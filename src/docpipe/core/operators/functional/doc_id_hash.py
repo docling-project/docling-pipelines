@@ -1,25 +1,19 @@
-import hashlib
-from logging import Logger
 from typing import Any
 
 import pyarrow as pa
-from data_processing.utils import TransformUtils
 from dpk_doc_id import DocIDTransform, doc_column_name_key, hash_column_name_key
 
 from docpipe.core.constants.constants import AttributeDataTypes, DocpipeConstants, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.operator_utils import OperatorUtils
-from docpipe.utils.infrastructure.logging import get_logger
-
-logger: Logger = get_logger()
 
 
 class DocIdHashOperator(AbstractOperator):
     """
     Implements generating a doc id by hashing content.
-    Uses dpk_doc_id.DocIDTransform when available, otherwise falls back to
-    hashlib.sha256 to generate a hash of the document content column.
+    Uses dpk_doc_id.DocIDTransform to generate a hash of the document
+    content column.
 
     This is an internal operator (IS_OPERATOR_AVAILABLE = False).
     It is used internally by other operators (e.g.,ExtractOperator, ChunkerOperator,
@@ -94,8 +88,7 @@ class DocIdHashOperator(AbstractOperator):
         """
         Generate hash IDs for documents by hashing the content column.
 
-        Uses DocIDTransform from dpk_doc_id when available, otherwise falls back
-        to hashlib.sha256.
+        Uses DocIDTransform from dpk_doc_id.
 
         Args:
             table: Input PyArrow table containing document content
@@ -106,33 +99,13 @@ class DocIdHashOperator(AbstractOperator):
         total_docs: int = OperatorUtils.find_doc_count(table=table)
         metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=total_docs)
 
-        if self._doc_id_transform is not None:
-            # Drop existing hash column before calling DocIDTransform to prevent it
-            # from renaming it to "<hash_column>.original"
-            if self.hash_column in table.column_names:
-                table = table.drop_columns([self.hash_column])
-            # Use DocIDTransform from dpk_doc_id
-            result: tuple[list[pa.Table], dict[str, Any]] = self._doc_id_transform.transform(table)
-            table = result[0][0]
-        else:
-            # Fallback: use hashlib.sha256 directly
-            hash_ids: list[str] = []
-
-            if self.doc_column in table.column_names:
-                values = ((content.as_py() if content.as_py() else "") for content in table[self.doc_column])
-            else:
-                logger.warning(
-                    f"Column '{self.doc_column}' not found in table. Generating hash IDs from row index.",
-                    extra=self.common_log_arguments,
-                )
-                values = (str(idx) for idx in range(table.num_rows))
-
-            for value in values:
-                hash_id: str = hashlib.sha256(value.encode("utf-8")).hexdigest()
-                hash_ids.append(hash_id)
-
-            # Add hash column to table
-            table = TransformUtils.add_column(table=table, name=self.hash_column, content=hash_ids)
+        # Drop existing hash column before calling DocIDTransform to prevent it
+        # from renaming it to "<hash_column>.original"
+        if self.hash_column in table.column_names:
+            table = table.drop_columns([self.hash_column])
+        # Use DocIDTransform from dpk_doc_id
+        result: tuple[list[pa.Table], dict[str, Any]] = self._doc_id_transform.transform(table)
+        table = result[0][0]
         metadata["hashed_rows"] = total_docs
         metadata[Metrics.External.PROCESSED_DOCS] = total_docs
 
