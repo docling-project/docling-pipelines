@@ -150,7 +150,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
 
         try:
             table = pq.read_table(parquet_path)
-            logger.debug("Read %s records from %s", {table.num_rows}, {parquet_path})
+            logger.debug("Read %s records from %s", table.num_rows, parquet_path)
             return table
         except Exception as exc:
             raise FlowExecutionFailedException(f"Failed to read parquet file for job_id={job_id}: {exc}") from exc
@@ -181,7 +181,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
             )
             # Atomic rename
             temp_path.replace(parquet_path)
-            logger.debug("Wrote %s records to %s", {table.num_rows}, {parquet_path})
+            logger.debug("Wrote %s records to %s", table.num_rows, parquet_path)
         except Exception as exc:
             # Clean up temp file on error
             if temp_path.exists():
@@ -223,7 +223,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                     job_run_id = filtered_table["job_run_id"][i].as_py()
                     result[doc_id] = {"modified_time": modified_time, "job_run_id": job_run_id}
 
-                logger.debug("Retrieved %s processed docs for job_id=%s", {len(result)}, {job_id})
+                logger.debug("Retrieved %s processed docs for job_id=%s", len(result), job_id)
                 return result
 
         except Timeout as exc:
@@ -261,9 +261,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 combined_table = pa.concat_tables([filtered_existing, new_table])
 
                 self._write_table(job_id=job_id, table=combined_table)
-                logger.info(
-                    "Upserted %s records for job_id=%s (total: %s)", len(records), job_id, combined_table.num_rows
-                )
+                logger.info("Upserted %s records for job_id=%s (total: %s)", len(records), job_id, combined_table.num_rows)
 
         except Timeout as exc:
             raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
@@ -354,10 +352,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 else:
                     self._write_table(job_id=job_id, table=filtered_table)
                     logger.info(
-                        "Deleted %s docs for job_id=%s (remaining: %s)",
-                        len(doc_ids),
-                        job_id,
-                        filtered_table.num_rows,
+                        "Deleted %s docs for job_id=%s (remaining: %s)", len(doc_ids), job_id, filtered_table.num_rows
                     )
 
         except Timeout as exc:

@@ -602,7 +602,7 @@ class WorkPoolAdapter(BatchExecutionPort):
             pq.write_table(batch_table, f"{self.batch_storage_bucket}/{s3_key}", filesystem=s3_fs)
 
             self.prefect_engine.logger.info(
-                "Batch %s: written to S3 (%s rows) → %s",
+                "Batch %s: written to S3 (%s rows) -> %s",
                 batch_num,
                 len(batch_table),
                 s3_uri,
@@ -637,7 +637,7 @@ class WorkPoolAdapter(BatchExecutionPort):
             pq.write_table(batch_table, local_path)
 
             self.prefect_engine.logger.info(
-                "Batch %s: written to local (%s rows) → %s",
+                "Batch %s: written to local (%s rows) -> %s",
                 batch_num,
                 len(batch_table),
                 local_path,
@@ -689,7 +689,7 @@ class WorkPoolAdapter(BatchExecutionPort):
             "Batch %s: serialized inline (%s rows, %s bytes)",
             batch_num,
             len(batch_table),
-            f"{size_bytes:,}",
+            size_bytes,
             extra={"job_run_id": job_run_id, "size_bytes": size_bytes},
         )
 
@@ -707,13 +707,12 @@ class WorkPoolAdapter(BatchExecutionPort):
             )
         if size_bytes > warning_threshold:
             self.prefect_engine.logger.warning(
-                "Batch %s: size %s bytes approaching "
-                "Prefect parameter limit (%s bytes, controlled by PREFECT_SERVER_API_MAX_PARAMETER_SIZE). "
-                "Consider configuring batch_storage.type='s3' or 'local' for better performance, "
-                "or increase PREFECT_SERVER_API_MAX_PARAMETER_SIZE on Prefect Server.",
+                "Batch %s: size %s bytes approaching Prefect parameter limit (%s bytes, controlled by "
+                "PREFECT_SERVER_API_MAX_PARAMETER_SIZE). Consider configuring batch_storage.type='s3' or "
+                "'local' for better performance, or increase PREFECT_SERVER_API_MAX_PARAMETER_SIZE on Prefect Server.",
                 batch_num,
-                f"{size_bytes:,}",
-                f"{size_limit:,}",
+                size_bytes,
+                size_limit,
                 extra={"job_run_id": job_run_id},
             )
 
@@ -862,7 +861,9 @@ class WorkPoolAdapter(BatchExecutionPort):
                     )
 
             self.prefect_engine.logger.info(
-                "Prefect Server connection verified (pool=%s, deployment=%s)", self.work_pool_name, self.deployment_name
+                "Prefect Server connection verified (pool=%s, deployment=%s)",
+                self.work_pool_name,
+                self.deployment_name,
             )
         except ValueError:
             raise
