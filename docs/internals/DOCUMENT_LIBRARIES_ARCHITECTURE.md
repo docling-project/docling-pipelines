@@ -30,45 +30,38 @@ The Document Libraries module provides metadata management for organizing collec
 │                      Domain Layer                            │
 │  (Pure Business Logic - No Dependencies)                    │
 │  - DocumentLibrary (domain model)                           │
-│  - DocumentLibraryRepositoryPort (interface)                │
-│  - Domain exceptions                                        │
+│  - AssetRepository[DocumentLibrary] (generic port,          │
+│    core/assets/common/)                                     │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                     Adapters Layer                           │
-│  (Infrastructure Implementations)                           │
-│  - DuckDBDocumentLibraryStorage (database layer)            │
-│  - DuckDBDocumentLibraryMetadataRepository (port implementation)    │
+│  (Generic implementations in core/assets/common/)           │
+│  - DuckDBAssetRepository[DocumentLibrary]                   │
+│  - LocalAssetRepository[DocumentLibrary]                    │
+│  Created by RepositoryFactory.create_repository()           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## Directory Structure
 
-```
-document_libraries/
-├── README.md                           # This file
+```text
+src/docpipe/core/assets/document_libraries/
 ├── __init__.py
-├── domain/                             # Domain Layer (Pure Python)
+├── adapters/
 │   ├── __init__.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── document_library.py        # DocumentLibrary domain model
-│   └── ports/
-│       ├── __init__.py
-│       └── document_library_repository.py  # Repository interface
-├── adapters/                           # Adapters Layer (Infrastructure)
+│   └── duckdb/
+│       └── __init__.py                 # Notes only: DuckDBAssetRepository[DocumentLibrary] is used directly
+├── application/
 │   ├── __init__.py
-│   ├── storage/
-│   │   ├── __init__.py
-│   │   └── duckdb_storage.py          # DuckDB storage implementation
-│   └── repositories/
+│   └── services/
 │       ├── __init__.py
-│       └── duckdb_document_library_metadata_repository.py  # Repository implementation
-└── application/                        # Application Layer (Services)
+│       └── document_library_service.py  # Business logic orchestration
+└── domain/
     ├── __init__.py
-    └── services/
+    └── models/
         ├── __init__.py
-        └── document_library_service.py  # Business logic orchestration
+        └── document_library.py          # DocumentLibrary domain model
 ```
 
 ## Domain Model
@@ -105,63 +98,23 @@ The core domain entity representing a collection of Document Sets.
 
 ## Repository Pattern
 
-### DocumentLibraryRepositoryPort (Interface)
+Document libraries do not have their own repository class. They use the generic
+`AssetRepository[DocumentLibrary]` port and its implementations in `core/assets/common/`:
 
-Defines the contract for persistence operations:
+- `DuckDBAssetRepository[DocumentLibrary]` stores each library as one JSON record in the
+  `document_libraries` collection of a `KeyValueStoragePort` (DuckDB). The record contains
+  the library's `document_set_ids`, so no separate junction table is needed.
+- `LocalAssetRepository[DocumentLibrary]` stores the same records as JSON files.
 
-**CRUD Operations:**
-- `create(library)`: Create a new library
-- `get_by_id(library_id)`: Retrieve by ID
-- `get_by_name(name)`: Retrieve by name
-- `list_all(skip, limit)`: List all libraries with pagination
-- `update(library)`: Update existing library
-- `delete(library_id)`: Delete library
+`RepositoryFactory.create_repository(asset_type=DocumentLibrary)` selects the implementation
+from the `assets_management` section of `docling-pipelines-config.yaml` or from environment
+variables. The API gets the repository through `get_document_library_repository()` in
+`api/dependencies.py`.
 
-**Relationship Management:**
-- `add_document_set(library_id, document_set_id)`: Add document set to library
-- `remove_document_set(library_id, document_set_id)`: Remove document set from library
-- `get_document_sets_for_library(library_id)`: Get all document sets in library
-
-**Query Operations:**
-- `list_by_tags(tags, skip, limit)`: Filter by tags
-- `search_by_name(name_pattern, skip, limit)`: Search by name
-
-### DuckDBDocumentLibraryMetadataRepository (Implementation)
-
-Concrete implementation using DuckDB for metadata storage only.
-
-**Database Schema:**
-
-1. **document_libraries table** (metadata):
-```sql
-CREATE TABLE document_libraries (
-    library_id VARCHAR PRIMARY KEY,
-    name VARCHAR NOT NULL UNIQUE,
-    description VARCHAR,
-    created_at TIMESTAMP NOT NULL,
-    last_modified TIMESTAMP NOT NULL,
-    total_document_sets INTEGER NOT NULL DEFAULT 0,
-    total_documents INTEGER NOT NULL DEFAULT 0,
-    total_size_bytes INTEGER NOT NULL DEFAULT 0
-);
-```
-
-2. **library_documentset_junction table** (many-to-many relationships):
-```sql
-CREATE TABLE library_documentset_junction (
-    library_id VARCHAR NOT NULL,
-    document_set_id VARCHAR NOT NULL,
-    added_at TIMESTAMP NOT NULL,
-    PRIMARY KEY (library_id, document_set_id),
-    FOREIGN KEY (library_id) REFERENCES document_libraries(library_id)
-);
-```
-
-**Key Features:**
-- Metadata-only storage (no document content)
-- Many-to-many relationships with Document Sets
-- Automatic timestamp management
-- Transaction support for data consistency
+**Operations** (from `AssetRepository`): `save`, `find_by_id`, `find_by_name`, `find_all`, `update`,
+`partial_update`, `delete`, `bulk_delete`, `list_all`, `exists`, `exists_by_name`, `health_check`.
+Adding and removing document sets is domain logic in `DocumentLibrary` and is persisted with
+a single `update`.
 
 ## Service Layer
 
@@ -223,8 +176,8 @@ Base URL: `/api/v1/document-libraries`
 
 ### Test Structure
 
-```
-tests/unit/core/assets_management/document_libraries/
+```text
+tests/unit/core/assets/document_libraries/
 ├── conftest.py                         # Test fixtures
 ├── domain/
 │   └── models/
@@ -234,14 +187,14 @@ tests/unit/core/assets_management/document_libraries/
 │       └── test_document_library_service.py     # Service tests
 └── adapters/
     └── repositories/
-        └── test_duckdb_document_library_repository.py  # Repository tests
+        └── test_duckdb_document_library_metadata_repository.py  # DuckDBAssetRepository[DocumentLibrary] tests
 ```
 
 ### Test Coverage
 
 - **Domain Model Tests**: 26 tests covering validation, business rules, and state management
 - **Service Layer Tests**: 10 tests covering business logic orchestration
-- **Repository Tests**: Integration tests with DuckDB (optional)
+- **Repository Tests**: `DuckDBAssetRepository[DocumentLibrary]` against a mocked `KeyValueStoragePort`
 
 ### Running Tests
 
@@ -252,13 +205,13 @@ tests/unit/core/assets_management/document_libraries/
 export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
 
 # Run all document library tests
-uv run pytest tests/unit/core/assets_management/document_libraries/ -v
+uv run pytest tests/unit/core/assets/document_libraries/ -v
 
 # Run specific test file
-uv run pytest tests/unit/core/assets_management/document_libraries/domain/models/test_document_library_validation.py -v
+uv run pytest tests/unit/core/assets/document_libraries/domain/models/test_document_library_validation.py -v
 
 # Run with coverage
-uv run pytest tests/unit/core/assets_management/document_libraries/ --cov=core.assets_management.document_libraries --cov-report=html
+uv run pytest tests/unit/core/assets/document_libraries/ --cov=src/docpipe/core/assets/document_libraries --cov-report=html
 ```
 
 ## Usage Examples
@@ -266,13 +219,12 @@ uv run pytest tests/unit/core/assets_management/document_libraries/ --cov=core.a
 ### Creating a Library
 
 ```python
-from core.assets_management.document_libraries.application.services.document_library_service import DocumentLibraryService
-from core.assets_management.document_libraries.adapters.repositories.duckdb_document_library_metadata_repository import DuckDBDocumentLibraryMetadataRepository
-from core.assets_management.document_libraries.adapters.storage.duckdb_storage import DuckDBDocumentLibraryStorage
+from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory
+from docpipe.core.assets.document_libraries.application.services.document_library_service import DocumentLibraryService
+from docpipe.core.assets.document_libraries.domain.models.document_library import DocumentLibrary
 
-# Initialize storage and repository
-storage = DuckDBDocumentLibraryStorage(db_path="libraries.duckdb")
-repository = DuckDBDocumentLibraryMetadataRepository(storage=storage)
+# Create the configured repository (DuckDB or local, from docling-pipelines-config.yaml)
+repository = RepositoryFactory.create_repository(asset_type=DocumentLibrary)
 
 # Create service
 service = DocumentLibraryService(repository=repository)
@@ -396,9 +348,8 @@ Document Libraries reference Document Sets by ID but do not store document conte
 
 ### Indexing
 
-- Primary key index on `library_id`
-- Unique index on `name`
-- Composite index on `(library_id, document_set_id)` in junction table
+Each library is one record in the `document_libraries` collection, keyed by `library_id`.
+Lookups by name scan the collection.
 
 ### Pagination
 
