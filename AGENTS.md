@@ -56,6 +56,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/integrations/` | External service clients: AWS, Docling, HuggingFace, LiteLLM, Ollama, WatsonX |
 | `src/docpipe/storage/` | Storage abstraction: DuckDB + filesystem; interfaces `TableStorage`, `KeyValueStorage` in `storage/interfaces/`; default DuckDB paths: `data/duckdb/job_stats.duckdb`, `data/duckdb/document_sets.duckdb` |
 | `src/docpipe/utils/infrastructure/logging.py` | `get_logger()` — always use this, never `logging.getLogger()` directly |
+| `src/docpipe/utils/infrastructure/config_utils.py` | `DocpipeConfigLoader` — reads `docling-pipelines-config.yaml` once (cached singleton); use `get(key=...)` / `get_storage()` in factories, never parse the YAML file directly |
 | `src/docpipe/utils/` | Shared: logging, pyarrow handlers (`utils/data/pyarrow_handler.py`), flow_utils, duckdb helpers, llm utils |
 | `src/docpipe/exceptions/` | `DocpipeException`, `FlowValidationException`, `FlowExecutionFailedException` |
 | `tests/` | pytest — mirrors `src/docpipe/` structure; unit tests under `tests/unit/`, integration under `tests/integration/` |
