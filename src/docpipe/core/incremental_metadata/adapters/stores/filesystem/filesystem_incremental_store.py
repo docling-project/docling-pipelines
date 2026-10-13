@@ -261,7 +261,9 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 combined_table = pa.concat_tables([filtered_existing, new_table])
 
                 self._write_table(job_id=job_id, table=combined_table)
-                logger.info("Upserted %s records for job_id=%s (total: %s)", len(records), job_id, combined_table.num_rows)
+                logger.info(
+                    "Upserted %s records for job_id=%s (total: %s)", len(records), job_id, combined_table.num_rows
+                )
 
         except Timeout as exc:
             raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
