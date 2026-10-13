@@ -201,7 +201,6 @@ class DocpipeConstants:
 
     # Document Library constants
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
-    LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
     _DEFAULT_DATA_ROOT = _find_project_root() / "data"
@@ -255,9 +254,6 @@ class DocumentLibraryConstants:
 
     # Size value limits (JavaScript MAX_SAFE_INTEGER for JSON compatibility)
     MAX_SAFE_INTEGER = 9007199254740991
-
-    # Bulk operation limits
-    MAX_BULK_OPERATION_SIZE = 1000  # Maximum number of items in bulk operations
 
 
 class DocpipeConfigKeys:

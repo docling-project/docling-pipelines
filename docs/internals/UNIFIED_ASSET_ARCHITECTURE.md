@@ -28,7 +28,7 @@
        │ +created_on │   │ +created_at     │  │+document_      │
        │ +modified_on│   │ +updated_at     │  │  set_ids       │
        │ +definition │   │ +total_docs     │  │+add/remove_    │
-       │             │   │ +storage_ref    │  │  document_set()│
+       │             │   │                 │  │  document_set()│
        └─────────────┘   │ +data_card      │  └────────────────┘
                          └─────────────────┘
 
@@ -57,12 +57,13 @@
                      DocumentSetStorage (ABC)
                     ┌─────────────────────────────────┐
                     │  store(doc_set_name, data)       │
-                    │   -> StorageReference            │
-                    │  load(storage_ref, limit)        │
+                    │   -> AttachmentRef               │
+                    │  load(attachment_ref, limit)     │
                     │   -> pa.Table                    │
-                    │  delete(storage_ref) -> bool     │
-                    │  exists(storage_ref) -> bool     │
-                    │  get_metrics(storage_ref) -> dict│
+                    │  delete(attachment_ref) -> bool  │
+                    │  exists(attachment_ref) -> bool  │
+                    │  get_metrics(attachment_ref)     │
+                    │   -> dict                        │
                     │  health_check()                  │
                     │  validate_config(config)         │
                     └─────────────────────────────────┘
@@ -129,27 +130,30 @@
 │                        FACTORY LAYER                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-   MetadataRepositoryFactory              DocumentLibraryRepositoryFactory
-   (document_sets/factories/)             (document_libraries/factories/)
-  ┌──────────────────────────┐           ┌──────────────────────────────┐
-  │  create(                 │           │  create(                     │
-  │    adapter_name="duckdb",│           │    adapter_name="duckdb",    │
-  │    config                │           │    config                    │
-  │  ) -> AssetRepository    │           │  ) -> AssetRepository        │
-  │       [DocumentSet]      │           │       [DocumentLibrary]      │
-  │                          │           │                              │
-  │  Hardcodes duckdb path:  │           │  Hardcodes duckdb path:      │
-  │  1. Validates config     │           │  1. Validates config         │
-  │  2. Creates KV storage   │           │  2. Creates KV storage       │
-  │  3. Creates DuckDBAsset  │           │  3. Creates DuckDBAsset      │
-  │     Repository[DocSet]   │           │     Repository[DocLib]       │
-  │  4. Pins _collection =   │           │  4. Pins _collection =       │
-  │     "document_sets"      │           │     "document_libraries"     │
-  │  5. Returns as port type │           │  5. Returns as port type     │
-  │                          │           │                              │
-  │  register() decorator    │           │  register() decorator        │
-  │  for enterprise backends │           │  for enterprise backends     │
-  └──────────────────────────┘           └──────────────────────────────┘
+   RepositoryFactory
+   (core/assets/common/factories/)
+  ┌──────────────────────────────────┐
+  │  create_repository(              │
+  │    asset_type=DocumentSet |      │
+  │      DocumentLibrary | Flow,     │
+  │    adapter_name=None,            │
+  │    config_override=None          │
+  │  ) -> AssetRepository[T]         │
+  │                                  │
+  │  1. Resolves type and config     │
+  │     (env > YAML > defaults)      │
+  │  2. Looks up the class in        │
+  │     get_available_repository_    │
+  │     types(): local, duckdb       │
+  │  3. Builds DuckDBAssetRepository │
+  │     [T] (collection from the     │
+  │     asset type) or LocalAsset    │
+  │     Repository[T]                │
+  │                                  │
+  │  Subclass and override get_      │
+  │  available_repository_types()    │
+  │  to add backends                 │
+  └──────────────────────────────────┘
 
    DataStoreFactory
    (document_sets/factories/)
@@ -273,7 +277,7 @@
 ## Key Design Decisions
 
 ### No asset-specific repository subclasses
-`metadata_repository.py` files under each asset's `adapters/duckdb/` are **empty stubs** (documentation only).
+There are no asset-specific repository classes or factories for document sets and document libraries.
 `DuckDBAssetRepository[T]` implements the full `AssetRepository[T]` contract for any `T` — no subclass needed.
 
 ```python
@@ -295,13 +299,13 @@ DocumentSet has two storage concerns, each with its own factory:
 
 | Factory | Creates | Purpose |
 |---|---|---|
-| `MetadataRepositoryFactory` | `DuckDBAssetRepository[DocumentSet]` | Stores `DocumentSet` domain object (name, description, stats, storage_reference) |
+| `RepositoryFactory` | `DuckDBAssetRepository[DocumentSet]` | Stores `DocumentSet` domain object (name, description, stats) |
 | `DataStoreFactory` | `DuckDBDocumentSetStorage` | Stores the actual PyArrow document table data |
 
 ### Decorator vs hardcoded registration
 | Factory | Registration pattern | Why |
 |---|---|---|
-| `MetadataRepositoryFactory` | Hardcoded `if adapter_name == "duckdb"` | Only one built-in; enterprise adds via `register()` decorator |
+| `RepositoryFactory` | `get_available_repository_types()` mapping | Built-in `local` and `duckdb`; extensions override the mapping in a subclass |
 | `DataStoreFactory` | `@DataStoreFactory.register(name="duckdb")` decorator on `DuckDBDocumentSetStorage` | Adapter registers itself on import; enterprise adds same way |
 
 `DataStoreFactory` requires the adapter module to be imported before `create()` is called.
@@ -318,7 +322,7 @@ DocumentSet has two storage concerns, each with its own factory:
 | **Data-plane port** | — | `DocumentSetStorage` | — |
 | **Generic adapter** | `DuckDBAssetRepository[Flow]` | `DuckDBAssetRepository[DocumentSet]` or `PostgresAssetRepository[DocumentSet]` | `DuckDBAssetRepository[DocumentLibrary]` or `PostgresAssetRepository[DocumentLibrary]` |
 | **Data-plane adapter** | — | `DuckDBDocumentSetStorage` | — |
-| **Metadata factory** | `RepositoryFactory` | `MetadataRepositoryFactory` | `DocumentLibraryRepositoryFactory` |
+| **Metadata factory** | `RepositoryFactory` | `RepositoryFactory` | `RepositoryFactory` |
 | **Data-plane factory** | — | `DataStoreFactory` | — |
 | **Service** | `FlowService(AssetService[Flow])` | `DocumentSetService(AssetService[DocumentSet])` | `DocumentLibraryService(AssetService[DocumentLibrary])` |
 | **DI provider** | `get_flow_service()` | `get_document_set_service()` | `get_document_library_service()` |
