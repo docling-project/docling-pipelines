@@ -3194,7 +3194,7 @@ Legacy Ollama-only configurations are automatically converted to LiteLLM:
 
 ### 9. Document Set Hexagonal Architecture Pattern
 
-The Document Set operator follows hexagonal architecture (ports and adapters pattern) for flexible storage backend support. It uses the storage layer interfaces (KeyValueStorage and TableStorage) for persistence.
+The Document Set operator follows hexagonal architecture (ports and adapters pattern) for flexible storage backend support. It uses the storage layer interfaces (`KeyValueStoragePort` and `TableStoragePort`) for persistence.
 
 #### Architecture Overview
 
@@ -3208,8 +3208,9 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
    │           │                   │
    ▼           ▼                   ▼
 ┌──────────┐ ┌──────────────┐ ┌──────────────────┐
-│ Metadata │ │ Data Store   │ │ Attachment Repo  │
-│ Factory  │ │ Factory      │ │ Factory          │
+│ Repo-    │ │ Data Store   │ │ Attachment Repo  │
+│ sitory   │ │ Factory      │ │ Factory          │
+│ Factory  │ │              │ │                  │
 └────┬─────┘ └──────┬───────┘ └────────┬─────────┘
      │               │                  │
      ▼               ▼                  ▼
@@ -3220,16 +3221,15 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
      │               │                  │
      ▼               ▼                  ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-│ DuckDB       │ │ DuckDB Data  │ │ DuckDB           │
-│ Metadata     │ │ Adapter      │ │ Attachment Repo  │
-│ Adapter      │ └──────┬───────┘ └────────┬─────────┘
+│ DuckDBAsset  │ │ DuckDB Data  │ │ DuckDB           │
+│ Repository   │ │ Adapter      │ │ Attachment Repo  │
+│ [DocSet]     │ └──────┬───────┘ └────────┬─────────┘
 └──────┬───────┘        │                  │
        │                ▼                  ▼
        ▼         ┌──────────────┐ ┌──────────────────┐
 ┌──────────────┐ │ TableStorage │ │ KeyValueStorage  │
-│ KeyValue     │ │ (Interface)  │ │ (Interface)      │
-│ Storage      │ └──────────────┘ └──────────────────┘
-│ (Interface)  │
+│ KeyValue     │ │ Port         │ │ Port             │
+│ StoragePort  │ └──────────────┘ └──────────────────┘
 └──────────────┘
 ```
 
@@ -3244,7 +3244,6 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
   - `AssetRepository[DocumentSet]`: Metadata CRUD operations
   - `DocumentSetStorage`: PyArrow table data operations
 - **Types** (`types/`): TypedDict-based configuration types
-  - `RepositoryConfig`: Metadata repository configuration
   - `DataStoreConfig`: Data store configuration
   - `HealthCheckResult`: Health check response structure
 
@@ -3266,8 +3265,8 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
 **3. Adapter Layer**
 
 - **DuckDB document set adapters** (`document_sets/adapters/duckdb/`):
-  - **DuckDBAssetRepository** (`common/adapters/repositories/`): Generic metadata persistence using `KeyValueStorage`; stores in the collection returned by `DocumentSet.get_collection_name()` (i.e. `document_sets`)
-  - **DuckDBDocumentSetStorage**: Data persistence using `TableStorage`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
+  - **DuckDBAssetRepository** (`common/adapters/repositories/`): Generic metadata persistence using `KeyValueStoragePort`; stores in the collection returned by `DocumentSet.get_collection_name()` (i.e. `document_sets`)
+  - **DuckDBDocumentSetStorage**: Data persistence using `TableStoragePort`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
 - **Common adapters** (`common/adapters/repositories/`):
   - **DuckDBAttachmentRepository**: Persists `AttachmentRef` records in the `document_set_attachments` KV collection. Registered via `@AttachmentRepositoryFactory.register(name="duckdb")` and self-wires via its `create(*, config)` classmethod.
 - `DuckDBAssetRepository` is registered in `RepositoryFactory.get_available_repository_types()` as a dict entry (not a decorator). `DuckDBAttachmentRepository` uses the `@AttachmentRepositoryFactory.register()` decorator.
@@ -3331,8 +3330,10 @@ def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueSto
 3. **Implement Document Set Adapters**:
 
 Document set metadata is stored through the generic `AssetRepository[DocumentSet]` port, which
-`RepositoryFactory` creates. To add a metadata backend, implement `AssetRepository` and add it to
-`RepositoryFactory.get_available_repository_types()` in a subclass. The data plane uses its own factory:
+`RepositoryFactory` creates. To add a metadata backend, implement `AssetRepository`, add a value to
+`RepositoryType` and map it in `RepositoryFactory.get_available_repository_types()`. `DocumentSetOperator`
+and the API call `RepositoryFactory.create_repository()` directly, so there is currently no registration
+hook for metadata backends. The data plane uses its own factory:
 
 ```python
 @DataStoreFactory.register(name="postgresql", display_name="PostgreSQL")
@@ -4406,7 +4407,7 @@ Hexagonal architecture implementation for flow management:
 
 **Adapter Layer** (`adapters/repositories/`):
 
-- **StorageFlowRepository**: Generic repository using KeyValueStorage interface
+- **StorageFlowRepository**: Generic repository using KeyValueStoragePort interface
   - Works with any storage backend (DuckDB, filesystem)
   - Stores flows in 'flows' collection with flow_id as key
   - Exception wrapping with FlowNotFoundException, FlowStorageException
@@ -4425,10 +4426,10 @@ Hexagonal architecture implementation for document set management:
 - **AttachmentRef**: Backend-agnostic storage coordinate for asset attachments
 - **AttachmentRepository**: Port for attachment lifecycle management
 
-**Domain Ports** (`domain/ports/`):
+**Domain Ports**:
 
-- **DocumentSetMetadataRepository**: Interface for metadata persistence
-- **DocumentSetDataStore**: Interface for PyArrow table data operations
+- **AssetRepository[DocumentSet]** (`common/domain/ports/`): Interface for metadata persistence
+- **DocumentSetStorage** (`document_sets/domain/ports/`): Interface for PyArrow table data operations
 
 **Application Layer** (`application/services/`):
 

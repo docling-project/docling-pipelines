@@ -150,9 +150,9 @@
   │     asset type) or LocalAsset    │
   │     Repository[T]                │
   │                                  │
-  │  Subclass and override get_      │
+  │  New backends: add a Repository  │
+  │  Type value and map it in get_   │
   │  available_repository_types()    │
-  │  to add backends                 │
   └──────────────────────────────────┘
 
    DataStoreFactory
@@ -305,7 +305,7 @@ DocumentSet has two storage concerns, each with its own factory:
 ### Decorator vs hardcoded registration
 | Factory | Registration pattern | Why |
 |---|---|---|
-| `RepositoryFactory` | `get_available_repository_types()` mapping | Built-in `local` and `duckdb`; extensions override the mapping in a subclass |
+| `RepositoryFactory` | `get_available_repository_types()` mapping | Built-in `local` and `duckdb`; a new backend is added to `RepositoryType` and this mapping (callers use `RepositoryFactory` directly, so there is no registration hook) |
 | `DataStoreFactory` | `@DataStoreFactory.register(name="duckdb")` decorator on `DuckDBDocumentSetStorage` | Adapter registers itself on import; enterprise adds same way |
 
 `DataStoreFactory` requires the adapter module to be imported before `create()` is called.
