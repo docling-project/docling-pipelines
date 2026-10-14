@@ -43,7 +43,7 @@ class StorageFactory:
             **config: Storage-specific configuration
 
         Returns:
-            KeyValueStorage instance
+            KeyValueStoragePort instance
 
         Raises:
             ValueError: If storage_type is not supported
@@ -79,7 +79,7 @@ class StorageFactory:
                 ``postgres`` connection settings (postgres)
 
         Returns:
-            TableStorage instance
+            TableStoragePort instance
 
         Raises:
             ValueError: If storage_type is not supported or a setting is unknown

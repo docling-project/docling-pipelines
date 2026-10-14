@@ -1,5 +1,6 @@
 """Unit tests for DuckDB adapters implementing hexagonal architecture ports."""
 
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -181,6 +182,38 @@ class TestDuckDBMetadataRepository:
             result = metadata_repository.list_all()
 
         assert len(result) == 2
+
+    def test_find_all_sorted_newest_first(self, *, metadata_repository):
+        """find_all returns stored assets ordered by created_at descending."""
+        for asset_id, name, created_at in [
+            ("find-1", "Oldest", datetime(2024, 1, 1, tzinfo=UTC)),
+            ("find-2", "Newest", datetime(2024, 6, 1, tzinfo=UTC)),
+            ("find-3", "Middle", datetime(2024, 3, 1, tzinfo=UTC)),
+        ]:
+            metadata_repository.save(asset=DocumentSet(asset_id=asset_id, name=name, created_at=created_at))
+
+        result = metadata_repository.find_all()
+
+        assert [r.name for r in result] == ["Newest", "Middle", "Oldest"]
+
+    def test_find_all_sorts_assets_without_created_at_last(self, *, metadata_repository):
+        """find_all must not raise when timezone-aware and missing created_at values are mixed.
+
+        Missing values sort as datetime.min in UTC, so they come last. A naive datetime.min
+        would raise TypeError when compared with the aware timestamps.
+        """
+        metadata_repository.save(
+            asset=DocumentSet(asset_id="mixed-1", name="With Date", created_at=datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        metadata_repository.save(asset=DocumentSet(asset_id="mixed-2", name="No Date"))
+
+        def created_at_or_none(asset: DocumentSet) -> datetime | None:
+            return None if asset.name == "No Date" else asset.created_at
+
+        with patch.object(DocumentSet, "get_created_at", autospec=True, side_effect=created_at_or_none):
+            result = metadata_repository.find_all()
+
+        assert [r.name for r in result] == ["With Date", "No Date"]
 
     def test_update_document_set(self, *, metadata_repository):
         """Test updating document set metadata."""
