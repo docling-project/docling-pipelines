@@ -19,8 +19,8 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.operators.extract.ports.outbound.entity_extraction import EntityExtractionPort
 from docpipe.core.operators.functional.doc_id_hash import DocIdHashOperator
+from docpipe.core.ports.document_class_provider import DocumentClassProvider, get_default_document_class_provider
 from docpipe.utils.data.transform import TransformUtils
-from docpipe.utils.document_class_utils import DocumentClassUtils
 from docpipe.utils.infrastructure.concurrency import submit_task_with_context_propagation
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -65,6 +65,7 @@ class EntityExtractionService:
         node_id: str | None = None,
         node_name: str | None = None,
         batch_id: str | None = None,
+        document_class_provider: DocumentClassProvider | None = None,
     ) -> None:
         """Initialize the entity extraction service.
 
@@ -76,6 +77,9 @@ class EntityExtractionService:
             node_id: Node identifier for progress tracking (optional)
             node_name: Node name for progress tracking (optional)
             batch_id: Batch identifier for progress tracking (optional)
+            document_class_provider: Provider for resolving document class
+                schemas and Docling templates.  Defaults to
+                ``StaticDocumentClassProvider`` (local JSON files).
         """
         self.adapter = adapter
         self.max_workers = max_workers
@@ -93,6 +97,11 @@ class EntityExtractionService:
         self.node_id = node_id
         self.node_name = node_name
         self.batch_id = batch_id
+
+        # Document class provider — injected or defaulted to static local-file impl
+        self.document_class_provider: DocumentClassProvider = (
+            document_class_provider if document_class_provider is not None else get_default_document_class_provider()
+        )
 
         # Thread safety lock for metadata updates
         self._metadata_lock = threading.Lock()
@@ -600,7 +609,7 @@ class EntityExtractionService:
             document_types: List of document types to load schemas for
             schema_templates: Dictionary to populate with loaded schemas
         """
-        loaded_schemas = DocumentClassUtils.get_schema_templates(document_types)
+        loaded_schemas = self.document_class_provider.get_schema_templates(document_types=document_types)
         schema_templates.update(loaded_schemas)
 
     def validate_loaded_schemas(self, *, document_types: list[str], schema_templates: dict[str, dict]) -> None:

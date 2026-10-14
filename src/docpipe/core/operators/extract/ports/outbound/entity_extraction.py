@@ -50,6 +50,7 @@ class EntityExtractionPort(ABC):
 
     ADAPTER_NAME: str = "base"
     ADAPTER_DISPLAY_NAME: str = "Base Adapter"
+    requires_binary_content: bool = False
 
     def __init__(self, *, config: dict[str, Any]) -> None:
         """Initialize the entity extraction port with configuration.

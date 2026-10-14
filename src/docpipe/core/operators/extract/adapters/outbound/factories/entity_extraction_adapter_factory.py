@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.extract.domain import EntityExtractionMode
 from docpipe.core.operators.extract.ports.outbound.entity_extraction import EntityExtractionPort
+from docpipe.core.ports.document_class_provider import DocumentClassProvider
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -152,6 +153,7 @@ class EntityExtractionAdapterFactory:
         global_config: dict[str, Any],
         doc_column: str,
         max_workers: int = 4,
+        document_class_provider: DocumentClassProvider | None = None,
     ) -> EntityExtractionPort | None:
         """Create appropriate entity extraction adapter based on mode.
 
@@ -164,6 +166,10 @@ class EntityExtractionAdapterFactory:
             global_config: Global operator configuration (for job tracking, etc.)
             doc_column: Document column name from text_extraction config
             max_workers: Number of parallel workers (default: 4)
+            document_class_provider: Provider for resolving document class schemas and
+                Docling templates.  When supplied, passed to the adapter constructor so
+                the correct provider is used from the moment the adapter is initialised.
+                Defaults to ``None`` (adapters fall back to ``StaticDocumentClassProvider``).
 
         Returns:
             Configured EntityExtractionPort adapter instance, or None if mode is "none"
@@ -190,7 +196,7 @@ class EntityExtractionAdapterFactory:
         full_config = {**global_config, **adapter_config, "max_workers": max_workers}
 
         logger.info("Creating %s with %s workers", adapter_cls.__name__, max_workers)
-        return adapter_cls(config=full_config)
+        return adapter_cls(config=full_config, document_class_provider=document_class_provider)
 
     @classmethod
     def get_supported_modes(cls) -> list[str]:
