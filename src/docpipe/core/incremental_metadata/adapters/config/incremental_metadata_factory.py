@@ -138,9 +138,6 @@ class IncrementalMetadataFactory:
                 f"Invalid storage type '{storage_type}' for incremental metadata. Available: {available}"
             )
 
-        if DocpipeConfigKeys.POSTGRES in storage_config:
-            storage_config[DocpipeConfigKeys.POSTGRES] = storage_config[DocpipeConfigKeys.POSTGRES]
-
         return cls(storage_type=storage_type, config=storage_config)
 
 

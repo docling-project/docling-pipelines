@@ -92,7 +92,8 @@ class DocpipeConfigLoader:
         # storage configuration for the given key (ex: incremental_metadata, flow_definition_snapshot, etc.)
 
         # Precedence: service-specific > global_storage > default
-        storage_config = cls.get(key=key, default=default or {}).get(DocpipeConfigKeys.STORAGE, {})
+        config = cls.get(key=key, default=default or {})
+        storage_config = config.get(DocpipeConfigKeys.STORAGE, {}) or config.get(DocpipeConfigKeys.STORE, {})
         if storage_config:
             logger.info("Using service specific configuration for service: %s", key)
         else:

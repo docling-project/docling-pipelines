@@ -95,7 +95,6 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
             config: Configuration dict. Recognised keys:
                     - base_dir: base directory for parquet files
                     - lock_timeout: seconds to wait for file lock (default 120.0)
-                    DOCPIPE_INCREMENTAL_BASE_DIR env var takes precedence over base_dir.
         """
         self.config = config or {}
 
