@@ -83,7 +83,7 @@ class PackageAdapter(OperatorSourcePort):
             ) from exc
 
         logger.info(
-            f"Initialized package adapter for package: {package_name}, operator module: {self.full_module_path}"
+            "Initialized package adapter for package: %s, operator module: %s", package_name, self.full_module_path
         )
 
     def clear_cache(self):
@@ -96,7 +96,7 @@ class PackageAdapter(OperatorSourcePort):
 
         # Clear internal cache
         self._loaded_modules.clear()
-        logger.debug(f"Cleared module cache for package {self.package_name}")
+        logger.debug("Cleared module cache for package %s", self.package_name)
 
     def list_operators(self) -> list[OperatorInfo]:
         """Discover all operators in the package.
@@ -117,7 +117,7 @@ class PackageAdapter(OperatorSourcePort):
             if op_info.short_name not in discovered_names:
                 operators.append(op_info)
                 discovered_names.add(op_info.short_name)
-                logger.debug(f"Discovered operator via entry point: {op_info.short_name}")
+                logger.debug("Discovered operator via entry point: %s", op_info.short_name)
 
         # Method 2: Discover via module inspection
         operators_from_module = self._discover_via_module_inspection()
@@ -125,9 +125,9 @@ class PackageAdapter(OperatorSourcePort):
             if op_info.short_name not in discovered_names:
                 operators.append(op_info)
                 discovered_names.add(op_info.short_name)
-                logger.debug(f"Discovered operator via module inspection: {op_info.short_name}")
+                logger.debug("Discovered operator via module inspection: %s", op_info.short_name)
 
-        logger.info(f"Discovered {len(operators)} operators from package {self.package_name}")
+        logger.info("Discovered %s operators from package %s", len(operators), self.package_name)
         return operators
 
     def _discover_via_entry_points(self) -> list[OperatorInfo]:
@@ -158,7 +158,7 @@ class PackageAdapter(OperatorSourcePort):
                         and issubclass(operator_class, AbstractOperator)
                         and operator_class is not AbstractOperator
                     ):
-                        logger.warning(f"Entry point '{entry_point.name}' does not reference a valid operator class")
+                        logger.warning("Entry point '%s' does not reference a valid operator class", entry_point.name)
                         continue
 
                     if hasattr(operator_class, OperatorConstants.Misc.SHORT_NAME):
@@ -172,10 +172,10 @@ class PackageAdapter(OperatorSourcePort):
                         operators.append(op_info)
 
                 except Exception as e:
-                    logger.warning(f"Failed to load entry point '{entry_point.name}': {e}")
+                    logger.warning("Failed to load entry point '%s': %s", entry_point.name, e)
 
         except Exception as e:
-            logger.warning(f"Failed to discover operators via entry points: {e}")
+            logger.warning("Failed to discover operators via entry points: %s", e)
 
         return operators
 
@@ -196,17 +196,24 @@ class PackageAdapter(OperatorSourcePort):
 
             for op_class in operator_classes:
                 if hasattr(op_class, OperatorConstants.Misc.SHORT_NAME):
+                    class_attribute = op_class.__name__
+                    if vars(module).get(class_attribute) is not op_class:
+                        matched_attribute = next((name for name, obj in vars(module).items() if obj is op_class), None)
+                        if matched_attribute is None:
+                            logger.warning("Operator class %s has no module attribute", op_class.__name__)
+                            continue
+                        class_attribute = matched_attribute
                     op_info = OperatorInfo(
                         name=op_class.__name__,
                         short_name=getattr(op_class, OperatorConstants.Misc.SHORT_NAME),
-                        module_path=f"{self.full_module_path}.{op_class.__name__}",
+                        module_path=f"{self.full_module_path}:{class_attribute}",
                         category=str(getattr(op_class, OperatorConstants.Misc.CATEGORY)),
                         source_location=f"{self.ADAPTER_NAME}:{self.package_name}",
                     )
                     operators.append(op_info)
 
         except Exception as e:
-            logger.warning(f"Failed to inspect module {self.full_module_path}: {e}")
+            logger.warning("Failed to inspect module %s: %s", self.full_module_path, e)
 
         return operators
 
@@ -226,7 +233,7 @@ class PackageAdapter(OperatorSourcePort):
 
         # Check if already loaded
         if module_path in self._loaded_modules:
-            logger.debug(f"Using cached module for {operator_info.short_name}")
+            logger.debug("Using cached module for %s", operator_info.short_name)
             return self._loaded_modules[module_path]
 
         # Load the module

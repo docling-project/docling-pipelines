@@ -1,6 +1,8 @@
 """Unit tests for OperatorValidator rules and the OperatorSourceFactory registry."""
 
 import types
+from abc import ABC, abstractmethod
+from dataclasses import replace
 from typing import Any
 
 import pyarrow as pa
@@ -105,14 +107,56 @@ class TestValidateModule:
             setattr(module, cls.__name__, clone)
         return module
 
-    def test_multiple_operator_classes_warn_and_use_the_first(self) -> None:
+    def test_multiple_operator_classes_validate_the_named_class(self) -> None:
         first = type("AlphaOp", (_ValidOp,), {"__doc__": "Alpha."})
         second = type("BetaOp", (_ValidOp,), {"__doc__": "Beta."})
 
-        result = OperatorValidator.validate_module(module=self._module(first, second), operator_info=_INFO)
+        result = OperatorValidator.validate_module(
+            module=self._module(first, second), operator_info=replace(_INFO, name="BetaOp")
+        )
+
+        assert result.valid is True
+        assert result.warnings == []
+
+    def test_unnamed_metadata_keeps_first_class_warning(self) -> None:
+        first = type("AlphaOp", (_ValidOp,), {"__doc__": "Alpha."})
+        second = type("BetaOp", (_ValidOp,), {"__doc__": "Beta."})
+
+        result = OperatorValidator.validate_module(
+            module=self._module(first, second), operator_info=replace(_INFO, name="")
+        )
 
         assert result.valid is True
         assert result.warnings == ["Multiple operator classes found in sample.py. Using first one: AlphaOp"]
+
+    @pytest.mark.parametrize("name", ["MissingOp", "NotAnOperator", "ImportedOp", "AbstractOp"])
+    def test_invalid_named_metadata_does_not_use_another_class(self, name: str) -> None:
+        module = self._module(type("ValidOp", (_ValidOp,), {"__doc__": "Valid."}))
+        module.__dict__["NotAnOperator"] = 42
+        module.__dict__["ImportedOp"] = _ValidOp
+
+        class AbstractOp(_ValidOp, ABC):
+            __module__ = module.__name__
+
+            @abstractmethod
+            def extra(self) -> None: ...
+
+        module.__dict__["AbstractOp"] = AbstractOp
+
+        result = OperatorValidator.validate_module(module=module, operator_info=replace(_INFO, name=name))
+
+        assert result.valid is False
+        assert result.errors == [
+            f"Operator class '{name}' is not a concrete operator defined in module {module.__name__}"
+        ]
+
+    def test_non_string_class_name_is_rejected(self) -> None:
+        module = self._module(type("ValidOp", (_ValidOp,), {"__doc__": "Valid."}))
+
+        result = OperatorValidator.validate_module(module=module, operator_info=replace(_INFO, name=None))
+
+        assert result.valid is False
+        assert result.errors == ["Operator class name must be a string"]
 
     def test_module_without_operator_classes(self) -> None:
         result = OperatorValidator.validate_module(module=types.ModuleType("empty"), operator_info=_INFO)
