@@ -20,9 +20,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
-from docpipe.core.assets.common.adapters.repositories.postgres_asset_storage import (
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import (
     DEFAULT_ASSET_SCHEMA,
-    PostgresAssetStorage,
+    PostgresStorageUtils,
 )
 from docpipe.core.assets.common.domain.models.asset import Asset
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
@@ -89,9 +89,9 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
         self._engine = engine
         self._schema = schema
         if ensure_schema:
-            tables = PostgresAssetStorage.ensure_schema(engine=engine, schema=schema)
+            tables = PostgresStorageUtils.ensure_schema(engine=engine, schema=schema)
         else:
-            tables = PostgresAssetStorage.get_tables(schema=schema)
+            tables = PostgresStorageUtils.get_tables(schema=schema)
         self._table: Table = tables.records
         if hasattr(asset_type, "get_collection_name"):
             self._collection = asset_type.get_collection_name()
@@ -525,11 +525,11 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
                 repository_type="postgres",
             )
 
-        engine = PostgresAssetStorage.get_engine(config=config, owner=f"{asset_type.__name__} repository")
+        engine = PostgresStorageUtils.get_engine(config=config, owner=f"{asset_type.__name__} repository")
         return cls(
             asset_type=asset_type,
             engine=engine,
-            schema=PostgresAssetStorage.resolve_schema(config=config),
+            schema=PostgresStorageUtils.resolve_schema(config=config),
         )
 
     @classmethod
@@ -542,7 +542,7 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
         Returns:
             List of validation error strings (empty = valid)
         """
-        return PostgresAssetStorage.validate_config(config=config)
+        return PostgresStorageUtils.validate_config(config=config)
 
     # ==================== Utility Operations ====================
 
@@ -554,7 +554,7 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
         """
         details: dict[str, Any] = {
             "backend": "postgres",
-            "database": PostgresAssetStorage.describe_engine(engine=self._engine),
+            "database": PostgresStorageUtils.describe_engine(engine=self._engine),
             "schema": self._schema,
             "collection": self._collection,
             "asset_type": self._asset_type.__name__,

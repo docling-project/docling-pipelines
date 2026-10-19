@@ -11,9 +11,9 @@ from sqlalchemy import delete, exists, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 
-from docpipe.core.assets.common.adapters.repositories.postgres_asset_storage import (
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import (
     DEFAULT_ASSET_SCHEMA,
-    PostgresAssetStorage,
+    PostgresStorageUtils,
 )
 from docpipe.core.assets.common.domain.models.attachment_ref import AttachmentRef
 from docpipe.core.assets.common.domain.ports.attachment_repository import AttachmentRepository
@@ -53,9 +53,9 @@ class PostgresAttachmentRepository(AttachmentRepository):
         self._engine = engine
         self._schema = schema
         if ensure_schema:
-            tables = PostgresAssetStorage.ensure_schema(engine=engine, schema=schema)
+            tables = PostgresStorageUtils.ensure_schema(engine=engine, schema=schema)
         else:
-            tables = PostgresAssetStorage.get_tables(schema=schema)
+            tables = PostgresStorageUtils.get_tables(schema=schema)
         self._table = tables.attachments
         logger.info("PostgresAttachmentRepository initialised in schema: %s", schema)
 
@@ -76,8 +76,8 @@ class PostgresAttachmentRepository(AttachmentRepository):
             DocpipeException: If the database cannot be reached or initialised.
         """
         try:
-            engine = PostgresAssetStorage.get_engine(config=config, owner="document set attachment repository")
-            return cls(engine=engine, schema=PostgresAssetStorage.resolve_schema(config=config))
+            engine = PostgresStorageUtils.get_engine(config=config, owner="document set attachment repository")
+            return cls(engine=engine, schema=PostgresStorageUtils.resolve_schema(config=config))
         except DocpipeException:
             raise
         except Exception as e:
@@ -216,4 +216,4 @@ class PostgresAttachmentRepository(AttachmentRepository):
         Returns:
             List of validation error messages; empty if configuration is valid.
         """
-        return PostgresAssetStorage.validate_config(config=config)
+        return PostgresStorageUtils.validate_config(config=config)

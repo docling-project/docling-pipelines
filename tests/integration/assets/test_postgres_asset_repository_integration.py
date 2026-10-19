@@ -31,10 +31,10 @@ from sqlalchemy.engine import Engine
 
 from docpipe.api import dependencies
 from docpipe.core.assets.common.adapters.repositories.postgres_asset_repository import PostgresAssetRepository
-from docpipe.core.assets.common.adapters.repositories.postgres_asset_storage import PostgresAssetStorage
 from docpipe.core.assets.common.adapters.repositories.postgres_attachment_repository import (
     PostgresAttachmentRepository,
 )
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import PostgresStorageUtils
 from docpipe.core.assets.common.domain.models.asset import Asset
 from docpipe.core.assets.common.domain.models.attachment_ref import AttachmentRef
 from docpipe.core.assets.common.factories.attachment_repository_factory import AttachmentRepositoryFactory
@@ -374,7 +374,7 @@ class TestConcurrentWriters:
         )
         engines: list[Engine] = [create_engine(url) for _ in range(4)]
         try:
-            tasks = [(lambda e=e: PostgresAssetStorage.ensure_schema(engine=e, schema=asset_schema)) for e in engines]
+            tasks = [(lambda e=e: PostgresStorageUtils.ensure_schema(engine=e, schema=asset_schema)) for e in engines]
             results = self._run_concurrently(tasks=tasks)
             assert not [r for r in results if isinstance(r, Exception)], results
             with engines[0].connect() as connection:

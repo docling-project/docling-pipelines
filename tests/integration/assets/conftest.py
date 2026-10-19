@@ -24,7 +24,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from docpipe.core.assets.common.adapters.repositories.postgres_asset_storage import PostgresAssetStorage
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import PostgresStorageUtils
 
 
 def _postgres_settings() -> dict[str, Any] | None:
@@ -70,7 +70,7 @@ def asset_schema(postgres_settings: dict[str, Any]) -> Iterator[str]:
     """A unique PostgreSQL schema name, dropped (with its tables) after the test."""
     schema = f"it_assets_{uuid.uuid4().hex[:12]}"
     yield schema
-    PostgresAssetStorage.dispose_engines()
+    PostgresStorageUtils.dispose_engines()
     admin = create_engine(_url(postgres_settings))
     try:
         with admin.begin() as connection:

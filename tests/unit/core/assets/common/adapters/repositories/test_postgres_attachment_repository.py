@@ -13,10 +13,10 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 
-from docpipe.core.assets.common.adapters.repositories.postgres_asset_storage import PostgresAssetStorage
 from docpipe.core.assets.common.adapters.repositories.postgres_attachment_repository import (
     PostgresAttachmentRepository,
 )
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import PostgresStorageUtils
 from docpipe.core.assets.common.domain.models.attachment_ref import AttachmentRef
 from docpipe.core.assets.common.factories.attachment_repository_factory import AttachmentRepositoryFactory
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, RepositoryConfigurationException
@@ -66,17 +66,17 @@ class TestRegistration:
             AttachmentRepositoryFactory.create(adapter_name="postgres", config={"database_path": "x.duckdb"})
 
     def test_create_wraps_unexpected_errors(self):
-        with patch.object(PostgresAssetStorage, "get_engine", side_effect=RuntimeError("boom")):
+        with patch.object(PostgresStorageUtils, "get_engine", side_effect=RuntimeError("boom")):
             with pytest.raises(DocpipeException, match="boom") as exc_info:
                 PostgresAttachmentRepository.create(config={"postgres": {"password": "p"}})  # pragma: allowlist secret
         assert exc_info.value.status_code == 500
         assert exc_info.value.error_code == ErrorCode.DOCUMENT_SET_REPOSITORY_ERROR
 
     def test_create_uses_configured_schema(self, engine):
-        tables = PostgresAssetStorage.get_tables(schema="tenant_b")
+        tables = PostgresStorageUtils.get_tables(schema="tenant_b")
         with (
-            patch.object(PostgresAssetStorage, "get_engine", return_value=engine),
-            patch.object(PostgresAssetStorage, "ensure_schema", return_value=tables) as ensure,
+            patch.object(PostgresStorageUtils, "get_engine", return_value=engine),
+            patch.object(PostgresStorageUtils, "ensure_schema", return_value=tables) as ensure,
         ):
             repo = PostgresAttachmentRepository.create(config={"postgres": {"schema": "tenant_b"}})
         assert isinstance(repo, PostgresAttachmentRepository)

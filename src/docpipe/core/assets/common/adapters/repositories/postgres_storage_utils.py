@@ -71,7 +71,7 @@ class PostgresAssetTables:
     attachments: Table
 
 
-class PostgresAssetStorage:
+class PostgresStorageUtils:
     """Engine cache, table registry and schema bootstrap for asset repositories.
 
     All state is class-level so that every repository instance in a process

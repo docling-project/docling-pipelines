@@ -1,10 +1,10 @@
-"""Unit tests for PostgresAssetRepository and PostgresAssetStorage (no database needed).
+"""Unit tests for PostgresAssetRepository and PostgresStorageUtils (no database needed).
 
 The SQLAlchemy engine is mocked; behaviour against a real server is covered by
 tests/integration/assets/test_postgres_asset_repository_integration.py.
 
 Coverage:
-- PostgresAssetStorage: config validation, schema resolution, engine caching,
+- PostgresStorageUtils: config validation, schema resolution, engine caching,
   missing-password error, schema bootstrap statements, table layout
 - PostgresAssetRepository: save / find / update / delete / bulk_delete /
   health_check control flow and error mapping, from_config validation
@@ -19,10 +19,10 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from docpipe.core.assets.common.adapters.repositories.postgres_asset_repository import PostgresAssetRepository
-from docpipe.core.assets.common.adapters.repositories.postgres_asset_storage import (
+from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import (
     DEFAULT_ASSET_SCHEMA,
     RECORDS_NAME_UNIQUE_CONSTRAINT,
-    PostgresAssetStorage,
+    PostgresStorageUtils,
 )
 from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory, RepositoryType
 from docpipe.core.assets.document_libraries.domain.models.document_library import DocumentLibrary
@@ -55,7 +55,7 @@ def _isolate_postgres_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("DOCUMENTSET_REPOSITORY_TYPE", raising=False)
     yield
-    PostgresAssetStorage.dispose_engines()
+    PostgresStorageUtils.dispose_engines()
 
 
 @pytest.fixture
@@ -107,48 +107,48 @@ def _integrity_error(*, pgcode: str) -> IntegrityError:
 
 
 # ---------------------------------------------------------------------------
-# PostgresAssetStorage
+# PostgresStorageUtils
 # ---------------------------------------------------------------------------
 
 
-class TestPostgresAssetStorageConfig:
+class TestPostgresStorageUtilsConfig:
     def test_validate_config_accepts_empty_config(self):
-        assert PostgresAssetStorage.validate_config(config={}) == []
+        assert PostgresStorageUtils.validate_config(config={}) == []
 
     def test_validate_config_accepts_full_section(self):
         config = {"postgres": {"host": "h", "password": "p", "schema": "my_assets_2"}}  # pragma: allowlist secret
-        assert PostgresAssetStorage.validate_config(config=config) == []
+        assert PostgresStorageUtils.validate_config(config=config) == []
 
     def test_validate_config_rejects_non_mapping_section(self):
-        errors = PostgresAssetStorage.validate_config(config={"postgres": "localhost"})
+        errors = PostgresStorageUtils.validate_config(config={"postgres": "localhost"})
         assert len(errors) == 1
         assert "mapping" in errors[0]
 
     @pytest.mark.parametrize("schema", ["Bad", "1abc", "has-dash", "x" * 64, "", 5, 'a"; drop'])
     def test_validate_config_rejects_bad_schema(self, schema):
-        errors = PostgresAssetStorage.validate_config(config={"postgres": {"schema": schema}})
+        errors = PostgresStorageUtils.validate_config(config={"postgres": {"schema": schema}})
         assert errors
         assert "schema" in errors[0]
 
     def test_resolve_schema_default_and_custom(self):
-        assert PostgresAssetStorage.resolve_schema(config={}) == DEFAULT_ASSET_SCHEMA
-        assert PostgresAssetStorage.resolve_schema(config={"postgres": None}) == DEFAULT_ASSET_SCHEMA
-        assert PostgresAssetStorage.resolve_schema(config={"postgres": {"schema": "abc"}}) == "abc"
+        assert PostgresStorageUtils.resolve_schema(config={}) == DEFAULT_ASSET_SCHEMA
+        assert PostgresStorageUtils.resolve_schema(config={"postgres": None}) == DEFAULT_ASSET_SCHEMA
+        assert PostgresStorageUtils.resolve_schema(config={"postgres": {"schema": "abc"}}) == "abc"
 
 
-class TestPostgresAssetStorageEngine:
+class TestPostgresStorageUtilsEngine:
     def test_missing_password_raises_repository_configuration_exception(self):
         with pytest.raises(RepositoryConfigurationException, match="DOCPIPE_POSTGRES_PASSWORD") as exc_info:
-            PostgresAssetStorage.get_engine(config={"postgres": {"host": "h"}}, owner="DocumentSet repository")
+            PostgresStorageUtils.get_engine(config={"postgres": {"host": "h"}}, owner="DocumentSet repository")
         assert exc_info.value.repository_type == "postgres"
         assert exc_info.value.status_code == 400
 
     def test_engine_is_cached_per_connection_settings(self):
         config = {"postgres": {"host": "h", "password": "p"}}  # pragma: allowlist secret
         with patch(f"{DATABASE_MODULE}.create_postgres_engine", side_effect=lambda **_: MagicMock()) as create:
-            first = PostgresAssetStorage.get_engine(config=config, owner="a")
-            second = PostgresAssetStorage.get_engine(config=dict(config), owner="b")
-            other_pool = PostgresAssetStorage.get_engine(
+            first = PostgresStorageUtils.get_engine(config=config, owner="a")
+            second = PostgresStorageUtils.get_engine(config=dict(config), owner="b")
+            other_pool = PostgresStorageUtils.get_engine(
                 config={"postgres": {"host": "h", "password": "p", "pool_size": 2}},  # pragma: allowlist secret
                 owner="c",
             )
@@ -162,33 +162,33 @@ class TestPostgresAssetStorageEngine:
         monkeypatch.setenv("DOCPIPE_POSTGRES_PASSWORD", "envpw")
         monkeypatch.setenv("DOCPIPE_POSTGRES_HOST", "envhost")
         with patch(f"{DATABASE_MODULE}.create_postgres_engine", return_value=MagicMock()) as create:
-            PostgresAssetStorage.get_engine(config={}, owner="x")
+            PostgresStorageUtils.get_engine(config={}, owner="x")
         assert "envpw@envhost:" in create.call_args.kwargs["connection_string"]
 
     def test_dispose_engines_disposes_and_clears(self):
         config = {"postgres": {"password": "p"}}  # pragma: allowlist secret
         mock_engine = MagicMock()
         with patch(f"{DATABASE_MODULE}.create_postgres_engine", return_value=mock_engine):
-            PostgresAssetStorage.get_engine(config=config, owner="x")
-        PostgresAssetStorage.dispose_engines()
+            PostgresStorageUtils.get_engine(config=config, owner="x")
+        PostgresStorageUtils.dispose_engines()
         mock_engine.dispose.assert_called_once()
         with patch(f"{DATABASE_MODULE}.create_postgres_engine", return_value=MagicMock()) as create:
-            PostgresAssetStorage.get_engine(config=config, owner="x")
+            PostgresStorageUtils.get_engine(config=config, owner="x")
         create.assert_called_once()
 
     def test_describe_engine_hides_password(self, engine):
-        description = PostgresAssetStorage.describe_engine(engine=engine)
+        description = PostgresStorageUtils.describe_engine(engine=engine)
         assert description == "docpipe@db.example:5432/docpipe"
         assert "s3cret" not in description
 
 
-class TestPostgresAssetStorageSchema:
+class TestPostgresStorageUtilsSchema:
     def test_tables_are_cached_per_schema(self):
-        assert PostgresAssetStorage.get_tables(schema="s_one") is PostgresAssetStorage.get_tables(schema="s_one")
-        assert PostgresAssetStorage.get_tables(schema="s_one") is not PostgresAssetStorage.get_tables(schema="s_two")
+        assert PostgresStorageUtils.get_tables(schema="s_one") is PostgresStorageUtils.get_tables(schema="s_one")
+        assert PostgresStorageUtils.get_tables(schema="s_one") is not PostgresStorageUtils.get_tables(schema="s_two")
 
     def test_table_layout(self):
-        tables = PostgresAssetStorage.get_tables(schema="layout_check")
+        tables = PostgresStorageUtils.get_tables(schema="layout_check")
         records = tables.records
         assert records.schema == "layout_check"
         assert [c.name for c in records.primary_key.columns] == ["collection", "asset_id"]
@@ -197,9 +197,9 @@ class TestPostgresAssetStorageSchema:
         assert [c.name for c in tables.attachments.primary_key.columns] == ["collection", "asset_id"]
 
     def test_ensure_schema_takes_advisory_lock_before_ddl(self, engine, connection):
-        tables = PostgresAssetStorage.get_tables(schema="ensure_check")
+        tables = PostgresStorageUtils.get_tables(schema="ensure_check")
         with patch.object(tables.metadata, "create_all") as create_all:
-            result = PostgresAssetStorage.ensure_schema(engine=engine, schema="ensure_check")
+            result = PostgresStorageUtils.ensure_schema(engine=engine, schema="ensure_check")
 
         assert result is tables
         executed = [_compiled(statement=c.args[0]) for c in connection.execute.call_args_list]
@@ -216,8 +216,8 @@ class TestPostgresAssetStorageSchema:
 
 class TestInit:
     def test_init_bootstraps_schema_by_default(self, engine):
-        tables = PostgresAssetStorage.get_tables(schema="custom_schema")
-        with patch.object(PostgresAssetStorage, "ensure_schema", return_value=tables) as ensure:
+        tables = PostgresStorageUtils.get_tables(schema="custom_schema")
+        with patch.object(PostgresStorageUtils, "ensure_schema", return_value=tables) as ensure:
             repo = PostgresAssetRepository(asset_type=DocumentLibrary, engine=engine, schema="custom_schema")
         ensure.assert_called_once_with(engine=engine, schema="custom_schema")
         assert repo._collection == "document_libraries"
@@ -438,9 +438,9 @@ class TestFromConfig:
             "postgres": {"password": "p", "schema": "tenant_a"},
         }  # pragma: allowlist secret
         with (
-            patch.object(PostgresAssetStorage, "get_engine", return_value=engine) as get_engine,
+            patch.object(PostgresStorageUtils, "get_engine", return_value=engine) as get_engine,
             patch.object(
-                PostgresAssetStorage, "ensure_schema", return_value=PostgresAssetStorage.get_tables(schema="tenant_a")
+                PostgresStorageUtils, "ensure_schema", return_value=PostgresStorageUtils.get_tables(schema="tenant_a")
             ) as ensure,
         ):
             repo = PostgresAssetRepository.from_config(asset_type=DocumentLibrary, config=config)
@@ -474,7 +474,7 @@ class TestRepositoryFactoryPostgres:
         assert from_config.call_args.kwargs["asset_type"] is DocumentSet
 
     def test_connection_failure_is_wrapped(self):
-        with patch.object(PostgresAssetStorage, "get_engine", side_effect=RuntimeError("connection refused")):
+        with patch.object(PostgresStorageUtils, "get_engine", side_effect=RuntimeError("connection refused")):
             with pytest.raises(RepositoryConfigurationException, match="connection refused") as exc_info:
                 RepositoryFactory.create_repository(
                     asset_type=DocumentSet,
