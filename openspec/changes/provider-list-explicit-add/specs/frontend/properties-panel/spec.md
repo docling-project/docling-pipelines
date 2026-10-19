@@ -21,6 +21,10 @@ Provider list fields in operator panels (for example Ingest Source Paths) SHALL 
 - **WHEN** the user types a value and activates the Add button
 - **THEN** the trimmed value is added to the list and the input is cleared
 
+#### Scenario: Pending text is not saved
+- **WHEN** the user has text in a provider list input that was never committed and saves the properties panel
+- **THEN** the pending text is not added to the list and is not persisted; only committed values in the table are saved, and the Add button remains enabled to indicate the text is still pending
+
 ### Requirement: Add button availability
 Each provider list field SHALL always display an Add button next to its input, and SHALL disable it while the input contains no non-whitespace text.
 
@@ -61,6 +65,17 @@ A provider list field SHALL list committed values in a table below the input, wi
 #### Scenario: Table hidden when empty
 - **WHEN** the list contains no values
 - **THEN** no table is rendered
+
+### Requirement: Required provider list fields
+A provider list field marked required SHALL be labelled "(required)" and SHALL be treated as empty when its committed list has no values; pending uncommitted text SHALL NOT count as a value. The Save button state continues to be governed only by the top-level required operator attributes, so a nested required list field with no committed values does not itself disable Save; the backend rejects the configuration when the flow is validated or run.
+
+#### Scenario: Required label shown
+- **WHEN** a provider list field is marked required in the provider schema
+- **THEN** its label reads "<name> (required)"
+
+#### Scenario: Pending text does not satisfy a required list
+- **WHEN** a required list field has pending text in its input and no committed values
+- **THEN** the persisted value for that field is empty, and the pending text is not used
 
 ### Requirement: Provider list field accessibility
 Each provider list field SHALL expose an accessible name on its input, and SHALL expose the Add button, each remove control, and the pagination controls as keyboard-operable buttons with accessible names.

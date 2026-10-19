@@ -72,6 +72,7 @@ All user-facing strings live in `ListInput.messages.ts` (`defineMessages`) and a
 ## Risks / Trade-offs
 
 - [All provider `list` fields change, not only Ingest Source Paths] → Intended: the blur problem applies to every such field, and one rendering path avoids drift. Called out in the proposal impact.
-- [Existing tests that render `ProviderFieldsForm` need an intl context because `ListInput` uses `useIntl`] → Tests wrap in an intl provider; `ListInput` tests use `renderWithProviders`.
-- [A user who types a value and never clicks Add loses it on Save] → Accepted trade-off of explicit commit. The enabled Add button and helper text make the pending state visible.
+- [Existing tests that render `ProviderFieldsForm` need an intl context because `ListInput` uses `useIntl`] → Tests use `renderWithProviders`.
+- [A user who types a value and never clicks Add loses it on Save] → Accepted trade-off of explicit commit, specified as "Pending text is not saved". The enabled Add button and helper text make the pending state visible. Warning on Save would need a hook into Elyra's Save and is out of scope.
+- [Nested required list fields are not enforced on Save] → Pre-existing: `hasAnyRequiredParamMissing` only checks top-level operator attributes, so `paths` inside `provider_config` is checked by the backend instead (`FilesystemConfig.validate_paths`). Out of scope here; documented in "Required provider list fields".
 - [Fixed page size of 5 may not suit very long lists] → Acceptable for path-style lists; revisit if a field needs larger lists.

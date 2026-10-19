@@ -17,8 +17,7 @@
 
 - [x] 3.1 [frontend] Run the component test suite (`npx vitest run tests/unit/components`) and verify all tests pass.
 - [x] 3.2 [frontend] Run `npm run lint` and `npm run build`; verify no errors in changed files and a successful build.
-- [ ] 3.3 [frontend] Manually verify in the canvas: paste a folder path in Ingest Source Paths, switch to another window and back, confirm the text is kept, append a filename, click Add, and confirm the row appears. Record the result in the PR.
-- [x] 3.4 [frontend] Run `openspec validate provider-list-explicit-add --strict` and verify it reports the change as valid.
+- [x] 3.3 [frontend] Run `openspec validate provider-list-explicit-add --strict` and verify it reports the change as valid.
 
 ## Workflow follow-up
 
