@@ -2,11 +2,11 @@
 
 ## ADDED Requirements
 
-### Requirement: Provider list fields commit values only on explicit action
-Provider list fields in operator panels (for example Ingest Source Paths) SHALL hold typed or pasted text in the input until the user commits it by pressing Enter, pressing comma, or activating the Add button. Losing focus SHALL NOT commit, alter, or clear the pending text.
+### Requirement: Values are committed only on explicit action
+The component SHALL hold typed or pasted text in its input until the user commits it by pressing Enter, pressing comma, or activating the Add button. Losing focus SHALL NOT commit, alter, or clear the pending text.
 
 #### Scenario: Blur keeps pending text
-- **WHEN** the user pastes a folder path into the Paths input and moves focus to another window or control
+- **WHEN** the user pastes a folder path into the input and moves focus to another window or control
 - **THEN** no value is added and the pasted text is still in the input when focus returns, so the user can append to it
 
 #### Scenario: Enter commits pending text
@@ -21,12 +21,19 @@ Provider list fields in operator panels (for example Ingest Source Paths) SHALL 
 - **WHEN** the user types a value and activates the Add button
 - **THEN** the trimmed value is added to the list and the input is cleared
 
+### Requirement: Pending text is not part of the value
+The component SHALL report only committed values to its owner. Pending uncommitted text SHALL NOT be reported, so an owner that persists the value or checks it for emptiness treats a list with only pending text as empty.
+
 #### Scenario: Pending text is not saved
-- **WHEN** the user has text in a provider list input that was never committed and saves the properties panel
+- **WHEN** the user has text in the input that was never committed and the owner saves its form
 - **THEN** the pending text is not added to the list and is not persisted; only committed values in the table are saved, and the Add button remains enabled to indicate the text is still pending
 
+#### Scenario: Pending text does not satisfy a required list
+- **WHEN** a list with no committed values has pending text in its input
+- **THEN** the value reported to the owner is the empty list
+
 ### Requirement: Add button availability
-Each provider list field SHALL always display an Add button next to its input, and SHALL disable it while the input contains no non-whitespace text.
+The component SHALL always display an Add button next to its input, and SHALL disable it while the input contains no non-whitespace text.
 
 #### Scenario: Add disabled when input is empty
 - **WHEN** the input is empty or contains only whitespace
@@ -37,7 +44,7 @@ Each provider list field SHALL always display an Add button next to its input, a
 - **THEN** the Add button is enabled
 
 ### Requirement: Duplicate values are rejected visibly
-A provider list field SHALL NOT add a value that is already in the list. It SHALL keep the typed text and mark the input invalid with a message naming the duplicate, until the user edits the input.
+The component SHALL NOT add a value that is already in the list. It SHALL keep the typed text and mark the input invalid with a message naming the duplicate, until the user edits the input.
 
 #### Scenario: Duplicate shows invalid state
 - **WHEN** the user commits a value that already exists in the list
@@ -48,7 +55,7 @@ A provider list field SHALL NOT add a value that is already in the list. It SHAL
 - **THEN** the invalid state and message are removed
 
 ### Requirement: Committed values listed in a paginated table
-A provider list field SHALL list committed values in a table below the input, with a title, at most 5 rows per page, pagination controls when more than one page exists, and a remove control on each row. The table SHALL be hidden when the list is empty.
+The component SHALL list committed values in a table below the input, with a title, at most 5 rows per page, pagination controls when more than one page exists, and a remove control on each row. The table SHALL be hidden when the list is empty.
 
 #### Scenario: Value appears in the table
 - **WHEN** a value is committed
@@ -60,30 +67,19 @@ A provider list field SHALL list committed values in a table below the input, wi
 
 #### Scenario: Remove deletes the value
 - **WHEN** the user activates the remove control on a row
-- **THEN** that value is removed from the list and the persisted provider configuration
+- **THEN** that value is removed from the list reported to the owner
 
 #### Scenario: Table hidden when empty
 - **WHEN** the list contains no values
 - **THEN** no table is rendered
 
-### Requirement: Required provider list fields
-A provider list field marked required SHALL be labelled "(required)" and SHALL be treated as empty when its committed list has no values; pending uncommitted text SHALL NOT count as a value. The Save button state continues to be governed only by the top-level required operator attributes, so a nested required list field with no committed values does not itself disable Save; the backend rejects the configuration when the flow is validated or run.
-
-#### Scenario: Required label shown
-- **WHEN** a provider list field is marked required in the provider schema
-- **THEN** its label reads "<name> (required)"
-
-#### Scenario: Pending text does not satisfy a required list
-- **WHEN** a required list field has pending text in its input and no committed values
-- **THEN** the persisted value for that field is empty, and the pending text is not used
-
-### Requirement: Provider list field accessibility
-Each provider list field SHALL expose an accessible name on its input, and SHALL expose the Add button, each remove control, and the pagination controls as keyboard-operable buttons with accessible names.
+### Requirement: Accessibility
+The component SHALL expose an accessible name on its input, and SHALL expose the Add button, each remove control, and the pagination controls as keyboard-operable buttons with accessible names.
 
 #### Scenario: Input has an accessible name
-- **WHEN** a provider list field is rendered
-- **THEN** its input has an accessible name matching the field label
+- **WHEN** the component is rendered
+- **THEN** its input has an accessible name matching the supplied label
 
 #### Scenario: Controls reachable by keyboard
-- **WHEN** the user tabs through a provider list field that contains values
+- **WHEN** the user tabs through a component that contains values
 - **THEN** focus reaches the input, the Add button, each remove control, and the pagination controls, each operable with Enter or Space

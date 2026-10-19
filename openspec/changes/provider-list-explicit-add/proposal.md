@@ -20,11 +20,11 @@ In the Ingest Source properties panel, the `Paths` field used a tag-style input 
 
 ### New Capabilities
 
-None. The behavior belongs to the existing properties panel capability.
+- `frontend/common/list-input`: the shared `ListInput` component commits values only through an explicit action, rejects duplicates visibly, lists committed values in a paginated table, and is keyboard accessible. Specified under `common/` alongside `vault-input` and `shared-data-table`, because the component is a reusable primitive rather than part of the properties panel.
 
 ### Modified Capabilities
 
-- `frontend/properties-panel`: adds a requirement that provider `list` fields commit values only through an explicit action and list committed values in a paginated table.
+None.
 
 ## Impact
 
@@ -37,4 +37,4 @@ None. The behavior belongs to the existing properties panel capability.
 - Changing `TagInput` or its other usages (Extract, Storage Output, project and flow dialogs).
 - Backend, operator metadata, or flow JSON changes.
 - Splitting or reordering values, or validating path syntax; entries are stored as typed after trimming.
-- A separate capability spec for the `ListInput` component; its behavior is specified through the properties panel.
+- Specifying how `ProviderFieldsForm` or the individual operator panels use `ListInput`, or changing how Save is gated for nested required fields.

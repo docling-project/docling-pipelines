@@ -21,5 +21,5 @@
 
 ## Workflow follow-up
 
-- Archive the change with `openspec archive provider-list-explicit-add` after PR #273 is approved, so the delta merges into `openspec/specs/frontend/properties-panel/spec.md`.
-- Verify the canonical properties-panel spec contains the new requirements after archive.
+- Archive the change with `openspec archive provider-list-explicit-add` after PR #273 is approved, so the delta creates `openspec/specs/frontend/common/list-input/spec.md`.
+- Verify the canonical list-input spec contains the new requirements after archive.
