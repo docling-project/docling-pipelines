@@ -18,6 +18,7 @@ from docpipe.core.constants.constants import (
     Metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.event_streaming.models import InputEvent
 from docpipe.core.incremental_metadata import get_incremental_update_service
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.ingest.ingest_utils import (
@@ -196,7 +197,7 @@ class MicrosoftGraphLoader(BaseLoader):
             doc._binary_content = binary_content  # type: ignore[attr-defined]
             return doc
         except Exception as e:
-            logger.error("Failed to download file %s: %s", item.get("name", ""), e, exc_info=True)
+            logger.exception("Failed to download file %s: %s", item.get("name", ""), e)
             return Document(
                 page_content="",
                 metadata={
@@ -380,6 +381,12 @@ class IngestSourceOperator(AbstractOperator):
 
         # Validate extensions
         self._validate_extensions()
+
+        self.input_event: InputEvent | None = None
+        input_event = config.get("input_event")
+        if input_event is not None:
+            self.input_event = InputEvent.model_validate(input_event)
+            self.force_ingest = True
 
     def _validate_extensions(self) -> None:
         """
@@ -704,6 +711,12 @@ class IngestSourceOperator(AbstractOperator):
         """
         # Create adapter instance to access its config builder
         adapter = SourceAdapterFactory.create(provider)
+
+        if self.input_event is not None:
+            adapter.bind_file_reference(
+                provider_config=self.provider_config,
+                file_reference=self.input_event.file_reference,
+            )
 
         # Delegate configuration building to the adapter, passing the unified
         # provider_config dict.

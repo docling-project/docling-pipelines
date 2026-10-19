@@ -53,10 +53,10 @@ context: |
 rules:
   proposal:
     - Always include a Non-goals section
-    - State clearly which layer(s) are affected: frontend-only, backend-only, or full-stack
+    - "State clearly which layer(s) are affected: frontend-only, backend-only, or full-stack"
     - For frontend UI changes, identify relevant Carbon Design System components and layout patterns
     - Specify if changes affect routing under /ui, BFF proxy routes, or Redux state slices
-    - For backend changes, specify affected REST routes, operators, or storage adapters
+    - "For backend changes, specify affected REST routes, operators, or storage adapters"
 
   specs:
     - Focus specs strictly on externally observable capabilities and behavioral contracts, not 1:1 component file mirrors
@@ -76,14 +76,14 @@ rules:
   tasks:
     - Break tasks into chunks of maximum 2 hours
     - "Tag each task with the layer it touches: [frontend], [backend], or [both]"
-    - Order tasks by dependency: Backend API/adapters -> BFF -> Redux -> UI components -> Integration
+    - "Order tasks by dependency: Backend API/adapters -> BFF -> Redux -> UI components -> Integration"
     - Include explicit validation tasks (tests, linting, build verification)
 
 operations:
   apply:
     guidance:
-      - Backend Python: run `uv run ruff check --fix .` and `uv run mypy .` after code changes
-      - Frontend React: run `npm run lint` and verify TypeScript compilation in frontend/
+      - "Backend Python: run `uv run ruff check --fix .` and `uv run mypy .` after code changes"
+      - "Frontend React: run `npm run lint` and verify TypeScript compilation in frontend/"
       - Ensure all git commits include -s (DCO sign-off) and follow single-line commit message format
   archive:
     guidance:

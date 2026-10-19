@@ -151,7 +151,7 @@ class DoclingAdapter(TextExtractionPort):
 
         if ocr_block:
             logger.info(
-                "OCR config — enabled: %s, engine: %s, mode: %s",
+                "OCR config - enabled: %s, engine: %s, mode: %s",
                 self._ocr_enabled,
                 self._ocr_engine,
                 self._ocr_mode,
@@ -201,7 +201,7 @@ class DoclingAdapter(TextExtractionPort):
             )
             accelerator_device = base_device_map.get(device_key)
             if accelerator_device is None:
-                logger.warning("Unrecognised GPU device '%s' — falling back to default converter", self.gpu_device)
+                logger.warning("Unrecognised GPU device '%s' - falling back to default converter", self.gpu_device)
                 return DocumentConverter()
 
             accelerator_options = AcceleratorOptions(
@@ -266,7 +266,7 @@ class DoclingAdapter(TextExtractionPort):
         entry = _engine_imports.get(self._ocr_engine)
         if entry is None:
             logger.warning(
-                "Unknown OCR engine '%s' — falling back to OcrAutoOptions. Valid engines: %s",
+                "Unknown OCR engine '%s' - falling back to OcrAutoOptions. Valid engines: %s",
                 self._ocr_engine,
                 sorted(_engine_imports.keys()),
             )
@@ -279,7 +279,7 @@ class DoclingAdapter(TextExtractionPort):
             cls = getattr(module, cls_name)
         except (ImportError, AttributeError) as exc:
             logger.warning(
-                "Could not import OCR options for engine '%s': %s — using Docling defaults",
+                "Could not import OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
                 exc,
             )
@@ -290,7 +290,7 @@ class DoclingAdapter(TextExtractionPort):
             return cls(**opts) if opts else cls()
         except Exception as exc:
             logger.warning(
-                "Failed to build OCR options for engine '%s': %s — using Docling defaults",
+                "Failed to build OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
                 exc,
             )

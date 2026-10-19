@@ -133,26 +133,3 @@ class OperatorValidator:
             errors=errors + class_validation.errors,
             warnings=warnings + class_validation.warnings,
         )
-
-    @staticmethod
-    def validate_no_duplicate_in_batch(
-        short_name: str,
-        loaded_operators: dict[str, type],
-    ) -> ValidationResult:
-        """Validate that operator short_name is not already loaded in current batch.
-
-        Args:
-            short_name: The short name to validate
-            loaded_operators: Dictionary of operators already loaded in current batch
-
-        Returns:
-            ValidationResult with validation status and messages
-        """
-        if short_name in loaded_operators:
-            return ValidationResult(
-                valid=False,
-                errors=[f"Duplicate operator short_name '{short_name}' in current load batch"],
-                warnings=[],
-            )
-
-        return ValidationResult(valid=True, errors=[], warnings=[])

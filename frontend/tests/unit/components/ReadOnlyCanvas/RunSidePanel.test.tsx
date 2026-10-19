@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { RunSidePanel } from '@/components/ReadOnlyCanvas/RunSidePanel/RunSidePanel';
 import type { JobRunStatusResponse } from '@/types';
 
@@ -39,30 +40,30 @@ const nodeMetadata = {
 
 describe('RunSidePanel', () => {
   it('renders without crashing', () => {
-    const { container } = render(<RunSidePanel {...baseProps} />);
+    const { container } = renderWithProviders(<RunSidePanel {...baseProps} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders tab list', () => {
-    render(<RunSidePanel {...baseProps} />);
+    renderWithProviders(<RunSidePanel {...baseProps} />);
     expect(screen.getByText('Log Details')).toBeInTheDocument();
   });
 
   it('renders close button', () => {
     const onClose = vi.fn();
-    render(<RunSidePanel {...baseProps} onClose={onClose} />);
+    renderWithProviders(<RunSidePanel {...baseProps} onClose={onClose} />);
     const closeBtn = screen.getByRole('button', { name: /close/i });
     fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalled();
   });
 
   it('renders Node Summary tab when node sequence exists', () => {
-    render(<RunSidePanel {...baseProps} />);
+    renderWithProviders(<RunSidePanel {...baseProps} />);
     expect(screen.getByText('Node Summary')).toBeInTheDocument();
   });
 
   it('hides Node Summary tab on failed run with no node sequence', () => {
-    render(
+    renderWithProviders(
       <RunSidePanel
         {...baseProps}
         executionLogs={makeResponse({
@@ -75,13 +76,13 @@ describe('RunSidePanel', () => {
   });
 
   it('renders JobRunLogs on tab index 0', () => {
-    render(<RunSidePanel {...baseProps} activeTabIndex={0} />);
+    renderWithProviders(<RunSidePanel {...baseProps} activeTabIndex={0} />);
     // Accordion is rendered in log tab
     expect(document.querySelector('.cds--accordion')).toBeInTheDocument();
   });
 
   it('renders Node Summary content when tab index is 1 and node is selected', () => {
-    render(
+    renderWithProviders(
       <RunSidePanel
         {...baseProps}
         activeTabIndex={1}
@@ -96,19 +97,19 @@ describe('RunSidePanel', () => {
   });
 
   it('renders empty message when tab 1 and no selected node metadata', () => {
-    render(<RunSidePanel {...baseProps} activeTabIndex={1} selectedNodeId={null} />);
+    renderWithProviders(<RunSidePanel {...baseProps} activeTabIndex={1} selectedNodeId={null} />);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders download button on log tab (tab 0)', () => {
-    render(<RunSidePanel {...baseProps} activeTabIndex={0} />);
+    renderWithProviders(<RunSidePanel {...baseProps} activeTabIndex={0} />);
     // Download button present in toolbar
     expect(document.body).toBeInTheDocument();
   });
 
   it('calls onTabChange when a tab is clicked', () => {
     const onTabChange = vi.fn();
-    render(<RunSidePanel {...baseProps} onTabChange={onTabChange} />);
+    renderWithProviders(<RunSidePanel {...baseProps} onTabChange={onTabChange} />);
     // Clicking Node Summary tab triggers onTabChange
     const summaryTab = screen.getByText('Node Summary');
     fireEvent.click(summaryTab);
@@ -116,7 +117,7 @@ describe('RunSidePanel', () => {
   });
 
   it('renders with inline notification for failed run with no sequence', () => {
-    render(
+    renderWithProviders(
       <RunSidePanel
         {...baseProps}
         executionLogs={makeResponse({
@@ -132,14 +133,14 @@ describe('RunSidePanel', () => {
 
   it('calls onTabChange with 1 when Node Summary tab is clicked', () => {
     const onTabChange = vi.fn();
-    render(<RunSidePanel {...baseProps} onTabChange={onTabChange} />);
+    renderWithProviders(<RunSidePanel {...baseProps} onTabChange={onTabChange} />);
     fireEvent.click(screen.getByText('Node Summary'));
     expect(onTabChange).toHaveBeenCalledWith(1);
   });
 
   it('calls onTabChange with 0 when Log Details tab is clicked', () => {
     const onTabChange = vi.fn();
-    render(<RunSidePanel {...baseProps} onTabChange={onTabChange} activeTabIndex={1} />);
+    renderWithProviders(<RunSidePanel {...baseProps} onTabChange={onTabChange} activeTabIndex={1} />);
     fireEvent.click(screen.getByText('Log Details'));
     expect(onTabChange).toHaveBeenCalledWith(0);
   });
@@ -152,7 +153,7 @@ describe('RunSidePanel', () => {
       writable: true,
       value: { createObjectURL, revokeObjectURL },
     });
-    render(<RunSidePanel {...baseProps} activeTabIndex={0} />);
+    renderWithProviders(<RunSidePanel {...baseProps} activeTabIndex={0} />);
     // Find the download icon button (title="Download Logs")
     const downloadBtn = document.querySelector('button[title="Download Logs"]') as HTMLElement | null;
     if (downloadBtn) {
@@ -168,7 +169,7 @@ describe('RunSidePanel', () => {
     // JobRunLogs calls onShowFullLog when "Show detailed log" is clicked.
     // RunSidePanel wires that to setShowFullLog — the modal appears.
     const longLog = 'A'.repeat(600);
-    render(
+    renderWithProviders(
       <RunSidePanel
         {...baseProps}
         activeTabIndex={0}
@@ -186,7 +187,7 @@ describe('RunSidePanel', () => {
 
   it('closes full-log modal when the modal close button is clicked', () => {
     const longLog = 'B'.repeat(600);
-    render(
+    renderWithProviders(
       <RunSidePanel
         {...baseProps}
         activeTabIndex={0}
@@ -211,7 +212,7 @@ describe('RunSidePanel', () => {
       value: { writeText },
     });
     const longLog = 'C'.repeat(600);
-    render(
+    renderWithProviders(
       <RunSidePanel
         {...baseProps}
         activeTabIndex={0}

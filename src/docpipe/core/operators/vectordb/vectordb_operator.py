@@ -128,7 +128,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     content_column=self.doc_column,
                 )
                 logger.debug(
-                    "No feature_mappings provided — computed defaults from available_features for provider '%s'",
+                    "No feature_mappings provided - computed defaults from available_features for provider '%s'",
                     self.provider,
                 )
             # Store canonical list-of-dicts back into config so validation sees one shape

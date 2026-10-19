@@ -1,17 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { ProviderFieldsForm } from '@/components/PropertiesPanel/CustomPanels/shared/ProviderFieldsForm';
 
 describe('ProviderFieldsForm', () => {
   it('renders without crashing with empty properties', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm properties={{}} values={{}} onChange={vi.fn()} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders text input for non-sensitive string field', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ host: { type: 'string', label: 'Host', description: 'Host', sensitive: false } as any }}
         values={{ host: 'localhost' }}
@@ -23,7 +24,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('renders number input for int64 field', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ port: { type: 'int64', label: 'Port', description: 'Port' } as any }}
         values={{ port: 9200 }}
@@ -35,7 +36,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('renders toggle for boolean field', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ enabled: { type: 'boolean', label: 'Enabled', description: 'Flag' } as any }}
         values={{ enabled: true }}
@@ -47,7 +48,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('renders number input for double field', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ threshold: { type: 'double', label: 'Threshold', description: 'Float threshold' } as any }}
         values={{ threshold: 0.75 }}
@@ -59,7 +60,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('renders VaultInput for sensitive string field', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ secret_key: { type: 'string', label: 'Secret Key', description: 'Secret', sensitive: true } as any }}
         values={{ secret_key: '' }}
@@ -71,7 +72,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('renders list field as TagInput', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ paths: { type: 'list', label: 'Paths', description: 'List of paths' } as any }}
         values={{ paths: ['/data/input'] }}
@@ -83,7 +84,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('renders json field as JsonTextArea', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ extra_config: { type: 'json', label: 'Extra Config', description: 'JSON config' } as any }}
         values={{ extra_config: { key: 'value' } }}
@@ -95,7 +96,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('skips hidden field "file_extensions"', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{
           file_extensions: { type: 'list', label: 'File Extensions', description: 'Hidden field' } as any,
@@ -113,7 +114,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('marks required field with "(required)" suffix in label', () => {
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={{ bucket: { type: 'string', name: 'bucket', label: 'Bucket', description: 'S3 bucket', required: true, sensitive: false } as any }}
         values={{ bucket: '' }}
@@ -127,7 +128,7 @@ describe('ProviderFieldsForm', () => {
 
   it('calls onChange when text input value changes', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={{ bucket: { type: 'string', name: 'bucket', label: 'Bucket', description: 'S3 bucket', sensitive: false } as any }}
         values={{ bucket: 'my-bucket' }}
@@ -145,7 +146,7 @@ describe('ProviderFieldsForm', () => {
 
   it('calls onChange when boolean toggle is clicked', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={{ recursive: { type: 'boolean', name: 'recursive', label: 'Recursive', description: 'Recurse dirs' } as any }}
         values={{ recursive: false }}
@@ -168,7 +169,7 @@ describe('ProviderFieldsForm', () => {
       region: { type: 'string', name: 'region', label: 'Region', description: 'AWS region', sensitive: false } as any,
       access_key: { type: 'string', name: 'access_key', label: 'Access Key', description: 'AWS access key', sensitive: true } as any,
     };
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={s3Props}
         values={{ bucket: 'my-bucket', prefix: 'data/', region: 'us-east-1', access_key: '' }}
@@ -187,7 +188,7 @@ describe('ProviderFieldsForm', () => {
       bucket: { type: 'string', name: 'bucket', label: 'Bucket', description: 'COS bucket', sensitive: false } as any,
       api_key: { type: 'string', name: 'api_key', label: 'API Key', description: 'COS api key', sensitive: true } as any, // pragma: allowlist secret
     };
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={cosProps}
         values={{ endpoint: 'https://s3.us-south.cloud-object-storage.appdomain.cloud', bucket: 'my-cos-bucket', api_key: '' }}
@@ -200,7 +201,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('handles undefined values gracefully (falls back to empty string/false)', () => {
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={{
           host: { type: 'string', label: 'Host', description: 'Host', sensitive: false } as any,
@@ -217,7 +218,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('handles string array values for list field', () => {
-    render(
+    renderWithProviders(
       <ProviderFieldsForm
         properties={{ paths: { type: 'list', label: 'Paths', description: 'Paths' } as any }}
         values={{ paths: '/data/input,/data/extra' }}
@@ -228,7 +229,7 @@ describe('ProviderFieldsForm', () => {
   });
 
   it('handles null json value gracefully', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ config: { type: 'json', label: 'Config', description: 'JSON' } as any }}
         values={{ config: null }}

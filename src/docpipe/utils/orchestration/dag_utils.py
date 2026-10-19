@@ -197,11 +197,11 @@ def extract_dag_nodes(
 
     # Authoring format — rebuild from node_stats to preserve real UUIDs
     if DocpipeConstants.FLOW not in flow_definition:
-        logger.warning("Flow definition has neither 'dag' nor 'flow' key — cannot extract DAG nodes")
+        logger.warning("Flow definition has neither 'dag' nor 'flow' key - cannot extract DAG nodes")
         return []
 
     if not node_stats:
-        logger.warning("Authoring format flow found but no node_stats provided — cannot reconstruct DAG nodes")
+        logger.warning("Authoring format flow found but no node_stats provided - cannot reconstruct DAG nodes")
         return []
 
     authoring_ops: list[dict[str, Any]] = flow_definition.get(DocpipeConstants.FLOW, [])
