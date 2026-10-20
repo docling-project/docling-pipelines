@@ -103,7 +103,7 @@ class OperatorValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
-        operator_classes = OperatorValidator._find_operator_classes(module=module)
+        operator_classes = OperatorValidator.find_operator_classes(module=module)
 
         if not operator_classes:
             errors.append(f"No operator classes found in module {operator_info.module_path}")
@@ -135,7 +135,7 @@ class OperatorValidator:
         )
 
     @staticmethod
-    def _find_operator_classes(*, module: ModuleType) -> list[type[AbstractOperator]]:
+    def find_operator_classes(*, module: ModuleType) -> list[type[AbstractOperator]]:
         """Find operator subclasses defined directly in a module."""
         return [
             obj
@@ -149,7 +149,7 @@ class OperatorValidator:
     @staticmethod
     def select_operator_class(*, module: ModuleType, operator_info: OperatorInfo) -> type[AbstractOperator] | None:
         """Select the discovered class, or the first class for unnamed metadata."""
-        operator_classes = OperatorValidator._find_operator_classes(module=module)
+        operator_classes = OperatorValidator.find_operator_classes(module=module)
         if not isinstance(operator_info.name, str):
             return None
         if not operator_info.name:
