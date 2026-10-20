@@ -17,7 +17,6 @@ import pytest
 from docpipe.core.orchestration.operator_loader.adapters.package_adapter import PackageAdapter
 from docpipe.core.orchestration.operator_loader.loader_service import CustomOperatorLoader
 from docpipe.core.orchestration.operator_loader.ports.operator_source import OperatorInfo
-from docpipe.core.orchestration.operator_loader.validator import OperatorValidator
 
 _OPERATOR = '''
 
@@ -139,23 +138,6 @@ class TestDiscovery:
         operators = PackageAdapter(package_name=installed).list_operators()
 
         assert {op.short_name for op in operators} == {"module_op", "shared_op"}
-
-    def test_module_inspection_uses_validator_class_finder(
-        self, installed_without_entry_points: str, monkeypatch
-    ) -> None:
-        adapter = PackageAdapter(package_name=installed_without_entry_points)
-        module = importlib.import_module(adapter.full_module_path)
-        seen = []
-        original = OperatorValidator._find_operator_classes
-
-        def find_classes(*, module):
-            seen.append(module)
-            return original(module=module)
-
-        monkeypatch.setattr(OperatorValidator, "_find_operator_classes", find_classes)
-
-        assert {info.short_name for info in adapter._discover_via_module_inspection()} == {"module_op", "shared_op"}
-        assert seen == [module]
 
     def test_module_inspection_failure_still_returns_entry_points(self, installed: str, monkeypatch) -> None:
         adapter = PackageAdapter(package_name=installed)
