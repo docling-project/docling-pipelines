@@ -178,7 +178,7 @@ export function IngestSourcePanelBody({
 
       {/* ── Provider-dependent fields hidden until a provider is selected ── */}
       {provider && (
-        <Accordion align="start">
+        <Accordion align="start" className={common.fullWidthAccordion}>
 
           {/* ── Provider configuration ──────────────────────────────── */}
           <AccordionItem title="Provider configuration" open>
