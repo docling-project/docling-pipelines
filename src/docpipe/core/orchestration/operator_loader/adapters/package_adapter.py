@@ -192,7 +192,7 @@ class PackageAdapter(OperatorSourcePort):
             module = importlib.import_module(self.full_module_path)
 
             # Find operator classes in module
-            operator_classes = self._find_operator_classes(module=module)
+            operator_classes = OperatorValidator._find_operator_classes(module=module)
 
             for op_class in operator_classes:
                 if hasattr(op_class, OperatorConstants.Misc.SHORT_NAME):
@@ -229,7 +229,8 @@ class PackageAdapter(OperatorSourcePort):
         Raises:
             ImportError: If module loading fails
         """
-        module_path = operator_info.module_path
+        # Entry point paths include a class name, but the cache stores modules.
+        module_path = operator_info.module_path.split(":", 1)[0]
 
         # Check if already loaded
         if module_path in self._loaded_modules:
@@ -238,10 +239,6 @@ class PackageAdapter(OperatorSourcePort):
 
         # Load the module
         try:
-            # For entry point format "package.module:ClassName", extract module part
-            if ":" in module_path:
-                module_path = module_path.split(":")[0]
-
             module = importlib.import_module(module_path)
             self._loaded_modules[module_path] = module
             return module
@@ -262,28 +259,6 @@ class PackageAdapter(OperatorSourcePort):
             ValidationResult with validation status and messages
         """
         return OperatorValidator.validate_module(module=module, operator_info=operator_info)
-
-    def _find_operator_classes(self, *, module: ModuleType) -> list[type[AbstractOperator]]:
-        """Find all operator classes in a module.
-
-        Args:
-            module: Module to inspect
-
-        Returns:
-            List of operator classes found
-        """
-        operators: list[type[AbstractOperator]] = []
-
-        for _, obj in inspect.getmembers(module):
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, AbstractOperator)
-                and obj is not AbstractOperator
-                and obj.__module__ == module.__name__
-            ):
-                operators.append(obj)
-
-        return operators
 
     @staticmethod
     def _validate_package_name(package_name: str) -> None:

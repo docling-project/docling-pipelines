@@ -212,7 +212,7 @@ class CustomOperatorLoader:
         Returns:
             Operator class if found, None otherwise
         """
-        return OperatorValidator._select_operator_class(module=module, operator_info=op_info)
+        return OperatorValidator.select_operator_class(module=module, operator_info=op_info)
 
     def validate_and_load(
         self,

@@ -119,7 +119,7 @@ class OperatorValidator:
                 f"Using first one: {operator_classes[0].__name__}"
             )
 
-        operator_class = OperatorValidator._select_operator_class(module=module, operator_info=operator_info)
+        operator_class = OperatorValidator.select_operator_class(module=module, operator_info=operator_info)
         if operator_class is None:
             errors.append(
                 f"Operator class '{operator_info.name}' is not a concrete operator defined in module {module.__name__}"
@@ -147,7 +147,7 @@ class OperatorValidator:
         ]
 
     @staticmethod
-    def _select_operator_class(*, module: ModuleType, operator_info: OperatorInfo) -> type[AbstractOperator] | None:
+    def select_operator_class(*, module: ModuleType, operator_info: OperatorInfo) -> type[AbstractOperator] | None:
         """Select the discovered class, or the first class for unnamed metadata."""
         operator_classes = OperatorValidator._find_operator_classes(module=module)
         if not isinstance(operator_info.name, str):
