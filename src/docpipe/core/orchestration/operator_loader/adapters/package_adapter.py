@@ -192,7 +192,7 @@ class PackageAdapter(OperatorSourcePort):
             module = importlib.import_module(self.full_module_path)
 
             # Find operator classes in module
-            operator_classes = OperatorValidator._find_operator_classes(module=module)
+            operator_classes = OperatorValidator.find_operator_classes(module=module)
 
             for op_class in operator_classes:
                 if hasattr(op_class, OperatorConstants.Misc.SHORT_NAME):
