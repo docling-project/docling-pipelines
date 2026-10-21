@@ -188,3 +188,57 @@ class TestDataStoreFactory:
 
         mock_from_config.assert_called_once_with(config={"database_path": "/tmp/test.duckdb"})
         assert result is mock_instance
+
+
+@pytest.fixture
+def isolated_data_store_registry(monkeypatch):
+    """Run against copies of the adapter registry so test adapters do not leak."""
+    monkeypatch.setattr(DataStoreFactory, "_adapters", dict(DataStoreFactory._adapters))
+    monkeypatch.setattr(DataStoreFactory, "_adapter_metadata", dict(DataStoreFactory._adapter_metadata))
+
+
+class _BrokenStore:
+    """Adapter whose configuration is valid but whose construction fails."""
+
+    error: Exception = RuntimeError("backend unreachable")
+
+    @staticmethod
+    def validate_config(*, config):
+        return []
+
+    @classmethod
+    def from_config(cls, *, config):
+        raise cls.error
+
+
+@pytest.mark.usefixtures("isolated_data_store_registry")
+class TestDataStoreFactoryRegistry:
+    """Re-registration and construction failures."""
+
+    def test_re_registration_replaces_the_adapter(self):
+        DataStoreFactory.register(name="broken", display_name="Broken")(_BrokenStore)
+        replacement = type("ReplacementStore", (_BrokenStore,), {})
+
+        DataStoreFactory.register(name="broken", display_name="Broken v2")(replacement)
+
+        assert DataStoreFactory._adapters["broken"] is replacement
+        assert DataStoreFactory.get_adapter_info(adapter_name="broken")["display_name"] == "Broken v2"
+
+    def test_construction_error_is_wrapped(self):
+        DataStoreFactory.register(name="broken", display_name="Broken")(_BrokenStore)
+
+        with pytest.raises(DocpipeException, match="Failed to create data store adapter 'broken'") as exc_info:
+            DataStoreFactory.create(adapter_name="broken", config={})
+
+        assert exc_info.value.status_code == 500
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    def test_construction_docpipe_exception_is_kept(self, monkeypatch):
+        error = DocpipeException("database path is read-only", status_code=400)
+        monkeypatch.setattr(_BrokenStore, "error", error)
+        DataStoreFactory.register(name="broken", display_name="Broken")(_BrokenStore)
+
+        with pytest.raises(DocpipeException) as exc_info:
+            DataStoreFactory.create(adapter_name="broken", config={})
+
+        assert exc_info.value is error
