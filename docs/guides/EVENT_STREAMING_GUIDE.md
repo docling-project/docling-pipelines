@@ -255,8 +255,11 @@ of `file_reference`. Event ingestion forces reprocessing even when the file has 
 The flow's include and exclude filters still apply, and downstream storage behavior follows the saved flow's
 configuration.
 
-File events currently support the filesystem provider. The referenced path must be a readable regular file in the
-environment where the flow runs; for the Docker sample, `/documents` is the mounted invoice directory.
+File events currently support the filesystem and `box_driver` providers. For the filesystem provider, the
+referenced path must be a readable regular file in the environment where the flow runs; for the Docker sample,
+`/documents` is the mounted invoice directory. For `box_driver`, `file_reference` is the Box file ID (for example
+`"702199884861"`); the flow's own `provider_config` still supplies Box credentials, which are never read from the
+event.
 
 ### Processing failures
 
