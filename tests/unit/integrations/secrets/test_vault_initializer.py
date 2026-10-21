@@ -26,24 +26,9 @@ def _clean_providers():
     clear_providers()
 
 
-def _call(*, env=None, yaml_content="secrets:\n  vault:\n    enabled: true\n    provider: hashicorp\n"):
-    """Helper: run initialize_secret_providers with patched env and config."""
-    env_vars = env or {}
-    mock_provider = MagicMock()
-    mock_provider._config.validate.return_value = None
-    mock_provider._config.addr = "http://vault.test:8200"
-    mock_provider._config.mount_point = "secret"
-    mock_provider.is_available.return_value = True
-
-    with (
-        patch.dict(os.environ, env_vars, clear=False),
-        patch("docpipe.integrations.secrets.vault_initializer.HashiCorpVaultProvider", return_value=mock_provider),
-        patch("pathlib.Path.open", mock_open_yaml(yaml_content)),
-        patch("pathlib.Path.exists", return_value=True),
-    ):
-        initialize_secret_providers()
-
-    return mock_provider
+def _call(*, env=None, yaml_content=_DEFAULT_YAML):
+    """Run initialize_secret_providers through the shared helper."""
+    return _run(env=env, yaml_content=yaml_content)
 
 
 def mock_open_yaml(content: str):
