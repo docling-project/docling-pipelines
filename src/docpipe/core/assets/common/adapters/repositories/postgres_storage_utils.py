@@ -31,7 +31,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, MetaData, Table, Text, UniqueConstraint, func, text
+from sqlalchemy import Column, DateTime, Index, MetaData, Table, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import CreateSchema
@@ -47,6 +47,7 @@ SCHEMA_CONFIG_KEY = "schema"
 RECORDS_TABLE_NAME = "asset_records"
 ATTACHMENTS_TABLE_NAME = "asset_attachments"
 RECORDS_NAME_UNIQUE_CONSTRAINT = "uq_asset_records_collection_name"
+RECORDS_LISTING_INDEX = "ix_asset_records_listing"
 
 # Arbitrary but fixed key for pg_advisory_xact_lock; serialises schema bootstrap across processes.
 _SCHEMA_BOOTSTRAP_LOCK_KEY = 5_400_054_054
@@ -266,9 +267,21 @@ class PostgresStorageUtils:
             Column("asset_id", Text, primary_key=True),
             Column("name", Text, nullable=False),
             Column("data", JSONB, nullable=False),
+            # The asset's own creation timestamp (Asset.get_created_at()), NULL for asset
+            # types without one; created_at below is when the row was inserted.
+            Column("asset_created_at", DateTime(timezone=True), nullable=True),
             Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
             Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
             UniqueConstraint("collection", "name", name=RECORDS_NAME_UNIQUE_CONSTRAINT),
+        )
+        # Matches the listing order of PostgresAssetRepository.list_all, so LIMIT/OFFSET
+        # pages are read from the index instead of sorting the whole collection.
+        Index(
+            RECORDS_LISTING_INDEX,
+            records.c.collection,
+            records.c.asset_created_at.desc().nulls_last(),
+            records.c.created_at,
+            records.c.asset_id,
         )
         attachments = Table(
             ATTACHMENTS_TABLE_NAME,

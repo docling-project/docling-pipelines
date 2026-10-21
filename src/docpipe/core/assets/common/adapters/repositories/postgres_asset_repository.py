@@ -12,7 +12,6 @@ in a JSONB column; ``name`` is duplicated into its own column with a
 database rather than by a racy read-then-write.
 """
 
-from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import Table, delete, exists, func, select, update
@@ -129,7 +128,13 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
             data = asset.to_dict()
             statement = (
                 pg_insert(self._table)
-                .values(collection=self._collection, asset_id=asset.asset_id, name=asset.name, data=data)
+                .values(
+                    collection=self._collection,
+                    asset_id=asset.asset_id,
+                    name=asset.name,
+                    data=data,
+                    asset_created_at=asset.get_created_at(),
+                )
                 .on_conflict_do_nothing()
                 .returning(self._table.c.asset_id)
             )
@@ -269,7 +274,12 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
                         self._table.c.collection == self._collection,
                         self._table.c.asset_id == asset.asset_id,
                     )
-                    .values(name=asset.name, data=data, updated_at=func.now())
+                    .values(
+                        name=asset.name,
+                        data=data,
+                        asset_created_at=asset.get_created_at(),
+                        updated_at=func.now(),
+                    )
                 )
 
             logger.info("Updated %s: %s", self._asset_type.__name__, asset.asset_id)
@@ -339,20 +349,41 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
         Raises:
             DocpipeException: If the repository is not accessible
         """
+        return self.list_all()
+
+    def list_all(self, *, limit: int | None = None, offset: int | None = None) -> list[T]:
+        """Retrieve assets newest-first, with sorting and pagination done by PostgreSQL.
+
+        Same ordering rule as ``DuckDBAssetRepository``: newest-first by the asset's own
+        creation timestamp (``Asset.get_created_at()``, stored in ``asset_created_at``);
+        assets without one follow in insertion order.
+
+        Args:
+            limit: Maximum number of assets to return (None for all)
+            offset: Number of assets to skip (None / 0 for none)
+
+        Returns:
+            List of assets sorted by creation date newest-first
+
+        Raises:
+            DocpipeException: If the repository is not accessible
+        """
         try:
             statement = (
                 select(self._table.c.data)
                 .where(self._table.c.collection == self._collection)
-                .order_by(self._table.c.created_at, self._table.c.asset_id)
+                .order_by(
+                    self._table.c.asset_created_at.desc().nulls_last(),
+                    self._table.c.created_at,
+                    self._table.c.asset_id,
+                )
+                .limit(limit)
+                .offset(offset or None)
             )
             with self._engine.connect() as connection:
                 rows = connection.execute(statement).scalars().all()
 
             assets = [self._to_asset(data=data) for data in rows]
-            # Same ordering rule as DuckDBAssetRepository: newest-first by the asset's own
-            # creation timestamp; assets without one keep insertion order at the end.
-            assets.sort(key=lambda a: a.get_created_at() or datetime.min.replace(tzinfo=UTC), reverse=True)
-
             logger.debug("Retrieved %d %s assets", len(assets), self._asset_type.__name__)
             return assets
 
@@ -363,26 +394,6 @@ class PostgresAssetRepository[T: Asset](AssetRepository[T]):
                 f"Failed to list {self._asset_type.__name__} assets: {e!s}",
                 status_code=500,
             ) from e
-
-    def list_all(self, *, limit: int | None = None, offset: int | None = None) -> list[T]:
-        """Retrieve all assets with optional pagination, sorted newest-first.
-
-        Sorting uses ``Asset.get_created_at()`` from the deserialised payload, so
-        pagination is applied after sorting (identical to the DuckDB adapter).
-
-        Args:
-            limit: Maximum number of assets to return (None for all)
-            offset: Number of assets to skip (None / 0 for none)
-
-        Returns:
-            List of assets sorted by creation date newest-first
-        """
-        assets = self.find_all()
-        if offset:
-            assets = assets[offset:]
-        if limit is not None:
-            assets = assets[:limit]
-        return assets
 
     # ==================== Existence Checks ====================
 

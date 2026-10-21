@@ -183,16 +183,18 @@ class TestAssetRepositoryContract:
 
     def test_find_all_and_list_all(self, asset_type, factory, *, repo_config):
         repo = _create_repo(asset_type=asset_type, repo_config=repo_config)
-        names = ["first", "second", "third", "fourth"]
-        for offset, name in enumerate(names):
-            repo.save(asset=factory(name=name, offset_minutes=offset))
+        # Insertion order differs from creation order, so ordering by row insert time would fail
+        created_minutes = {"first": 2, "second": 0, "third": 3, "fourth": 1}
+        names = list(created_minutes)
+        for name, minutes in created_minutes.items():
+            repo.save(asset=factory(name=name, offset_minutes=minutes))
 
         all_assets = repo.find_all()
         assert len(all_assets) == 4
         listed_names = [a.name for a in all_assets]
         if asset_type is DocumentSet:
-            # newest-first by created_at
-            assert listed_names == list(reversed(names))
+            # newest-first by the asset's own created_at
+            assert listed_names == ["third", "first", "fourth", "second"]
         else:
             # no creation timestamp: insertion order (same as the DuckDB adapter)
             assert listed_names == names

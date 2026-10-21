@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from docpipe.core.assets.common.adapters.repositories.postgres_asset_repository import PostgresAssetRepository
 from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import (
     DEFAULT_ASSET_SCHEMA,
+    RECORDS_LISTING_INDEX,
     RECORDS_NAME_UNIQUE_CONSTRAINT,
     PostgresStorageUtils,
 )
@@ -192,8 +193,10 @@ class TestPostgresStorageUtilsSchema:
         records = tables.records
         assert records.schema == "layout_check"
         assert [c.name for c in records.primary_key.columns] == ["collection", "asset_id"]
-        assert {"name", "data", "created_at", "updated_at"} <= set(records.c.keys())
+        assert {"name", "data", "asset_created_at", "created_at", "updated_at"} <= set(records.c.keys())
+        assert records.c.asset_created_at.nullable
         assert any(getattr(c, "name", None) == RECORDS_NAME_UNIQUE_CONSTRAINT for c in records.constraints)
+        assert {index.name for index in records.indexes} == {RECORDS_LISTING_INDEX}
         assert [c.name for c in tables.attachments.primary_key.columns] == ["collection", "asset_id"]
 
     def test_ensure_schema_takes_advisory_lock_before_ddl(self, engine, connection):
@@ -236,10 +239,12 @@ class TestSave:
 
         assert repo.save(asset=asset) is asset
 
-        sql = _compiled(statement=connection.execute.call_args.args[0])
+        statement = connection.execute.call_args.args[0]
+        sql = _compiled(statement=statement)
         assert "INSERT INTO docpipe_assets.asset_records" in sql
         assert "ON CONFLICT DO NOTHING" in sql
         assert "RETURNING" in sql
+        assert statement.compile().params["asset_created_at"] == asset.created_at
 
     def test_save_validates_before_touching_database(self, repo, engine):
         with pytest.raises(AssetInvalidDataException):
@@ -300,15 +305,37 @@ class TestFind:
         with pytest.raises(DocpipeException, match="existence"):
             repo.exists(asset_id="x")
 
-    def test_find_all_sorts_newest_first_and_list_all_paginates(self, repo, connection):
-        old = DocumentSet(name="old")
-        new = DocumentSet(name="new")
-        old.created_at = old.created_at.replace(year=2020)
-        connection.execute.return_value = _result(scalars_all=[old.to_dict(), new.to_dict()])
+    def test_find_all_sorts_newest_first_in_the_database(self, repo, connection):
+        rows = [DocumentSet(name="new").to_dict(), DocumentSet(name="old").to_dict()]
+        connection.execute.return_value = _result(scalars_all=rows)
 
         assert [a.name for a in repo.find_all()] == ["new", "old"]
-        assert [a.name for a in repo.list_all(limit=1)] == ["new"]
-        assert [a.name for a in repo.list_all(offset=1)] == ["old"]
+
+        sql = _compiled(statement=connection.execute.call_args.args[0])
+        assert sql.endswith(
+            "WHERE docpipe_assets.asset_records.collection = %(collection_1)s "
+            "ORDER BY docpipe_assets.asset_records.asset_created_at DESC NULLS LAST, "
+            "docpipe_assets.asset_records.created_at, docpipe_assets.asset_records.asset_id"
+        )
+
+    @pytest.mark.parametrize(
+        ("limit", "offset", "clause"),
+        [
+            (2, None, " LIMIT %(param_1)s"),
+            (None, 3, " LIMIT ALL OFFSET %(param_1)s"),
+            (2, 3, " LIMIT %(param_1)s OFFSET %(param_2)s"),
+            (None, 0, "asset_records.asset_id"),
+        ],
+    )
+    def test_list_all_paginates_in_the_database(self, repo, connection, limit, offset, clause):
+        connection.execute.return_value = _result(scalars_all=[])
+
+        assert repo.list_all(limit=limit, offset=offset) == []
+
+        statement = connection.execute.call_args.args[0]
+        assert _compiled(statement=statement).endswith(clause)
+        params = statement.compile().params
+        assert [v for k, v in params.items() if k.startswith("param_")] == [v for v in (limit, offset) if v]
 
     def test_exists(self, repo, connection):
         connection.execute.return_value = _result(scalar=True)
@@ -341,8 +368,10 @@ class TestUpdate:
         assert repo.update(asset=asset) is asset
 
         assert asset.updated_at >= before
-        sql = _compiled(statement=connection.execute.call_args_list[-1].args[0])
+        statement = connection.execute.call_args_list[-1].args[0]
+        sql = _compiled(statement=statement)
         assert sql.startswith("UPDATE docpipe_assets.asset_records SET name=")
+        assert statement.compile().params["asset_created_at"] == asset.created_at
 
     def test_update_unique_violation_race_maps_to_invalid_data(self, repo, connection):
         connection.execute.side_effect = [_result(first=("id",)), _result(scalar=False), _unique_violation()]
