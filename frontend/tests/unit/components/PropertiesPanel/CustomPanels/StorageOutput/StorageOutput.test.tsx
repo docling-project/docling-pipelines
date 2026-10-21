@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import React from 'react';
 import { StorageOutputPanelBody } from '@/components/PropertiesPanel/CustomPanels/StorageOutput/StorageOutput';
 
@@ -49,17 +50,17 @@ describe('StorageOutputPanelBody', () => {
   // ── basic rendering ─────────────────────────────────────────────────────────
 
   it('renders without crashing with empty controller', () => {
-    const { container } = render(<StorageOutputPanelBody controller={makeController()} />);
+    const { container } = renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders mode dropdown with id="mode"', () => {
-    render(<StorageOutputPanelBody controller={makeController()} />);
+    renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
     expect(document.getElementById('mode') ?? document.body).toBeInTheDocument();
   });
 
   it('renders with null controller without crashing', () => {
-    const { container } = render(<StorageOutputPanelBody controller={null as any} />);
+    const { container } = renderWithProviders(<StorageOutputPanelBody controller={null as any} />);
     expect(container).toBeInTheDocument();
   });
 
@@ -77,7 +78,7 @@ describe('StorageOutputPanelBody', () => {
         },
       })),
     });
-    const { container } = render(<StorageOutputPanelBody controller={controller} />);
+    const { container } = renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     expect(container).toBeInTheDocument();
     // Accordion descriptions rendered
     expect(screen.queryByText('Configure where to store output')).toBeTruthy();
@@ -87,7 +88,7 @@ describe('StorageOutputPanelBody', () => {
 
   it('mode onChange with selectedItem calls updatePropertyValue', () => {
     const controller = makeController();
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     const btn = document.getElementById('mode');
     if (btn) {
       fireEvent.click(btn);
@@ -112,13 +113,13 @@ describe('StorageOutputPanelBody', () => {
         return undefined;
       }),
     });
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     expect(screen.queryByText('Refetch original') ?? document.body).toBeInTheDocument();
   });
 
   it('mode renders default items when operatorMetadata has no valid_values', () => {
     const controller = makeController();
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     // should render without error — the default ['processed_content', ...] list is used
     expect(document.getElementById('mode') ?? document.body).toBeInTheDocument();
   });
@@ -127,7 +128,7 @@ describe('StorageOutputPanelBody', () => {
 
   it('selecting a provider resets provider_config and credentials', () => {
     const controller = makeController();
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     const providerBtn = document.getElementById('destination_provider');
     if (providerBtn) {
       fireEvent.click(providerBtn);
@@ -151,14 +152,14 @@ describe('StorageOutputPanelBody', () => {
   describe('filesystem provider', () => {
     it('renders filesystem root_path and create_dirs fields', () => {
       const controller = makeProviderController('filesystem', { root_path: '/data' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('fs_root_path') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('fs_create_dirs') ?? document.body).toBeInTheDocument();
     });
 
     it('changing fs_root_path calls updatePropertyValue with correct args', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('fs_root_path', '/mnt/output');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -174,7 +175,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('toggling fs_create_dirs calls updatePropertyValue', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('fs_create_dirs');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -213,7 +214,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('fs_root_path') as HTMLInputElement | null;
       if (el) {
         expect(el.value).toBe('/default/path');
@@ -232,7 +233,7 @@ describe('StorageOutputPanelBody', () => {
         secret_key: 'SECRET', // pragma: allowlist secret
         bucket: 'my-bucket',
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('s3_bucket') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('s3_key_prefix') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('s3_endpoint_url') ?? document.body).toBeInTheDocument();
@@ -241,7 +242,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing s3_bucket calls updatePropertyValue', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_bucket', 'test-bucket');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -257,7 +258,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing s3_key_prefix calls updatePropertyValue', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_key_prefix', 'output/');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -268,7 +269,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing s3_endpoint_url with value calls updatePropertyValue', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_endpoint_url', 'https://s3.example.com');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -284,7 +285,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('clearing s3_endpoint_url passes null to updatePropertyValue', () => {
       const controller = makeProviderController('s3', { endpoint_url: 'https://s3.example.com' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_endpoint_url', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -300,7 +301,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing s3_region with value calls updatePropertyValue', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_region', 'us-east-1');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -311,7 +312,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('clearing s3_region passes null to updatePropertyValue', () => {
       const controller = makeProviderController('s3', { region: 'us-east-1' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_region', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -327,7 +328,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('toggling s3_verify_bucket_owner calls updatePropertyValue', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('s3_verify_bucket_owner');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -338,7 +339,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('toggling s3_create_dirs calls updatePropertyValue', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('s3_create_dirs');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -349,20 +350,20 @@ describe('StorageOutputPanelBody', () => {
 
     it('s3 VaultInput for access_key renders', () => {
       const controller = makeProviderController('s3', { access_key: 'AKIA123' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // VaultInput renders a PasswordInput with the id
       expect(document.getElementById('s3_access_key') ?? document.body).toBeInTheDocument();
     });
 
     it('s3 VaultInput for secret_key renders', () => {
       const controller = makeProviderController('s3', { secret_key: 'SECRET' }); // pragma: allowlist secret
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('s3_secret_key') ?? document.body).toBeInTheDocument();
     });
 
     it('s3 access_key VaultInput onChange calls updateProviderConfig', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('s3_access_key') as HTMLInputElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: 'NEWKEY' } });
@@ -374,7 +375,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('s3 secret_key VaultInput onChange calls updateProviderConfig', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('s3_secret_key') as HTMLInputElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: 'NEWSECRET' } }); // pragma: allowlist secret
@@ -390,13 +391,13 @@ describe('StorageOutputPanelBody', () => {
   describe('ibm_cos provider', () => {
     it('renders ibm_cos fields (shared with s3)', () => {
       const controller = makeProviderController('ibm_cos', { bucket: 'cos-bucket' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('s3_bucket') ?? document.body).toBeInTheDocument();
     });
 
     it('changing s3_bucket for ibm_cos calls updatePropertyValue', () => {
       const controller = makeProviderController('ibm_cos', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('s3_bucket', 'ibm-bucket');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -411,14 +412,14 @@ describe('StorageOutputPanelBody', () => {
   describe('box provider', () => {
     it('renders box credentials_path and folder_id fields', () => {
       const controller = makeProviderController('box', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('box_credentials_path') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('box_folder_id') ?? document.body).toBeInTheDocument();
     });
 
     it('changing box_credentials_path calls updatePropertyValue', () => {
       const controller = makeProviderController('box', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('box_credentials_path', '/path/to/box.json');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -434,7 +435,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing box_folder_id calls updatePropertyValue', () => {
       const controller = makeProviderController('box', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('box_folder_id', '12345');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -450,7 +451,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('toggling box_create_dirs calls updatePropertyValue', () => {
       const controller = makeProviderController('box', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('box_create_dirs');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -465,7 +466,7 @@ describe('StorageOutputPanelBody', () => {
   describe('sharepoint provider', () => {
     it('renders all sharepoint fields', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('sp_client_id') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('sp_tenant_id') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('sp_drive_id') ?? document.body).toBeInTheDocument();
@@ -474,7 +475,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing sp_client_id calls updatePropertyValue', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('sp_client_id', 'client-abc');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -490,7 +491,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('sp_client_secret VaultInput renders and onChange calls updatePropertyValue', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('sp_client_secret') as HTMLInputElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: 'secret-xyz' } }); // pragma: allowlist secret
@@ -502,7 +503,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing sp_tenant_id calls updatePropertyValue', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('sp_tenant_id', 'tenant-123');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -513,7 +514,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing sp_drive_id calls updatePropertyValue', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('sp_drive_id', 'drive-xyz');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -524,7 +525,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing sp_folder_path calls updatePropertyValue', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('sp_folder_path', '/Shared Documents/output');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -535,7 +536,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('sp_graph_api_version dropdown onChange calls updateProviderConfig', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const dropdownBtn = document.getElementById('sp_graph_api_version');
       if (dropdownBtn) {
         fireEvent.click(dropdownBtn);
@@ -550,7 +551,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('toggling sp_create_dirs calls updatePropertyValue', () => {
       const controller = makeProviderController('sharepoint', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('sp_create_dirs');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -565,13 +566,13 @@ describe('StorageOutputPanelBody', () => {
   describe('onedrive provider', () => {
     it('renders onedrive fields (shared with sharepoint)', () => {
       const controller = makeProviderController('onedrive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('sp_client_id') ?? document.body).toBeInTheDocument();
     });
 
     it('changing sp_folder_path for onedrive calls updatePropertyValue', () => {
       const controller = makeProviderController('onedrive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('sp_folder_path', '/OneDrive/output');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -586,7 +587,7 @@ describe('StorageOutputPanelBody', () => {
   describe('google_drive provider', () => {
     it('renders all google_drive fields', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('gd_folder_id') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('gd_drive_id') ?? document.body).toBeInTheDocument();
       expect(document.getElementById('gd_service_account_path') ?? document.body).toBeInTheDocument();
@@ -598,7 +599,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing gd_folder_id calls updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_folder_id', 'folder-abc');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -614,7 +615,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing gd_drive_id with value calls updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_drive_id', 'drive-xyz');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -625,7 +626,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('clearing gd_drive_id passes null to updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', { drive_id: 'drive-xyz' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_drive_id', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -641,7 +642,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing gd_service_account_path with value calls updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_service_account_path', '/keys/sa.json');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -652,7 +653,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('clearing gd_service_account_path passes null', () => {
       const controller = makeProviderController('google_drive', { service_account_json_path: '/keys/sa.json' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_service_account_path', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -668,7 +669,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing gd_credentials_path with value calls updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_credentials_path', '/keys/creds.json');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -679,7 +680,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('clearing gd_credentials_path passes null', () => {
       const controller = makeProviderController('google_drive', { credentials_path: '/keys/creds.json' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_credentials_path', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -695,7 +696,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('changing gd_token_path with value calls updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_token_path', '/keys/token.json');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -706,7 +707,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('clearing gd_token_path passes null', () => {
       const controller = makeProviderController('google_drive', { token_path: '/keys/token.json' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('gd_token_path', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -724,7 +725,7 @@ describe('StorageOutputPanelBody', () => {
       const controller = makeProviderController('google_drive', {
         scopes: ['https://www.googleapis.com/auth/drive'],
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('gd_scopes') as HTMLInputElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: 'https://www.googleapis.com/auth/drive.file' } });
@@ -737,7 +738,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('gd_chunk_size_mb renders with numeric value from providerConfig', () => {
       const controller = makeProviderController('google_drive', { chunk_size_mb: 10 });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('gd_chunk_size_mb');
       if (el) {
         expect(el).toBeInTheDocument();
@@ -748,7 +749,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('toggling gd_create_dirs calls updatePropertyValue', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('gd_create_dirs');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalled();
@@ -759,7 +760,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('google_drive scopes read as empty array when providerConfig has no scopes', () => {
       const controller = makeProviderController('google_drive', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // TagInput with empty tags renders the input
       expect(document.getElementById('gd_scopes') ?? document.body).toBeInTheDocument();
     });
@@ -770,19 +771,19 @@ describe('StorageOutputPanelBody', () => {
   describe('credentials VaultInput', () => {
     it('renders credentials VaultInput when provider is set', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('destination_credentials') ?? document.body).toBeInTheDocument();
     });
 
     it('does not render credentials VaultInput when provider is empty', () => {
       const controller = makeController();
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('destination_credentials')).toBeNull();
     });
 
     it('credentials onChange with vault reference calls updatePropertyValue with vault string', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // VaultInput renders a TextArea in multiline mode (id="destination_credentials")
       const el = document.getElementById('destination_credentials') as HTMLTextAreaElement | null;
       if (el) {
@@ -798,7 +799,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('credentials onChange with empty string calls updatePropertyValue with empty object', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('destination_credentials') as HTMLTextAreaElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: '' } });
@@ -813,7 +814,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('credentials onChange with valid JSON calls updatePropertyValue with parsed object', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('destination_credentials') as HTMLTextAreaElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: '{"key":"value"}' } });
@@ -828,7 +829,7 @@ describe('StorageOutputPanelBody', () => {
 
     it('credentials onChange with invalid JSON calls updatePropertyValue with raw string', () => {
       const controller = makeProviderController('filesystem', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('destination_credentials') as HTMLTextAreaElement | null;
       if (el) {
         fireEvent.change(el, { target: { value: 'not-json' } });
@@ -850,7 +851,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // The component renders with invalid state — it should not crash
       expect(document.body).toBeInTheDocument();
     });
@@ -864,7 +865,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.body).toBeInTheDocument();
     });
   });
@@ -873,13 +874,13 @@ describe('StorageOutputPanelBody', () => {
 
   describe('output format section', () => {
     it('content_format dropdown renders', () => {
-      render(<StorageOutputPanelBody controller={makeController()} />);
+      renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
       expect(document.getElementById('content_format') ?? document.body).toBeInTheDocument();
     });
 
     it('changing content_format dropdown calls updateOutputFormat', () => {
       const controller = makeController();
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const btn = document.getElementById('content_format');
       if (btn) {
         fireEvent.click(btn);
@@ -896,13 +897,13 @@ describe('StorageOutputPanelBody', () => {
     });
 
     it('include_metadata_sidecar toggle renders', () => {
-      render(<StorageOutputPanelBody controller={makeController()} />);
+      renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
       expect(document.getElementById('include_metadata_sidecar') ?? document.body).toBeInTheDocument();
     });
 
     it('toggling include_metadata_sidecar calls updateOutputFormat', () => {
       const controller = makeController();
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('include_metadata_sidecar');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -921,7 +922,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const toggle = document.getElementById('include_metadata_sidecar') as HTMLInputElement | null;
       if (toggle) {
         // default is false so it should not be "checked" initially
@@ -938,7 +939,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // json should be shown as selected item
       expect(screen.queryByText('JSON (.json)') ?? document.body).toBeInTheDocument();
     });
@@ -948,13 +949,13 @@ describe('StorageOutputPanelBody', () => {
 
   describe('output structure section', () => {
     it('structure_type dropdown renders', () => {
-      render(<StorageOutputPanelBody controller={makeController()} />);
+      renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
       expect(document.getElementById('structure_type') ?? document.body).toBeInTheDocument();
     });
 
     it('changing structure_type calls updateOutputStructure', () => {
       const controller = makeController();
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const btn = document.getElementById('structure_type');
       if (btn) {
         fireEvent.click(btn);
@@ -971,13 +972,13 @@ describe('StorageOutputPanelBody', () => {
     });
 
     it('path_template input renders', () => {
-      render(<StorageOutputPanelBody controller={makeController()} />);
+      renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
       expect(document.getElementById('path_template') ?? document.body).toBeInTheDocument();
     });
 
     it('changing path_template with value calls updateOutputStructure with the value', () => {
       const controller = makeController();
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('path_template', '{source}/{filename}');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -996,7 +997,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = changeInput('path_template', '');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -1009,13 +1010,13 @@ describe('StorageOutputPanelBody', () => {
     });
 
     it('overwrite_existing toggle renders', () => {
-      render(<StorageOutputPanelBody controller={makeController()} />);
+      renderWithProviders(<StorageOutputPanelBody controller={makeController()} />);
       expect(document.getElementById('overwrite_existing') ?? document.body).toBeInTheDocument();
     });
 
     it('toggling overwrite_existing calls updateOutputStructure', () => {
       const controller = makeController();
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = toggleById('overwrite_existing');
       if (el) {
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
@@ -1034,7 +1035,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(screen.queryByText('Hierarchical') ?? document.body).toBeInTheDocument();
     });
   });
@@ -1071,7 +1072,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // create_dirs toggle renders; schema default=false means it should be off
       const toggle = document.getElementById('fs_create_dirs') as HTMLInputElement | null;
       expect(toggle ?? document.body).toBeInTheDocument();
@@ -1112,7 +1113,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('gd_chunk_size_mb');
       expect(el ?? document.body).toBeInTheDocument();
     });
@@ -1146,7 +1147,7 @@ describe('StorageOutputPanelBody', () => {
           return undefined;
         }),
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const el = document.getElementById('fs_root_path') as HTMLInputElement | null;
       if (el) {
         expect(el.value).toBe('/default');
@@ -1157,14 +1158,14 @@ describe('StorageOutputPanelBody', () => {
 
     it('pcBool uses explicit boolean from providerConfig', () => {
       const controller = makeProviderController('filesystem', { create_dirs: false });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       const toggle = document.getElementById('fs_create_dirs');
       expect(toggle ?? document.body).toBeInTheDocument();
     });
 
     it('pcNum uses explicit number from providerConfig', () => {
       const controller = makeProviderController('google_drive', { chunk_size_mb: 20 });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('gd_chunk_size_mb') ?? document.body).toBeInTheDocument();
     });
 
@@ -1172,19 +1173,19 @@ describe('StorageOutputPanelBody', () => {
       const controller = makeProviderController('s3', {
         content_type_map: { '.md': 'text/markdown' },
       });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('s3_content_type_map') ?? document.body).toBeInTheDocument();
     });
 
     it('s3 content_type_map null renders JsonTextArea without crashing', () => {
       const controller = makeProviderController('s3', {});
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(document.getElementById('s3_content_type_map') ?? document.body).toBeInTheDocument();
     });
 
     it('spGraphApiVersion falls back to v1.0 when providerConfig has empty string', () => {
       const controller = makeProviderController('sharepoint', { graph_api_version: '' });
-      render(<StorageOutputPanelBody controller={controller} />);
+      renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       // v1.0 is the fallback; the dropdown should show it
       expect(screen.queryByText('v1.0') ?? document.body).toBeInTheDocument();
     });
@@ -1207,7 +1208,7 @@ describe('StorageOutputPanelBody', () => {
         })),
         getPropertyValue: vi.fn(() => undefined),
       });
-      const { container } = render(<StorageOutputPanelBody controller={controller} />);
+      const { container } = renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(container).toBeInTheDocument();
     });
 
@@ -1215,7 +1216,7 @@ describe('StorageOutputPanelBody', () => {
       const controller = makeController({
         getAppData: vi.fn(() => undefined),
       });
-      const { container } = render(<StorageOutputPanelBody controller={controller} />);
+      const { container } = renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(container).toBeInTheDocument();
     });
 
@@ -1223,7 +1224,7 @@ describe('StorageOutputPanelBody', () => {
       const controller = makeController({
         getAppData: vi.fn(() => ({ operatorMetadata: { other_operator: {} } })),
       });
-      const { container } = render(<StorageOutputPanelBody controller={controller} />);
+      const { container } = renderWithProviders(<StorageOutputPanelBody controller={controller} />);
       expect(container).toBeInTheDocument();
     });
   });
@@ -1245,7 +1246,7 @@ describe('StorageOutputPanelBody', () => {
         },
       })),
     });
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     const btn = document.getElementById('mode');
     if (btn) {
       fireEvent.click(btn);
@@ -1274,7 +1275,7 @@ describe('StorageOutputPanelBody', () => {
         },
       })),
     });
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     expect(document.getElementById('content_format') ?? document.body).toBeInTheDocument();
   });
 
@@ -1296,7 +1297,7 @@ describe('StorageOutputPanelBody', () => {
         },
       })),
     });
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     expect(document.getElementById('structure_type') ?? document.body).toBeInTheDocument();
   });
 
@@ -1304,7 +1305,7 @@ describe('StorageOutputPanelBody', () => {
 
   it('mode onChange does NOT call updatePropertyValue when selectedItem is null', () => {
     const controller = makeController();
-    render(<StorageOutputPanelBody controller={controller} />);
+    renderWithProviders(<StorageOutputPanelBody controller={controller} />);
     // The guard `if (selectedItem)` prevents calling update with null
     // We can't easily simulate null selectedItem via click — just verify component renders
     expect(document.getElementById('mode') ?? document.body).toBeInTheDocument();
