@@ -729,35 +729,57 @@ RapidOCR is included in the default PyPI install, and `ocr.engine: "rapidocr"` i
 
 Only `"inline"` models (HuggingFace) are supported. API model types are not supported by Docling's `DocumentExtractor`; use `entity_extraction.provider: "litellm"` for API-based extraction instead.
 
-Example (all fields shown with their defaults; only `repo_id` is required):
+The adapter builds `VlmExtractionPipelineOptions` starting from its built-in defaults (pre-set for `numind/NuExtract-2.0-2B`) and then applies only the fields you supply in `inline_model` on top. This means **only `repo_id` is strictly required** when using a different model; all other fields fall back to the preset defaults. Any `inline_model` key that is not in the recognised field list below is silently dropped and a `WARNING`-level log entry is emitted listing the ignored keys.
+
+Example (all recognised fields shown; only `repo_id` is required):
 ```json
 {
   "model_type": "inline",
   "inline_model": {
     "repo_id": "numind/NuExtract-2.0-2B",
     "inference_framework": "transformers",
+    "transformers_model_type": "automodel-imagetexttotext",
+    "transformers_prompt_style": "chat",
     "scale": 2.0,
+    "max_size": 1920,
     "temperature": 0.0,
     "max_new_tokens": 4096,
     "load_in_8bit": true,
+    "llm_int8_threshold": 6.0,
+    "quantized": false,
+    "use_kv_cache": true,
     "torch_dtype": "bfloat16",
     "prompt": "",
-    "response_format": "markdown"
+    "response_format": "plaintext",
+    "stop_strings": ["<|endoftext|>", "<|im_end|>"],
+    "extra_generation_config": {"top_p": 0.95, "repetition_penalty": 1.05},
+    "extra_processor_kwargs": {"do_resize": true}
   }
 }
 ```
 
-| `inline_model` field      | Type    | Default        | Description                                                              |
-|---------------------------|---------|----------------|--------------------------------------------------------------------------|
-| `repo_id`                 | string  | required       | HuggingFace repository ID (e.g., `"numind/NuExtract-2.0-2B"`)           |
-| `inference_framework`     | string  | `"transformers"` | Inference backend: `"transformers"`, `"vllm"`, or `"mlx"`             |
-| `scale`                   | float   | `2.0`          | Image scale factor for rendering                                         |
-| `temperature`             | float   | `0.0`          | Sampling temperature                                                     |
-| `max_new_tokens`          | integer | `4096`         | Maximum tokens to generate                                               |
-| `load_in_8bit`            | boolean | `false`        | Load model in 8-bit quantization                                         |
-| `torch_dtype`             | string  | `"bfloat16"`   | Torch data type: `"bfloat16"`, `"float16"`, `"float32"`                 |
-| `prompt`                  | string  | `""`           | Custom prompt override (leave empty to use model default)                |
-| `response_format`         | string  | `"markdown"`   | Expected response format from the model                                  |
+| `inline_model` field        | Type    | Default              | Description                                                                          |
+|-----------------------------|---------|----------------------|--------------------------------------------------------------------------------------|
+| `repo_id`                   | string  | required             | HuggingFace repository ID (e.g., `"numind/NuExtract-2.0-2B"`)                       |
+| `inference_framework`       | string  | `"transformers"`     | Inference backend: `"transformers"`, `"vllm"`, or `"mlx"`                           |
+| `transformers_model_type`   | string  | preset default       | Transformers model class, e.g. `"automodel-imagetexttotext"`                         |
+| `transformers_prompt_style` | string  | preset default       | Prompt formatting style, e.g. `"chat"`                                               |
+| `scale`                     | float   | `2.0`                | Image scale factor for rendering                                                     |
+| `max_size`                  | integer | `1920`               | Maximum image dimension (pixels) before downscaling                                  |
+| `temperature`               | float   | `0.0`                | Sampling temperature                                                                 |
+| `max_new_tokens`            | integer | `4096`               | Maximum tokens to generate                                                           |
+| `load_in_8bit`              | boolean | `true`               | Load model in 8-bit quantization                                                     |
+| `llm_int8_threshold`        | float   | `6.0`                | Threshold for LLM.int8() quantization (only used when `load_in_8bit` is `true`)     |
+| `quantized`                 | boolean | `false`              | Use pre-quantized model weights                                                      |
+| `use_kv_cache`              | boolean | `true`               | Enable key-value cache for faster autoregressive generation                          |
+| `torch_dtype`               | string  | `"bfloat16"`         | Torch data type: `"bfloat16"`, `"float16"`, `"float32"`                             |
+| `prompt`                    | string  | `""`                 | Custom prompt override (leave empty to use model default)                            |
+| `response_format`           | string  | `"plaintext"`        | Expected response format from the model: `"plaintext"` or `"markdown"`              |
+| `stop_strings`              | list    | preset default       | Token strings that halt generation, e.g. `["<\|endoftext\|>", "<\|im_end\|>"]`      |
+| `extra_generation_config`   | object  | `{}`                 | Additional generation kwargs forwarded to the model, e.g. `{"top_p": 0.95}`         |
+| `extra_processor_kwargs`    | object  | `{}`                 | Additional processor kwargs, e.g. `{"do_resize": true}`                             |
+
+> **Note:** Any key not listed in the table above is unrecognised and will be dropped. A `WARNING` log entry is emitted listing the ignored key names.
 
 ### LiteLLM Entity Extraction Parameters
 
@@ -1274,6 +1296,7 @@ ExtractOperator (Orchestrator)
 │ Port Layer (Interfaces)                                      │
 │  - TextExtractionPort                                        │
 │  - EntityExtractionPort                                      │
+│  - DocumentClassProvider (document type / schema resolver)   │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -1284,6 +1307,8 @@ ExtractOperator (Orchestrator)
 │  Entity Extraction:                                          │
 │   - LLMEntityAdapter (litellm and watsonx providers - unified)   │
 │   - DoclingEntityAdapter (docling provider)                      │
+│  Document Class (default):                                   │
+│   - StaticDocumentClassProvider (local JSON files)               │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -1305,6 +1330,7 @@ ExtractOperator (Orchestrator)
 - Clear separation between business logic, interfaces, and implementations
 - Testability through dependency injection and mocking
 - Unified LLM support: Both `litellm` and `watsonx` use the same `LLMEntityAdapter`
+- Pluggable document-class metadata: inject a custom `DocumentClassProvider` to supply document types and schemas from an external source instead of local JSON files
 
 ### Execution Flow
 

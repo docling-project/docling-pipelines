@@ -828,3 +828,34 @@ class TestStaticDocumentClassProvider:
 
         mock_util.assert_called_once_with(["invoice"])
         assert result == fake_schemas
+
+    def test_docling_template_helper_delegates_to_utils(self):
+        """generate_docling_templates_for_types in docling_entity_adapter delegates to DocumentClassUtils."""
+        from docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter import (
+            generate_docling_templates_for_types,
+        )
+
+        fake_templates = {"invoice": {"invoice_number": "string", "total": "float"}}
+
+        with patch(
+            "docpipe.utils.document_class_utils.DocumentClassUtils.generate_docling_templates_for_types",
+            return_value=fake_templates,
+        ) as mock_util:
+            result = generate_docling_templates_for_types(document_types=["invoice"])
+
+        mock_util.assert_called_once_with(["invoice"], include_nested=True)
+        assert result == fake_templates
+
+    def test_docling_template_helper_forwards_include_nested_false(self):
+        """include_nested=False is forwarded to DocumentClassUtils."""
+        from docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter import (
+            generate_docling_templates_for_types,
+        )
+
+        with patch(
+            "docpipe.utils.document_class_utils.DocumentClassUtils.generate_docling_templates_for_types",
+            return_value={},
+        ) as mock_util:
+            generate_docling_templates_for_types(document_types=["invoice"], include_nested=False)
+
+        mock_util.assert_called_once_with(["invoice"], include_nested=False)

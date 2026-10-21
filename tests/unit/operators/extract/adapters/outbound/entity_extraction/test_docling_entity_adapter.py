@@ -116,8 +116,40 @@ def test_adapter_validate_rejects_non_string_repo_id():
 
 
 # ---------------------------------------------------------------------------
-# get_config_schema
+# _ALLOWED_VLM_FIELDS & get_config_schema
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_allowed_vlm_fields_content():
+    """Verify _ALLOWED_VLM_FIELDS contains supported fields and excludes skipped ones."""
+    allowed = DoclingEntityAdapter._ALLOWED_VLM_FIELDS
+    expected_allowed = {
+        "extra_generation_config",
+        "extra_processor_kwargs",
+        "inference_framework",
+        "llm_int8_threshold",
+        "load_in_8bit",
+        "max_new_tokens",
+        "max_size",
+        "prompt",
+        "quantized",
+        "repo_id",
+        "response_format",
+        "scale",
+        "stop_strings",
+        "temperature",
+        "torch_dtype",
+        "transformers_model_type",
+        "transformers_prompt_style",
+        "use_kv_cache",
+    }
+    assert allowed == expected_allowed
+    # Explicitly ensure skipped options are excluded
+    assert "revision" not in allowed
+    assert "trust_remote_code" not in allowed
+    assert "custom_stopping_criteria" not in allowed
+    assert "supported_devices" not in allowed
 
 
 @pytest.mark.unit
@@ -146,7 +178,7 @@ def test_build_vlm_extraction_options_returns_none_for_non_inline_type():
 @pytest.mark.unit
 def test_build_vlm_extraction_options_raises_on_import_error():
     # If Docling isn't installed, expect a ValueError wrapping ImportError
-    with patch.dict(sys.modules, {"docling.datamodel.pipeline_options_vlm_model": None}):
+    with patch.dict(sys.modules, {"docling.datamodel.pipeline_options": None}):
         with pytest.raises((ValueError, ImportError)):
             DoclingEntityAdapter._build_vlm_extraction_options(
                 vlm_pipeline={
@@ -352,7 +384,7 @@ def test_build_vlm_extraction_options_inline_returns_dict():
         "docling.backend.docling_parse_backend": MagicMock(DoclingParseDocumentBackend=MagicMock()),
         "docling.backend.pypdfium2_backend": MagicMock(PyPdfiumDocumentBackend=MagicMock()),
         "docling.datamodel.base_models": MagicMock(InputFormat=mock_input_format),
-        "docling.datamodel.pipeline_options": MagicMock(VlmPipelineOptions=MagicMock()),
+        "docling.datamodel.pipeline_options": MagicMock(VlmExtractionPipelineOptions=MagicMock()),
         "docling.datamodel.pipeline_options_vlm_model": MagicMock(InlineVlmOptions=MagicMock()),
         "docling.document_extractor": MagicMock(ExtractionFormatOption=mock_extractor_cls),
         "docling.pipeline.extraction_vlm_pipeline": MagicMock(ExtractionVlmPipeline=MagicMock()),
@@ -369,13 +401,58 @@ def test_build_vlm_extraction_options_inline_returns_dict():
 
 
 @pytest.mark.unit
+def test_build_vlm_extraction_options_filters_disallowed_fields(caplog):
+    """Fields not in _ALLOWED_VLM_FIELDS (such as revision, trust_remote_code) are omitted."""
+    mock_input_format = MagicMock()
+    mock_input_format.PDF = "pdf"
+    mock_input_format.IMAGE = "image"
+
+    mock_vlm_opts = MagicMock()
+    mock_base_pipeline_opts = MagicMock()
+    mock_base_pipeline_opts.vlm_options = mock_vlm_opts
+
+    mock_pipeline_options_cls = MagicMock(return_value=mock_base_pipeline_opts)
+
+    mocks = {
+        "docling.backend.docling_parse_backend": MagicMock(DoclingParseDocumentBackend=MagicMock()),
+        "docling.backend.pypdfium2_backend": MagicMock(PyPdfiumDocumentBackend=MagicMock()),
+        "docling.datamodel.base_models": MagicMock(InputFormat=mock_input_format),
+        "docling.datamodel.pipeline_options": MagicMock(VlmExtractionPipelineOptions=mock_pipeline_options_cls),
+        "docling.datamodel.pipeline_options_vlm_model": MagicMock(InlineVlmOptions=MagicMock()),
+        "docling.document_extractor": MagicMock(ExtractionFormatOption=MagicMock()),
+        "docling.pipeline.extraction_vlm_pipeline": MagicMock(ExtractionVlmPipeline=MagicMock()),
+    }
+    with patch.dict(sys.modules, mocks), caplog.at_level("WARNING"):
+        DoclingEntityAdapter._build_vlm_extraction_options(
+            vlm_pipeline={
+                "model_type": "inline",
+                "inline_model": {
+                    "repo_id": "some/model",
+                    "temperature": 0.5,
+                    "revision": "v1.0",
+                    "trust_remote_code": True,
+                    "custom_stopping_criteria": [],
+                },
+            }
+        )
+
+    # model_copy should only have been called with repo_id and temperature
+    mock_vlm_opts.model_copy.assert_called_once_with(update={"repo_id": "some/model", "temperature": 0.5})
+    assert "Ignoring unrecognised inline_model keys" in caplog.text
+    assert "revision" in caplog.text
+    assert "trust_remote_code" in caplog.text
+
+
+@pytest.mark.unit
 def test_build_vlm_extraction_options_raises_on_general_exception():
     """A non-ImportError from inside the build path is re-raised as ValueError."""
     mocks = {
         "docling.backend.docling_parse_backend": MagicMock(DoclingParseDocumentBackend=MagicMock()),
         "docling.backend.pypdfium2_backend": MagicMock(PyPdfiumDocumentBackend=MagicMock()),
         "docling.datamodel.base_models": MagicMock(InputFormat=MagicMock()),
-        "docling.datamodel.pipeline_options": MagicMock(VlmPipelineOptions=MagicMock(side_effect=RuntimeError("bad"))),
+        "docling.datamodel.pipeline_options": MagicMock(
+            VlmExtractionPipelineOptions=MagicMock(side_effect=RuntimeError("bad"))
+        ),
         "docling.datamodel.pipeline_options_vlm_model": MagicMock(InlineVlmOptions=MagicMock()),
         "docling.document_extractor": MagicMock(ExtractionFormatOption=MagicMock()),
         "docling.pipeline.extraction_vlm_pipeline": MagicMock(ExtractionVlmPipeline=MagicMock()),
@@ -531,59 +608,15 @@ def test_transform_delegates_to_service(adapter):
 
 
 # ---------------------------------------------------------------------------
-# _prepare_document_tasks (adapter-level)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_adapter_prepare_document_tasks(adapter):
-    """_prepare_document_tasks merges document_type into each task dict."""
-    import pyarrow as pa
-
-    table = pa.table({"id": ["d1", "d2"], "name": ["a.pdf", "b.pdf"], "path": ["/a.pdf", "/b.pdf"]})
-    document_types = ["invoice", "receipt"]
-
-    fake_tasks = [
-        {"idx": 0, "doc_id": "d1", "doc_name": "a.pdf", "content": b""},
-        {"idx": 1, "doc_id": "d2", "doc_name": "b.pdf", "content": b""},
-    ]
-    with patch(
-        "docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter.OperatorUtils.prepare_document_content_fetch",
-        return_value=fake_tasks,
-    ):
-        tasks = adapter._prepare_document_tasks(table, document_types, {})
-
-    assert tasks[0]["document_type"] == "invoice"
-    assert tasks[1]["document_type"] == "receipt"
-
-
-@pytest.mark.unit
-def test_adapter_prepare_document_tasks_empty_document_types(adapter):
-    """When document_types is empty, document_type is set to None."""
-    import pyarrow as pa
-
-    table = pa.table({"id": ["d1"], "name": ["a.pdf"], "path": ["/a.pdf"]})
-    fake_tasks = [{"idx": 0, "doc_id": "d1", "doc_name": "a.pdf", "content": b""}]
-
-    with patch(
-        "docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter.OperatorUtils.prepare_document_content_fetch",
-        return_value=fake_tasks,
-    ):
-        tasks = adapter._prepare_document_tasks(table, [], {})
-
-    assert tasks[0]["document_type"] is None
-
-
-# ---------------------------------------------------------------------------
 # _load_schema_templates (adapter-level)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_adapter_load_schema_templates(adapter):
-    """_load_schema_templates populates schema_templates via DocumentClassUtils."""
+    """_load_schema_templates populates schema_templates via the document_class_provider."""
     with patch(
-        "docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter.DocumentClassUtils.generate_docling_templates_for_types",
+        "docpipe.utils.document_class_utils.DocumentClassUtils.generate_docling_templates_for_types",
         return_value={"invoice": {"fields": []}},
     ):
         schema_templates: dict = {}
@@ -663,7 +696,7 @@ def test_service_prepare_document_tasks_merges_document_type(adapter):
 
 @pytest.mark.unit
 def test_service_load_schema_templates(adapter):
-    """Service._load_schema_templates delegates to DocumentClassUtils."""
+    """Service._load_schema_templates delegates via the document_class_provider."""
     from docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter import (
         DoclingEntityExtractionService,
     )
@@ -674,7 +707,7 @@ def test_service_load_schema_templates(adapter):
     )
 
     with patch(
-        "docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter.DocumentClassUtils.generate_docling_templates_for_types",
+        "docpipe.utils.document_class_utils.DocumentClassUtils.generate_docling_templates_for_types",
         return_value={"invoice": {"fields": []}},
     ):
         schema_templates: dict = {}

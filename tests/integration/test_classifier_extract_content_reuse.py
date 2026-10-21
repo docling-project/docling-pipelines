@@ -38,10 +38,10 @@ def _build_classifier_config() -> dict:
     return {
         OperatorConstants.Config.PROVIDER: "litellm",
         OperatorConstants.Config.PROVIDER_CONFIG: {
+            "model_id": "openai/granite4:latest",
             "api_base": "http://localhost:11434/v1",
             "api_key": "<ollama>",  # pragma: allowlist secret
         },
-        OperatorConstants.Config.MODEL_ID: "openai/granite4:latest",
         OperatorConstants.Config.DOCUMENT_TYPES: ["invoice", "receipt", "contract"],
         OperatorConstants.Config.CONFIDENCE_THRESHOLD: 7.0,
         OperatorConstants.Columns.DOC_COLUMN: OperatorConstants.Columns.DOC_COLUMN_DEFAULT,

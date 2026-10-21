@@ -53,7 +53,7 @@ def inline_model_config():
                 "max_new_tokens": 4096,
                 "load_in_8bit": True,
                 "torch_dtype": "bfloat16",
-                "response_format": "markdown",  # Valid Docling response format
+                "response_format": "markdown",
                 "prompt": "",
             },
         }
@@ -149,44 +149,33 @@ class TestDoclingEntityAdapterInitialization:
 class TestDoclingEntityAdapterVLMOptions:
     """Tests for VLM options building."""
 
-    @patch("docling.pipeline.vlm_pipeline.VlmPipeline")
-    @patch("docling.document_extractor.ExtractionFormatOption")
-    @patch("docling.datamodel.pipeline_options.VlmPipelineOptions")
-    @patch("docling.datamodel.pipeline_options_vlm_model.InlineVlmOptions")
-    def test_build_vlm_options_inline(
-        self, mock_inline_options, mock_pipeline_options, mock_extraction_option, mock_pipeline, inline_model_config
-    ):
-        """Test VLM options building for inline model."""
+    def test_build_vlm_options_inline(self, inline_model_config):
+        """Verify inline model config fields are correctly applied to InlineVlmOptions."""
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import VlmExtractionPipelineOptions
+        from docling.datamodel.pipeline_options_vlm_model import InlineVlmOptions
+
         adapter = DoclingEntityAdapter(config=inline_model_config)
-
-        # Reset mock since it was called during initialization
-        mock_inline_options.reset_mock()
-
         options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
 
-        # Verify InlineVlmOptions was called with correct parameters
-        mock_inline_options.assert_called_once()
-        call_kwargs = mock_inline_options.call_args.kwargs
-        assert call_kwargs["repo_id"] == "numind/NuExtract-2.0-2B"
-        assert call_kwargs["inference_framework"] == "transformers"
-        assert call_kwargs["scale"] == 2.0
-        assert call_kwargs["temperature"] == 0.0
-        assert call_kwargs["max_new_tokens"] == 4096
-        assert call_kwargs["load_in_8bit"] is True
-        assert call_kwargs["torch_dtype"] == "bfloat16"
-
-        # Verify options structure
         assert options is not None
         assert len(options) == 2  # PDF and IMAGE formats
 
-    @patch("docling.pipeline.vlm_pipeline.VlmPipeline")
-    @patch("docling.document_extractor.ExtractionFormatOption")
-    @patch("docling.datamodel.pipeline_options.VlmPipelineOptions")
-    @patch("docling.datamodel.pipeline_options_vlm_model.InlineVlmOptions")
-    def test_build_vlm_options_with_defaults(
-        self, mock_inline_options, mock_pipeline_options, mock_extraction_option, mock_pipeline
-    ):
+        # Verify the pipeline_options is VlmExtractionPipelineOptions with InlineVlmOptions
+        pdf_option = options[InputFormat.PDF]
+        assert isinstance(pdf_option.pipeline_options, VlmExtractionPipelineOptions)
+        assert isinstance(pdf_option.pipeline_options.vlm_options, InlineVlmOptions)
+
+        # Verify user-provided fields were applied
+        vlm_opts = pdf_option.pipeline_options.vlm_options
+        assert vlm_opts.repo_id == "numind/NuExtract-2.0-2B"
+        assert vlm_opts.scale == 2.0
+        assert vlm_opts.temperature == 0.0
+
+    def test_build_vlm_options_with_defaults(self):
         """Test that default values are applied correctly for inline model."""
+        from docling.datamodel.base_models import InputFormat
+
         config = {
             "vlm_pipeline": {
                 "model_type": "inline",
@@ -198,19 +187,20 @@ class TestDoclingEntityAdapterVLMOptions:
         }
         adapter = DoclingEntityAdapter(config=config)
 
-        adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+        options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+        assert options is not None
 
-        # Verify defaults were applied
-        call_kwargs = mock_inline_options.call_args.kwargs
-        assert call_kwargs["repo_id"] == "test/model"
-        assert call_kwargs["inference_framework"] == "transformers"  # default
-        assert call_kwargs["scale"] == 2.0  # default
-        assert call_kwargs["temperature"] == 0.0  # default
-        assert call_kwargs["max_new_tokens"] == 4096  # default
-        assert call_kwargs["load_in_8bit"] is True  # default
-        assert call_kwargs["torch_dtype"] == "bfloat16"  # default
-        assert call_kwargs["prompt"] == ""  # default
-        assert call_kwargs["response_format"] == "markdown"  # default
+        pdf_option = options[InputFormat.PDF]
+        vlm_opts = pdf_option.pipeline_options.vlm_options
+
+        # User-provided field
+        assert vlm_opts.repo_id == "test/model"
+        # Default fields from NuExtract-2.0-2B preset
+        assert vlm_opts.scale == 2.0
+        assert vlm_opts.temperature == 0.0
+        assert vlm_opts.max_new_tokens == 4096
+        assert vlm_opts.load_in_8bit is True
+        assert vlm_opts.prompt == ""
 
     def test_build_vlm_options_without_config(self, basic_config):
         """Test that None is returned when no custom config is provided."""
@@ -220,24 +210,125 @@ class TestDoclingEntityAdapterVLMOptions:
 
         assert options is None
 
+    def test_build_vlm_options_all_supported_fields(self):
+        """Verify that all fields in _ALLOWED_VLM_FIELDS are correctly applied to InlineVlmOptions."""
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import VlmExtractionPipelineOptions
+        from docling.datamodel.pipeline_options_vlm_model import (
+            InferenceFramework,
+            InlineVlmOptions,
+            ResponseFormat,
+            TransformersModelType,
+            TransformersPromptStyle,
+        )
+
+        all_fields_config = {
+            "vlm_pipeline": {
+                "model_type": "inline",
+                "inline_model": {
+                    "repo_id": "ibm-granite/granite-vision-3.2-2b",
+                    "inference_framework": "transformers",
+                    "temperature": 0.3,
+                    "max_new_tokens": 2048,
+                    "load_in_8bit": False,
+                    "torch_dtype": "float16",
+                    "prompt": "custom prompt",
+                    "response_format": "markdown",
+                    "scale": 1.5,
+                    "max_size": 1024,
+                    "llm_int8_threshold": 5.0,
+                    "quantized": True,
+                    "transformers_model_type": "automodel-imagetexttotext",
+                    "transformers_prompt_style": "chat",
+                    "stop_strings": ["###", "END"],
+                    "extra_generation_config": {"top_p": 0.95},
+                    "extra_processor_kwargs": {"do_resize": True},
+                    "use_kv_cache": False,
+                },
+            }
+        }
+        adapter = DoclingEntityAdapter(config=all_fields_config)
+        options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+
+        assert options is not None
+        pdf_option = options[InputFormat.PDF]
+        assert isinstance(pdf_option.pipeline_options, VlmExtractionPipelineOptions)
+        vlm_opts = pdf_option.pipeline_options.vlm_options
+        assert isinstance(vlm_opts, InlineVlmOptions)
+
+        assert vlm_opts.repo_id == "ibm-granite/granite-vision-3.2-2b"
+        assert vlm_opts.inference_framework == InferenceFramework.TRANSFORMERS
+        assert vlm_opts.temperature == 0.3
+        assert vlm_opts.max_new_tokens == 2048
+        assert vlm_opts.load_in_8bit is False
+        assert vlm_opts.torch_dtype == "float16"
+        assert vlm_opts.prompt == "custom prompt"
+        assert vlm_opts.response_format == ResponseFormat.MARKDOWN
+        assert vlm_opts.scale == 1.5
+        assert vlm_opts.max_size == 1024
+        assert vlm_opts.llm_int8_threshold == 5.0
+        assert vlm_opts.quantized is True
+        assert vlm_opts.transformers_model_type == TransformersModelType.AUTOMODEL_IMAGETEXTTOTEXT
+        assert vlm_opts.transformers_prompt_style == TransformersPromptStyle.CHAT
+        assert vlm_opts.stop_strings == ["###", "END"]
+        assert vlm_opts.extra_generation_config == {"top_p": 0.95}
+        assert vlm_opts.extra_processor_kwargs == {"do_resize": True}
+        assert vlm_opts.use_kv_cache is False
+
+    def test_build_vlm_options_ignores_unknown_and_skipped_fields(self, caplog):
+        """Verify that revision, trust_remote_code, and unrecognised keys are ignored and logged."""
+        from docling.datamodel.base_models import InputFormat
+
+        config = {
+            "vlm_pipeline": {
+                "model_type": "inline",
+                "inline_model": {
+                    "repo_id": "test/model",
+                    "revision": "custom-branch",
+                    "trust_remote_code": True,
+                    "malicious_field": "should-be-ignored",
+                    "accelerator_options": "should-be-ignored",
+                },
+            }
+        }
+        with caplog.at_level("WARNING"):
+            adapter = DoclingEntityAdapter(config=config)
+            options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+
+        assert options is not None
+        pdf_option = options[InputFormat.PDF]
+        vlm_opts = pdf_option.pipeline_options.vlm_options
+        assert vlm_opts.repo_id == "test/model"
+        # revision and trust_remote_code should not be overridden from inline_model
+        assert vlm_opts.trust_remote_code is False
+        assert vlm_opts.revision != "custom-branch"
+
+        # Verify warning was logged for ignored fields
+        assert "Ignoring unrecognised inline_model keys" in caplog.text
+        assert "revision" in caplog.text
+        assert "trust_remote_code" in caplog.text
+        assert "accelerator_options" in caplog.text
+        assert "malicious_field" in caplog.text
+
 
 class TestDoclingEntityAdapterExtraction:
     """Tests for entity extraction with custom models."""
 
-    @patch("docling.datamodel.pipeline_options_vlm_model.InlineVlmOptions")
-    @patch("docling.datamodel.pipeline_options.VlmPipelineOptions")
-    @patch("docling.document_extractor.ExtractionFormatOption")
-    @patch("docling.pipeline.vlm_pipeline.VlmPipeline")
-    def test_extract_with_inline_model(
-        self,
-        mock_pipeline,
-        mock_extraction_option,
-        mock_pipeline_options,
-        mock_inline_options,
-        mock_document_extractor,
-        inline_model_config,
-    ):
+    @patch("docling.document_extractor.DocumentExtractor")
+    def test_extract_with_inline_model(self, mock_document_extractor, inline_model_config):
         """Test extraction using inline model configuration."""
+        mock_instance = MagicMock()
+        mock_document_extractor.return_value = mock_instance
+
+        mock_page = MagicMock()
+        mock_page.page_no = 1
+        mock_page.extracted_data = {"test": "data"}
+        mock_page.raw_text = "Test content"
+        mock_page.errors = []
+        mock_result = MagicMock()
+        mock_result.pages = [mock_page]
+        mock_instance.extract.return_value = mock_result
+
         adapter = DoclingEntityAdapter(config=inline_model_config)
 
         result = adapter.extract_entities_single(
@@ -251,6 +342,18 @@ class TestDoclingEntityAdapterExtraction:
     @patch("docling.document_extractor.DocumentExtractor")
     def test_extract_without_custom_config(self, mock_document_extractor, basic_config):
         """Test extraction without custom model config (default behavior)."""
+        mock_instance = MagicMock()
+        mock_document_extractor.return_value = mock_instance
+
+        mock_page = MagicMock()
+        mock_page.page_no = 1
+        mock_page.extracted_data = {"test": "data"}
+        mock_page.raw_text = "Test content"
+        mock_page.errors = []
+        mock_result = MagicMock()
+        mock_result.pages = [mock_page]
+        mock_instance.extract.return_value = mock_result
+
         adapter = DoclingEntityAdapter(config=basic_config)
 
         result = adapter.extract_entities_single(
@@ -260,20 +363,21 @@ class TestDoclingEntityAdapterExtraction:
         assert result[OperatorConstants.Extraction.SUCCESS] is True
         mock_document_extractor.assert_called_once()
 
-    @patch("docling.datamodel.pipeline_options_vlm_model.InlineVlmOptions")
-    @patch("docling.datamodel.pipeline_options.VlmPipelineOptions")
-    @patch("docling.document_extractor.ExtractionFormatOption")
-    @patch("docling.pipeline.vlm_pipeline.VlmPipeline")
-    def test_extract_handles_string_content(
-        self,
-        mock_pipeline,
-        mock_extraction_option,
-        mock_pipeline_options,
-        mock_inline_options,
-        mock_document_extractor,
-        inline_model_config,
-    ):
+    @patch("docling.document_extractor.DocumentExtractor")
+    def test_extract_handles_string_content(self, mock_document_extractor, inline_model_config):
         """Test that string content is converted to bytes."""
+        mock_instance = MagicMock()
+        mock_document_extractor.return_value = mock_instance
+
+        mock_page = MagicMock()
+        mock_page.page_no = 1
+        mock_page.extracted_data = {"test": "data"}
+        mock_page.raw_text = "Test content"
+        mock_page.errors = []
+        mock_result = MagicMock()
+        mock_result.pages = [mock_page]
+        mock_instance.extract.return_value = mock_result
+
         adapter = DoclingEntityAdapter(config=inline_model_config)
 
         result = adapter.extract_entities_single(
@@ -311,24 +415,24 @@ class TestDoclingEntityAdapterErrorHandling:
         assert result[OperatorConstants.Extraction.SUCCESS] is False
         assert "Extraction failed" in result[OperatorConstants.Extraction.ERROR]
 
-    def test_build_vlm_options_handles_import_error(self, inline_model_config):
+    @patch(
+        "docling.datamodel.pipeline_options.VlmExtractionPipelineOptions",
+        side_effect=ImportError("VLM module not found"),
+    )
+    def test_build_vlm_options_handles_import_error(self, mock_vlm_options, inline_model_config):
         """Test handling of ImportError when building VLM options."""
-        with patch(
-            "docling.datamodel.pipeline_options_vlm_model.InlineVlmOptions",
-            side_effect=ImportError("VLM module not found"),
-        ):
-            adapter = DoclingEntityAdapter(config=inline_model_config)
-            with pytest.raises(ValueError, match="Docling VLM dependencies not available"):
-                adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+        adapter = DoclingEntityAdapter(config=inline_model_config)
+        with pytest.raises(ValueError, match="Docling VLM dependencies not available"):
+            adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
 
-    def test_build_vlm_options_handles_configuration_error(self, inline_model_config):
+    @patch(
+        "docling.datamodel.pipeline_options.VlmExtractionPipelineOptions", side_effect=TypeError("Invalid parameter")
+    )
+    def test_build_vlm_options_handles_configuration_error(self, mock_vlm_options, inline_model_config):
         """Test handling of configuration errors when building VLM options."""
-        with patch(
-            "docling.datamodel.pipeline_options_vlm_model.InlineVlmOptions", side_effect=TypeError("Invalid parameter")
-        ):
-            adapter = DoclingEntityAdapter(config=inline_model_config)
-            with pytest.raises(ValueError, match="Invalid VLM configuration"):
-                adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+        adapter = DoclingEntityAdapter(config=inline_model_config)
+        with pytest.raises(ValueError, match="Invalid VLM configuration"):
+            adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
 
 
 class TestDoclingEntityAdapterAdapterInfo:
