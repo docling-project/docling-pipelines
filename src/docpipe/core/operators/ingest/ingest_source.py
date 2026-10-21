@@ -4,12 +4,9 @@ import importlib
 import itertools
 import json
 import pathlib
-from typing import Any, Iterator, cast
+from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import pyarrow as pa
-
-# Import standard LangChain loaders
-from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 
 from docpipe.core.constants.constants import (
@@ -29,6 +26,11 @@ from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
 from docpipe.utils.infrastructure.logging import get_logger
 
+if TYPE_CHECKING:
+    # Runtime import is intentionally avoided: langchain_core.document_loaders transitively imports
+    # langchain_text_splitters, which eagerly loads torch/transformers/spacy/nltk (several seconds).
+    from langchain_core.document_loaders import BaseLoader
+
 # Microsoft Graph API Constants
 MICROSOFT_LOGIN_URL = "https://login.microsoftonline.com"
 MICROSOFT_GRAPH_API_BASE = "https://graph.microsoft.com/v1.0"
@@ -36,13 +38,16 @@ MICROSOFT_GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 MICROSOFT_OAUTH_TOKEN_PATH = "/oauth2/v2.0/token"  # nosec B105 - URL path segment, not a credential
 
 
-class MicrosoftGraphLoader(BaseLoader):
+class MicrosoftGraphLoader:
     """
-    Custom LangChain-compatible loader for Microsoft SharePoint and OneDrive
-    using the Microsoft Graph API with app-only (client credentials) authentication.
+    Duck-typed LangChain-compatible loader (``lazy_load`` / ``load``) for Microsoft SharePoint
+    and OneDrive using the Microsoft Graph API with app-only (client credentials) authentication.
 
     This bypasses LangChain's O365-based loaders which require delegated (user) auth
     and call /me/drives/ endpoints that are incompatible with app-only tokens.
+
+    It deliberately does not subclass ``langchain_core.document_loaders.BaseLoader``: importing
+    that module costs several seconds of unrelated ML-framework imports at operator-registry load.
     """
 
     def __init__(
@@ -848,7 +853,7 @@ class IngestSourceOperator(AbstractOperator):
         path_parts: list[str] = key.split("/")
         return any(part.startswith(".") and part not in [".", ".."] for part in path_parts)
 
-    def _get_loader(self) -> BaseLoader:
+    def _get_loader(self) -> "BaseLoader":
         """
         Factory method to initialize the correct LangChain loader.
 
