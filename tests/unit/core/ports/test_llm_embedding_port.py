@@ -105,3 +105,18 @@ def test_generate_embeddings_batch_returns_list_of_lists():
 def test_get_embedding_dimension_returns_int():
     port = _ConcreteEmbeddingPort()
     assert port.get_embedding_dimension() == 3
+
+
+# ---------------------------------------------------------------------------
+# Request shaping defaults
+# ---------------------------------------------------------------------------
+
+
+def test_default_embedding_batch_size():
+    port = _ConcreteEmbeddingPort()
+    assert port.get_embedding_batch_size() == 32
+
+
+def test_default_max_concurrent_requests_is_serial():
+    port = _ConcreteEmbeddingPort()
+    assert port.get_max_concurrent_requests() == 1

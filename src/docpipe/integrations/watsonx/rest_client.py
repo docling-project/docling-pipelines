@@ -14,6 +14,7 @@ Authentication: API key is exchanged for IAM access token automatically.
 import time
 from typing import Any, ClassVar
 
+from docpipe.core.constants.constants import ServiceConstants
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.base_llm_client import BaseLLMClient, retry_with_backoff
@@ -80,7 +81,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
         container_kind: str,
         container_id: str,
         model_name: str,
-        batch_size: int = 800,
+        batch_size: int = ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE,
         job_run_id: str | None = None,
         timeout: int = 60,
         max_retries: int = 3,
@@ -114,11 +115,15 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
         if cache_key in WatsonxRestEmbeddingClient._client_cache:
             cached_instance = WatsonxRestEmbeddingClient._client_cache[cache_key]
             logger.info(
-                f"Reusing cached REST client instance for model={model_name}, "
-                f"container_kind={container_kind}, batch_size={batch_size}"
+                "Reusing cached REST client instance for model=%s, container_kind=%s, batch_size=%s",
+                model_name,
+                container_kind,
+                batch_size,
             )
             # Copy cached instance attributes to self
             self.__dict__.update(cached_instance.__dict__)
+            # batch_size is per-caller configuration, not part of the shared connection state
+            self.batch_size = batch_size
             return
 
         # Initialize base class
@@ -159,9 +164,11 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
         WatsonxRestEmbeddingClient._client_cache[cache_key] = self
 
         logger.info(
-            f"Created and cached new REST client instance for model={model_name}, "
-            f"container_kind={container_kind}, batch_size={batch_size}, "
-            f"rate_limit_name={self.rate_limit_name}"
+            "Created and cached new REST client instance for model=%s, container_kind=%s, batch_size=%s, rate_limit_name=%s",
+            model_name,
+            container_kind,
+            batch_size,
+            self.rate_limit_name,
         )
 
     @classmethod
@@ -204,12 +211,12 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
         cache_key = (self.api_key, self.url, self.model_name)
         if cache_key in WatsonxRestEmbeddingClient._token_limit_cache:
             cached_limit = WatsonxRestEmbeddingClient._token_limit_cache[cache_key]
-            logger.debug(f"Using cached token limit {cached_limit} for model '{self.model_name}'")
+            logger.debug("Using cached token limit %s for model '%s'", cached_limit, self.model_name)
             return cached_limit
 
         try:
             # Fetch model specs from API (this call is cached by @lru_cache)
-            logger.info(f"Fetching token limit for model '{self.model_name}' from WatsonX API")
+            logger.info("Fetching token limit for model '%s' from WatsonX API", self.model_name)
             model_specs = get_available_foundation_models(api_key=self.api_key, url=self.url)
 
             # Find the model spec matching the model_name
@@ -221,7 +228,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
                         max_seq_length = model_limits.get("max_sequence_length")
                         if max_seq_length and isinstance(max_seq_length, int):
                             logger.info(
-                                f"Found max_sequence_length={max_seq_length} for model '{self.model_name}' from API"
+                                "Found max_sequence_length=%s for model '%s' from API", max_seq_length, self.model_name
                             )
                             # Cache the result
                             WatsonxRestEmbeddingClient._token_limit_cache[cache_key] = max_seq_length
@@ -229,17 +236,17 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
 
             # Model found but no max_sequence_length in model_limits
             logger.warning(
-                f"Model '{self.model_name}' found but max_sequence_length not available in model_limits. "
-                f"Using fallback value."
+                "Model '%s' found but max_sequence_length not available in model_limits. Using fallback value.",
+                self.model_name,
             )
 
         except Exception as e:
             # Log error but don't fail - fall back to hardcoded values
-            logger.warning(f"Failed to fetch token limit from API for model '{self.model_name}': {e}")
+            logger.warning("Failed to fetch token limit from API for model '%s': %s", self.model_name, e)
 
         # Fall back to hardcoded values
         fallback_limit = WATSONX_MODEL_TOKEN_LIMITS.get(self.model_name, 512)
-        logger.info(f"Using fallback token limit {fallback_limit} for model '{self.model_name}'")
+        logger.info("Using fallback token limit %s for model '%s'", fallback_limit, self.model_name)
 
         # Cache the fallback value to avoid repeated API calls
         WatsonxRestEmbeddingClient._token_limit_cache[cache_key] = fallback_limit
@@ -403,7 +410,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
             # Re-raise ExternalServiceError as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to generate embeddings: {e}")
+            logger.error("Failed to generate embeddings: %s", e)
             raise ExternalServiceError(
                 message=f"Watsonx.ai REST API embedding generation failed: {e}",
                 error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
@@ -441,7 +448,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
         all_embeddings: list[list[float]] = []
         total_batches = (len(texts) + self.batch_size - 1) // self.batch_size
 
-        logger.info(f"Processing {len(texts)} texts in {total_batches} batches (batch_size={self.batch_size})")
+        logger.info("Processing %s texts in %s batches (batch_size=%s)", len(texts), total_batches, self.batch_size)
 
         total_start = time.time()
 
@@ -496,10 +503,12 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
                 all_embeddings.extend(batch_embeddings)
 
                 batch_time = time.time() - batch_start
-                logger.info(f"Batch {batch_num}/{total_batches} processed ({len(batch)} texts) in {batch_time:.2f}s")
+                logger.info(
+                    "Batch %s/%s processed (%s texts) in %.2fs", batch_num, total_batches, len(batch), batch_time
+                )
 
             total_time = time.time() - total_start
-            logger.info(f"Total processing time: {total_time:.2f}s ({len(texts)} texts, {total_batches} batches)")
+            logger.info("Total processing time: %.2fs (%s texts, %s batches)", total_time, len(texts), total_batches)
 
             return all_embeddings
 
@@ -507,7 +516,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
             # Re-raise ExternalServiceError as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to generate embeddings: {e}")
+            logger.error("Failed to generate embeddings: %s", e)
             raise ExternalServiceError(
                 message=f"Watsonx.ai REST API embedding generation failed: {e}",
                 error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,

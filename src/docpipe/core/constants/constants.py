@@ -404,6 +404,14 @@ class ServiceConstants:
 
     # Embeddings batch processing
     DEFAULT_EMBEDDINGS_BATCH_SIZE = 32  # Default batch size for embeddings generation
+    # Default number of embedding sub-batch requests kept in flight at once for HTTP-based
+    # providers (LiteLLM). Kept low so a single operator stays well below typical hosted-API
+    # rate limits; a local Ollama server queues requests beyond its own OLLAMA_NUM_PARALLEL.
+    DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 4
+    # watsonx.ai embeddings: texts per request, and requests in flight (the service enforces
+    # a per-instance limit of 8 req/s, so concurrency stays opt-in).
+    DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
+    DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
 
 
 class ProviderConstants:
