@@ -8,7 +8,7 @@ try:
     import boto3
 
     _BOTO3_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - boto3 is a core dependency; this only runs in a broken install
     _BOTO3_AVAILABLE = False
 
 from docpipe.core.orchestration.operator_loader.adapters.factories.operator_source_factory import (

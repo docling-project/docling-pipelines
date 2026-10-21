@@ -286,3 +286,59 @@ Full style guide: [`docs/guides/DOCUMENTATION_STYLE_GUIDE.md`](docs/guides/DOCUM
 **Mermaid:** validate every diagram at [mermaid.live](https://mermaid.live) before committing; use `graph LR` for pipelines, `graph TD` for hierarchy
 
 **Changelog:** maintainers manually update `CHANGELOG.md` at release time. Agents must not update it during PR or commit work unless explicitly requested.
+
+## OpenSpec
+
+This repo uses [OpenSpec](https://openspec.dev) for spec-driven development. Live specs in `openspec/specs/` describe the current observable behavior of every major API surface and engine capability. Read the relevant spec before modifying any capability it covers.
+
+**Spec index** — `openspec list --specs` (requires `openspec` CLI, Node ≥20.19):
+
+| Namespace | Coverage |
+|---|---|
+| `backend/flows-api` | Flow CRUD REST API (incl. cascade delete of job runs) |
+| `backend/projects-api` | Project CRUD REST API |
+| `backend/job-runs-api` | Job run lifecycle REST API |
+| `backend/operators-api` | Operator metadata + flow validation REST API |
+| `backend/document-sets-api` | Document set REST API |
+| `backend/document-libraries-api` | Document library REST API |
+| `backend/documents-api` | Document REST API |
+| `backend/providers-api` | LLM/embedding provider model listing (ollama, watsonx) |
+| `backend/custom-operators-api` | Custom operator upload, CRUD, directory tree |
+| `backend/document-classes-api` | Document type definitions REST API |
+| `backend/flow-execution-engine` | FlowExecutor, orchestration, micro-batching |
+| `frontend/canvas-page` | Pipeline editor page |
+| `frontend/properties-panel` + custom panels | Operator config side panel |
+| `frontend/elyra-canvas`, `frontend/read-only-canvas` | Canvas components |
+| `frontend/home-page`, `projects-page`, `project-detail-page`, `flow-detail-page`, `run-details-page` | UI pages |
+| `frontend/state/assets-slice` | Shared flow + job run navigation asset maps |
+| `frontend/state/notifications-slice` | Global toast / history / unread-counter notification system |
+| `frontend/state/flows-slice`, `job-runs-slice`, `operators-slice`, `projects-slice` | Domain entity Redux slices |
+| `frontend/common/*` | Shared UI components |
+
+**Pre-commit Workflow** — OpenSpec operations:
+
+```bash
+# Before starting new feature or behavior change
+openspec list --specs                             # read what's already specified
+
+# Start a change
+openspec new change <descriptive-name>
+# → write openspec/changes/<name>/proposal.md
+# → write openspec/changes/<name>/specs/<capability>/spec.md
+# → write openspec/changes/<name>/design.md
+# → write openspec/changes/<name>/tasks.md
+
+# Validate before implementing
+openspec validate <name> --strict
+
+# After code review and tests pass
+openspec archive <name>
+```
+
+**Rules:**
+- Never modify `openspec/specs/` directly — only `openspec archive` writes there.
+- Do not implement code before the change's `proposal.md` and spec delta are written and reviewed.
+- Scope implementation strictly to the declared change — no opportunistic refactors.
+- Run `openspec validate <name> --strict` before handing off for implementation.
+- The `openspec/changes/archive/` directory is the historical record — do not edit archived changes.
+- New capabilities must use `backend/*` for Python API/engine/operator work, or `frontend/*` for React page and component work.

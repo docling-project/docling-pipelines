@@ -341,6 +341,13 @@ class EnvironmentVariables:
     DOCPIPE_LINEAGE_PRODUCER = "DOCPIPE_LINEAGE_PRODUCER"
     DOCPIPE_LINEAGE_STRICT = "DOCPIPE_LINEAGE_STRICT"
 
+    DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
+    DOCPIPE_API_BASE_URL = "DOCPIPE_API_BASE_URL"
+    KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
+    KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
+    KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
+    SCHEMA_REGISTRY_URL = "SCHEMA_REGISTRY_URL"
+
 
 class LineageConstants:
     """Constants and defaults for OpenLineage integration."""
@@ -483,6 +490,7 @@ class Metrics:
         FAILED_DOCS = "failed_docs"
         SKIPPED_DOCS_COUNT = "skipped_docs_count"
         SKIPPED_DOCS = "skipped_docs"
+        DOCUMENT_URL = "document_url"
         TOTAL_PAGES_CONVERTED = "total_pages_converted"
         NODE_STATUS = "node_status"
         UNPROCESSED_DOC_COUNT = "unprocessed_doc_count"

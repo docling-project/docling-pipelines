@@ -17,12 +17,12 @@
 # Supported storage types: filesystem, postgresql, duckdb, inmemory
 global_storage:
   type: "filesystem"  # Default storage type for all services
-  
+
   # config section (required for file-based storage: parquet, duckdb)
   config:
     base_dir: "./data"  # Base directory for file-based storage
     lock_timeout: 30.0  # Lock timeout in seconds
-  
+
   # PostgreSQL configuration (only needed if type is "postgresql")
   # NOTE: For PostgreSQL, the config section above is optional
   postgres:
@@ -298,3 +298,16 @@ incremental_metadata:
 #   - Increase lock_timeout to 300.0+ seconds
 #   - Configure PostgreSQL max_connections appropriately
 #   - Monitor database connection pool usage
+# Ededup owns its admission storage independently of incremental_metadata.
+# Precedence: ededup.storage > global_storage > filesystem default.
+# Set this explicitly when existing incremental service-specific settings were
+# previously used for ededup; filesystem registry files must be moved to ededup_registry.
+# ededup:
+#   storage:
+#     type: postgresql
+#     config:
+#       postgres:
+#         schema: ededup_registry
+# Common DOCPIPE_POSTGRES_* environment variables supply connection settings.
+# For filesystem instead: type: filesystem, config: {base_dir: ./data}
+# DOCPIPE_INCREMENTAL_BASE_DIR does not configure deduplication.

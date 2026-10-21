@@ -1375,17 +1375,54 @@ When `display_pii: true`, additional `*_info` columns are appended for each PII 
 
 #### EdedupOperator
 
-**Purpose:** Remove exact duplicate documents using `dpk_ededup`.
+**Purpose:** Remove repeated normalized content using atomic shared hash registration.
 
 **Category:** Quality
 
 **Class:** `core.operators.quality.ededup.EdedupOperator`
 
-| Parameter     | Type   | Required | Default          | Description               |
-| ------------- | ------ | -------: | ---------------- | ------------------------- |
-| `doc_column`  | string |       No | `content`        | Content column to compare |
-| `doc_id_hash` | string |       No | `doc_id_hash`    | Hash/id column            |
-| `filter`      | object |       No | `HashFilter({})` | Hash filter state/config  |
+| Parameter | Type | Required | Default | Description |
+| --- | --- | ---: | --- | --- |
+| `doc_column` | string | No | `content` | Content column to normalize and hash |
+| `doc_id_hash_column` | string | No | `doc_id_hash` | Required document hash/ID input column; content is hashed independently |
+
+The legacy `filter` argument is unsupported. It was a backend-only argument and was not exposed as a user-configurable
+field in the UI. The operator uses its dedicated `ededup.storage` backend configured in
+`docling-pipelines-config.yaml`. PostgreSQL coordinates separate pods; filesystem coordinates callers sharing one local
+storage directory. The orchestrator supplies job, run, and node IDs. Direct callers supplying job/run context must also
+supply the node ID; partial execution context is rejected.
+Call `transform(table)` when invoking the operator directly; the former `transform(table, file_name=...)` form is
+unsupported. Context-free standalone instances retain an in-memory registry across calls on that instance only.
+
+Configuration precedence is `ededup.storage` over `global_storage` over filesystem defaults; nested ededup config values
+override shared values. `incremental_metadata` settings and `DOCPIPE_INCREMENTAL_BASE_DIR` are not consulted. Invalid
+ededup backend settings fail explicitly. PostgreSQL uses common `DOCPIPE_POSTGRES_*` connection settings and creates
+only `hashes`, defaulting to the `ededup_registry` schema when no schema is configured. Filesystem uses
+`<base_dir>/ededup_registry/hashes_<scope_hash>.parquet` and matching `.lock` files, where `base_dir` is
+`ededup.storage.config.base_dir` or the common data root. The scope hash is SHA-256 of the JSON-encoded
+`[job_id, node_id, job_run_id]`. Registry records persist across runs and source deletion.
+When moving from the earlier coupled configuration, copy service-specific storage settings into `ededup.storage`
+before running. Data under the previous `dedup_registry` namespace and legacy `ededup_hashes` tables/folders are not automatically migrated or read. To keep using PostgreSQL data from the previous default, set the schema to `dedup_registry`; move previous filesystem registry files into the new `ededup_registry` directory under the same base directory.
+
+Registration is isolated by `(job_id, node_id, job_run_id, hash_value)`. Within each input table, the first occurrence wins;
+across concurrent batches the winner depends on registration order. Hashes use the existing normalization: remove spaces,
+newlines and ASCII punctuation, lowercase, then SHA-256. This is not a byte-for-byte comparison.
+
+The five stored fields are `job_id`, `node_id`, `job_run_id`, `hash_value`, and `doc_id`; document ID is not part of
+uniqueness. Each branch's ededup node admits independently, while all workers for one node share its stable ID. Merging
+branch outputs adds no automatic cross-branch deduplication. PostgreSQL uses bounded bulk inserts with conflict-ignore
+and returns only newly inserted hashes after the whole call commits; an error rolls back every chunk.
+
+A renamed document with unchanged content is skipped if the same node/run already admitted its hash; the original
+record is unchanged. A new run, or another branch's node without that hash, can admit the new document ID independently.
+Reopening an existing registry preserves these memberships. A downstream failure does not remove admissions: retrying
+at the same node/run skips the hash, while a new run can accept it.
+
+Records retain the accepted source `doc_id` and are not removed when source documents disappear. Historical runs never
+suppress a new run, including overlapping runs. These records are admissions, not completed-processing history; they are
+retained and require an operational retention policy at scale. No automatic run cleanup is performed.
+
+Deduplication does not perform rename detection, downstream filename updates, or reuse of previously generated outputs.
 
 ---
 

@@ -1,5 +1,7 @@
 import React from 'react';
 import { Loading as CarbonLoading, InlineLoading } from '@carbon/react';
+import { useIntl } from 'react-intl';
+import { messages } from './Loading.messages';
 import styles from './Loading.module.scss';
 
 /**
@@ -35,15 +37,17 @@ interface LoadingProps {
  * - Pass `centered` (default `true`) to vertically and horizontally centre the full spinner.
  */
 export function Loading({
-  description = 'Loading...',
+  description,
   inline = false,
   status = 'active',
   centered = true,
 }: LoadingProps): React.JSX.Element {
+  const intl = useIntl();
+  const resolvedDescription = description ?? intl.formatMessage(messages.defaultDescription);
   if (inline) {
     return (
       <InlineLoading
-        description={description}
+        description={resolvedDescription}
         status={status}
       />
     );
@@ -51,7 +55,7 @@ export function Loading({
 
   const loadingElement = (
     <CarbonLoading
-      description={description}
+      description={resolvedDescription}
       withOverlay={false}
     />
   );

@@ -19,7 +19,13 @@ jobs:
   verify-commits:
     name: Verify DCO, GPG & PR Template
     # Only meaningful on pull requests; push and workflow_dispatch have no PR payload.
-    if: github.event_name == 'pull_request'
+    # PRs opened by allowlisted dependency bots are skipped: their commits carry no
+    # Signed-off-by trailer and their PR body is generated, so DCO and template
+    # checks cannot pass. Keep this an explicit
+    # allowlist; do not widen it to user.type == 'Bot'.
+    if: >
+      github.event_name == 'pull_request' &&
+      !contains(fromJSON('["renovate[bot]","dependabot[bot]"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     permissions:
       contents: read

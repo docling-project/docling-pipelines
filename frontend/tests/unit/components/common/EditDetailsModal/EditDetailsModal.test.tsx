@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { EditDetailsModal } from '@/components/common/EditDetailsModal/EditDetailsModal';
@@ -13,7 +14,7 @@ function renderModal(props: Partial<Parameters<typeof EditDetailsModal>[0]> = {}
     onEdit: vi.fn(() => Promise.resolve()),
     ...props,
   };
-  return { ...render(React.createElement(EditDetailsModal, defaults)), ...defaults };
+  return { ...renderWithProviders(React.createElement(EditDetailsModal, defaults)), ...defaults };
 }
 
 describe('EditDetailsModal', () => {

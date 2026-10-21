@@ -32,6 +32,7 @@ import {
   TableCell,
   Tooltip,
 } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { NodeMetadataItem, JobStats } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 import {
@@ -39,9 +40,9 @@ import {
   CELL_VALUE_FLOAT_DECIMALS,
   CELL_VALUE_FLOAT_THRESHOLD,
   DEFAULT_NODE_STATUS,
-  METADATA_TABLE_HEADERS,
 } from '@/constants/runSidePanel';
 import { SharedDataTable, SharedTearsheet } from '@/components/common';
+import { messages } from './NodeSummary.messages';
 import styles from './NodeSummary.module.scss';
 
 // ─── Doc array item shape ─────────────────────────────────────────────────────
@@ -51,12 +52,6 @@ interface DocItem {
   fileName: string;
   reason: string;
 }
-
-const DOC_TABLE_HEADERS = [
-  { key: 'documentId', header: 'Document ID'  },
-  { key: 'fileName',   header: 'File Name'    },
-  { key: 'reason',     header: 'Reason'       },
-];
 
 interface NodeSummaryProps {
   nodeMetadata: NodeMetadataItem;
@@ -196,9 +191,14 @@ function getStatusIconComponent(status: string): CarbonIconType | null {
  * Renders a Carbon DataTable for a list of name/value metadata rows.
  */
 function MetadataDataTable({ rows }: { rows: MetadataRow[] }): React.JSX.Element {
+  const intl = useIntl();
   const dtRows = rows as unknown as React.ComponentProps<typeof DataTable>['rows'];
+  const metadataTableHeaders = [
+    { key: 'name',  header: intl.formatMessage(messages.metadataHeaderName)  },
+    { key: 'value', header: intl.formatMessage(messages.metadataHeaderValue) },
+  ];
   return (
-    <DataTable rows={dtRows} headers={METADATA_TABLE_HEADERS}>
+    <DataTable rows={dtRows} headers={metadataTableHeaders}>
       {/* eslint-disable react/jsx-props-no-spreading, react/jsx-key */}
       {({ rows: tableRows, headers, getHeaderProps, getRowProps }) => (
         <Table className={styles.metadataTable}>
@@ -238,6 +238,12 @@ interface DocsTearsheetProps {
 }
 
 function DocsTearsheet({ open, title, docs, downloadFilename, onClose }: DocsTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
+  const docTableHeaders = [
+    { key: 'documentId', header: intl.formatMessage(messages.documentIdHeader) },
+    { key: 'fileName',   header: intl.formatMessage(messages.fileNameHeader)   },
+    { key: 'reason',     header: intl.formatMessage(messages.reasonHeader)     },
+  ];
   const rows = docs.map((doc) => ({
     id: doc.id || `doc-${doc.fileName}`,
     documentId: doc.id,
@@ -254,10 +260,10 @@ function DocsTearsheet({ open, title, docs, downloadFilename, onClose }: DocsTea
     >
       <div className={styles.tearsheetContent}>
         <SharedDataTable
-          headers={DOC_TABLE_HEADERS}
+          headers={docTableHeaders}
           rows={rows}
           searchable
-          searchPlaceholder="Search documents"
+          searchPlaceholder={intl.formatMessage(messages.searchDocuments)}
           renderToolbarActions={() => (
             <Button
               kind="primary"
@@ -265,7 +271,7 @@ function DocsTearsheet({ open, title, docs, downloadFilename, onClose }: DocsTea
               renderIcon={Download}
               onClick={() => { downloadDocs(docs, downloadFilename); }}
             >
-              Download
+              {intl.formatMessage(messages.download)}
             </Button>
           )}
         />
@@ -280,6 +286,7 @@ export function NodeSummary({
   nodeMetadata,
   jobStats,
 }: NodeSummaryProps): React.JSX.Element {
+  const intl = useIntl();
   const [skippedDocsOpen, setSkippedDocsOpen] = useState(false);
   const [failedDocsOpen, setFailedDocsOpen] = useState(false);
 
@@ -288,9 +295,11 @@ export function NodeSummary({
     [nodeMetadata.id, jobStats.node_stats]
   );
 
+  // DEFAULT_NODE_STATUS drives the CSS class and icon lookup.
   const nodeStatus = nodeStat?.node_status ?? DEFAULT_NODE_STATUS;
   const statusBadgeClass = `${styles.nodeStatus} ${getStatusClass(nodeStatus)}`;
   const StatusIcon = getStatusIconComponent(nodeStatus);
+  const nodeStatusLabel = nodeStat?.node_status ?? intl.formatMessage(messages.statusNotStarted);
 
   // Parse doc arrays from node_metadata once
   const skippedDocs = useMemo(
@@ -330,7 +339,7 @@ export function NodeSummary({
                   kind="ghost"
                   size="sm"
                   renderIcon={View}
-                  iconDescription="View skipped documents"
+                  iconDescription={intl.formatMessage(messages.viewSkippedDocs)}
                   hasIconOnly
                   className={styles.viewDocsButton}
                   onClick={() => { setSkippedDocsOpen(true); }}
@@ -359,7 +368,7 @@ export function NodeSummary({
                   kind="ghost"
                   size="sm"
                   renderIcon={View}
-                  iconDescription="View failed documents"
+                  iconDescription={intl.formatMessage(messages.viewFailedDocs)}
                   hasIconOnly
                   className={styles.viewDocsButton}
                   onClick={() => { setFailedDocsOpen(true); }}
@@ -389,7 +398,7 @@ export function NodeSummary({
           </div>
           <div className={statusBadgeClass}>
             {StatusIcon && <StatusIcon className={styles.statusIcon} />}
-            {nodeStatus}
+            {nodeStatusLabel}
           </div>
         </div>
       </div>
@@ -401,21 +410,21 @@ export function NodeSummary({
         {metadataRows.length > 0 && (
           <>
             <div className={styles.sectionHeader}>
-              <span className={styles.sectionTitle}>Node Metadata</span>
+              <span className={styles.sectionTitle}>{intl.formatMessage(messages.nodeSectionTitle)}</span>
             </div>
             <MetadataDataTable rows={metadataRows} />
           </>
         )}
 
         {!nodeStat && metadataRows.length === 0 && (
-          <p className={styles.nodeDescription}>No metadata available for this node.</p>
+          <p className={styles.nodeDescription}>{intl.formatMessage(messages.noMetadata)}</p>
         )}
       </div>
 
       {/* Skipped Docs Tearsheet */}
       <DocsTearsheet
         open={skippedDocsOpen}
-        title="Skipped Documents"
+        title={intl.formatMessage(messages.skippedDocsTearsheetTitle)}
         docs={skippedDocs}
         downloadFilename="skipped_documents.json"
         onClose={() => { setSkippedDocsOpen(false); }}
@@ -424,7 +433,7 @@ export function NodeSummary({
       {/* Failed Docs Tearsheet */}
       <DocsTearsheet
         open={failedDocsOpen}
-        title="Failed Documents"
+        title={intl.formatMessage(messages.failedDocsTearsheetTitle)}
         docs={failedDocs}
         downloadFilename="failed_documents.json"
         onClose={() => { setFailedDocsOpen(false); }}

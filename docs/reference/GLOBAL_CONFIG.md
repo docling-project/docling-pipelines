@@ -378,6 +378,27 @@ If you have existing flows with flow-level incremental metadata configuration, f
 
 ---
 
+## Ededup Registry Storage
+
+The deduplication registry is configured separately from flow `global_config`, in
+`docling-pipelines-config.yaml` under `ededup.storage`. It is persistent by default when the operator runs with job,
+run, and flow-node context. `ededup.storage` takes precedence over `global_storage`, then the filesystem default.
+Incremental metadata settings do not configure this registry.
+
+```yaml
+ededup:
+  storage:
+    type: postgresql
+    config:
+      postgres:
+        schema: ededup_registry
+```
+
+PostgreSQL is suitable for workers on separate hosts or pods. The filesystem default is suitable only when all workers
+share the same directory; see [Advanced Configuration](../guides/ADVANCED_CONFIGURATION.md#ededup-shared-storage-guidance)
+for deployment requirements. See the [EdedupOperator reference](OPERATORS.md#ededupoperator) for backend settings,
+registry scope, migration notes, and cleanup instructions.
+
 ## Orchestration configuration
 
 ### Prefect Configuration

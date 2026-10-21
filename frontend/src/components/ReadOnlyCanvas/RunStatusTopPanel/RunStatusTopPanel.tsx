@@ -6,10 +6,12 @@
 import React, { useMemo } from 'react';
 import { Button } from '@carbon/react';
 import { CheckmarkFilled, ErrorFilled, WarningAltFilled, Close, Maximize, Minimize } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import type { JobStats } from '@/types';
 import { JOB_RUN_STATUS, COMPLETED_STATUSES } from '@/constants/jobRunStatus';
 import { WARNING_NODE_STATUSES } from '@/constants/canvasActions';
 import { formatElapsedTime } from '@/utils/dateTimeUtils';
+import { messages } from './RunStatusTopPanel.messages';
 import styles from './RunStatusTopPanel.module.scss';
 
 interface RunStatusTopPanelProps {
@@ -80,6 +82,7 @@ export function RunStatusTopPanel({
   onStop,
   onRunAgain,
 }: RunStatusTopPanelProps): React.JSX.Element {
+  const intl = useIntl();
   const nodeCounts = useMemo(() => computeNodeCounts(jobStats), [jobStats]);
   const elapsedTimeStr = useMemo(() => formatElapsedTime(jobStats.duration), [jobStats.duration]);
   const progressFillClass = useMemo(() => getProgressFillClass(jobStats.status), [jobStats.status]);
@@ -93,7 +96,7 @@ export function RunStatusTopPanel({
             <div className={styles.sectionColumns}>
               {/* Orchestrator */}
               <div className={styles.sectionGroup}>
-                <p className={styles.sectionHeader}>Orchestrator</p>
+                <p className={styles.sectionHeader}>{intl.formatMessage(messages.orchestratorLabel)}</p>
                 <p>{jobStats.orchestrator}</p>
               </div>
 
@@ -101,7 +104,7 @@ export function RunStatusTopPanel({
 
               {/* Duration */}
               <div className={styles.sectionGroup}>
-                <p className={styles.sectionHeader}>Duration</p>
+                <p className={styles.sectionHeader}>{intl.formatMessage(messages.durationLabel)}</p>
                 <p>{elapsedTimeStr}</p>
               </div>
 
@@ -109,26 +112,26 @@ export function RunStatusTopPanel({
 
               {/* Nodes */}
               <div className={styles.sectionGroup}>
-                <p className={styles.sectionHeader}>Nodes</p>
+                <p className={styles.sectionHeader}>{intl.formatMessage(messages.nodesLabel)}</p>
                 <div className={styles.statusGroupRow}>
                   <div className={styles.statusItem}>
                     <div className={styles.statusLabelRow}>
                       <CheckmarkFilled size={16} className={styles.checkmarkFilled} />
-                      <span>Completed</span>
+                      <span>{intl.formatMessage(messages.nodesCompleted)}</span>
                     </div>
                     <p>{nodeCounts.completed}</p>
                   </div>
                   <div className={styles.statusItem}>
                     <div className={styles.statusLabelRow}>
                       <ErrorFilled size={16} className={styles.errorFilled} />
-                      <span>Failed</span>
+                      <span>{intl.formatMessage(messages.nodesFailed)}</span>
                     </div>
                     <p>{nodeCounts.failed}</p>
                   </div>
                   <div className={styles.statusItem}>
                     <div className={styles.statusLabelRow}>
                       <WarningAltFilled size={16} className={styles.warningAltFilled} />
-                      <span>Warning</span>
+                      <span>{intl.formatMessage(messages.nodesWarning)}</span>
                     </div>
                     <p>{nodeCounts.warning}</p>
                   </div>
@@ -139,22 +142,22 @@ export function RunStatusTopPanel({
 
               {/* Documents */}
               <div className={styles.sectionGroup}>
-                <p className={styles.sectionHeader}>Documents</p>
+                <p className={styles.sectionHeader}>{intl.formatMessage(messages.documentsLabel)}</p>
                 <div className={styles.statusGroupRow}>
                   <div className={styles.statusItem}>
-                    <p>In scope</p>
+                    <p>{intl.formatMessage(messages.docsInScope)}</p>
                     <p>{jobStats.total_docs}</p>
                   </div>
                   <div className={styles.statusItem}>
-                    <p>Processed</p>
+                    <p>{intl.formatMessage(messages.docsProcessed)}</p>
                     <p>{jobStats.completed_docs ?? 0}</p>
                   </div>
                   <div className={styles.statusItem}>
-                    <p>Skipped</p>
+                    <p>{intl.formatMessage(messages.docsSkipped)}</p>
                     <p>{jobStats.skipped_docs}</p>
                   </div>
                   <div className={styles.statusItem}>
-                    <p>Failed</p>
+                    <p>{intl.formatMessage(messages.docsFailed)}</p>
                     <p>{jobStats.failed_docs}</p>
                   </div>
                 </div>
@@ -163,10 +166,10 @@ export function RunStatusTopPanel({
 
             {/* Minimize + Close — sibling of sectionColumns, right-aligned inside topRow */}
             <div className={styles.topPanelRightIcons}>
-              <button className={styles.topPanelIconButton} onClick={onToggleMinimize} title="Minimize">
+              <button className={styles.topPanelIconButton} onClick={onToggleMinimize} title={intl.formatMessage(messages.minimize)}>
                 <Minimize size={20} />
               </button>
-              <button className={styles.topPanelIconButton} onClick={onClose} title="Close">
+              <button className={styles.topPanelIconButton} onClick={onClose} title={intl.formatMessage(messages.close)}>
                 <Close size={20} />
               </button>
             </div>
@@ -190,7 +193,7 @@ export function RunStatusTopPanel({
                   disabled={isRunning ? isStopDisabled : false}
                   onClick={isRunning ? onStop : onRunAgain}
                 >
-                  {isRunning ? 'Stop' : 'Run Again'}
+                  {isRunning ? intl.formatMessage(messages.stop) : intl.formatMessage(messages.runAgain)}
                 </Button>
               </div>
             </div>
@@ -203,10 +206,10 @@ export function RunStatusTopPanel({
         <div className={styles.runDetailsTopRowDiv}>
           <p className={styles.progressStatusMinimize}>{jobStats.status}</p>
           <div className={styles.topPanelRightIcons}>
-            <button className={styles.topPanelIconButton} onClick={onToggleMinimize} title="Maximize">
+            <button className={styles.topPanelIconButton} onClick={onToggleMinimize} title={intl.formatMessage(messages.maximize)}>
               <Maximize size={20} />
             </button>
-            <button className={styles.topPanelIconButton} onClick={onClose} title="Close">
+            <button className={styles.topPanelIconButton} onClick={onClose} title={intl.formatMessage(messages.close)}>
               <Close size={20} />
             </button>
           </div>

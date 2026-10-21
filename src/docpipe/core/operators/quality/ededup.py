@@ -1,61 +1,35 @@
+"""Content deduplication with atomic, run-scoped shared admissions."""
+
 from typing import Any
 
 import pyarrow as pa
-from dpk_ededup import (
-    EdedupTransform,
-    HashFilter,
-    doc_column_name_key,
-    int_column_name_key,
-)
+from data_processing.utils import TransformUtils
 
-from docpipe.core.constants.constants import (
-    DocpipeConstants,
-    ExecutionStatus,
-    Metrics,
-)
+from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
-from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.core.operators.quality.ededup_storage.factory import get_default_ededup_factory
 from docpipe.utils.infrastructure.logging import get_logger
-
-FILTER_KEY: str = "filter"
 
 logger = get_logger()
 
 
 class EdedupOperator(AbstractOperator):
-    """
-    Ededup (Exact De-duplication) Operator is an exact deduplication operator which can be added after Extract Operator,
-    so that if there are exact duplicate documents that are extracted, it will be removed from the pyarrow table before
-    proceeding with other subsequent operators. This will save time and processing power to a great extent.
-    """
+    """Remove repeated normalized content within a node's execution across batches."""
 
     short_name: str = OperatorConstants.Operators.EDEDUP
     category: OperatorCategory = OperatorCategory.Quality
     owner = DocpipeConstants.OWNER_DOCPIPE
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """
-        Initialize based on the dictionary of parameters.
-        Parameters are: {"doc_column": "content", "doc_id_column": "doc_id_hash}
-        """
         super().__init__(config)
         self.doc_id_column: str = config.get(
             OperatorConstants.Columns.DOC_ID_HASH, OperatorConstants.Columns.DOC_ID_HASH_DEFAULT
         )
-        self.filter: HashFilter = config.get(FILTER_KEY, HashFilter({}))
-        self.config.update(
-            {
-                doc_column_name_key: self.doc_column,
-                int_column_name_key: self.doc_id_column,
-                FILTER_KEY: self.filter,
-            }
-        )
-        self.common_log_arguments: dict[str, Any] = {
-            DocpipeConstants.JOB_ID: self.job_id,
-            DocpipeConstants.JOB_RUN_ID: self.job_run_id,
-        }
-        self._ededup_transform: EdedupTransform = EdedupTransform(self.config)
+        if "filter" in config:
+            raise ValueError("ededup no longer accepts a DPK filter; configure the ededup storage backend instead")
+        # Preserve standalone library use without creating a shared 'None' run.
+        self._local_hashes: set[str] = set()
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:
@@ -67,54 +41,60 @@ class EdedupOperator(AbstractOperator):
             OperatorConstants.Config.DESCRIPTION: "Exact deduplication operator that removes duplicate documents based on content hash",
         }
 
-    def transform(self, table: pa.Table, file_name: str | None = None) -> tuple[list[pa.Table], dict[str, Any]]:
-        """
-        Performs exact deduplication of contents on the ededup_input pyarrow table and generates a list of output pyarrow
-        tables and metadata after removing duplicates based on central hashing. It uses Data Prep Toolkit's Exact
-        deduplication transform that identifies and removes identical documents in a dataset by comparing them
-        hash-for-hash to ensure exact matching.
-        """
-        logger.info(
-            ">> Running Exact Deduplication Operation on Pyarrow tables as ededup_input",
-            extra=self.common_log_arguments,
-        )
-        output_tables: list[pa.Table] = []
-        metadata: dict[str, Any] = {}
-        try:
-            if table is not None and table.num_rows > 0:
-                output_tables, _metadata = self._ededup_transform.transform(table=table, file_name=file_name)
-                logger.info(
-                    ">> Exact Deduplication Successful!!",
-                    extra=self.common_log_arguments,
-                )
-                logger.info("Metadata : %s", _metadata, extra=self.common_log_arguments)
-                metadata = self.create_base_metadata(total_docs_count=_metadata.get("source_documents"))
-                metadata[Metrics.External.PROCESSED_DOCS] = _metadata.get("result_documents")
-                metadata[Metrics.External.SKIPPED_DOCS_COUNT] = _metadata.get("source_documents") - _metadata.get(
-                    "result_documents"
-                )
-                metadata[Metrics.External.REMOVED_DOCUMENTS] = len(_metadata.get("removed_documents"))
-                metadata.update(
-                    OperatorUtils.find_skipped_docs(
-                        input_table=table,
-                        output_table=output_tables[0],
-                        reason="This document was identified as a duplicate and removed.",
-                    )
-                )
-        finally:
-            if not output_tables:
-                output_tables = [table]
-                logger.info(
-                    ">> Exact Deduplication Not Successful!!",
-                    extra=self.common_log_arguments,
-                )
-            if not metadata:
-                total_docs: int = OperatorUtils.find_doc_count(table=table)
-                metadata = self.create_base_metadata(
-                    total_docs_count=total_docs,
-                    node_status=ExecutionStatus.COMPLETED_WITH_WARNINGS.value,
-                )
-                metadata[Metrics.External.FAILED_DOCS_COUNT] = total_docs
-                metadata[Metrics.External.REMOVED_DOCUMENTS] = 0
+    def transform(self, table: pa.Table) -> tuple[list[pa.Table], dict[str, Any]]:
+        """Keep first local occurrences admitted by the configured shared store.
 
-        return output_tables, metadata
+        Hash normalization matches the previous DPK transform. Shared admission
+        is enabled when job and run context are present; standalone instances
+        retain only local state. Store errors propagate rather than passing data.
+        """
+        total = table.num_rows if table is not None else 0
+        metadata = self.create_base_metadata(total_docs_count=total)
+        metadata[Metrics.External.REMOVED_DOCUMENTS] = 0
+        if not total:
+            return [table], metadata
+
+        TransformUtils.validate_columns(table=table, required=[self.doc_column, self.doc_id_column])
+        first_rows: dict[str, int] = {}
+        for index, content in enumerate(table[self.doc_column].to_pylist()):
+            content_hash = TransformUtils.str_to_hash(TransformUtils.normalize_string(str(content)))
+            first_rows.setdefault(content_hash, index)
+
+        source_column = OperatorConstants.Columns.ID
+        if source_column not in table.column_names:
+            source_column = self.doc_id_column
+        doc_ids = table[source_column].to_pylist()
+        if self.job_id or self.job_run_id:
+            if not (self.job_id and self.job_run_id and self.id):
+                raise ValueError("Shared ededup requires job_id, job_run_id and the flow node id")
+            accepted = (
+                get_default_ededup_factory()
+                .get_store()
+                .check_and_register_hashes(
+                    job_id=str(self.job_id),
+                    node_id=str(self.id),
+                    job_run_id=str(self.job_run_id),
+                    records={value: str(doc_ids[index]) for value, index in first_rows.items()},
+                )
+            )
+        else:
+            accepted = set(first_rows) - self._local_hashes
+            self._local_hashes.update(accepted)
+
+        keep = {index for value, index in first_rows.items() if value in accepted}
+        output = table.filter(pa.array([index in keep for index in range(total)], type=pa.bool_()))
+        names = table[OperatorConstants.Columns.NAME].to_pylist() if "name" in table.column_names else [""] * total
+        paths = table["path"].to_pylist() if "path" in table.column_names else [""] * total
+        for index in range(total):
+            if index not in keep:
+                self.record_skipped_document(
+                    metadata=metadata,
+                    doc_id=doc_ids[index],
+                    doc_name=names[index],
+                    reason="This document was identified as a duplicate and removed.",
+                )
+                metadata[Metrics.External.SKIPPED_DOCS][-1][Metrics.External.DOCUMENT_URL] = paths[index]
+        metadata[Metrics.External.PROCESSED_DOCS] = len(keep)
+        metadata[Metrics.External.REMOVED_DOCUMENTS] = total - len(keep)
+        logger.info("Deduplication accepted %s of %s documents", len(keep), total, extra=self.common_log_arguments)
+        return [output], metadata

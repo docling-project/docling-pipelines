@@ -127,6 +127,19 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                         print(f"Error processing file {file_path}: {e}")
                         continue
 
+    @classmethod
+    def bind_file_reference(cls, *, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set filesystem ``paths`` to one canonical file."""
+        file_path = Path(file_reference)
+        try:
+            file_path = file_path.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(f"File reference does not exist: {file_reference}") from exc
+        if not file_path.is_file() or not os.access(file_path, os.R_OK):
+            raise ValueError(f"File reference is not a readable regular file: {file_reference}")
+
+        provider_config["paths"] = [str(file_path)]
+
     async def test_connection(self, config: FilesystemSourceConfig) -> tuple[bool, str]:
         """
         Test filesystem access.
