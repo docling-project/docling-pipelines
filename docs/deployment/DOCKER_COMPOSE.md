@@ -1,53 +1,71 @@
 # Run Docling Pipelines with Docker Compose
 
-Run from the repository root.
+Run all commands from repo root.
 
-## Stage 0: Set the OpenSearch password
+## Prerequisites
 
-Compose requires `OPENSEARCH_PASSWORD`. Run this in each terminal before using Compose:
+- Docker Engine 24.0+ and Docker Compose 2.24+; the Docker daemon must be running.
+- At least 6 GB of RAM available for containers.
+- Internet access to build images and download the embedding model.
+
+## Step 0: Setup Environment
+
+Set `OPENSEARCH_PASSWORD` in each terminal before running Docker Compose commands:
 
 ```bash
-export OPENSEARCH_PASSWORD='DocpipeLocal9!Secure'
+export OPENSEARCH_PASSWORD='MyStrongPass@123' # pragma: allowlist secret
 ```
 
-## Stage 1: Build the images
+## Step 1: Verify Configuration
 
 ```bash
 docker compose -f docker/docker-compose.yml config --quiet
+```
+
+## Step 2: Build Image
+
+```bash
 docker compose -f docker/docker-compose.yml build
 ```
 
 or, for a GPU build, use:
 
 ```bash
-# docker compose -f docker/docker-compose.yml config --quiet
-# time docker compose -f docker/docker-compose.yml build --build-arg COMPUTE_BACKEND=gpu
+# docker compose -f docker/docker-compose.yml build --build-arg COMPUTE_BACKEND=gpu
 ```
 
-## Stage 2: Run the API
+## Step 3: Start Application
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d --no-build
-docker compose -f docker/docker-compose.yml ps
 ```
 
-Check API health:
+### Check application health:
 
 ```bash
+docker compose -f docker/docker-compose.yml ps
 curl --fail http://localhost:8080/health
+```
+
+### View API logs (optional)
+
+In a separate terminal, run this command to follow the API logs. Press `Ctrl+C` to stop the stream.
+
+```bash
+docker compose -f docker/docker-compose.yml logs -f docpipe
+```
+
+### View BFF logs (optional)
+
+In a separate terminal, run this command to follow BFF logs. Press `Ctrl+C` to stop the stream.
+
+```bash
+docker compose -f docker/docker-compose.yml logs -f bff
 ```
 
 API docs: `http://localhost:8080/api/v1/docs`.
 
-### API logs (optional)
-
-Log commands stream until you press `Ctrl+C`.
-
-```bash
-docker compose -f docker/docker-compose.yml logs -f --tail=100 docpipe
-```
-
-### Run a sample flow through the API (optional)
+## Step 4: API: Run a sample flow
 
 Pull the embedding model:
 
@@ -55,7 +73,7 @@ Pull the embedding model:
 docker compose -f docker/docker-compose.yml exec ollama ollama pull nomic-embed-text
 ```
 
-Upload the sample flow and use `python3` to capture and print the returned flow ID:
+Upload the sample flow and use `python3` to capture and print the returned Flow ID:
 
 ```bash
 FLOW_ID=$(curl --fail-with-body -sS \
@@ -66,7 +84,7 @@ FLOW_ID=$(curl --fail-with-body -sS \
 printf 'FLOW_ID=%s\n' "$FLOW_ID"
 ```
 
-Start the run in the same terminal using the captured flow ID:
+Start the Job Run in the same terminal using the captured Flow ID:
 
 ```bash
 curl --fail-with-body -sS \
@@ -75,19 +93,11 @@ curl --fail-with-body -sS \
   -d "{\"entity\":{\"job\":{\"asset_ref\":\"${FLOW_ID:?Run the flow upload command first}\"}}}"
 ```
 
-## Stage 3: Run the sample flow in the UI
+## Step 5: UI: Run sample flow
 
 1. Open the UI: `http://localhost:8080/ui/home`.
 2. Click **Start** on **Get started with sample data**. The sample flow opens in the canvas.
 3. Click **Run flow** in the canvas to run it and view its progress and results.
-
-#### Optional: Watch BFF logs
-
-To monitor BFF activity while using the UI, start this log stream before step 1:
-
-```bash
-docker compose -f docker/docker-compose.yml logs -f --tail=100 bff
-```
 
 ## Stop the stack
 

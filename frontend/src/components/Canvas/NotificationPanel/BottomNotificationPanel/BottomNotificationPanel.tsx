@@ -6,16 +6,15 @@
 import React, { useState } from 'react';
 import { Button, CopyButton } from '@carbon/react';
 import { Close, WarningAlt, ErrorFilled, ChevronRight, ChevronDown } from '@carbon/react/icons';
+import { useIntl } from 'react-intl';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
 import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
+import { messages } from './BottomNotificationPanel.messages';
 import styles from './BottomNotificationPanel.module.scss';
 import {
   COLUMN_KEYS,
-  COLUMN_HEADERS,
   NOTIFICATION_TYPES,
   DEFAULT_VALUES,
-  ARIA_LABELS,
-  BUTTON_TITLES,
 } from '@/constants/notificationPanel';
 
 import type { ValidationActionType } from '@/services/api';
@@ -39,15 +38,6 @@ interface BottomNotificationPanelProps {
   onNodeClick?: (nodeId: string, messageCode?: string | null, actionType?: ValidationActionType | null) => void;
 }
 
-const HEADERS: SharedDataTableHeader[] = [
-  { key: COLUMN_KEYS.EXPAND,      header: COLUMN_HEADERS.EXPAND },
-  { key: COLUMN_KEYS.NUMBER,      header: COLUMN_HEADERS.NUMBER },
-  { key: COLUMN_KEYS.TIMESTAMP,   header: COLUMN_HEADERS.TIMESTAMP },
-  { key: COLUMN_KEYS.STATUS,      header: COLUMN_HEADERS.STATUS },
-  { key: COLUMN_KEYS.NAME,        header: COLUMN_HEADERS.NAME },
-  { key: COLUMN_KEYS.DESCRIPTION, header: COLUMN_HEADERS.DESCRIPTION },
-];
-
 /**
  * BottomNotificationPanel
  *
@@ -60,9 +50,18 @@ const HEADERS: SharedDataTableHeader[] = [
 const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
   notifications,
   onClose,
-  title = DEFAULT_VALUES.TITLE,
+  title,
   onNodeClick,
 }) => {
+  const intl = useIntl();
+  const headers: SharedDataTableHeader[] = [
+    { key: COLUMN_KEYS.EXPAND,      header: '' },
+    { key: COLUMN_KEYS.NUMBER,      header: intl.formatMessage(messages.headerNumber) },
+    { key: COLUMN_KEYS.TIMESTAMP,   header: intl.formatMessage(messages.headerTimestamp) },
+    { key: COLUMN_KEYS.STATUS,      header: intl.formatMessage(messages.headerStatus) },
+    { key: COLUMN_KEYS.NAME,        header: intl.formatMessage(messages.headerName) },
+    { key: COLUMN_KEYS.DESCRIPTION, header: intl.formatMessage(messages.headerDescription) },
+  ];
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const toggleRow = (rowId: string): void => {
@@ -112,7 +111,7 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
           type="button"
           className={styles.expandIcon}
           onClick={() => { toggleRow(row.id); }}
-          aria-label={isExpanded ? ARIA_LABELS.COLLAPSE_ROW : ARIA_LABELS.EXPAND_ROW}
+          aria-label={intl.formatMessage(isExpanded ? messages.collapseRow : messages.expandRow)}
         >
           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
@@ -152,8 +151,8 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
           <CopyButton
             className={styles.copyButton}
             onClick={() => { handleCopy(fullMessage); }}
-            iconDescription={BUTTON_TITLES.COPY_TO_CLIPBOARD}
-            feedback="Copied"
+            iconDescription={intl.formatMessage(messages.copyToClipboard)}
+            feedback={intl.formatMessage(messages.copied)}
             feedbackTimeout={2000}
             align="left"
           />
@@ -172,7 +171,7 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
     if (!notification) { return null; }
     return (
       <tr className={styles.expandedRow}>
-        <td colSpan={HEADERS.length} className={styles.expandedCell}>
+        <td colSpan={headers.length} className={styles.expandedCell}>
           <span className={styles.expandedContent}>{notification.message}</span>
         </td>
       </tr>
@@ -184,24 +183,24 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
   return (
     <div className={styles.bottomPanel}>
       <div className={styles.header}>
-        <h3 className={styles.title}>{title}</h3>
+        <h3 className={styles.title}>{title ?? intl.formatMessage(messages.title)}</h3>
         <div className={styles.actions}>
           <Button
             kind="ghost"
             size="sm"
             hasIconOnly
             renderIcon={Close}
-            iconDescription={ARIA_LABELS.CLOSE}
+            iconDescription={intl.formatMessage(messages.close)}
             onClick={onClose}
           />
         </div>
       </div>
       <div className={styles.tableContainer}>
         <SharedDataTable
-          headers={HEADERS}
+          headers={headers}
           rows={rows}
           searchable
-          searchPlaceholder={DEFAULT_VALUES.SEARCH_PLACEHOLDER}
+          searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
           size="sm"
           renderCell={renderCell}
           renderRowExtras={renderRowExtras}

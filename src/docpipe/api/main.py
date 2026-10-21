@@ -49,6 +49,7 @@ from docpipe.api.middleware.security_headers import SecurityHeadersMiddleware
 from docpipe.api.middleware.transaction_middleware import TransactionMiddleware
 from docpipe.api.openapi import build_custom_openapi
 from docpipe.core.constants.constants import EnvironmentVariables
+from docpipe.core.event_streaming.factory import EventStreamingFactory
 from docpipe.core.job_management.adapters.config.job_management_factory import get_default_factory
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.logging import (
@@ -171,6 +172,7 @@ async def lifespan(app: FastAPI):
     from docpipe.integrations.secrets.vault_initializer import initialize_secret_providers
 
     initialize_secret_providers()
+    event_listener = EventStreamingFactory.create_kafka_listener()
     bff_process, started_bff_url = _start_bff()
     # Shared AsyncClient — reused across all proxy_to_bff requests so the
     # connection pool is maintained and TCP overhead is paid once, not per request.
@@ -189,15 +191,21 @@ async def lifespan(app: FastAPI):
         custom_op_paths.append(custom_operators_dir)
         os.environ[EnvironmentVariables.DOCPIPE_CUSTOM_OPERATORS] = ",".join(custom_op_paths)
 
-    yield
-    if app.state.bff_client is not None:
-        await app.state.bff_client.aclose()
-    if bff_process:
-        logger.info("Shutting down BFF sidecar...")
-        bff_process.terminate()
-        # Do not call bff_process.wait() — it is a synchronous blocking call
-        # inside an async context and would stall the uvicorn event loop during
-        # shutdown. SIGTERM is sufficient; the OS reaps the child after it exits.
+    try:
+        if event_listener is not None:
+            event_listener.start()
+        yield
+    finally:
+        if event_listener is not None:
+            await event_listener.stop()
+        if app.state.bff_client is not None:
+            await app.state.bff_client.aclose()
+        if bff_process:
+            logger.info("Shutting down BFF sidecar...")
+            bff_process.terminate()
+            # Do not call bff_process.wait() — it is a synchronous blocking call
+            # inside an async context and would stall the uvicorn event loop during
+            # shutdown. SIGTERM is sufficient; the OS reaps the child after it exits.
 
 
 app = FastAPI(

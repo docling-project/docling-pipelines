@@ -18,6 +18,10 @@ class ErrorCode(StrEnum):
     FLOW_DELETE_ERROR = "flow_delete_error"
     FLOW_UPDATE_ERROR = "flow_update_error"
 
+    # Event mapping operations
+    EVENT_MAPPING_NOT_FOUND = "event_mapping_not_found"
+    EVENT_MAPPING_ALREADY_EXISTS = "event_mapping_already_exists"
+
     # Job run operations
     JOB_RUN_NOT_FOUND = "job_run_not_found"
     JOB_RUN_ALREADY_EXISTS = "job_run_already_exists"

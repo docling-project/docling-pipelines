@@ -30,8 +30,8 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
 ARG COMPUTE_BACKEND=cpu
 # Use CPU dependencies by default, or select GPU support with COMPUTE_BACKEND=gpu.
-# Install CPU torch/torchvision separately to select CPU wheels without changing
-# pyproject.toml or uv.lock; the locked hashes apply to the original wheels.
+# Install the pinned torch and torchvision versions separately using CPU wheels.
+# This avoids CUDA dependencies while keeping pyproject.toml and uv.lock unchanged.
 RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
     case "$COMPUTE_BACKEND" in \
         gpu) \

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import React from 'react';
 import { VaultInput, type VaultInputProps } from '@/components/common/VaultInput/VaultInput';
 
@@ -11,7 +12,7 @@ function renderVaultInput(props: Partial<VaultInputProps> = {}) {
     onChange: vi.fn(),
     ...props,
   };
-  return { ...render(React.createElement(VaultInput, defaults)), ...defaults };
+  return { ...renderWithProviders(React.createElement(VaultInput, defaults)), ...defaults };
 }
 
 describe('VaultInput', () => {
