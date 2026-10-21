@@ -25,7 +25,6 @@ from typing import TypeVar
 from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
 from docpipe.core.assets.common.domain.models.asset import Asset
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
-from docpipe.core.constants.constants import _find_project_root
 from docpipe.exceptions.docpipe_exceptions import RepositoryConfigurationException
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
@@ -50,10 +49,6 @@ class RepositoryType(AbstractRepositoryType):
     LOCAL = "local"
     DUCKDB = "duckdb"
     POSTGRES = "postgres"
-
-
-DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
-ENV_CONFIG_PATH_KEY = "DOCPIPE_CONFIG_PATH"
 
 
 class AssetRepositoryFactory:

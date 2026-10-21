@@ -29,7 +29,7 @@ from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
-_DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
+DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
 DEFAULT_STORAGE_BACKEND = "filesystem"
 
 
@@ -88,9 +88,23 @@ class DocpipeConfigLoader:
 
     @classmethod
     def get_storage(cls, key: str, default: Any = None) -> tuple[str, dict[str, Any]]:
-        # Returns storage type (ex: filesystem, duckdb, etc.) and
-        # storage configuration for the given key (ex: incremental_metadata, flow_definition_snapshot, etc.)
+        """Return the storage type and storage config for a named service key.
 
+        Resolves configuration with the following precedence:
+        service-specific ``storage``/``store`` block → ``global_storage`` → built-in
+        default (``"filesystem"``).
+
+        Args:
+            key: Top-level YAML key identifying the service
+                 (e.g. ``"incremental_metadata"``, ``"flow_definition_snapshot"``).
+            default: Fallback value passed to :meth:`get` when *key* is absent.
+                     Defaults to ``None`` (treated as ``{}``).
+
+        Returns:
+            A ``(storage_type, config_dict)`` tuple where *storage_type* is a
+            string such as ``"filesystem"`` or ``"duckdb"`` and *config_dict*
+            contains backend-specific configuration.
+        """
         # Precedence: service-specific > global_storage > default
         config = cls.get(key=key, default=default or {})
         storage_config = config.get(DocpipeConfigKeys.STORAGE, {}) or config.get(DocpipeConfigKeys.STORE, {})
@@ -126,7 +140,7 @@ class DocpipeConfigLoader:
     @classmethod
     def _load(cls) -> dict[str, Any]:
         """Read and parse the YAML config file.  Returns ``{}`` on any error."""
-        config_path = Path(os.environ.get(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(_DEFAULT_CONFIG_PATH)))
+        config_path = Path(os.environ.get(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(DEFAULT_CONFIG_PATH)))
 
         if not config_path.exists():
             logger.debug("Config file not found at %s; using empty configuration.", config_path)

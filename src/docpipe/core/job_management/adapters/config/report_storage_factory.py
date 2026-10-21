@@ -19,13 +19,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from docpipe.core.constants import DocpipeConfigKeys
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.storage.file_system.content_file_system_storage import ContentFileSystemStorage
-from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
+from docpipe.utils.infrastructure.config_utils import DEFAULT_STORAGE_BACKEND, DocpipeConfigLoader
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
-
-DEFAULT_STORAGE_BACKEND = "filesystem"
 
 if TYPE_CHECKING:
     from docpipe.storage.interfaces.content_storage_port import ContentStoragePort
@@ -85,6 +83,18 @@ class ContentStorageFactory:
 
     @classmethod
     def create_default_factory(cls) -> ContentStorageFactory:
+        """Create a ``ContentStorageFactory`` configured from ``docling-pipelines-config.yaml``.
+
+        Reads the ``job_run_report`` storage section (falling back to ``global_storage``
+        and then the filesystem default) and validates that the resolved backend is
+        registered before returning a factory instance.
+
+        Returns:
+            ContentStorageFactory: Configured factory for report content storage.
+
+        Raises:
+            DocpipeException: If the resolved storage type is not registered.
+        """
         storage_type, storage_config = DocpipeConfigLoader.get_storage(key=DocpipeConfigKeys.JOB_RUN_REPORT)
 
         if storage_type not in ContentStorageFactory._stores:
