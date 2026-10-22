@@ -1,3 +1,5 @@
+"""Validate source configuration and ingest documents through provider adapters."""
+
 import asyncio
 import hashlib
 import importlib
@@ -23,6 +25,7 @@ from docpipe.core.operators.ingest.ingest_utils import (
     is_doc_previously_processed,
 )
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -297,7 +300,7 @@ class IngestSourceOperator(AbstractOperator):
     category: OperatorCategory = OperatorCategory.Ingest
     owner = DocpipeConstants.OWNER_DOCPIPE
 
-    def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
+    def validate(self, *, errors: list[Any], warnings: list[str], available_features: list[str]) -> None:
         """
         Validate operator configuration including adapter-specific requirements.
 
@@ -312,6 +315,15 @@ class IngestSourceOperator(AbstractOperator):
         """
         # Call parent validation for required features
         super().validate(errors=errors, warnings=warnings, available_features=available_features)
+
+        if not self.provider:
+            errors.append(
+                ValidationMessage(
+                    message=ValidationCodeMessages.INGEST_PROVIDER_MISSING.value,
+                    message_code=ValidationCodeMessages.INGEST_PROVIDER_MISSING.name,
+                )
+            )
+            return
 
         # Validate adapter configuration for adapter-managed providers.
         # Skip when provider_config contains vault references — either still a
@@ -353,7 +365,11 @@ class IngestSourceOperator(AbstractOperator):
         - force_ingest: Force re-ingestion of previously processed documents
         """
         super().__init__(config)
-        self.provider: str = config.get(PROVIDER_KEY, "").lower()
+        provider = config.get(PROVIDER_KEY)
+        if provider is not None and not isinstance(provider, str):
+            msg = "Provider must be a string."
+            raise ValueError(msg)
+        self.provider: str = provider.strip().lower() if provider is not None else ""
         self.max_files: int = config.get(MAX_FILES_KEY, MAX_FILES_DEFAULT_VALUE)
         self.provider_config: dict[str, Any] = dict(config.get(PROVIDER_CONFIG_KEY) or {})
 
@@ -430,6 +446,9 @@ class IngestSourceOperator(AbstractOperator):
         Returns:
             Tuple of (list of output tables, metadata dictionary)
         """
+
+        if not self.provider:
+            raise ValueError(ValidationCodeMessages.INGEST_PROVIDER_MISSING.value)
 
         incremental_service = get_incremental_update_service()
         job_id_for_tracking: str = self.context_id or self.job_id or ""
