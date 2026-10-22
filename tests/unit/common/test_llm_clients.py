@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from docpipe.exceptions.docpipe_exceptions import ConfigurationError
-from docpipe.integrations.base_llm_client import BaseLLMClient, retry_with_backoff
+from docpipe.exceptions.docpipe_exceptions import ConfigurationError, DependencyError, ExternalServiceError
+from docpipe.integrations.base_llm_client import BaseLLMClient, require_package, retry_with_backoff
 from docpipe.integrations.huggingface.client import HuggingFaceLLMClient
 from docpipe.integrations.litellm.client import LiteLLMLLMClient
 
@@ -58,6 +58,39 @@ class TestRetryWithBackoff:
             decorated()
 
         assert mock_func.call_count == 3
+
+    def test_retry_without_jitter_sleeps_exact_delay(self):
+        """Test that the default backoff sleeps the exact exponential delay."""
+        mock_func = Mock(__name__="test_func", side_effect=Exception("fail"))
+        decorated = retry_with_backoff(max_retries=3, initial_delay=1.0, backoff_factor=2.0)(mock_func)
+
+        with (
+            patch("docpipe.integrations.base_llm_client.time.sleep") as sleep,
+            patch("docpipe.integrations.base_llm_client.random.uniform") as uniform,
+        ):
+            with pytest.raises(Exception, match="fail"):
+                decorated()
+
+        assert [c.args[0] for c in sleep.call_args_list] == [1.0, 2.0]
+        uniform.assert_not_called()
+
+    def test_retry_with_jitter_sleeps_random_share_of_delay(self):
+        """Test that jitter sleeps a random duration between 0 and the capped exponential delay."""
+        mock_func = Mock(__name__="test_func", side_effect=Exception("fail"))
+        decorated = retry_with_backoff(
+            max_retries=4, initial_delay=1.0, backoff_factor=2.0, max_delay=3.0, jitter=True
+        )(mock_func)
+
+        with (
+            patch("docpipe.integrations.base_llm_client.time.sleep") as sleep,
+            patch("docpipe.integrations.base_llm_client.random.uniform", side_effect=lambda a, b: b / 2) as uniform,
+        ):
+            with pytest.raises(Exception, match="fail"):
+                decorated()
+
+        assert [c.args for c in uniform.call_args_list] == [(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)]
+        assert [c.args[0] for c in sleep.call_args_list] == [0.5, 1.0, 1.5]
+        assert mock_func.call_count == 4
 
 
 class TestBaseLLMClient:
@@ -157,6 +190,50 @@ class TestBaseLLMClient:
 
         with pytest.raises(ConfigurationError, match="must be a non-empty string"):
             client.generate_embeddings(None)  # type: ignore
+
+    def test_validate_configuration_and_embeddings_output(self):
+        """Test model name and embeddings output validation."""
+
+        class TestClient(BaseLLMClient):
+            def generate_embeddings(self, text: str):
+                return [0.1, 0.2]
+
+            def generate_embeddings_batch(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
+                return [[0.1, 0.2] for _ in texts]
+
+            @staticmethod
+            def get_model_token_limit(model_name: str) -> int:
+                return 1000
+
+            @staticmethod
+            def get_embedding_dimension(model_name: str) -> int:
+                return 768
+
+        TestClient(model_name="test-model").validate_configuration()
+        with pytest.raises(ConfigurationError, match="model_name is required"):
+            TestClient(model_name="").validate_configuration()
+
+        client = TestClient(model_name="test-model")
+        client._validate_embeddings_output([0.1, 2])
+        with pytest.raises(ExternalServiceError, match="expected non-empty list"):
+            client._validate_embeddings_output([])
+        with pytest.raises(ExternalServiceError, match="all elements must be numeric"):
+            client._validate_embeddings_output([0.1, "x"])  # type: ignore[list-item]
+
+    def test_sanitize_config_redacts_sensitive_keys(self):
+        """Test that sensitive configuration values are masked."""
+        sanitized = BaseLLMClient.sanitize_config(
+            {"model": "m", "api_key": "k", "IAM_Token": "t"}  # pragma: allowlist secret
+        )
+
+        assert sanitized == {"model": "m", "api_key": "***REDACTED***", "IAM_Token": "***REDACTED***"}
+
+    def test_require_package_raises_for_missing_package(self):
+        """Test that a missing optional package raises DependencyError with the install hint."""
+        require_package("json", "pip install json")
+
+        with pytest.raises(DependencyError, match="pip install not-a-real-package"):
+            require_package("not_a_real_package_xyz", "pip install not-a-real-package")
 
 
 @pytest.mark.skipif(not HAS_SENTENCE_TRANSFORMERS, reason="sentence-transformers package not installed")

@@ -1,16 +1,19 @@
-"""Consume JSON messages from the configured topic using its latest value schema."""
+"""Consume JSON messages from Kafka."""
 
 import json
+import logging
 import os
 
-from confluent_kafka import DeserializingConsumer, KafkaError
+from confluent_kafka import DeserializingConsumer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.json_schema import JSONDeserializer
 
-BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092")
-TOPIC = os.environ["KAFKA_TOPIC"]
-GROUP_ID = os.getenv("KAFKA_GROUP_ID", "docpipe-event-consumer")
-SCHEMA_REGISTRY_URL = os.getenv("SCHEMA_REGISTRY_URL", "http://localhost:8081")
+logger = logging.getLogger(__name__)
+
+BOOTSTRAP_SERVERS = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
+TOPIC = os.environ["KAFKA_INPUT_TOPIC"]
+GROUP_ID = os.environ["KAFKA_GROUP_ID"]
+SCHEMA_REGISTRY_URL = os.environ["SCHEMA_REGISTRY_URL"]
 
 
 def consume() -> None:
@@ -38,10 +41,9 @@ def consume() -> None:
                 continue
             error = message.error()
             if error is not None:
-                if error.code() != KafkaError._PARTITION_EOF:
-                    print(f"Consumer error: {error}")
+                logger.error("Kafka consumer error: %s", error)
                 continue
-            print(json.dumps(message.value()), flush=True)
+            logger.info("Consumed: %s", json.dumps(message.value()))
     except KeyboardInterrupt:
         pass
     finally:
@@ -49,4 +51,9 @@ def consume() -> None:
 
 
 if __name__ == "__main__":
-    consume()
+    logging.basicConfig(level=logging.INFO)
+    try:
+        consume()
+    except Exception as error:
+        logger.exception("Kafka consumer failed")
+        raise SystemExit(1) from error

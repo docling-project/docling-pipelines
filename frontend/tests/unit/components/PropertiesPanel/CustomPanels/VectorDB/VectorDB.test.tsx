@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { VectorDBPanelBody } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDB';
 
 const makeController = (overrides: Record<string, unknown> = {}) => ({
@@ -19,12 +20,12 @@ describe('VectorDBPanelBody', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('renders without crashing with empty controller', () => {
-    const { container } = render(<VectorDBPanelBody controller={makeController()} />);
+    const { container } = renderWithProviders(<VectorDBPanelBody controller={makeController()} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders with opensearch provider', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -37,7 +38,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with milvus provider', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -50,7 +51,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with existing feature mappings', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -66,7 +67,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with invalid provider_config JSON (dirty state)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -80,7 +81,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with add_sparse_vector true (milvus)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -95,7 +96,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with opensearch basic auth (username+password)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -110,7 +111,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with opensearch JWT auth', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -125,7 +126,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with opensearch AWS auth', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -140,25 +141,25 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with null controller gracefully', () => {
-    const { container } = render(<VectorDBPanelBody controller={null as any} />);
+    const { container } = renderWithProviders(<VectorDBPanelBody controller={null as any} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders provider dropdown', () => {
-    render(<VectorDBPanelBody controller={makeController()} />);
+    renderWithProviders(<VectorDBPanelBody controller={makeController()} />);
     const providerEl = document.getElementById('vectordb-provider');
     expect(providerEl ?? document.body).toBeInTheDocument();
   });
 
   it('renders provider_config TextArea', () => {
-    render(<VectorDBPanelBody controller={makeController()} />);
+    renderWithProviders(<VectorDBPanelBody controller={makeController()} />);
     const configEl = document.getElementById('vectordb-provider-config');
     expect(configEl ?? document.body).toBeInTheDocument();
   });
 
   it('typing in provider_config calls updatePropertyValue', () => {
     const controller = makeController();
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const configEl = document.getElementById('vectordb-provider-config') as HTMLTextAreaElement | null;
     if (configEl) {
       fireEvent.change(configEl, { target: { value: '{"host": "localhost", "port": 9200}' } });
@@ -169,7 +170,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with use_ssl toggle', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -184,12 +185,12 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders advanced accordion section', () => {
-    render(<VectorDBPanelBody controller={makeController()} />);
+    renderWithProviders(<VectorDBPanelBody controller={makeController()} />);
     expect(screen.queryAllByText(/advanced/i).length).toBeGreaterThan(0);
   });
 
   it('renders feature mappings summary table when mappings exist', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -218,7 +219,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     // The advanced textarea id is vectordb-provider-config-textarea
     const textarea = document.getElementById('vectordb-provider-config-textarea') as HTMLTextAreaElement | null;
     if (textarea) {
@@ -238,7 +239,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const textarea = document.getElementById('vectordb-provider-config-textarea') as HTMLTextAreaElement | null;
     if (textarea) {
       // Invalid JSON must NOT be written to provider_config — it is held in local
@@ -259,7 +260,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const textarea = document.getElementById('vectordb-provider-config-textarea') as HTMLTextAreaElement | null;
     if (textarea) {
       fireEvent.change(textarea, { target: { value: '' } });
@@ -273,7 +274,7 @@ describe('VectorDBPanelBody', () => {
 
   it('handleOpenTearsheet with valid JSON (empty advanced config) opens tearsheet', () => {
     // When provider_config has only managed keys, advancedConfig='' → no JSON validation needed
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -313,7 +314,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
 
     // Type invalid JSON into the advanced textarea to make advancedConfig invalid
     const textarea = document.getElementById('vectordb-provider-config-textarea') as HTMLTextAreaElement | null;
@@ -343,7 +344,7 @@ describe('VectorDBPanelBody', () => {
   // ── handleSaveFeatureMappings (lines 291-312) ─────────────────────────────
 
   it('hasMappings=true renders summary card with resource name and edit button', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -378,7 +379,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
 
     // Select the non-mandatory row using its checkbox
     const rowCheckbox = document.getElementById('summary-select-embedding') as HTMLInputElement | null;
@@ -413,7 +414,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
 
     const rowCheckbox = document.getElementById('summary-select-embedding') as HTMLInputElement | null;
     if (rowCheckbox) {
@@ -437,7 +438,7 @@ describe('VectorDBPanelBody', () => {
   // ── OpenSearch-specific fields (lines 511-733) ────────────────────────────
 
   it('renders opensearch host field when provider=opensearch', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -451,7 +452,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders opensearch port field when provider=opensearch', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -470,7 +471,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'opensearch' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const hostInput = document.getElementById('opensearch-host') as HTMLInputElement | null;
     if (hostInput) {
       fireEvent.change(hostInput, { target: { value: 'my-opensearch-host.example.com' } });
@@ -486,7 +487,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'opensearch' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const portInput = document.getElementById('opensearch-port') as HTMLInputElement | null;
     if (portInput) {
       fireEvent.change(portInput, { target: { value: '9201' } });
@@ -502,7 +503,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'opensearch' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     // Carbon Toggle renders a <button> with id + "-toggle" or the underlying checkbox
     const sslToggle = document.getElementById('opensearch-use-ssl') as HTMLButtonElement | null;
     if (sslToggle) {
@@ -521,7 +522,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders opensearch auth method dropdown when provider=opensearch', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -535,7 +536,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders opensearch username field when basic auth is saved', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -558,7 +559,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const usernameInput = document.getElementById('opensearch-username') as HTMLInputElement | null;
     if (usernameInput) {
       fireEvent.change(usernameInput, { target: { value: 'newuser' } });
@@ -569,7 +570,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders opensearch AWS region field when aws_auth is saved', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -592,7 +593,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const awsRegionInput = document.getElementById('opensearch-aws-region') as HTMLInputElement | null;
     if (awsRegionInput) {
       fireEvent.change(awsRegionInput, { target: { value: 'eu-west-1' } });
@@ -605,7 +606,7 @@ describe('VectorDBPanelBody', () => {
   // ── Milvus-specific fields ─────────────────────────────────────────────────
 
   it('renders milvus host field when provider=milvus', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -619,7 +620,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus port field when provider=milvus', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -633,7 +634,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus database field when provider=milvus', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -647,7 +648,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus URI field when auth_type=uri', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -670,7 +671,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const uriInput = document.getElementById('milvus-uri') as HTMLInputElement | null;
     if (uriInput) {
       fireEvent.change(uriInput, { target: { value: 'https://xxx.zillizcloud.com' } });
@@ -681,7 +682,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus token field when auth_type=token', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -697,7 +698,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus username field when auth_type=grpc', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -718,7 +719,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'milvus' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const milvusHostInput = document.getElementById('milvus-host') as HTMLInputElement | null;
     if (milvusHostInput) {
       fireEvent.change(milvusHostInput, { target: { value: 'milvus.example.com' } });
@@ -734,7 +735,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'milvus' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const secureToggle = document.getElementById('milvus-secure') as HTMLButtonElement | null;
     if (secureToggle) {
       fireEvent.click(secureToggle);
@@ -751,7 +752,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('hasMappings=true with milvus renders summary card with collection name', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -779,7 +780,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     // Find the provider dropdown and change to milvus
     const providerDropdown = document.getElementById('vectordb-provider-dropdown') as HTMLButtonElement | null;
     if (providerDropdown) {
@@ -811,7 +812,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
 
     // Click select-all checkbox
     const selectAll = document.getElementById('summary-select-all') as HTMLInputElement | null;
@@ -835,7 +836,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('search filter in summary table narrows displayed rows', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -855,7 +856,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders loading skeleton when featuresLoading=true', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getAppData: vi.fn(() => ({
@@ -883,7 +884,7 @@ describe('VectorDBPanelBody', () => {
   // ── verify_certs toggle (only shown when use_ssl=true) ───────────────────
 
   it('renders verify_certs toggle when use_ssl=true and provider=opensearch', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -906,7 +907,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const toggle = document.getElementById('opensearch-verify-certs') as HTMLButtonElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -932,7 +933,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const authDropdown = document.getElementById('opensearch-auth-method') as HTMLButtonElement | null;
     if (authDropdown) {
       fireEvent.click(authDropdown);
@@ -951,7 +952,7 @@ describe('VectorDBPanelBody', () => {
   // ── milvus grpc auth fields ───────────────────────────────────────────────
 
   it('renders milvus password field when auth_type=standalone', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -967,7 +968,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus password field when auth_type=grpc', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -983,7 +984,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus username when auth_type=token', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -1006,7 +1007,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const usernameInput = document.getElementById('milvus-username') as HTMLInputElement | null;
     if (usernameInput) {
       fireEvent.change(usernameInput, { target: { value: 'myuser' } });
@@ -1027,7 +1028,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const usernameInput = document.getElementById('milvus-username') as HTMLInputElement | null;
     if (usernameInput) {
       fireEvent.change(usernameInput, { target: { value: 'root' } });
@@ -1056,7 +1057,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const passInput = document.getElementById('milvus-password') as HTMLInputElement | null;
     if (passInput) {
       fireEvent.change(passInput, { target: { value: 'secret' } });
@@ -1082,7 +1083,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'milvus' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const authDropdown = document.getElementById('milvus-auth-type') as HTMLButtonElement | null;
     if (authDropdown) {
       fireEvent.click(authDropdown);
@@ -1099,7 +1100,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders milvus port when auth_type=grpc (not uri)', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -1115,7 +1116,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders provider_config as object (not string) without crash', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -1137,7 +1138,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const hostInput = document.getElementById('opensearch-host') as HTMLInputElement | null;
     if (hostInput) {
       fireEvent.change(hostInput, { target: { value: '' } });
@@ -1154,7 +1155,7 @@ describe('VectorDBPanelBody', () => {
         p.name === 'provider' ? 'opensearch' : undefined
       ),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const portInput = document.getElementById('opensearch-port') as HTMLInputElement | null;
     if (portInput) {
       fireEvent.change(portInput, { target: { value: 'abc' } });
@@ -1165,7 +1166,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('renders with featuresLoading=false and hasMappings=false shows empty state', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getAppData: vi.fn(() => ({
@@ -1191,7 +1192,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const passInput = document.getElementById('milvus-password') as HTMLInputElement | null;
     if (passInput) {
       fireEvent.change(passInput, { target: { value: 'new-pass' } });
@@ -1209,7 +1210,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const tokenInput = document.getElementById('milvus-token') as HTMLInputElement | null;
     if (tokenInput) {
       fireEvent.change(tokenInput, { target: { value: 'new-tok' } });
@@ -1220,7 +1221,7 @@ describe('VectorDBPanelBody', () => {
   });
 
   it('VectorDBEmptyState add click opens tearsheet and tearsheet onClose closes it', () => {
-    render(
+    renderWithProviders(
       <VectorDBPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -1251,7 +1252,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     // PasswordInput renders with id="opensearch-password"
     const passInput = document.getElementById('opensearch-password') as HTMLInputElement | null;
     if (passInput) {
@@ -1279,7 +1280,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const jwtInput = document.getElementById('opensearch-jwt-token') as HTMLInputElement | null;
     if (jwtInput) {
       fireEvent.change(jwtInput, { target: { value: 'new-token' } });
@@ -1304,7 +1305,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     // The milvus auth-type dropdown renders with id="milvus-auth-type"
     const authDropdown = document.getElementById('milvus-auth-type') as HTMLButtonElement | null;
     if (authDropdown) {
@@ -1336,7 +1337,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const authDropdown = document.getElementById('milvus-auth-type') as HTMLButtonElement | null;
     if (authDropdown) {
       fireEvent.click(authDropdown);
@@ -1376,7 +1377,7 @@ describe('VectorDBPanelBody', () => {
         return undefined;
       }),
     });
-    render(<VectorDBPanelBody controller={controller} />);
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
     const authDropdown = document.getElementById('opensearch-auth-method') as HTMLButtonElement | null;
     if (authDropdown) {
       fireEvent.click(authDropdown);

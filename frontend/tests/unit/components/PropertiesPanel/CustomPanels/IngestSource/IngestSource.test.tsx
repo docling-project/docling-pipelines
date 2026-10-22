@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { IngestSourcePanelBody } from '@/components/PropertiesPanel/CustomPanels/IngestSource/IngestSource';
 
 const FILESYSTEM_METADATA = {
@@ -49,27 +50,27 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody controller={makeController()} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders with null controller gracefully', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody controller={null as any} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders provider dropdown with provider items from metadata', () => {
-    render(<IngestSourcePanelBody controller={makeController()} />);
+    renderWithProviders(<IngestSourcePanelBody controller={makeController()} />);
     // The Dropdown label text is "Provider" (exact match avoids false positives from ARIA)
     expect(screen.getAllByText(/provider/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders filesystem provider with accordion when provider is set', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -83,7 +84,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders COS provider without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -96,7 +97,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders custom provider with JSON textarea fallback', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -110,7 +111,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders with include_filter as array', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -125,7 +126,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders with include_filter as comma-separated string', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -140,7 +141,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders with max_files set to custom value', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -155,7 +156,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders with provider_config as object', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -170,7 +171,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders without metadata for operator (empty attributes)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <IngestSourcePanelBody
         controller={{
           getAppData: vi.fn(() => ({ operatorMetadata: {} })),
@@ -188,7 +189,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     const input = document.getElementById('max_files') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: '25' } });
@@ -204,7 +205,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     // FilterableMultiSelect renders the include_filter field
     expect(document.getElementById('include_filter')).not.toBeNull();
   });
@@ -215,7 +216,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(document.getElementById('exclude_filter')).not.toBeNull();
   });
 
@@ -225,7 +226,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     const toggle = document.getElementById('ignore_hidden_files') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -266,7 +267,7 @@ describe('IngestSourcePanelBody', () => {
       ),
       updatePropertyValue: vi.fn(),
     };
-    const { container } = render(<IngestSourcePanelBody controller={controllerWithSchema} />);
+    const { container } = renderWithProviders(<IngestSourcePanelBody controller={controllerWithSchema} />);
     expect(container).toBeInTheDocument();
     // ProviderFieldsForm should render a field for 'paths'
     expect(document.getElementById('provider-field-paths')).not.toBeNull();
@@ -303,7 +304,7 @@ describe('IngestSourcePanelBody', () => {
       ),
       updatePropertyValue: vi.fn(),
     };
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(controller.updatePropertyValue).toBeDefined();
   });
 
@@ -313,7 +314,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'custom' : undefined
       ),
     });
-    const { container } = render(<IngestSourcePanelBody controller={controller} />);
+    const { container } = renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(container).toBeInTheDocument();
     // JSON fallback textarea should be present for custom provider
     expect(document.getElementById('provider_config')).not.toBeNull();
@@ -352,7 +353,7 @@ describe('IngestSourcePanelBody', () => {
       ),
       updatePropertyValue: vi.fn(),
     };
-    const { container } = render(<IngestSourcePanelBody controller={controllerNoSchema} />);
+    const { container } = renderWithProviders(<IngestSourcePanelBody controller={controllerNoSchema} />);
     expect(container).toBeInTheDocument();
     expect(document.getElementById('provider_config')).not.toBeNull();
   });
@@ -363,7 +364,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     // Simulate provider change — button click on the dropdown trigger
     const dropdown = document.getElementById('provider');
     if (dropdown) {
@@ -381,7 +382,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     // Get the dropdown and simulate changing to a different provider
     const dropdown = document.getElementById('provider');
@@ -398,14 +399,14 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'ibm_cos' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(document.body).toBeInTheDocument();
   });
 
   // ── Provider configuration accordion (lines 178-221) ──────────────────────
 
   it('renders provider configuration accordion with description for filesystem', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -420,7 +421,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders provider configuration accordion with description for COS', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -434,7 +435,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders ProviderFieldsForm for provider with schema (filesystem)', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getAppData: vi.fn(() => ({
@@ -492,7 +493,7 @@ describe('IngestSourcePanelBody', () => {
         },
       },
     };
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={{
           getAppData: vi.fn(() => ({ operatorMetadata: s3Metadata })),
@@ -512,7 +513,7 @@ describe('IngestSourcePanelBody', () => {
   // ── Custom provider JSON fallback (lines 203-218) ──────────────────────────
 
   it('renders JSON fallback for custom provider with provider_config object', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -550,7 +551,7 @@ describe('IngestSourcePanelBody', () => {
         },
       },
     };
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={{
           getAppData: vi.fn(() => ({ operatorMetadata: noSchemaMetadata })),
@@ -570,7 +571,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'custom' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     // JsonTextArea is rendered - check it exists
     expect(document.getElementById('provider_config')).not.toBeNull();
   });
@@ -583,7 +584,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     // FilterableMultiSelect is rendered
     expect(document.getElementById('include_filter')).not.toBeNull();
   });
@@ -594,7 +595,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(document.getElementById('exclude_filter')).not.toBeNull();
   });
 
@@ -628,7 +629,7 @@ describe('IngestSourcePanelBody', () => {
       getPropertyValue: vi.fn(() => undefined),
       updatePropertyValue: vi.fn(),
     };
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     // Provider dropdown should show invalid state when required but empty
     expect(document.body).toBeInTheDocument();
   });
@@ -644,7 +645,7 @@ describe('IngestSourcePanelBody', () => {
         return undefined;
       }),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(document.body).toBeInTheDocument();
     // Conflict warning should be present in DOM (warn prop on FilterableMultiSelect)
   });
@@ -652,7 +653,7 @@ describe('IngestSourcePanelBody', () => {
   // ── Ingestion settings accordion (lines 224-335) ──────────────────────────
 
   it('renders ingestion settings accordion with description', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -666,7 +667,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders max_files NumberInput with validation', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -679,7 +680,7 @@ describe('IngestSourcePanelBody', () => {
   });
 
   it('renders ignore_hidden_files Toggle', () => {
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) =>
@@ -701,7 +702,7 @@ describe('IngestSourcePanelBody', () => {
         return undefined;
       }),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
     expect(document.body).toBeInTheDocument();
   });
 
@@ -731,7 +732,7 @@ describe('IngestSourcePanelBody', () => {
         },
       },
     };
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={{
           getAppData: vi.fn(() => ({ operatorMetadata: webMetadata })),
@@ -773,7 +774,7 @@ describe('IngestSourcePanelBody', () => {
         },
       },
     };
-    render(
+    renderWithProviders(
       <IngestSourcePanelBody
         controller={{
           getAppData: vi.fn(() => ({ operatorMetadata: spMetadata })),
@@ -796,7 +797,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     // The Carbon Dropdown renders a <button> with id="provider".
     // Clicking it opens the list; we exercise the handler directly via the
@@ -852,7 +853,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     const field = document.getElementById('provider-field-base_path') as HTMLInputElement | null;
     if (field) {
@@ -896,7 +897,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'myp' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     const field = document.getElementById('provider-field-batch_size') as HTMLInputElement | null;
     if (field) {
@@ -937,7 +938,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'myp' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     const toggleBtn = document.getElementById('provider-field-recursive') as HTMLElement | null;
     if (toggleBtn) {
@@ -959,7 +960,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'custom' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     const textarea = document.getElementById('provider_config') as HTMLTextAreaElement | null;
     if (textarea) {
@@ -979,7 +980,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     // Open the include_filter multi-select (the trigger button is the combobox input sibling)
     const combobox = document.querySelector('#include_filter input[role="combobox"]') as HTMLElement | null;
@@ -1007,7 +1008,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     // Open the exclude_filter multi-select
     const combobox = document.querySelector('#exclude_filter input[role="combobox"]') as HTMLElement | null;
@@ -1036,7 +1037,7 @@ describe('IngestSourcePanelBody', () => {
         prop.name === 'provider' ? 'filesystem' : undefined
       ),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     const toggleBtn = document.getElementById('ignore_hidden_files') as HTMLElement | null;
     if (toggleBtn) {
@@ -1061,7 +1062,7 @@ describe('IngestSourcePanelBody', () => {
         return undefined;
       }),
     });
-    render(<IngestSourcePanelBody controller={controller} />);
+    renderWithProviders(<IngestSourcePanelBody controller={controller} />);
 
     // The warnText prop is passed to FilterableMultiSelect — Carbon renders it
     // inside a <div class="*--form-requirement"> sibling to the field wrapper.

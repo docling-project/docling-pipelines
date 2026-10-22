@@ -10,7 +10,9 @@ import {
   TextInput,
   TextArea,
 } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import { TagInput } from '../TagInput';
+import { messages } from './EditDetailsModal.messages';
 import styles from './EditDetailsModal.module.scss';
 
 interface EditDetailsModalProps {
@@ -56,6 +58,7 @@ export function EditDetailsModal({
   onEdit,
   error = null,
 }: EditDetailsModalProps): React.JSX.Element {
+  const intl = useIntl();
   const [name, setName] = useState(initialValues.name);
   const [description, setDescription] = useState(initialValues.description);
   const [tags, setTags] = useState<string[]>(initialValues.tags);
@@ -106,30 +109,30 @@ export function EditDetailsModal({
         <div className={styles.formContent}>
           {error && (
             <InlineNotification
-              kind="error"
-              title="Failed to save"
-              subtitle={error}
-              hideCloseButton
-              lowContrast
-            />
+                kind="error"
+                title={intl.formatMessage(messages.errorTitle)}
+                subtitle={error}
+                hideCloseButton
+                lowContrast
+              />
           )}
 
           <TextInput
             id="edit-name"
-            labelText="Name"
+            labelText={intl.formatMessage(messages.nameLabel)}
             value={name}
             onChange={(e) => {
               setName(e.target.value);
               if (e.target.value.trim()) { setNameInvalid(false); }
             }}
             invalid={nameInvalid}
-            invalidText="Name is required"
+            invalidText={intl.formatMessage(messages.nameRequired)}
             disabled={saving}
           />
 
           <TextArea
             id="edit-description"
-            labelText="Description (optional)"
+            labelText={intl.formatMessage(messages.descriptionLabel)}
             value={description}
             onChange={(e) => { setDescription(e.target.value); }}
             rows={5}
@@ -140,7 +143,7 @@ export function EditDetailsModal({
             id="edit-tags"
             tags={tags}
             onChange={setTags}
-            labelText="Add tags (optional)"
+            labelText={intl.formatMessage(messages.tagsLabel)}
             disabled={saving}
           />
         </div>
@@ -148,10 +151,10 @@ export function EditDetailsModal({
 
       <ModalFooter className={styles.footer}>
         <Button kind="secondary" onClick={handleCancel} disabled={saving} className={styles.footerBtn}>
-          Cancel
+          {intl.formatMessage(messages.cancel)}
         </Button>
         <Button kind="primary" onClick={handleSave} disabled={saving} className={styles.footerBtn}>
-          {saving ? <InlineLoading description="Saving..." /> : 'Save'}
+          {saving ? <InlineLoading description={intl.formatMessage(messages.saving)} /> : intl.formatMessage(messages.save)}
         </Button>
       </ModalFooter>
     </ComposedModal>

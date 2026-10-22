@@ -49,6 +49,9 @@ ErrorCode = Literal[
     "flow_validation_failed",
     "flow_execution_failed",
     "prefect_flow_failed",
+    # Event mapping operations
+    "event_mapping_not_found",
+    "event_mapping_already_exists",
     # Configuration and external service error codes
     "invalid_configuration",
     "external_service_error",

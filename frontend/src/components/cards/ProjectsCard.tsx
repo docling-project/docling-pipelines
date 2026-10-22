@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@carbon/react';
 import { Add } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { ROUTES, generateRoute } from '@/config';
 import { go } from '@/utils';
 import { useAppDispatch, useAppSelector, useNotify } from '@/hooks';
@@ -16,6 +17,7 @@ import { selectProjectsArray, selectProjectsLoading, selectProjectsError } from 
 import { formatRelativeTime } from '@/utils/formatRelativeTime';
 import { CreateProjectTearsheet } from '../common/CreateProjectTearsheet';
 import { HomeCard } from '../HomeCard';
+import { messages } from './ProjectsCard.messages';
 import cardStyles from '../HomeCard/HomeCard.module.scss';
 
 const MAX_ROWS = 5;
@@ -31,6 +33,7 @@ const MAX_ROWS = 5;
  * - Renders a "Create project" CTA in the empty state when no projects exist.
  */
 export function ProjectsCard(): React.JSX.Element {
+  const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const notify = useNotify();
@@ -54,12 +57,12 @@ export function ProjectsCard(): React.JSX.Element {
         dispatch(setProjects(map));
       })
       .catch(() => {
-        dispatch(setError('Failed to load projects.'));
+        dispatch(setError(intl.formatMessage(messages.loadError)));
       })
       .finally(() => {
         dispatch(setLoading(false));
       });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   /**
    * Handles tearsheet submission: creates the project (and optionally a flow),
@@ -93,9 +96,9 @@ export function ProjectsCard(): React.JSX.Element {
       } else {
         go(navigate, generateRoute.projectDetail(created.id));
       }
-      notify.success(`${project.name} created successfully.`);
+      notify.success(intl.formatMessage(messages.createSuccess, { name: project.name }));
     } catch {
-      notify.error('Failed to create project');
+      notify.error(intl.formatMessage(messages.createError));
       throw new Error('Failed to create project');
     }
   };
@@ -109,7 +112,7 @@ export function ProjectsCard(): React.JSX.Element {
   let cardChildren: React.ReactNode = null;
 
   if (loading) {
-    cardChildren = <p className={cardStyles.itemLoading}>Loading projects...</p>;
+    cardChildren = <p className={cardStyles.itemLoading}>{intl.formatMessage(messages.loading)}</p>;
   } else if (error) {
     cardChildren = <p className={cardStyles.itemError}>{error}</p>;
   } else if (rows.length > 0) {
@@ -137,7 +140,7 @@ export function ProjectsCard(): React.JSX.Element {
           className={cardStyles.viewAll}
           onClick={() => { go(navigate, ROUTES.PROJECTS); }}
         >
-          View all
+          {intl.formatMessage(messages.viewAll)}
         </Button>
       </div>
     );
@@ -146,14 +149,14 @@ export function ProjectsCard(): React.JSX.Element {
   return (
     <>
       <HomeCard
-        title="Projects"
+        title={intl.formatMessage(messages.title)}
         headerIcon={Add}
-        headerIconDescription="Create project"
+        headerIconDescription={intl.formatMessage(messages.createIconDescription)}
         onHeaderAction={() => { setTearsheetOpen(true); }}
-        emptyTitle="No recent projects"
-        emptySubtitle="After you create projects, you'll see them here."
+        emptyTitle={intl.formatMessage(messages.emptyTitle)}
+        emptySubtitle={intl.formatMessage(messages.emptySubtitle)}
         emptyAction={{
-          text: 'Create project',
+          text: intl.formatMessage(messages.emptyActionText),
           kind: 'tertiary',
           renderIcon: Add,
           onClick: () => { setTearsheetOpen(true); },

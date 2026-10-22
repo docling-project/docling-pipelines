@@ -14,7 +14,9 @@ import {
   TextInput,
   TextArea,
 } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import { TagInput } from '../TagInput';
+import { messages } from './CreateProjectTearsheet.messages';
 import styles from './CreateProjectTearsheet.module.scss';
 
 /**
@@ -72,6 +74,7 @@ export function CreateProjectTearsheet({
   onClose,
   onSubmit,
 }: CreateProjectTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
   const [currentStep, setCurrentStep] = useState(0);
   const [project, setProject] = useState<CreateProjectFormValues>(EMPTY_PROJECT);
   const [flow, setFlow] = useState<FlowFormValues>(EMPTY_FLOW);
@@ -161,7 +164,7 @@ export function CreateProjectTearsheet({
       containerClassName={styles.modal}
     >
       <ModalHeader
-        title="Create project and add flow"
+        title={intl.formatMessage(messages.modalTitle)}
         buttonOnClick={handleClose}
         className={styles.modalHeader}
       />
@@ -174,19 +177,19 @@ export function CreateProjectTearsheet({
           className={styles.progressBar}
           spaceEqually
         >
-          <ProgressStep label="Create project" />
-          <ProgressStep label="Create flow" secondaryLabel="Optional" />
+          <ProgressStep label={intl.formatMessage(messages.stepProject)} />
+          <ProgressStep label={intl.formatMessage(messages.stepFlow)} secondaryLabel={intl.formatMessage(messages.stepFlowOptional)} />
         </ProgressIndicator>
 
         {/* ── Step 1: Project details ── */}
         {currentStep === 0 && (
           <div className={styles.formContent}>
-            <h2 className={styles.formHeading}>Define project details</h2>
+            <h2 className={styles.formHeading}>{intl.formatMessage(messages.projectHeading)}</h2>
 
             <TextInput
               id="project-name"
-              labelText="Name"
-              placeholder="Enter name"
+              labelText={intl.formatMessage(messages.nameLabel)}
+              placeholder={intl.formatMessage(messages.namePlaceholder)}
               value={project.name}
               onChange={(e) => {
                 setProject((prev) => ({ ...prev, name: e.target.value }));
@@ -197,15 +200,15 @@ export function CreateProjectTearsheet({
               invalid={nameInvalid || nameDuplicate}
               invalidText={
                 nameDuplicate
-                  ? 'A project with this name already exists. Please choose a unique name.'
-                  : 'Name is required'
+                  ? intl.formatMessage(messages.nameDuplicate)
+                  : intl.formatMessage(messages.nameRequired)
               }
             />
 
             <TextArea
               id="project-description"
-              labelText="Description (optional)"
-              placeholder="Enter description"
+              labelText={intl.formatMessage(messages.descriptionLabel)}
+              placeholder={intl.formatMessage(messages.descriptionPlaceholder)}
               value={project.description}
               onChange={(e) => { setProject((prev) => ({ ...prev, description: e.target.value })); }}
               rows={4}
@@ -222,20 +225,20 @@ export function CreateProjectTearsheet({
         {/* ── Step 2: Flow details (optional) ── */}
         {currentStep === 1 && (
           <div className={styles.formContent}>
-            <h2 className={styles.formHeading}>Define flow details (optional)</h2>
+            <h2 className={styles.formHeading}>{intl.formatMessage(messages.flowHeading)}</h2>
 
             <TextInput
               id="flow-name"
-              labelText="Name"
-              placeholder="Enter name"
+              labelText={intl.formatMessage(messages.nameLabel)}
+              placeholder={intl.formatMessage(messages.namePlaceholder)}
               value={flow.flowName}
               onChange={(e) => { setFlow((prev) => ({ ...prev, flowName: e.target.value })); }}
             />
 
             <TextArea
               id="flow-description"
-              labelText="Description (optional)"
-              placeholder="Enter description"
+              labelText={intl.formatMessage(messages.descriptionLabel)}
+              placeholder={intl.formatMessage(messages.descriptionPlaceholder)}
               value={flow.flowDescription}
               onChange={(e) => { setFlow((prev) => ({ ...prev, flowDescription: e.target.value })); }}
               rows={4}
@@ -245,7 +248,7 @@ export function CreateProjectTearsheet({
               id="flow-tags"
               tags={flow.flowTags}
               onChange={(tags) => { setFlow((prev) => ({ ...prev, flowTags: tags })); }}
-              helperText="Add tags to make flows easier to find. To add tags, separate them with commas and press Enter."
+              helperText={intl.formatMessage(messages.tagsHelperText)}
             />
           </div>
         )}
@@ -255,7 +258,7 @@ export function CreateProjectTearsheet({
       {/* ── Footer: 2-1-1 grid — Cancel | Back | Next/Create ── */}
       <ModalFooter className={styles.footer}>
         <Button kind="ghost" onClick={handleClose} disabled={submitting} className={styles.footerCancel}>
-          Cancel
+          {intl.formatMessage(messages.cancel)}
         </Button>
         <Button
           kind="secondary"
@@ -263,7 +266,7 @@ export function CreateProjectTearsheet({
           disabled={currentStep === 0 || submitting}
           className={styles.footerBack}
         >
-          Back
+          {intl.formatMessage(messages.back)}
         </Button>
         {currentStep === 0 ? (
           <Button
@@ -272,7 +275,7 @@ export function CreateProjectTearsheet({
             disabled={!project.name.trim() || nameDuplicate}
             className={styles.footerPrimary}
           >
-            Next
+            {intl.formatMessage(messages.next)}
           </Button>
         ) : (
           <Button
@@ -281,7 +284,7 @@ export function CreateProjectTearsheet({
             disabled={submitting}
             className={styles.footerPrimary}
           >
-            {submitting ? <InlineLoading description="Creating..." /> : 'Create'}
+            {submitting ? <InlineLoading description={intl.formatMessage(messages.creating)} /> : intl.formatMessage(messages.create)}
           </Button>
         )}
       </ModalFooter>

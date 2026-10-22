@@ -341,6 +341,13 @@ class EnvironmentVariables:
     DOCPIPE_LINEAGE_PRODUCER = "DOCPIPE_LINEAGE_PRODUCER"
     DOCPIPE_LINEAGE_STRICT = "DOCPIPE_LINEAGE_STRICT"
 
+    DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
+    DOCPIPE_API_BASE_URL = "DOCPIPE_API_BASE_URL"
+    KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
+    KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
+    KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
+    SCHEMA_REGISTRY_URL = "SCHEMA_REGISTRY_URL"
+
 
 class LineageConstants:
     """Constants and defaults for OpenLineage integration."""
@@ -397,6 +404,14 @@ class ServiceConstants:
 
     # Embeddings batch processing
     DEFAULT_EMBEDDINGS_BATCH_SIZE = 32  # Default batch size for embeddings generation
+    # Default number of embedding sub-batch requests kept in flight at once for HTTP-based
+    # providers (LiteLLM). Kept low so a single operator stays well below typical hosted-API
+    # rate limits; a local Ollama server queues requests beyond its own OLLAMA_NUM_PARALLEL.
+    DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 4
+    # watsonx.ai embeddings: texts per request, and requests in flight (the service enforces
+    # a per-instance limit of 8 req/s, so concurrency stays opt-in).
+    DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
+    DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
 
 
 class ProviderConstants:
