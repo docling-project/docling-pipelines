@@ -94,7 +94,8 @@ def test_rest_validation_identifies_missing_provider_node(*, incomplete_flow, is
 
 def test_library_validation_reports_missing_provider(incomplete_flow):
     """The library returns an invalid result containing the provider-selection error."""
-    result = DocpipeFlowManager(flow_def=incomplete_flow).validate()
+    # Preserve pytest's logging setup for subsequent caplog assertions.
+    result = DocpipeFlowManager(flow_def=incomplete_flow, configure_logging=False).validate()
 
     assert result["valid"] is False
     assert len(result["errors"]) == 1
