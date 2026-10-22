@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 from types import ModuleType
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,15 +11,17 @@ from docpipe.integrations.aws import s3_utils
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
 
 
-def _fail_if_sts_is_called(*_args, **_kwargs):
-    raise AssertionError("STS must not be called when boto3 is unavailable")
-
-
 @pytest.fixture
-def boto3_unavailable(monkeypatch):
-    """Simulate a runtime without boto3 and make any STS client creation fail loudly."""
+def boto3_unavailable(monkeypatch) -> MagicMock:
+    """Simulate a runtime without boto3 and return a stand-in that records any boto3 use.
+
+    ``raising=False`` lets the fixture work whether or not the optional ``aws`` extra is
+    installed: without it, ``s3_utils`` has no ``boto3`` attribute at all.
+    """
+    boto3_stand_in = MagicMock()
     monkeypatch.setattr(s3_utils, "_BOTO3_AVAILABLE", False)
-    monkeypatch.setattr(s3_utils.boto3, "client", _fail_if_sts_is_called)
+    monkeypatch.setattr(s3_utils, "boto3", boto3_stand_in, raising=False)
+    return boto3_stand_in
 
 
 class TestResolveAwsAccountIdWithoutBoto3:
@@ -28,14 +31,18 @@ class TestResolveAwsAccountIdWithoutBoto3:
         access_key = "AKIAIOSFODNN7EXAMPLE"  # pragma: allowlist secret
 
         assert resolve_aws_account_id(access_key=access_key, region="us-east-1") is None
+        boto3_unavailable.client.assert_not_called()
 
     def test_strict_raises_with_install_hint(self, boto3_unavailable):
         with pytest.raises(RuntimeError, match=r"boto3 is required .*uv sync --extra aws"):
             resolve_aws_account_id(strict=True)
 
+        boto3_unavailable.client.assert_not_called()
+
     def test_endpoint_url_skips_boto3_check_even_when_strict(self, boto3_unavailable):
         """S3-compatible storage never needs STS, so a missing boto3 is irrelevant there."""
         assert resolve_aws_account_id(endpoint_url="http://localhost:9000", strict=True) is None
+        boto3_unavailable.client.assert_not_called()
 
 
 def _load_s3_utils_without_boto3(monkeypatch) -> ModuleType:
