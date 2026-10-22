@@ -97,7 +97,16 @@ job_management:
 
 DuckDB defaults to `<DOCPIPE_DATA_PATH>/duckdb`, or `<project-root>/data/duckdb` when unset, resolved at startup.
 Job stats use `job_stats.duckdb`; document sets and libraries share the default `document_sets.duckdb` file.
-Explicit `database_path` settings take precedence, including the YAML example above.
+Explicit `database_path` settings take precedence over `DOCPIPE_DATA_PATH`, including the YAML example above.
+
+The shipped root [`docling-pipelines-config.yaml`](../../docling-pipelines-config.yaml) explicitly sets the document-set
+`database_path` to `data/duckdb/document_sets.duckdb`. Setting `DOCPIPE_DATA_PATH` alone does not move the document-set
+database used by the API. The environment-based default applies only when no `database_path` is configured.
+
+**Compatibility limitation:** With the shipped YAML and `DOCPIPE_DATA_PATH` pointing to a different data root, a flow
+with a `document_set` node that has no explicit `database_path` uses the environment-based default, while the API keeps
+the YAML path. These consumers previously used the same file when launched from the project root. To share a database,
+set the same absolute `database_path` in the API's document-set repository configuration and the operator's configuration.
 
 Important notes:
 

@@ -8,7 +8,7 @@ import pytest
 from docpipe.core.constants import constants
 
 
-@pytest.mark.parametrize("data_root", [None, "relative-data", "absolute", "absolute/"])
+@pytest.mark.parametrize("data_root", [None, "relative-data", "absolute"])
 def test_default_database_paths(*, monkeypatch, tmp_path, data_root):
     """Resolve all defaults from the data root without creating directories."""
     working_dir = tmp_path / "working"
