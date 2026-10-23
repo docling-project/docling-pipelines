@@ -93,7 +93,7 @@ dependencies = [
     "tabulate==0.10.0",
     "tenacity==8.3.0",
     "toml==0.10.2",
-    "torch==2.13.0",
+    "torch==2.14.1",
     "transformers>=5.17,<5.18",
     "unicategories==0.1.2",
     "unicodedataplus==16.0.0.post1",
