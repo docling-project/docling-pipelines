@@ -65,6 +65,7 @@ class OperatorConstants:
         SQL_FILTER: Final[str] = "sql_filter"
 
         # Storage Operators
+        DOCUMENT_SET: Final[str] = "document_set"
         ENTITY_CURATION_OPERATOR: Final[str] = "entity_curation_operator"
         ENTITY_STORE_OPERATOR: Final[str] = "entity_store"
         OPENSEARCH: Final[str] = "opensearch"
