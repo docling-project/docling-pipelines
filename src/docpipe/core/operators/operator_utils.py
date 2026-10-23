@@ -7,7 +7,8 @@ import io
 import json
 import os
 import sys
-import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -33,6 +34,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     ValidationAlert,
 )
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
+from docpipe.integrations.docling.converter_pool import get_docling_pool, options_fingerprint
 from docpipe.utils.infrastructure.logging import get_logger
 
 status_codes = {
@@ -53,13 +55,18 @@ hash_functions = hashlib.sha3_512
 logger = get_logger()
 
 # ---------------------------------------------------------------------------
-# DocumentConverter per-thread cache
+# DocumentConverter pooling
 # ---------------------------------------------------------------------------
 # DocumentConverter (docling-parse 7.x) is not thread-safe: calling .convert()
 # concurrently from multiple threads on the same instance causes segfaults on
-# macOS (arm64) and is unreliable on Linux. Each thread gets its own converter
-# instance, keyed by a stable MD5 hash of the format_options configuration so
-# that different pipeline configs (e.g. standard vs OCR-disabled) remain separate.
+# macOS (arm64) and is unreliable on Linux. Converters are therefore leased
+# *exclusively* from a process-wide, bounded pool (see
+# ``docpipe.integrations.docling.converter_pool``), keyed by a hash of the actual
+# format_options values so that different pipeline configs (e.g. standard vs
+# OCR-disabled, or two OCR engines) never share a converter. Pooled converters
+# survive across worker threads, micro-batches and operator instances, so Docling
+# model pipelines are initialised once per configuration instead of once per
+# worker thread per batch.
 try:
     _DOCLING_AVAILABLE = importlib.util.find_spec("docling") is not None
 except ValueError:
@@ -75,37 +82,31 @@ try:
 except ImportError:
     pass
 
-# Thread-local storage: each thread has its own dict[cache_key -> DocumentConverter]
-_thread_local_converters = threading.local()
+_CONVERTER_POOL_KEY_PREFIX = "DocumentConverter:"
 
 
 def _converter_cache_key(converter_config: dict | None) -> str:
-    """Return a stable MD5 cache key for a given DocumentConverter configuration.
+    """Return a stable cache key for a given DocumentConverter configuration.
+
+    The key is a SHA-256 digest of the *values* of every format option (pipeline
+    class, backend, pipeline options including nested OCR/accelerator/table options),
+    so two configurations that differ in any setting get different keys while equal
+    settings built independently (e.g. by different operator instances) share one.
 
     Args:
         converter_config: Dict optionally containing ``format_options`` key.
 
     Returns:
-        A hex digest string that uniquely identifies the configuration.
+        ``"default"`` when no format options are given, otherwise a hex digest that
+        uniquely identifies the configuration.
     """
-    if not converter_config or "format_options" not in converter_config:
+    if not converter_config or OperatorConstants.Config.FORMAT_OPTIONS not in converter_config:
         return "default"
-    key_parts = {str(fmt): type(opt).__name__ for fmt, opt in converter_config["format_options"].items()}
-    return hashlib.md5(json.dumps(key_parts, sort_keys=True).encode(), usedforsecurity=False).hexdigest()  # nosec B324
+    return options_fingerprint(converter_config[OperatorConstants.Config.FORMAT_OPTIONS])
 
 
-def _get_or_create_converter(converter_config: dict | None) -> Any:
-    """Return a per-thread DocumentConverter, constructing it once per thread per unique config.
-
-    Each worker thread builds its own ``DocumentConverter`` instance so that
-    concurrent ``convert()`` calls never share state — avoiding the segfault
-    triggered by calling docling-parse 7.x from multiple threads simultaneously.
-
-    Args:
-        converter_config: Optional dict with ``format_options`` for the converter.
-
-    Returns:
-        A ``DocumentConverter`` instance owned by the calling thread.
+def _build_converter(converter_config: dict | None) -> Any:
+    """Construct a new DocumentConverter for ``converter_config``.
 
     Raises:
         RuntimeError: If docling is not installed.
@@ -116,24 +117,45 @@ def _get_or_create_converter(converter_config: dict | None) -> Any:
 
     from docling.document_converter import DocumentConverter
 
-    cache_key = _converter_cache_key(converter_config)
+    if converter_config and OperatorConstants.Config.FORMAT_OPTIONS in converter_config:
+        return DocumentConverter(format_options=converter_config[OperatorConstants.Config.FORMAT_OPTIONS])
+    return DocumentConverter()
 
-    # Ensure the thread-local dict exists
-    if not hasattr(_thread_local_converters, "cache"):
-        _thread_local_converters.cache = {}
 
-    thread_cache: dict[str, Any] = _thread_local_converters.cache
+@contextmanager
+def _lease_converter(converter_config: dict | None) -> Iterator[Any]:
+    """Borrow a DocumentConverter for ``converter_config`` exclusively.
 
-    if cache_key not in thread_cache:
-        logger.info("Creating DocumentConverter for cache key: %s", cache_key)
-        if converter_config and "format_options" in converter_config:
-            thread_cache[cache_key] = DocumentConverter(format_options=converter_config["format_options"])
-        else:
-            thread_cache[cache_key] = DocumentConverter()
-    else:
-        logger.debug("DocumentConverter cache hit for key: %s", cache_key)
+    The converter comes from the process-wide pool and is returned to it when the
+    block exits, so no two threads ever call ``convert()`` on the same instance and
+    the converter (with its initialised model pipelines) is reused by later calls.
 
-    return thread_cache[cache_key]
+    Args:
+        converter_config: Optional dict with ``format_options`` for the converter.
+
+    Yields:
+        A ``DocumentConverter`` instance owned by the caller for the block's duration.
+
+    Raises:
+        RuntimeError: If docling is not installed.
+    """
+    if not _DOCLING_AVAILABLE:
+        msg = "docling is not installed. Install with: pip install 'docling-pipelines-slim[extract]'"
+        raise RuntimeError(msg)
+
+    key = _CONVERTER_POOL_KEY_PREFIX + _converter_cache_key(converter_config)
+    with get_docling_pool().lease(key=key, factory=lambda: _build_converter(converter_config)) as converter:
+        yield converter
+
+
+@contextmanager
+def _use_converter(*, converter: Any, converter_config: dict | None) -> Iterator[Any]:
+    """Yield ``converter`` when given, otherwise lease a pooled one for ``converter_config``."""
+    if converter is not None:
+        yield converter
+        return
+    with _lease_converter(converter_config) as leased:
+        yield leased
 
 
 def sanitize_doc_id_for_filename(doc_id: str) -> str:
@@ -1770,8 +1792,10 @@ class OperatorUtils:
                                Each format creates a separate column in the output.
             converter: Optional pre-built DocumentConverter instance. When provided,
                        ``converter_config`` is ignored and the supplied converter is used
-                       directly. Intended for GPU-accelerated adapters that construct the
-                       converter once and reuse it across documents.
+                       directly; the caller is then responsible for never using it from
+                       two threads at once. When omitted (the normal case) a converter
+                       for ``converter_config`` is leased exclusively from the
+                       process-wide pool and returned after the conversion.
             doc_format: Target format for the primary content column (default: "markdown").
 
         Returns:
@@ -1822,27 +1846,26 @@ class OperatorUtils:
                     doc_format=doc_format,
                 )
 
-            # Use supplied converter when provided (GPU path), otherwise retrieve
-            # (or lazily construct) the singleton converter for this config.
-            if converter is None:
-                converter = _get_or_create_converter(converter_config)
-
             # Create DocumentStream from binary content (no temporary file needed)
             audio_video_suffixes = {f".{extension.lower()}" for extension in FormatToExtensions[InputFormat.AUDIO]}
             doc_name = Path(file_path).name if file_path else f"document{file_suffix}"
-            if file_suffix in audio_video_suffixes:
-                current_path_file = Path.cwd() / doc_name
-                try:
-                    current_path_file.write_bytes(binary_content)
-                    result = converter.convert(current_path_file)
-                finally:
-                    if current_path_file.exists():
-                        current_path_file.unlink()
-            else:
-                # Create DocumentStream from binary content (no temporary file needed)
-                doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(binary_content))
-                # Convert document directly from stream
-                result = converter.convert(doc_stream)
+
+            # Use the supplied converter when provided; otherwise lease a pooled converter
+            # for this config exclusively for the duration of the conversion only.
+            with _use_converter(converter=converter, converter_config=converter_config) as active_converter:
+                if file_suffix in audio_video_suffixes:
+                    current_path_file = Path.cwd() / doc_name
+                    try:
+                        current_path_file.write_bytes(binary_content)
+                        result = active_converter.convert(current_path_file)
+                    finally:
+                        if current_path_file.exists():
+                            current_path_file.unlink()
+                else:
+                    # Create DocumentStream from binary content (no temporary file needed)
+                    doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(binary_content))
+                    # Convert document directly from stream
+                    result = active_converter.convert(doc_stream)
 
             # Generate content in all requested formats
             content_dict: dict[str, str | None] = {}

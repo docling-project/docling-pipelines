@@ -6,8 +6,8 @@ Unit tests for DoclingAdapter GPU acceleration and converter reuse.
 
 These tests verify:
 - GPU config is correctly read from config dict into adapter attributes
-- _build_gpu_converter is called (or skipped) based on device config
-- extract_single_document uses the pre-built converter for GPU path
+- _build_gpu_converter_config is called (or skipped) based on device config
+- extract_single_document passes the pre-built GPU converter config (pooled converter) on the GPU path
 - GPU device name is written into result metadata on success
 - TextExtractionAdapterFactory correctly extracts GPU config and validates constraints
 """
@@ -37,8 +37,8 @@ def _make_adapter(extra: dict | None = None) -> DoclingAdapter:
     }
     if extra:
         base.update(extra)
-    # Patch _build_gpu_converter so no real docling GPU classes are needed
-    with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=MagicMock(name="gpu_converter")):
+    # Patch _build_gpu_converter_config so no real docling GPU classes are needed
+    with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value={"format_options": {}}):
         return DoclingAdapter(config=base)
 
 
@@ -70,7 +70,7 @@ class TestDoclingAdapterGpuInit:
 
     def test_gpu_num_threads_stored_without_device(self):
         """num_threads key is stored even if device is absent; no converter is built."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter") as mock_build:
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config") as mock_build:
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -80,10 +80,10 @@ class TestDoclingAdapterGpuInit:
             )
             mock_build.assert_not_called()
         assert adapter.gpu_num_threads == 4
-        assert adapter._gpu_converter is None
+        assert adapter._gpu_converter_config is None
 
     def test_build_gpu_converter_called_when_device_set(self):
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=MagicMock()) as mock_build:
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=MagicMock()) as mock_build:
             DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -94,13 +94,13 @@ class TestDoclingAdapterGpuInit:
         mock_build.assert_called_once()
 
     def test_build_gpu_converter_not_called_without_device(self):
-        with patch.object(DoclingAdapter, "_build_gpu_converter") as mock_build:
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config") as mock_build:
             DoclingAdapter(config={"max_workers": 1, "use_processes": False})
             mock_build.assert_not_called()
 
-    def test_gpu_converter_stored_on_adapter(self):
-        mock_converter = MagicMock(name="gpu_converter")
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=mock_converter):
+    def test_gpu_converter_config_stored_on_adapter(self):
+        gpu_config = {"format_options": {"pdf": MagicMock(name="gpu_pdf_option")}}
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=gpu_config):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -108,7 +108,7 @@ class TestDoclingAdapterGpuInit:
                     OperatorConstants.Extraction.DEVICE: "mps",
                 }
             )
-        assert adapter._gpu_converter is mock_converter
+        assert adapter._gpu_converter_config is gpu_config
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +117,12 @@ class TestDoclingAdapterGpuInit:
 
 
 class TestExtractSingleDocumentGpuPath:
-    """Tests that extract_single_document uses the GPU converter when present."""
+    """Tests that extract_single_document uses the GPU converter config when present."""
 
-    def test_gpu_converter_passed_to_extract_content(self):
-        """When _gpu_converter is set, extract_content receives converter= kwarg."""
-        mock_converter = MagicMock(name="gpu_converter")
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=mock_converter):
+    def test_gpu_converter_config_passed_to_extract_content(self):
+        """When _gpu_converter_config is set, extract_content receives it (pooled converter, no shared instance)."""
+        gpu_config = {"format_options": {"pdf": MagicMock(name="gpu_pdf_option")}}
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=gpu_config):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -144,12 +144,32 @@ class TestExtractSingleDocumentGpuPath:
             adapter.extract_single_document(file_path="doc.pdf", binary_content=b"PDF")
 
         call_kwargs = mock_extract.call_args.kwargs
-        assert call_kwargs.get("converter") is mock_converter
-        assert call_kwargs.get("converter_config") is None
+        assert call_kwargs.get("converter") is None
+        assert call_kwargs.get("converter_config") is gpu_config
+
+    def test_unrecognised_device_config_uses_default_converter(self):
+        """An empty GPU config (unrecognised device) maps to the default converter (converter_config=None)."""
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value={}):
+            adapter = DoclingAdapter(
+                config={"max_workers": 1, "use_processes": False, OperatorConstants.Extraction.DEVICE: "mps"}
+            )
+
+        mock_result = {
+            OperatorConstants.Extraction.SUCCESS: True,
+            OperatorConstants.Columns.DOC_COLUMN_DEFAULT: "text",
+            OperatorConstants.Metadata.METADATA: {},
+        }
+        with patch(
+            "docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter.OperatorUtils.extract_content",
+            return_value=mock_result,
+        ) as mock_extract:
+            adapter.extract_single_document(file_path="doc.pdf", binary_content=b"PDF")
+
+        assert mock_extract.call_args.kwargs.get("converter_config") is None
 
     def test_no_gpu_path_does_not_pass_converter(self):
         """When gpu_device is None, extract_content is called without converter kwarg."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter"):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config"):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 4,
@@ -175,8 +195,7 @@ class TestExtractSingleDocumentGpuPath:
 
     def test_gpu_device_written_to_result_metadata_on_success(self):
         """Successful GPU extraction records device name in result metadata."""
-        mock_converter = MagicMock(name="gpu_converter")
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=mock_converter):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value={"format_options": {}}):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -201,8 +220,7 @@ class TestExtractSingleDocumentGpuPath:
 
     def test_gpu_device_not_in_metadata_on_failure(self):
         """Failed GPU extraction should not write device into metadata."""
-        mock_converter = MagicMock(name="gpu_converter")
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=mock_converter):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value={"format_options": {}}):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -226,10 +244,10 @@ class TestExtractSingleDocumentGpuPath:
 
         assert OperatorConstants.Extraction.DEVICE not in result.get(OperatorConstants.Metadata.METADATA, {})
 
-    def test_converter_is_reused_across_calls(self):
-        """The same converter object is passed to both calls — not rebuilt per document."""
-        mock_converter = MagicMock(name="gpu_converter")
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=mock_converter):
+    def test_converter_config_is_reused_across_calls(self):
+        """The same GPU config object is passed to both calls — options are not rebuilt per document."""
+        gpu_config = {"format_options": {"pdf": MagicMock(name="gpu_pdf_option")}}
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=gpu_config):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -252,9 +270,9 @@ class TestExtractSingleDocumentGpuPath:
             adapter.extract_single_document(file_path="doc2.pdf", binary_content=b"PDF2")
 
         assert mock_extract.call_count == 2
-        converters_used = [call.kwargs.get("converter") for call in mock_extract.call_args_list]
-        assert converters_used[0] is mock_converter
-        assert converters_used[1] is mock_converter
+        configs_used = [call.kwargs.get("converter_config") for call in mock_extract.call_args_list]
+        assert configs_used[0] is gpu_config
+        assert configs_used[1] is gpu_config
 
 
 # ---------------------------------------------------------------------------
@@ -650,7 +668,7 @@ class TestCheckDeviceAvailability:
 
 
 class TestBuildGpuConverter:
-    """Tests for DoclingAdapter._build_gpu_converter correct Docling 2105 construction."""
+    """Tests for DoclingAdapter._build_gpu_converter_config correct Docling 2105 construction."""
 
     def _make_docling_mocks(self):
         """Return a dict of mocked docling classes for patching sys.modules."""
@@ -694,7 +712,7 @@ class TestBuildGpuConverter:
         }
 
     def test_uses_threaded_pdf_pipeline_options(self):
-        """_build_gpu_converter must use ThreadedPdfPipelineOptions not PipelineOptions."""
+        """_build_gpu_converter_config must use ThreadedPdfPipelineOptions not PipelineOptions."""
         mocks = self._make_docling_mocks()
 
         with patch.dict(
@@ -713,14 +731,17 @@ class TestBuildGpuConverter:
                 }
             )
 
-        assert adapter._gpu_converter is not None
+        assert adapter._gpu_converter_config is not None
+        assert set(adapter._gpu_converter_config["format_options"]) == {"pdf_fmt", "img_fmt"}
+        # The converter itself is no longer built at init; it is leased from the pool on first use.
+        mocks["DocumentConverter"].assert_not_called()
         mocks["ThreadedPdfPipelineOptions"].assert_called_once()
         mocks["PdfFormatOption"].assert_called_once()
         mocks["ImageFormatOption"].assert_called_once()
 
     def test_cuda_index_maps_to_cuda_enum(self):
         """cuda:0 must resolve to AcceleratorDevice.CUDA, not fail the device_map lookup."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=MagicMock()) as mock_build:
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=MagicMock()) as mock_build:
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -742,7 +763,7 @@ class TestDoclingAdapterInitLogging:
 
     def test_vlm_pipeline_info_logged(self):
         """No exception when VLM pipeline is enabled (log branch coverage)."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -772,7 +793,7 @@ class TestDoclingAdapterInitLogging:
             import docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter as mod
 
             with patch.object(mod, "_ASR_AVAILABLE", True):
-                with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+                with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
                     adapter = DoclingAdapter(
                         config={
                             "max_workers": 1,
@@ -787,7 +808,7 @@ class TestDoclingAdapterInitLogging:
         import docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter as mod
 
         with patch.object(mod, "_ASR_AVAILABLE", False):
-            with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+            with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
                 adapter = DoclingAdapter(
                     config={
                         "max_workers": 1,
@@ -799,7 +820,7 @@ class TestDoclingAdapterInitLogging:
 
     def test_standard_pipeline_no_gpu_no_asr_logs(self):
         """Standard path (no VLM, no ASR, no GPU) reaches the standard-extraction log line."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -812,15 +833,15 @@ class TestDoclingAdapterInitLogging:
 
 
 # ---------------------------------------------------------------------------
-# DoclingAdapter — _build_gpu_converter error paths
+# DoclingAdapter — _build_gpu_converter_config error paths
 # ---------------------------------------------------------------------------
 
 
 class TestBuildGpuConverterEdgeCases:
-    """Tests covering fallback and error paths in _build_gpu_converter."""
+    """Tests covering fallback and error paths in _build_gpu_converter_config."""
 
     def test_unrecognised_device_returns_default_converter(self):
-        """Unrecognised device name falls back to plain DocumentConverter()."""
+        """Unrecognised device name falls back to the default converter config ({})."""
         import sys
         from unittest.mock import MagicMock
 
@@ -862,12 +883,12 @@ class TestBuildGpuConverterEdgeCases:
                 }
             )
 
-        # Falls back to DocumentConverter() with no args
-        mock_converter_cls.assert_called_with()
-        assert adapter._gpu_converter is mock_converter_instance
+        # Falls back to the default converter configuration; nothing is constructed at init
+        mock_converter_cls.assert_not_called()
+        assert adapter._gpu_converter_config == {}
 
-    def test_import_error_in_build_gpu_converter_returns_none(self):
-        """ImportError in _build_gpu_converter returns None and logs warning."""
+    def test_import_error_in_build_gpu_converter_config_returns_none(self):
+        """ImportError in _build_gpu_converter_config returns None and logs warning."""
         import sys
 
         with patch.dict(sys.modules, {"docling.datamodel.pipeline_options": None}):
@@ -878,8 +899,8 @@ class TestBuildGpuConverterEdgeCases:
                     OperatorConstants.Extraction.DEVICE: "cuda",
                 }
             )
-        # _build_gpu_converter catches ImportError and returns None
-        assert adapter._gpu_converter is None
+        # _build_gpu_converter_config catches ImportError and returns None
+        assert adapter._gpu_converter_config is None
 
 
 # ---------------------------------------------------------------------------
@@ -892,7 +913,7 @@ class TestExtractSingleDocumentBranches:
 
     def test_vlm_pipeline_metadata_written_on_success(self):
         """VLM preset and engine type are written to result metadata on success."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -926,7 +947,7 @@ class TestExtractSingleDocumentBranches:
         import docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter as mod
 
         with patch.object(mod, "_ASR_AVAILABLE", True):
-            with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+            with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
                 adapter = DoclingAdapter(
                     config={
                         "max_workers": 1,
@@ -952,7 +973,7 @@ class TestExtractSingleDocumentBranches:
 
     def test_import_error_for_vlm_pipeline_returns_error_dict(self):
         """ImportError when VLM deps are missing returns structured error dict."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -972,7 +993,7 @@ class TestExtractSingleDocumentBranches:
 
     def test_generic_exception_returns_error_dict(self):
         """Unexpected exception during extraction returns structured error dict."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(config={"max_workers": 1, "use_processes": False})
 
         with patch(
@@ -986,7 +1007,7 @@ class TestExtractSingleDocumentBranches:
 
     def test_standard_pipeline_logs_standard_extraction(self):
         """Standard pipeline (no GPU, no VLM) logs correct message path."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(config={"max_workers": 1, "use_processes": False})
 
         mock_result = {
@@ -1014,7 +1035,7 @@ class TestConfigureVlmEngine:
 
     def test_no_engine_no_provider_config_returns_none(self):
         """Returns None when neither vlm_engine_type nor vlm_provider_config are set."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -1032,7 +1053,7 @@ class TestConfigureVlmEngine:
         mock_provider = MagicMock()
         mock_provider.create_pipeline_options.return_value = MagicMock(name="pipeline_opts")
 
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(
                 config={
                     "max_workers": 1,
@@ -1062,7 +1083,7 @@ class TestConfigureAsrEngine:
 
     def test_no_model_name_returns_none(self):
         """Returns None when asr_model_name is empty/falsy."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(config={"max_workers": 1, "use_processes": False})
         adapter.asr_model_name = ""
         result = adapter._configure_asr_engine()
@@ -1089,7 +1110,7 @@ class TestConfigureAsrEngine:
                 "docling.datamodel.pipeline_options": pipeline_options_mock,
             },
         ):
-            with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+            with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
                 adapter = DoclingAdapter(config={"max_workers": 1, "use_processes": False})
             adapter.asr_model_name = "whisper_turbo"
             result = adapter._configure_asr_engine()
@@ -1117,7 +1138,7 @@ class TestConfigureAsrEngine:
                 "docling.datamodel.pipeline_options": pipeline_options_mock,
             },
         ):
-            with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+            with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
                 adapter = DoclingAdapter(config={"max_workers": 1, "use_processes": False})
             adapter.asr_model_name = "nonexistent_model"
             result = adapter._configure_asr_engine()
@@ -1126,7 +1147,7 @@ class TestConfigureAsrEngine:
 
     def test_import_error_returns_none(self):
         """Returns None when ASR import raises inside _configure_asr_engine."""
-        with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+        with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
             adapter = DoclingAdapter(config={"max_workers": 1, "use_processes": False})
 
         adapter.asr_model_name = "whisper_turbo"

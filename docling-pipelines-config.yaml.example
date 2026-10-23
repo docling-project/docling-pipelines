@@ -63,6 +63,25 @@ incremental_metadata:
   #     schema: "incremental_metadata"  # Service-specific schema
 
 # ============================================================================
+# Docling Converter Pool Configuration
+# ============================================================================
+# The extract_operator reuses Docling DocumentConverter / DocumentExtractor
+# instances through one pool per process, shared by every flow and job in that
+# process. These limits are therefore process-wide, not flow or operator settings.
+# Settings are read when the pool is first used (restart to apply changes).
+#
+# Precedence (highest to lowest):
+#   1. Environment Variables (DOCPIPE_DOCLING_CONVERTER_POOL_SIZE,
+#      DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS)
+#   2. This section
+#   3. Built-in Defaults
+#
+# docling:
+#   converter_pool:
+#     size: 8                 # Max live converters per process (>= 1); default: min(2 x CPU count, 16)
+#     idle_ttl_seconds: 600   # Release idle converters after N seconds; 0 = keep until exit; default: 600
+
+# ============================================================================
 # Global Storage Configuration Examples
 # ============================================================================
 
