@@ -39,7 +39,7 @@
 
 ## Migration Plan
 
-1. Create brownfield base specification for `backend/vectordb-operator`.
+1. Brownfield base specification for `backend/vectordb-operator` is formalized and archived separately (`formalize-vectordb-operator-spec`).
 2. Remove `create_index` from operator configuration parsing and `get_metadata()`, adding deprecation warning log when present.
 3. Remove `CREATE_INDEX` constant.
 4. Clean up sample flows, documentation, and tests.

@@ -1,7 +1,6 @@
 # backend/vectordb-operator Specification
 
 ## Purpose
-
 The VectorDB operator ingests vectorized chunk embeddings and document metadata from PyArrow tables into supported vector database backends (OpenSearch, Milvus). It supports dense, sparse, and hybrid vector indexing, automatic embedding dimension detection, index/collection lifecycle management, schema validation, stale chunk cleanup, flow enrichment resource introspection, and detailed execution failure metrics.
 
 ## Requirements
