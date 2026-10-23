@@ -348,6 +348,8 @@ class OperatorConstants:
         DEFAULT_DOC_COLUMN: Final[str] = "content"  # References Columns.DOC_COLUMN_DEFAULT
         DEFAULT_REQUEST_TIMEOUT: Final[int] = 120
         DEFAULT_MAX_CONTENT_LENGTH: Final[int] = 2000
+        DEFAULT_TEMPERATURE: Final[float] = 0.0
+        DEFAULT_MAX_TOKENS: Final[int] = 500
 
         # Configuration Keys
         DOC_COLUMN_KEY: Final[str] = "doc_column"  # References Columns.DOC_COLUMN

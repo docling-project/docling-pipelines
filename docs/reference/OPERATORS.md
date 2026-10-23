@@ -691,7 +691,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 
 #### DocumentClassifierOperator
 
-**Purpose:** Classifies documents into predefined types using LLM-based classification with confidence scoring and reasoning. Uses simplified service-based architecture with shared LLM infrastructure supporting multiple providers (LiteLLM, Watsonx).
+**Purpose:** Classifies documents into predefined types using LLM-based classification with confidence scoring and reasoning. Uses a port/adapter architecture (`ClassificationPort`) with shared LLM infrastructure supporting multiple providers (LiteLLM, Watsonx).
 
 **Category:** Quality
 
@@ -865,14 +865,15 @@ Detailed dictionary format (recommended):
 
 **Architecture**
 
-Uses simplified service-based architecture:
+Uses a hexagonal (ports and adapters) architecture:
 
-- **Operator Layer**: `DocumentClassifierOperator` handles PyArrow table processing and orchestration
-- **Service Layer**: `ClassificationService` contains business logic for document classification
+- **Operator Layer**: `DocumentClassifierOperator` handles PyArrow table processing and orchestration, and depends only on `ClassificationPort`
+- **Port**: `ClassificationPort` defines `classify_document()`; `ClassificationAdapterFactory` resolves the `provider` to a concrete adapter
+- **Adapter**: `StandardLLMClassificationAdapter` performs prompt building, the LLM call and response parsing. It also extracts text with Docling when only binary content is available, and reports it back for reuse by the Extract operator
 - **Domain Layer**: Pure domain models (`ClassificationRequest`, `ClassificationResponse`) and prompt building
 - **Infrastructure Layer**: Leverages shared `LLMAdapterFactory` for multi-provider LLM support (LiteLLM, Watsonx)
 
-This simplified design removes the port/adapter overhead while maintaining clean separation of concerns and provider flexibility through the shared LLM infrastructure.
+See the [Classification Operator Guide](../operators/quality/document_classifier_readme.md#architecture) for details.
 
 **Related Documentation**
 

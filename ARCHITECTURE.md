@@ -2484,7 +2484,7 @@ graph TB
 
 ### 8. DocumentClassifier Pattern
 
-The DocumentClassifier operator classifies documents into predefined categories using Large Language Models. It uses a simplified service-based architecture that leverages the shared LLM adapter infrastructure for multi-provider support.
+The DocumentClassifier operator classifies documents into predefined categories using Large Language Models. It uses a port/adapter architecture (`ClassificationPort`) that leverages the shared LLM adapter infrastructure for multi-provider support.
 
 **Typical Workflow Position:**
 
@@ -2511,11 +2511,16 @@ graph LR
 │                   DocumentClassifierOperator                │
 │                     (Main Operator)                         │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+                         │ depends on
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  ClassificationService                      │
-│              (Business Logic Layer)                         │
+│                     ClassificationPort                      │
+│        (resolved by ClassificationAdapterFactory)           │
+└────────────────────────┬────────────────────────────────────┘
+                         │ implemented by
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              StandardLLMClassificationAdapter               │
 │  ┌─────────────────────────────────────────────────-─────┐  │
 │  │  Domain Models:                                       │  │
 │  │  - ClassificationRequest                              │  │
@@ -2542,7 +2547,7 @@ graph LR
 
 1. **LLM-Based Classification**: Uses Large Language Models for intelligent document classification
 2. **Multi-Provider Support**: LiteLLM (100+ providers) and IBM watsonx.ai via shared LLM infrastructure
-3. **Simplified Architecture**: Direct service-based design without port/adapter overhead
+3. **Port/Adapter Architecture**: Operator depends on `ClassificationPort`; adapters self-register with `ClassificationAdapterFactory`
 4. **Confidence Scoring**: 1-10 scale confidence scores for each classification
 5. **Reasoning Output**: Optional explanations for classification decisions
 6. **Shared Infrastructure**: Leverages common LLM adapter factory for consistency

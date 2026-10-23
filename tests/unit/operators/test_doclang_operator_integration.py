@@ -508,8 +508,8 @@ class TestDocumentClassifierDocFormat:
         )
 
         config = {**self._VALID_CONFIG, "doc_format": doc_format}
-        # Patch ClassificationService so __init__ doesn't attempt an LLM connection
-        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationService"):
+        # Patch ClassificationAdapterFactory so __init__ doesn't attempt an LLM connection
+        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"):
             return DocumentClassifierOperator(config)
 
     def test_doc_format_attribute_doclang(self):
@@ -523,7 +523,7 @@ class TestDocumentClassifierDocFormat:
             DocumentClassifierOperator,
         )
 
-        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationService"):
+        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"):
             op = DocumentClassifierOperator(self._VALID_CONFIG)
         assert op.doc_format == MARKDOWN
 
