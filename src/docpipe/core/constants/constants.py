@@ -200,15 +200,15 @@ class DocpipeConstants:
     BATCH_NODE_STATS = "batch_node_stats"
 
     # Document Library constants
-    # Use same database as document sets for consistency
-    DOCUMENT_LIBRARY_DEFAULT_DB_PATH = "data/duckdb/document_sets.duckdb"
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
     LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
-    _PROJECT_ROOT = _find_project_root()
-    DOCUMENT_SET_DEFAULT_DB_PATH = str(_PROJECT_ROOT / "data" / "duckdb" / "document_sets.duckdb")
-    JOB_STATS_DEFAULT_DB_PATH = str(_PROJECT_ROOT / "data" / "duckdb" / "job_stats.duckdb")
+    _DEFAULT_DATA_ROOT = _find_project_root() / "data"
+    _DUCKDB_ROOT = Path(os.getenv(DOCPIPE_DATA_PATH, _DEFAULT_DATA_ROOT)).resolve()
+    DOCUMENT_SET_DEFAULT_DB_PATH = str(_DUCKDB_ROOT / "duckdb" / "document_sets.duckdb")
+    DOCUMENT_LIBRARY_DEFAULT_DB_PATH = DOCUMENT_SET_DEFAULT_DB_PATH
+    JOB_STATS_DEFAULT_DB_PATH = str(_DUCKDB_ROOT / "duckdb" / "job_stats.duckdb")
 
     # Prefect Constants
     PREFECT_CONFIG = "prefect"
