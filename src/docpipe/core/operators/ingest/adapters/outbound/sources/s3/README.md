@@ -84,6 +84,7 @@ python examples/connectors/test_s3_adapter.py
 | `secret_key` | str | Yes | - | AWS secret access key or S3-compatible secret key |
 | `bucket` | str | Yes | - | S3 bucket name |
 | `prefix` | str | No | "" | S3 key prefix to filter objects (e.g., 'documents/reports/') |
+| `object_key` | str | No | None | Object key to ingest on its own (e.g., 'invoices/report.pdf'). When set, only this object is fetched. File events for `s3` and `ibm_cos` set this from `file_reference`. The value is a key, not an `s3://` URI. |
 | `endpoint_url` | str | No | None | Custom S3 endpoint URL for S3-compatible storage (e.g., 'https://s3.example.com') |
 | `region` | str | No | None | AWS region (e.g., 'us-east-1'). Optional for S3-compatible storage |
 | `recursive` | bool | No | True | Whether to recursively traverse subdirectories (prefixes) |

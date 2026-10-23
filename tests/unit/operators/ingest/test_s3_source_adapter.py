@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 
+import logging
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import ValidationError
 
 from docpipe.core.operators.ingest.adapters.outbound.sources.s3.adapter import S3SourceAdapter
 from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
+from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
 
 # Configure pytest-asyncio
 pytestmark = pytest.mark.asyncio
@@ -182,6 +185,7 @@ class TestS3SourceAdapter:
         assert config.recursive is False
         assert config.file_extensions == [".pdf", ".docx"]
         assert config.max_file_size_mb == 50
+        assert config.object_key is None
 
     def test_build_config_missing_credentials(self, adapter):
         """Test that missing credentials raise ValueError."""
@@ -914,3 +918,431 @@ class TestS3FetchBinaryContentErrors:
 
         # boto3.client should only have been called once (cached on second call)
         mock_boto.assert_called_once()
+
+
+def _s3_provider_config() -> dict[str, str]:
+    """Provider settings used by file-event tests. Credentials stay in this dict."""
+    return {
+        "access_key": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+        "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
+        "bucket": "test-bucket",
+        "prefix": "archive/",
+        "endpoint_url": "https://s3.example.com",
+        "region": "us-south",
+    }
+
+
+def _input_event(*, operation: str, file_reference: str) -> dict[str, str]:
+    """Build a five-field file event payload."""
+    return {
+        "event_id": "550e8400-e29b-41d4-a716-446655440002",
+        "event_timestamp": "2026-10-12T12:00:00Z",
+        "routing_key": "invoices",
+        "operation": operation,
+        "file_reference": file_reference,
+    }
+
+
+class TestS3BindFileReference:
+    """File-event binding for the shared s3 and ibm_cos adapter."""
+
+    @pytest.mark.parametrize(
+        ("file_reference", "expected"),
+        [
+            ("invoices/TR-INV_001.pdf", "invoices/TR-INV_001.pdf"),
+            ("/invoices/TR-INV_001.pdf", "invoices/TR-INV_001.pdf"),
+            ("  /invoices/my file.pdf  ", "invoices/my file.pdf"),
+            ("folder:name/file.pdf", "folder:name/file.pdf"),
+            ("k" * 1024, "k" * 1024),
+        ],
+    )
+    def test_valid_file_reference_sets_object_key(self, file_reference: str, expected: str) -> None:
+        """A valid object key is stored without changing connection settings."""
+        provider_config = _s3_provider_config()
+
+        S3SourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=file_reference)
+
+        assert provider_config["object_key"] == expected
+        assert provider_config["prefix"] == "archive/"
+        assert provider_config["bucket"] == "test-bucket"
+        assert provider_config["endpoint_url"] == "https://s3.example.com"
+        assert provider_config["region"] == "us-south"
+        assert provider_config["access_key"] == "AKIAIOSFODNN7EXAMPLE"  # pragma: allowlist secret
+        assert provider_config["secret_key"] == "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
+
+    def test_update_rebinds_the_same_or_a_new_key(self) -> None:
+        """A later event replaces object_key and does not keep a previously ingested key."""
+        provider_config = _s3_provider_config()
+
+        S3SourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="invoices/a.pdf")
+        S3SourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="invoices/a.pdf")
+        assert provider_config["object_key"] == "invoices/a.pdf"
+
+        S3SourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="/invoices/b.pdf")
+
+        assert provider_config["object_key"] == "invoices/b.pdf"
+        assert provider_config["prefix"] == "archive/"
+        assert provider_config["secret_key"] == "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
+
+    @pytest.mark.parametrize(
+        ("file_reference", "match"),
+        [
+            ("", "non-empty S3 object key"),
+            ("   ", "non-empty S3 object key"),
+            (None, "non-empty S3 object key"),
+            (123, "non-empty S3 object key"),
+            ("s3://other-bucket/invoices/a.pdf", "not a URI"),
+            ("S3://other-bucket/invoices/a.pdf", "not a URI"),
+            ("http://s3.example.com/test-bucket/invoices/a.pdf", "not a URI"),
+            ("https://s3.example.com/test-bucket/invoices/a.pdf", "not a URI"),
+            ("cos://other-bucket/invoices/a.pdf", "not a URI"),
+            ("ftp://files.example.com/invoices/a.pdf", "not a URI"),
+            ("/", "not an S3 object key"),
+            ("///", "not an S3 object key"),
+            ("invoices/", "not an S3 object key"),
+            ("invoices/a.pdf/", "not an S3 object key"),
+            ("invoices/a.pdf\nextra", "not an S3 object key"),
+            ("invoices/a.pdf\rextra", "not an S3 object key"),
+            ("invoices/\x00a.pdf", "not an S3 object key"),
+            ("k" * 1025, "1024 bytes"),
+        ],
+    )
+    def test_invalid_file_reference_raises_value_error(self, file_reference: object, match: str) -> None:
+        """Unsupported references fail before any connection setting is changed."""
+        provider_config = _s3_provider_config()
+
+        with pytest.raises(ValueError, match=match) as exc_info:
+            S3SourceAdapter.bind_file_reference(
+                provider_config=provider_config,
+                file_reference=cast(str, file_reference),
+            )
+
+        message = str(exc_info.value)
+        assert "object_key" not in provider_config
+        assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in message  # pragma: allowlist secret
+        assert "AKIAIOSFODNN7EXAMPLE" not in message  # pragma: allowlist secret
+        assert "https://s3.example.com" not in message
+        assert "s3://" not in message.lower()
+
+    def test_build_config_passes_normalized_object_key(self) -> None:
+        """build_config keeps a bound key and the original prefix."""
+        adapter = S3SourceAdapter()
+        provider_config = _s3_provider_config()
+        provider_config["object_key"] = "/invoices/TR-INV_001.pdf"
+
+        config = adapter.build_config_from_operator_params(provider_config=provider_config)
+
+        assert config.object_key == "invoices/TR-INV_001.pdf"
+        assert config.prefix == "archive/"
+        assert config.bucket == "test-bucket"
+        assert config.endpoint_url == "https://s3.example.com"
+
+    def test_build_config_ignores_blank_object_key(self) -> None:
+        """An empty object_key leaves the scan configuration unchanged."""
+        adapter = S3SourceAdapter()
+        provider_config = _s3_provider_config()
+        provider_config["object_key"] = ""
+
+        config = adapter.build_config_from_operator_params(provider_config=provider_config)
+
+        assert config.object_key is None
+
+    def test_config_accepts_explicit_null_object_key(self) -> None:
+        """object_key=None stays unset."""
+        config = S3SourceConfig(
+            access_key="AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+            secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
+            bucket="test-bucket",
+            object_key=None,
+        )
+
+        assert config.object_key is None
+
+    def test_config_rejects_whitespace_object_key(self) -> None:
+        """A whitespace object_key is rejected when it is passed through to the model."""
+        with pytest.raises(ValidationError, match="non-empty S3 object key"):
+            S3SourceConfig(
+                access_key="AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+                secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
+                bucket="test-bucket",
+                object_key="   ",
+            )
+
+    def test_config_rejects_uri_object_key(self) -> None:
+        """A URI cannot be stored as an object key."""
+        with pytest.raises(ValidationError, match="not a URI"):
+            S3SourceConfig(
+                access_key="AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+                secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
+                bucket="test-bucket",
+                object_key="s3://other-bucket/invoices/a.pdf",
+            )
+
+    @pytest.mark.parametrize("operation", ["create", "update"])
+    def test_input_event_binds_key_and_forces_reingest(self, operation: str) -> None:
+        """create and update events ingest that key even when force_ingest was off."""
+        operator = IngestSourceOperator(
+            {
+                "provider": "s3",
+                "provider_config": _s3_provider_config(),
+                "force_ingest": False,
+                "input_event": _input_event(operation=operation, file_reference="/invoices/TR-INV_001.pdf"),
+            }
+        )
+
+        assert operator.force_ingest is True
+        adapter, config = operator._build_adapter_config(operator.provider)
+
+        assert isinstance(adapter, S3SourceAdapter)
+        assert config.object_key == "invoices/TR-INV_001.pdf"
+        assert config.prefix == "archive/"
+        assert operator.provider_config["secret_key"] == _s3_provider_config()["secret_key"]
+
+    def test_ibm_cos_input_event_uses_the_s3_adapter(self) -> None:
+        """ibm_cos is the same adapter and keeps its configured endpoint."""
+        provider_config = _s3_provider_config()
+        provider_config["endpoint_url"] = "https://s3.us-south.cloud-object-storage.appdomain.cloud"
+        operator = IngestSourceOperator(
+            {
+                "provider": "ibm_cos",
+                "provider_config": provider_config,
+                "input_event": _input_event(operation="update", file_reference="invoices/TR-INV_001.pdf"),
+            }
+        )
+
+        adapter, config = operator._build_adapter_config(operator.provider)
+
+        assert isinstance(adapter, S3SourceAdapter)
+        assert operator.force_ingest is True
+        assert config.object_key == "invoices/TR-INV_001.pdf"
+        assert config.endpoint_url == "https://s3.us-south.cloud-object-storage.appdomain.cloud"
+        assert config.bucket == "test-bucket"
+
+    def test_flow_without_input_event_keeps_prefix_scan(self) -> None:
+        """A flow with no file event does not set object_key or force re-ingest."""
+        operator = IngestSourceOperator(
+            {
+                "provider": "s3",
+                "provider_config": _s3_provider_config(),
+                "force_ingest": False,
+            }
+        )
+
+        assert operator.force_ingest is False
+        _, config = operator._build_adapter_config(operator.provider)
+
+        assert config.object_key is None
+        assert config.prefix == "archive/"
+        assert "object_key" not in operator.provider_config
+
+    def test_invalid_input_event_fails_without_leaking_credentials(self) -> None:
+        """An unsupported file_reference fails config build and leaves credentials in place."""
+        operator = IngestSourceOperator(
+            {
+                "provider": "s3",
+                "provider_config": _s3_provider_config(),
+                "input_event": _input_event(operation="create", file_reference="s3://other-bucket/invoices/a.pdf"),
+            }
+        )
+
+        with pytest.raises(ValueError, match="not a URI") as exc_info:
+            operator._build_adapter_config(operator.provider)
+
+        message = str(exc_info.value)
+        assert "object_key" not in operator.provider_config
+        assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in message  # pragma: allowlist secret
+        assert "https://s3.example.com" not in message
+        assert "other-bucket" not in message
+
+
+class TestS3FetchSingleObject:
+    """Single-object ingest used after a file event binds object_key."""
+
+    def _config(self, **kwargs: object) -> S3SourceConfig:
+        values: dict[str, object] = {
+            "access_key": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+            "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
+            "bucket": "test-bucket",
+            "prefix": "archive/",
+            "endpoint_url": "https://s3.example.com",
+            "file_extensions": [".txt"],
+            "object_key": "invoices/TR-INV_001.pdf",
+        }
+        values.update(kwargs)
+        return S3SourceConfig(**values)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_fetch_documents_returns_only_the_bound_object(self) -> None:
+        """A bound key is fetched alone, ignoring prefix and extension filters."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        mock_client.head_object.return_value = {
+            "ContentLength": 2048,
+            "LastModified": datetime(2024, 1, 1, tzinfo=UTC),
+            "ETag": '"abc123"',
+            "StorageClass": "STANDARD",
+        }
+
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value="123456789012"):
+                documents = await collect_async(adapter.fetch_documents(config))
+
+        assert len(documents) == 1
+        assert documents[0].id == "invoices/TR-INV_001.pdf"
+        assert documents[0].name == "TR-INV_001.pdf"
+        assert documents[0].content == b""
+        assert documents[0].size == 2048
+        assert documents[0].extension == ".pdf"
+        assert documents[0].metadata["bucket"] == "test-bucket"
+        assert documents[0].metadata["key"] == "invoices/TR-INV_001.pdf"
+        assert documents[0].metadata["etag"] == "abc123"
+        mock_client.head_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="invoices/TR-INV_001.pdf",
+            ExpectedBucketOwner="123456789012",
+        )
+        mock_client.get_paginator.assert_not_called()
+        mock_client.get_object.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fetch_documents_omits_expected_bucket_owner_without_account_id(self) -> None:
+        """IBM COS style calls do not send ExpectedBucketOwner when no account id is resolved."""
+        adapter = S3SourceAdapter()
+        config = self._config(object_key="invoices/a.pdf")
+        mock_client = Mock()
+        mock_client.head_object.return_value = {"ContentLength": 12}
+
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                documents = await collect_async(adapter.fetch_documents(config))
+
+        assert len(documents) == 1
+        assert documents[0].id == "invoices/a.pdf"
+        mock_client.head_object.assert_called_once_with(Bucket="test-bucket", Key="invoices/a.pdf")
+        mock_client.get_paginator.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fetch_documents_accepts_head_response_without_optional_metadata(self) -> None:
+        """Missing head fields fall back to empty size, etag, and standard storage class."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        mock_client.head_object.return_value = {}
+
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                documents = await collect_async(adapter.fetch_documents(config))
+
+        assert len(documents) == 1
+        assert documents[0].size == 0
+        assert documents[0].modified_time is None
+        assert documents[0].metadata["etag"] == ""
+        assert documents[0].metadata["storage_class"] == "STANDARD"
+
+    @pytest.mark.asyncio
+    async def test_missing_object_raises_without_leaking_connection_details(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A missing key fails the fetch. Logs keep the error code, not the client message."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        leaked = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY at https://s3.example.com"  # pragma: allowlist secret
+        mock_client.head_object.side_effect = ClientError(
+            {"Error": {"Code": "404", "Message": leaked}},
+            "HeadObject",
+        )
+
+        caplog.set_level(logging.INFO)
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                with pytest.raises(ValueError, match="not available") as exc_info:
+                    await collect_async(adapter.fetch_documents(config))
+
+        assert "invoices/TR-INV_001.pdf" in str(exc_info.value)
+        assert leaked not in str(exc_info.value)
+        assert leaked not in caplog.text
+        assert "error_code=404" in caplog.text
+        mock_client.get_paginator.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_client_error_without_error_body_uses_unknown_code(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A ClientError with no error body still fails clearly."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        mock_client.head_object.side_effect = ClientError({}, "HeadObject")
+
+        caplog.set_level(logging.ERROR)
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                with pytest.raises(ValueError, match="not available"):
+                    await collect_async(adapter.fetch_documents(config))
+
+        assert "error_code=Unknown" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_client_error_without_code_uses_unknown_code(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A ClientError body without Code is reported as Unknown."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        mock_client.head_object.side_effect = ClientError({"Error": {"Message": "nope"}}, "HeadObject")
+
+        caplog.set_level(logging.ERROR)
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                with pytest.raises(ValueError, match="not available"):
+                    await collect_async(adapter.fetch_documents(config))
+
+        assert "error_code=Unknown" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_botocore_error_raises_without_leaking_credentials(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Transport failures fail the key lookup and do not log the secret or endpoint."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        mock_client.head_object.side_effect = BotoCoreError()
+
+        caplog.set_level(logging.ERROR)
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                with pytest.raises(ValueError, match="not available") as exc_info:
+                    await collect_async(adapter.fetch_documents(config))
+
+        message = str(exc_info.value)
+        assert "invoices/TR-INV_001.pdf" in message
+        assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in message  # pragma: allowlist secret
+        assert "https://s3.example.com" not in message
+        assert "https://s3.example.com" not in caplog.text
+        assert "error_code" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_download_failure_raises_value_error(self) -> None:
+        """A head that cannot be turned into a document fails the run."""
+        adapter = S3SourceAdapter()
+        config = self._config()
+        mock_client = Mock()
+        mock_client.head_object.return_value = {"ContentLength": 10}
+
+        with patch.object(adapter, "_create_s3_client", return_value=mock_client):
+            with patch.object(adapter, "_get_aws_account_id", return_value=None):
+                with patch.object(adapter, "_download_s3_object", return_value=None):
+                    with pytest.raises(ValueError, match="not available") as exc_info:
+                        await collect_async(adapter.fetch_documents(config))
+
+        assert "invoices/TR-INV_001.pdf" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_fetch_single_object_rejects_missing_key(self) -> None:
+        """Calling the single-object helper without a key does not touch S3."""
+        adapter = S3SourceAdapter()
+        config = self._config(object_key=None)
+        mock_client = Mock()
+
+        with pytest.raises(ValueError, match="non-empty S3 object key"):
+            await adapter._fetch_single_object(s3_client=mock_client, config=config)
+
+        mock_client.head_object.assert_not_called()

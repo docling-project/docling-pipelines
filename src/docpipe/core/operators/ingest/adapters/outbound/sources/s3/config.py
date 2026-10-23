@@ -4,6 +4,9 @@ from typing import ClassVar
 
 from pydantic import BaseModel, Field, field_validator
 
+# S3 rejects object keys longer than 1024 bytes.
+_MAX_OBJECT_KEY_BYTES = 1024
+
 
 class S3SourceConfig(BaseModel):
     """
@@ -31,6 +34,16 @@ class S3SourceConfig(BaseModel):
     prefix: str = Field(
         "",
         description="S3 key prefix to filter objects. Use 'documents/reports/' for directory or 'documents/report.pdf' for exact file",
+    )
+
+    object_key: str | None = Field(
+        None,
+        description=(
+            "Object key to ingest on its own, for example 'invoices/report.pdf'. "
+            "When set, only this object is fetched from the configured bucket. "
+            "File events for the s3 and ibm_cos providers set this from file_reference. "
+            "The value is a key, not an s3:// URI."
+        ),
     )
 
     # S3-compatible storage configuration (optional)
@@ -107,6 +120,38 @@ class S3SourceConfig(BaseModel):
             return ""
         # Remove leading slash
         return v.lstrip("/")
+
+    @staticmethod
+    def normalize_object_key(file_reference: str) -> str:
+        """Return one S3 object key, or reject an empty or unsupported reference.
+
+        The reference is the key inside the bucket already configured on the flow.
+        URIs are rejected so an event cannot select another bucket or endpoint.
+        """
+        if not isinstance(file_reference, str) or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty S3 object key")
+
+        reference = file_reference.strip()
+        lowered = reference.lower()
+        if lowered.startswith(("s3://", "http://", "https://", "cos://")) or "://" in reference:
+            raise ValueError("File reference must be an S3 object key in the configured bucket, not a URI")
+
+        key = reference.lstrip("/")
+        if not key or key.endswith("/") or any(separator in key for separator in ("\x00", "\n", "\r")):
+            raise ValueError(f"File reference is not an S3 object key: {reference}")
+
+        if len(key.encode("utf-8")) > _MAX_OBJECT_KEY_BYTES:
+            raise ValueError("File reference exceeds the maximum S3 object key length of 1024 bytes")
+
+        return key
+
+    @field_validator("object_key")
+    @classmethod
+    def validate_object_key(cls, value: str | None) -> str | None:
+        """Normalize a single-object key supplied on the configuration."""
+        if value is None:
+            return None
+        return cls.normalize_object_key(value)
 
     @field_validator("endpoint_url")
     @classmethod
