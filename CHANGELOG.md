@@ -92,8 +92,13 @@ Versioning follows [Semantic Versioning 2.0.0](https://semver.org/).
 - Flow execution defaults `enable_micro_batching` to `true` when not set in the flow (#58)
 - Deprecation policy (`docs/guides/DEPRECATION_POLICY.md`) and migration guide template (#58)
 - Release process documentation (`RELEASE_PROCESS.md`) (#58)
+- `EntityStoreOperator` — stores curated entities in DuckDB or PostgreSQL, one table per entity type, with a configurable `schema` and `table_prefix` (#184)
+- `PostgresTableStorage` — backend-generic PostgreSQL `TableStoragePort` implementation with a configurable schema, and a table storage contract test run against DuckDB and PostgreSQL (#184)
 
 ### Changed
+
+- `StorageFactory.create_table_storage` takes the same flat settings for every backend and passes each backend only its own settings (#184)
+- `DuckDBTableStorage.read_data` returns rows ordered by `id`, so pages read with `limit` and `offset` are stable (#184)
 
 - **Breaking:** `IngestSourceOperator` migrated from `connection_params` + `credentials` to unified `provider_config`; all 8 source adapters and all sample flows updated (#152)
 - `PIIAndHAPAnnotator` provider selection replaced with decorator-based `PIIAndHAPDetectionFactory` registry (#76)

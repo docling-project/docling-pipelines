@@ -38,6 +38,7 @@ from docpipe.core.operators.quality.pii_and_hap.pii_and_hap_annotator import PII
 from docpipe.core.operators.quality.readability import ReadabilityOperator
 from docpipe.core.operators.quality.redaction import RedactionOperator
 from docpipe.core.operators.quality.sql_filter import SQLFilterOperator
+from docpipe.core.operators.storage.entity_store_operator import EntityStoreOperator
 from docpipe.core.operators.storage.storage_output_operator import StorageOutputOperator
 
 # VectorDB Operators
@@ -75,6 +76,7 @@ DOCPIPE_OPERATORS = frozenset(
         VectorDBOperator,
         # Storage
         DocumentSetOperator,
+        EntityStoreOperator,
         StorageOutputOperator,
     }
 )
@@ -166,28 +168,39 @@ def get_docpipe_operators(*, orchestrator: str | None = None) -> frozenset:
 
     # Start with base docpipe operators
     operators = set(DOCPIPE_OPERATORS)
-    logger.debug(f"Starting with {len(operators)} base docpipe operators")
+    logger.debug("Starting with %d base docpipe operators", len(operators))
 
     # Collect operators from all registered providers
     for idx, provider_func in enumerate(_EXTERNAL_OPERATOR_PROVIDERS):
         try:
             logger.debug(
-                f"Calling external provider {idx + 1}/{len(_EXTERNAL_OPERATOR_PROVIDERS)}: {provider_func.__name__}"
+                "Calling external provider %d/%d: %s",
+                idx + 1,
+                len(_EXTERNAL_OPERATOR_PROVIDERS),
+                provider_func.__name__,
             )
             external_ops = provider_func(orchestrator=orchestrator)
 
             if isinstance(external_ops, frozenset):
                 operators.update(external_ops)
-                logger.info(f"Added {len(external_ops)} operators from provider '{provider_func.__name__}'")
+                logger.info(
+                    "Added %d operators from provider '%s'",
+                    len(external_ops),
+                    provider_func.__name__,
+                )
             else:
                 logger.warning(
-                    f"Provider '{provider_func.__name__}' returned {type(external_ops).__name__}, "
-                    f"expected frozenset. Skipping."
+                    "Provider '%s' returned %s, expected frozenset. Skipping.",
+                    provider_func.__name__,
+                    type(external_ops).__name__,
                 )
-        except Exception as e:
-            logger.error(f"Error calling operator provider '{provider_func.__name__}': {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error calling operator provider '%s'", provider_func.__name__)
 
-    logger.info(f"Returning {len(operators)} total operators (base + external, before priority resolution)")
+    logger.info(
+        "Returning %d total operators (base + external, before priority resolution)",
+        len(operators),
+    )
     return frozenset(operators)
 
 

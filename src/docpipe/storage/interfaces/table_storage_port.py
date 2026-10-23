@@ -10,47 +10,58 @@ class TableStoragePort(ABC):
     """
     Interface for PyArrow table storage.
 
-    Used for storing document set data as PyArrow tables.
+    Used for storing document set data and curated entities as PyArrow tables.
     Provides operations for creating tables, upserting data, and querying.
 
-    docling-pipelines implementations: DuckDBTableStorage
+    Contract shared by all implementations:
+        - Every table written with ``upsert_data`` has an ``id`` column, which is its
+          primary key. Rows with an existing ``id`` are updated.
+        - Nested values (lists, structs and maps) are stored as JSON and read back as
+          JSON text.
+        - ``read_data`` returns rows ordered by ``id``.
+        - ``execute_query`` takes positional ``?`` placeholders.
+
+    docling-pipelines implementations: DuckDBTableStorage, PostgresTableStorage
     """
 
     @abstractmethod
     def create_table(self, *, table_name: str, schema: pa.Schema) -> None:
         """
-        Create a new table with the specified schema.
+        Create a table with the specified schema, if it does not exist yet.
+
+        Creating a table that already exists does nothing, and keeps its columns.
 
         Args:
             table_name: Unique name for the table
-            schema: PyArrow schema defining the table structure
+            schema: PyArrow schema defining the table structure. An ``id`` column
+                becomes the primary key.
 
         Raises:
-            ValueError: If a table with the same name already exists
-            RuntimeError: If storage operation fails
+            StorageException: If storage operation fails
         """
         ...
 
     @abstractmethod
     def upsert_data(self, *, table_name: str, data: pa.Table) -> None:
         """
-        Insert or update data in a table.
+        Insert or update data in a table, by ``id``.
+
+        Columns that the table does not have yet are added.
 
         Args:
             table_name: Name of the table to upsert data into
-            data: PyArrow table containing the data to upsert
+            data: PyArrow table containing the data to upsert. Must have an ``id`` column.
 
         Raises:
-            KeyError: If the specified table does not exist
-            ValueError: If the data schema does not match the table schema
-            RuntimeError: If storage operation fails
+            StorageException: If the specified table does not exist or the storage operation fails
+            StorageValidationError: If the data has no ``id`` column
         """
         ...
 
     @abstractmethod
     def read_data(self, *, table_name: str, limit: int | None = None, offset: int | None = None) -> pa.Table:
         """
-        Read data from a table.
+        Read data from a table, ordered by ``id`` so that pages are stable.
 
         Args:
             table_name: Name of the table to read from
@@ -92,6 +103,10 @@ class TableStoragePort(ABC):
 
         Returns:
             True if table exists, False otherwise
+
+        Raises:
+            StorageConnectionError: If the storage cannot be reached. A failed check
+                is never reported as a missing table.
         """
         ...
 
@@ -117,14 +132,20 @@ class TableStoragePort(ABC):
         """
         Execute a SQL query and return results as PyArrow table.
 
+        Placeholders are positional ``?`` on every backend; each implementation
+        translates them for its driver.
+
         Args:
-            query: SQL query to execute
-            params: Optional query parameters
+            query: SQL query to execute, with ``?`` placeholders
+            params: Optional positional values for the placeholders
 
         Returns:
             Query results as PyArrow table
 
         Raises:
-            RuntimeError: If query execution fails
+            StorageException: If query execution fails
         """
         ...
+
+    def close(self) -> None:
+        """Release the resources held by the storage, such as a connection pool."""
