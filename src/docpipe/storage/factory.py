@@ -32,7 +32,7 @@ class StorageFactory:
             **config: Storage-specific configuration
 
         Returns:
-            KeyValueStorage instance
+            KeyValueStoragePort instance
 
         Raises:
             ValueError: If storage_type is not supported
@@ -43,7 +43,7 @@ class StorageFactory:
                 database_path="data/assets.db"
             )
         """
-        logger.debug(f"Creating key-value storage: {storage_type}")
+        logger.debug("Creating key-value storage: %s", storage_type)
 
         if storage_type == "filesystem":
             return KeyValueFileSystemStorage(**config)
@@ -63,7 +63,7 @@ class StorageFactory:
             **config: Storage-specific configuration
 
         Returns:
-            TableStorage instance
+            TableStoragePort instance
 
         Raises:
             ValueError: If storage_type is not supported
@@ -74,7 +74,7 @@ class StorageFactory:
                 database_path="data/tables.db"
             )
         """
-        logger.debug(f"Creating table storage: {storage_type}")
+        logger.debug("Creating table storage: %s", storage_type)
 
         if storage_type == "duckdb":
             return DuckDBTableStorage(**config)

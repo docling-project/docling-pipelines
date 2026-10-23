@@ -146,7 +146,7 @@ def get_document_set_repository() -> AssetRepository[DocumentSet]:
 
     Uses RepositoryFactory to create repository based on configuration from
     docling-pipelines-config.yaml. This enables:
-    - OSS: DuckDBDocumentSetMetadataRepository (database-based)
+    - OSS: DuckDBAssetRepository[DocumentSet] (database-based)
     - Future: PostgreSQL or other storage backends
 
     Returns:
