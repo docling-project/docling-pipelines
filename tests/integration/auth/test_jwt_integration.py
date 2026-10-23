@@ -79,7 +79,7 @@ class TestJWTAuthentication:
         import jwt
 
         # Create token without username
-        data = {"email": "test@example.com"}
+        data: dict[str, object] = {"email": "test@example.com"}
         expire = datetime.now(UTC) + timedelta(minutes=30)
         data.update({"exp": expire})
 
@@ -96,7 +96,7 @@ class TestJWTAuthentication:
         import jwt
 
         # Create expired token
-        data = {"username": "testuser"}
+        data: dict[str, object] = {"username": "testuser"}
         expire = datetime.now(UTC) - timedelta(minutes=1)
         data.update({"exp": expire})
 
