@@ -77,7 +77,7 @@ dependencies = [
     "milvus-lite==3.2.2",
     "pymilvus==2.6.13",
     "pyopenssl==26.4.0",
-    "pypdf==6.20.0",
+    "pypdf==6.21.1",
     "pyphen==0.17.2",
     "python-dotenv==1.2.2",
     "python-ldap==3.4.5",
