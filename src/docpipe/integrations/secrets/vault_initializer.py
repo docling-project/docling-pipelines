@@ -49,7 +49,7 @@ def initialize_secret_providers() -> None:
         _initialize_secret_providers()
     except Exception as exc:
         logger.warning(
-            "Vault initialization failed unexpectedly — application will continue without Vault. Detail: %s",
+            "Vault initialization failed unexpectedly - application will continue without Vault. Detail: %s",
             exc,
             exc_info=True,
         )
@@ -94,7 +94,7 @@ def _initialize_secret_providers() -> None:
         provider._config.validate()
     except ConfigurationError as exc:
         logger.warning(
-            "Vault is enabled in config but credentials are missing — "
+            "Vault is enabled in config but credentials are missing - "
             "set VAULT_ROLE_ID and VAULT_SECRET_ID environment variables. Detail: %s",
             exc,
             exc_info=True,
@@ -105,7 +105,7 @@ def _initialize_secret_providers() -> None:
     #    is_available() logs the full stacktrace internally on failure
     if not provider.is_available():
         logger.warning(
-            "Vault provider will not be registered — "
+            "Vault provider will not be registered - "
             "check VAULT_ADDR=%s, VAULT_TLS_SKIP_VERIFY, and VAULT_CA_CERT. "
             "Set DS_LOG_LEVEL=DEBUG for full stacktrace.",
             provider._config.addr,

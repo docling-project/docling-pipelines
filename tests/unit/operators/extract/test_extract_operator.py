@@ -2858,7 +2858,7 @@ def test_write_streaming_progress_swallows_store_exception():
         # Call the real method with mocked imports — it must not raise
         try:
             with patch(
-                "docpipe.core.job_management.adapters.config.job_management_factory.get_default_factory",
+                "docpipe.core.operators.extract.extract_operator.get_default_factory",
                 return_value=mock_factory,
             ):
                 operator._write_streaming_progress(
@@ -2894,7 +2894,7 @@ def test_write_streaming_progress_calls_store_when_ids_set():
     mock_factory.create_job_stats_store.return_value = mock_store
 
     with patch(
-        "docpipe.core.job_management.adapters.config.job_management_factory.get_default_factory",
+        "docpipe.core.operators.extract.extract_operator.get_default_factory",
         return_value=mock_factory,
     ):
         operator._write_streaming_progress(

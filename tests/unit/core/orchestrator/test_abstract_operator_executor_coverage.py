@@ -1,6 +1,7 @@
 """Unit tests covering missing lines in AbstractOperatorExecutor."""
 
 from queue import Queue
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -109,10 +110,25 @@ class TestValidateAndGetMetadata:
         mock_op = Mock()
         executor.get_operator = Mock(return_value=mock_op)
 
-        errors, warnings, features = [], [], ["col1"]
+        errors: list[Any] = []
+        warnings: list[str] = []
+        features = ["col1"]
         executor.validate(errors=errors, warnings=warnings, available_features=features)
 
-        mock_op.validate.assert_called_once_with(errors, warnings, features)
+        mock_op.validate.assert_called_once_with(errors=errors, warnings=warnings, available_features=features)
+
+    def test_validate_ingest_without_provider(self):
+        """The executor supports the ingest operator's keyword-only validation contract."""
+        from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
+
+        executor = _make_executor()
+        executor.get_operator = Mock(return_value=IngestSourceOperator({"provider": None}))
+        errors: list[Any] = []
+
+        executor.validate(errors=errors, warnings=[], available_features=[])
+
+        assert len(errors) == 1
+        assert errors[0].message_code == "INGEST_PROVIDER_MISSING"
 
     def test_get_metadata_delegates_to_operator(self):
         """Lines 115-116: get_metadata() calls op.get_metadata()."""
@@ -159,7 +175,7 @@ class TestAddEmptyDocsToSkippedMetadataExtraPaths:
     def test_empty_indices_returns_early(self, executor):
         """Line 381: empty_doc_indices=[] returns early before calling get_operator."""
         table = pa.table({"id": ["doc1"], "content": ["valid"]})
-        metadata = {}
+        metadata: dict[str, Any] = {}
         executor._add_empty_docs_to_skipped_metadata(table=table, empty_doc_indices=[], metadata=metadata)
         # get_operator must NOT be called
         executor.get_operator.assert_not_called()
@@ -189,7 +205,7 @@ class TestExecuteDeletedRowsBranch:
 
         out_table = pa.table({"id": ["1"]})
         deleted = pa.table({"id": ["deleted_doc"]})  # non-empty
-        deleted_rows_list = Queue()
+        deleted_rows_list: Queue = Queue()
 
         with (
             patch.object(executor, "_get_input_tables", return_value=out_table),
@@ -213,7 +229,7 @@ class TestExecuteDeletedRowsBranch:
 
         out_table = pa.table({"id": ["1"]})
         empty_deleted = pa.table({"id": pa.array([], type=pa.string())})
-        deleted_rows_list = Queue()
+        deleted_rows_list: Queue = Queue()
 
         with (
             patch.object(executor, "_get_input_tables", return_value=out_table),

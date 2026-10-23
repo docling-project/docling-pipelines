@@ -103,29 +103,29 @@ class OperatorValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
-        # Find operator classes in module
-        operator_classes = []
-        for _, obj in inspect.getmembers(module):
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, AbstractOperator)
-                and obj is not AbstractOperator
-                and obj.__module__ == module.__name__
-            ):
-                operator_classes.append(obj)
+        operator_classes = OperatorValidator.find_operator_classes(module=module)
 
         if not operator_classes:
             errors.append(f"No operator classes found in module {operator_info.module_path}")
             return ValidationResult(valid=False, errors=errors, warnings=warnings)
 
-        if len(operator_classes) > 1:
+        if not isinstance(operator_info.name, str):
+            errors.append("Operator class name must be a string")
+            return ValidationResult(valid=False, errors=errors, warnings=warnings)
+
+        if not operator_info.name and len(operator_classes) > 1:
             warnings.append(
                 f"Multiple operator classes found in {operator_info.module_path}. "
                 f"Using first one: {operator_classes[0].__name__}"
             )
 
-        # Validate the first operator class found
-        operator_class = operator_classes[0]
+        operator_class = OperatorValidator.select_operator_class(module=module, operator_info=operator_info)
+        if operator_class is None:
+            errors.append(
+                f"Operator class '{operator_info.name}' is not a concrete operator defined in module {module.__name__}"
+            )
+            return ValidationResult(valid=False, errors=errors, warnings=warnings)
+
         class_validation = OperatorValidator.validate_operator_class(cls=operator_class, operator_info=operator_info)
 
         return ValidationResult(
@@ -133,3 +133,37 @@ class OperatorValidator:
             errors=errors + class_validation.errors,
             warnings=warnings + class_validation.warnings,
         )
+
+    @staticmethod
+    def find_operator_classes(*, module: ModuleType) -> list[type[AbstractOperator]]:
+        """Find operator subclasses defined directly in a module."""
+        return [
+            obj
+            for _, obj in inspect.getmembers(module)
+            if inspect.isclass(obj)
+            and issubclass(obj, AbstractOperator)
+            and obj is not AbstractOperator
+            and obj.__module__ == module.__name__
+        ]
+
+    @staticmethod
+    def select_operator_class(*, module: ModuleType, operator_info: OperatorInfo) -> type[AbstractOperator] | None:
+        """Select the discovered class, or the first class for unnamed metadata."""
+        operator_classes = OperatorValidator.find_operator_classes(module=module)
+        if not isinstance(operator_info.name, str):
+            return None
+        if not operator_info.name:
+            return operator_classes[0] if operator_classes else None
+        candidate = vars(module).get(operator_info.name)
+        if candidate is None and ":" in operator_info.module_path:
+            attribute_name = operator_info.module_path.rsplit(":", 1)[1]
+            if attribute_name.isidentifier():
+                candidate = vars(module).get(attribute_name)
+        if (
+            inspect.isclass(candidate)
+            and any(candidate is operator_class for operator_class in operator_classes)
+            and candidate.__name__ == operator_info.name
+            and not inspect.isabstract(candidate)
+        ):
+            return candidate
+        return None

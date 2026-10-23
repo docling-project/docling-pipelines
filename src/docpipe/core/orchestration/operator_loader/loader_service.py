@@ -4,7 +4,6 @@ This service coordinates the discovery and loading of custom operators from
 multiple sources.
 """
 
-import inspect
 from typing import Any
 
 from docpipe.core.operators.abstract_operator import AbstractOperator
@@ -15,6 +14,7 @@ from docpipe.core.orchestration.operator_loader.ports.operator_source import (
     OperatorInfo,
     OperatorSourcePort,
 )
+from docpipe.core.orchestration.operator_loader.validator import OperatorValidator
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -212,16 +212,7 @@ class CustomOperatorLoader:
         Returns:
             Operator class if found, None otherwise
         """
-        for _, obj in inspect.getmembers(module):
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, AbstractOperator)
-                and obj is not AbstractOperator
-                and obj.__module__ == module.__name__
-            ):
-                return obj
-
-        return None
+        return OperatorValidator.select_operator_class(module=module, operator_info=op_info)
 
     def validate_and_load(
         self,
