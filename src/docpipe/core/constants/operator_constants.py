@@ -564,6 +564,9 @@ class OperatorConstants:
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
 
+        # Archive formats (filesystem ingest only)
+        ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
+
         BASE_EXTENSIONS: Final[list[str]] = [
             EXT_PDF,
             EXT_DOCX,
