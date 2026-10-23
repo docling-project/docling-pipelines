@@ -145,7 +145,7 @@ notebooks = [
     # CVE-2026-102831, CVE-2026-102904, CVE-2026-102830: fixed in JupyterLab 4.6.4.
     "jupyterlab==4.6.4",
     "matplotlib==3.11.2",
-    "nbconvert==7.17.1",
+    "nbconvert==7.17.2",
     "nbformat==5.10.4",
     "seaborn==0.13.2",
 ]
