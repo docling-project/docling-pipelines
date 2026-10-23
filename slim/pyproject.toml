@@ -109,7 +109,7 @@ dev = [
     "interrogate==1.7.0",
     "mypy==2.4.0",
     "pre-commit==4.5.1",
-    "pytest==9.0.3",
+    "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.0.0",
     "pytest-mock==3.15.1",
