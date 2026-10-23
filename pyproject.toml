@@ -140,7 +140,7 @@ dev = [
 ]
 
 notebooks = [
-    "ipykernel==7.3.0",
+    "ipykernel==7.4.0",
     "jupyter==1.1.1",
     # CVE-2026-102831, CVE-2026-102904, CVE-2026-102830: fixed in JupyterLab 4.6.4.
     "jupyterlab==4.6.4",
