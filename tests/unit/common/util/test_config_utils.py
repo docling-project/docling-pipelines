@@ -24,7 +24,7 @@ class TestGetOpensearchConfig:
             config = get_opensearch_config()
 
             # Operator-level params
-            assert config[OperatorConstants.VectorDB.CREATE_INDEX] is True
+            assert "create_index" not in config
             assert config[OperatorConstants.Columns.DOC_ID_COLUMN] == "doc_id_hash"
 
             # Provider-specific params and resource name are in provider_config
@@ -53,7 +53,6 @@ class TestGetOpensearchConfig:
             "OPENSEARCH_SPACE_TYPE": "cosine",
             "OPENSEARCH_VECTOR_DIMENSION": "768",
             "OPENSEARCH_BATCH_SIZE": "200",
-            "OPENSEARCH_CREATE_INDEX": "false",
             "OPENSEARCH_INDEX_NAME": "custom_index",
             "OPENSEARCH_DOC_ID_COLUMN": "custom_id",
             "OPENSEARCH_EMBEDDINGS_COLUMN": "custom_embeddings",
@@ -63,7 +62,6 @@ class TestGetOpensearchConfig:
             config = get_opensearch_config()
 
             # Operator-level params
-            assert config[OperatorConstants.VectorDB.CREATE_INDEX] is False
             assert config[OperatorConstants.Columns.DOC_ID_COLUMN] == "custom_id"
 
             # Provider-specific params and resource name are in provider_config
@@ -390,7 +388,6 @@ class TestEdgeCases:
             "OPENSEARCH_SPACE_TYPE": "l2",
             "OPENSEARCH_VECTOR_DIMENSION": "384",
             "OPENSEARCH_BATCH_SIZE": "100",
-            "OPENSEARCH_CREATE_INDEX": "true",
             "OPENSEARCH_INDEX_NAME": "test",
             "OPENSEARCH_DOC_ID_COLUMN": "id",
             "OPENSEARCH_EMBEDDINGS_COLUMN": "emb",

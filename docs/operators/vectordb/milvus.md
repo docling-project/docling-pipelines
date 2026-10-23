@@ -44,7 +44,6 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 |-----------|------|----------|---------|-------------|
 | `provider` | string | No | "milvus" | Vector database type |
 | `doc_id_column` | string | No | "doc_id_hash" | Column containing document IDs |
-| `create_index` | boolean | No | true | Create collection if it doesn't exist |
 | `batch_size` | integer | No | 100 | Documents per batch |
 | `provider_config` | object | **Yes** | - | Provider-specific configuration including the collection name (see below) |
 
@@ -390,7 +389,6 @@ config = {
   "config": {
     "provider": "milvus",
     "doc_id_column": "doc_id_hash",
-    "create_index": true,
     "provider_config": {
       "collection_name": "docpipe_documents",
       "auth_type": "standalone",

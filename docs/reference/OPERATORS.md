@@ -2027,7 +2027,6 @@ Schemas are defined with `target_tables` specifying field mappings and transform
 | -------------------- | ------ | -------: | ------------- | --------------------------------------------------------------------------- |
 | `provider`           | string |      Yes | -             | VectorDB backend (`opensearch` or `milvus`)                                 |
 | `doc_id_column`      | string |       No | `doc_id_hash` | Primary document id column                                                  |
-| `create_index`       | bool   |       No | `true`        | Auto-create index/collection if it does not exist                           |
 | `provider_config`    | object |      Yes | -             | Connection parameters and resource name for the backend (see examples below)|
 | `available_features` | object |       No | -             | Feature definitions for vector DB schema                                    |
 | `feature_mappings`   | object |       No | -             | Mapping of PyArrow columns to vector DB fields                              |
@@ -2084,7 +2083,6 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
   "operator": "vectordb",
   "config": {
     "provider": "opensearch",
-    "create_index": true,
     "provider_config": {
       "index_name": "my_documents",
       "host": "localhost",
@@ -2105,7 +2103,6 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
   "operator": "vectordb",
   "config": {
     "provider": "milvus",
-    "create_index": true,
     "add_sparse_vector": false,
     "provider_config": {
       "collection_name": "my_collection",
@@ -2158,7 +2155,6 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
   "config": {
     "provider": "milvus",
     "add_sparse_vector": false,
-    "create_index": true,
     "provider_config": {
       "collection_name": "wxdata_collection",
       "auth_type": "grpc",
@@ -2190,7 +2186,6 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
   "operator": "vectordb",
   "config": {
     "provider": "milvus",
-    "create_index": true,
     "add_sparse_vector": false,
     "provider_config": {
       "collection_name": "wxdata_token_collection",

@@ -78,7 +78,6 @@ No Docker, Podman, or Kubernetes required. Data is persisted to a local `.db` fi
   "config": {
     "provider": "milvus",
     "doc_id_column": "doc_id_hash",
-    "create_index": true,
     "add_sparse_vector": false,
     "provider_config": {
       "collection_name": "documents",
@@ -416,7 +415,6 @@ Docling Pipelines provides two example pipeline flows demonstrating different Mi
   "doc_id_column": "doc_id_hash",
   "embeddings_column": "embeddings",
   "add_sparse_vector": true,
-  "create_index": true,
   "provider_config": {
     "collection_name": "sample_documents_sparse",
     "auth_type": "standalone",
@@ -448,7 +446,6 @@ Docling Pipelines provides two example pipeline flows demonstrating different Mi
   "doc_id_column": "doc_id_hash",
   "embeddings_column": "embeddings",
   "add_sparse_vector": false,
-  "create_index": true,
   "provider_config": {
     "collection_name": "sample_documents_collection_dense",
     "auth_type": "grpc",
