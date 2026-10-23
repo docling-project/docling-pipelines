@@ -321,6 +321,9 @@ jobs:
     name: Test Suite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
 
     strategy:
       fail-fast: false
