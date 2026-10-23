@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qsl
 
@@ -399,7 +399,8 @@ def _rsa_key_pair() -> tuple[str, str]:
 def signing_key() -> dict[str, Any]:
     """The provider's signing key and the JWKS that publishes it."""
     private_pem, public_pem = _rsa_key_pair()
-    public_jwk = json.loads(RSAAlgorithm.to_jwk(serialization.load_pem_public_key(public_pem.encode())))
+    public_key = cast(rsa.RSAPublicKey, serialization.load_pem_public_key(public_pem.encode()))
+    public_jwk = json.loads(RSAAlgorithm.to_jwk(public_key))
     public_jwk["kid"] = _KID
     return {"private_pem": private_pem, "public_pem": public_pem, "jwks": {"keys": [public_jwk]}}
 
