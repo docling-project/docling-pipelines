@@ -255,12 +255,15 @@ of `file_reference`. Event ingestion forces reprocessing even when the file has 
 The flow's include and exclude filters still apply, and downstream storage behavior follows the saved flow's
 configuration.
 
-File events currently support the filesystem, `box_driver` and `dropbox` providers. For the filesystem provider,
-the referenced path must be a readable regular file in the environment where the flow runs; for the Docker sample,
-`/documents` is the mounted invoice directory. For `box_driver`, `file_reference` is the Box file ID (for example
-`"702199884861"`). For `dropbox`, `file_reference` is a Dropbox path (for example `/Reports/q1.pdf`) or file id
-(for example `id:abc123`). In both cases the flow's own `provider_config` still supplies the credentials, which are
-never read from the event.
+File events currently support the filesystem, `box_driver`, `dropbox`, `s3`, and `ibm_cos` providers. For the
+filesystem provider, the referenced path must be a readable regular file in the environment where the flow runs; for
+the Docker sample, `/documents` is the mounted invoice directory. For `box_driver`, `file_reference` is the Box file
+ID (for example `"702199884861"`). For `dropbox`, `file_reference` is a Dropbox path (for example `/Reports/q1.pdf`)
+or file id (for example `id:abc123`). For `s3` and `ibm_cos` (the same adapter), `file_reference` is the object key
+in the bucket already configured on the flow (for example `invoices/TR-INV_001.pdf`). A leading slash is ignored.
+URI forms such as `s3://bucket/key` are rejected, so the event cannot select a different bucket or endpoint. In
+every case the flow's own `provider_config` supplies the credentials and connection details, which are never read
+from the event.
 
 ### Processing failures
 
