@@ -68,7 +68,7 @@ dependencies = [
     "pyarrow==26.0.0",
     "pyasn1==0.6.4",
     "pydantic==2.12.5",
-    "pydantic-settings==2.14.2",
+    "pydantic-settings==2.16.1",
     "pygments==2.20.0",
     "pyiceberg-core==0.7.0",
     "pyiceberg[glue]==0.9.1",

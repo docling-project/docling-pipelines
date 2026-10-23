@@ -93,7 +93,7 @@ dependencies = [
     "tabulate==0.10.0",
     "tenacity==8.3.0",
     "toml==0.10.2",
-    "torch==2.13.0",
+    "torch==2.14.1",
     "transformers>=5.17,<5.18",
     "unicategories==0.1.2",
     "unicodedataplus==16.0.0.post1",
@@ -121,9 +121,9 @@ benchmark = [
 ]
 
 dev = [
-    "black==26.3.1",
+    "black==26.10.1",
     "detect-secrets==1.5.0",
-    "faker==40.8.0",
+    "faker==40.43.0",
     "flake8==7.3.0",
     "httpx==0.28.1",  # For testing FastAPI
     "interrogate==1.7.0",

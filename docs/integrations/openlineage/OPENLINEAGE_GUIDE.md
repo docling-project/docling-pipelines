@@ -88,7 +88,7 @@ Every pipeline run produces a **flow job** in the lineage graph — a single job
 
 ### Dataset stitching
 
-Lineage graphs are built from dataset edges. The output dataset name of one node matches the input dataset name of the next downstream node, which is how the lineage backend draws edges between operator jobs. Ingest nodes receive a dataset name derived from the source provider and path (for example `filesystem://./my-docs` or `s3://my-bucket`) so the graph shows the actual data origin.
+Lineage graphs are built from dataset edges. The output dataset name of one node matches the input dataset name of the next downstream node, which is how the lineage backend draws edges between operator jobs. Ingest nodes receive a dataset name derived from the source provider and path (for example namespace `file` with name `./my-docs`, or namespace `s3://my-bucket`) so the graph shows the actual data origin.
 
 ### Credential safety
 
@@ -301,7 +301,7 @@ Before viewing lineage in Marquez, understand how its data model aligns with `do
 * **Namespaces**: Logical context boundaries for jobs and datasets (e.g. `docpipe://dev`, `docpipe://stage`, `docpipe://prod`).
 * **Jobs**: The transformation code that executed. In **flow mode**, this is the pipeline flow name (e.g. `customer_support_rag`). In **operator mode**, each DAG node also becomes a distinct child job (e.g. `extract_operator`, `chunker`, `embeddings`).
 * **Runs**: A single execution instance of a job identified by a UUID. Runs transition through lifecycle states: `START` &rarr; `RUNNING` &rarr; `COMPLETE` or `FAIL`.
-* **Datasets & Graph Stitching**: Data inputs and outputs identified by unique URIs (e.g. `filesystem://./docs`, `opensearch://knowledge_base`). Marquez automatically stitches DAG edges whenever Job A's output dataset matches Job B's input dataset.
+* **Datasets & Graph Stitching**: Data inputs and outputs identified by unique URIs (e.g. namespace `file` with name `./docs`, or namespace `opensearch://localhost:9200` with name `knowledge_base`). Marquez automatically stitches DAG edges whenever Job A's output dataset matches Job B's input dataset.
 * **Facets**: Metadata payloads attached to runs, jobs, and datasets, such as dynamic PyArrow schema definitions, execution times, document processing metrics (`docpipeStats`), and error stack traces.
 
 #### Architecture and data flow
@@ -400,7 +400,7 @@ When `DOCPIPE_LINEAGE_MODE=operator`, all five flow-level events above are still
 
 > [!TIP]
 > Ingest node input datasets are named from the source provider and path — for example
-> `filesystem://./my-docs` or `s3://my-bucket` — so the lineage graph shows the actual data origin
+> namespace `file` with name `./my-docs`, or namespace `s3://my-bucket` — so the lineage graph shows the actual data origin
 > rather than an opaque internal identifier.
 
 ---
