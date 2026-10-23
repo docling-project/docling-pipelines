@@ -365,6 +365,32 @@ class LineageConstants:
     )
     DEFAULT_STRICT = os.getenv(EnvironmentVariables.DOCPIPE_LINEAGE_STRICT, "false")
 
+    # Standard dataset namespaces & schemes
+    NAMESPACE_INMEMORY = "inmemory://"
+    NAMESPACE_FILE = "file"
+    NAMESPACE_GOOGLE_DRIVE = "googledrive://drive.google.com"
+    NAMESPACE_DOCUMENT_SET = "docpipe://document_set"
+    NAMESPACE_DROPBOX = "dropbox://api.dropbox.com"
+    NAMESPACE_MILVUS_LITE = "milvus://lite"
+
+    # Known storage & vector providers
+    PROVIDER_FILESYSTEM = "filesystem"
+    PROVIDER_LOCAL = "local"
+    PROVIDER_FILE = "file"
+    PROVIDER_S3 = "s3"
+    PROVIDER_OPENSEARCH = "opensearch"
+    PROVIDER_MILVUS = "milvus"
+    PROVIDER_QDRANT = "qdrant"
+    PROVIDER_WEAVIATE = "weaviate"
+    PROVIDER_PINECONE = "pinecone"
+    PROVIDER_CHROMA = "chroma"
+    PROVIDER_BOX = "box"
+    PROVIDER_SHAREPOINT = "sharepoint"
+    PROVIDER_GOOGLE_DRIVE = "google_drive"
+    PROVIDER_ONEDRIVE = "onedrive"
+    PROVIDER_DROPBOX = "dropbox"
+    PROVIDER_WEB = "web"
+
     # Job and processing types
     JOB_TYPE_FLOW = "FLOW"
     JOB_TYPE_OPERATOR = "OPERATOR"
