@@ -15,7 +15,6 @@ All endpoints delegate to service layer which raises custom DocpipeException sub
 """
 
 import logging
-from functools import lru_cache
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -46,11 +45,8 @@ from docpipe.api.dto.flow_dto import (
     PaginatedFlowResponse,
 )
 from docpipe.api.dto.mappers.flow_mapper import FlowMapper
-from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
-from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
 from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
-from docpipe.core.assets.flows.domain.models.flow import Flow
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -208,24 +204,6 @@ def get_filter_params(
     }
 
 
-# Dependency providers (Unified Architecture)
-@lru_cache(maxsize=1)
-def get_flow_repository() -> AssetRepository[Flow]:
-    """Dependency provider for flow repository (singleton).
-
-    Creates a single repository instance using the unified architecture.
-    Uses LocalAssetRepository[Flow] for filesystem storage.
-
-    Returns:
-        AssetRepository[Flow]: Configured repository instance (cached singleton)
-
-    Note:
-        Uses LocalAssetRepository[Flow] which stores flows in the configured
-        directory (from environment or config: ~/Documents/pipeline/assets)
-    """
-    return LocalAssetRepository[Flow](asset_type=Flow)
-
-
 # Type alias for dependency injection
 PaginationDep = Annotated[tuple[int, int], Depends(get_pagination_params)]
 FiltersDep = Annotated[dict, Depends(get_filter_params)]
@@ -349,7 +327,7 @@ async def create_flow(
     Raises:
         HTTPException: If flow creation fails (400, 409, 500)
     """
-    logger.debug(f"Creating flow, is_elyra: {is_elyra}")
+    logger.debug("Creating flow, is_elyra: %s", is_elyra)
 
     if is_elyra:
         # Validate as Elyra format (UI)
@@ -377,12 +355,12 @@ async def create_flow(
             container_id=None,
         )
 
-    logger.debug(f"Converted to domain model: {domain_flow.name}")
+    logger.debug("Converted to domain model: %s", domain_flow.name)
 
     # Create flow using service - store in original format
     created_flow = service.create_flow(flow=domain_flow, is_elyra=is_elyra)
 
-    logger.info(f"Successfully created flow {created_flow.flow_id}")
+    logger.info("Successfully created flow %s", created_flow.flow_id)
 
     # Convert domain model back to appropriate DTO based on format
     if is_elyra:
@@ -499,12 +477,12 @@ async def get_flow(
     """
     from docpipe.core.constants.constants import DocpipeConstants
 
-    logger.debug(f"Retrieving flow: {flow_id}")
+    logger.debug("Retrieving flow: %s", flow_id)
 
     # Get flow using service - service raises typed exceptions
     domain_flow = service.get_flow(flow_id)
 
-    logger.info(f"Successfully retrieved flow {flow_id}")
+    logger.info("Successfully retrieved flow %s", flow_id)
 
     # Detect format and return appropriate DTO
     if DocpipeConstants.FLOW_NAME in domain_flow.definition:
@@ -632,8 +610,13 @@ async def list_flows(
         is_elyra = False
 
     logger.debug(
-        f"Listing flows: offset={offset}, limit={limit}, name={name}, tags={tags}, "
-        f"is_hidden={is_hidden}, is_elyra={is_elyra}"
+        "Listing flows: offset=%s, limit=%s, name=%s, tags=%s, is_hidden=%s, is_elyra=%s",
+        offset,
+        limit,
+        name,
+        tags,
+        is_hidden,
+        is_elyra,
     )
 
     # Get flows and total — format filter applied inside the service before pagination
@@ -642,7 +625,7 @@ async def list_flows(
     )
     total = service.count_flows(name_filter=name, tags_filter=tags, is_hidden=is_hidden, is_elyra=is_elyra)
 
-    logger.info(f"Successfully retrieved {len(flows)} flows (format: {'Elyra' if is_elyra else 'Authoring'})")
+    logger.info("Successfully retrieved %s flows (format: %s)", len(flows), "Elyra" if is_elyra else "Authoring")
 
     # Generate pagination links
     base_url = str(request.url).split("?")[0]
@@ -785,7 +768,7 @@ async def update_flow(
     Raises:
         HTTPException: If flow not found or update fails (404, 400, 500)
     """
-    logger.debug(f"Updating flow: {flow_id}, is_elyra: {is_elyra}")
+    logger.debug("Updating flow: %s, is_elyra: %s", flow_id, is_elyra)
 
     if is_elyra:
         # Validate as Elyra format (UI)
@@ -818,7 +801,7 @@ async def update_flow(
     # Update flow using service - service raises typed exceptions
     updated_flow = service.update_flow(domain_flow)
 
-    logger.info(f"Successfully updated flow {flow_id}")
+    logger.info("Successfully updated flow %s", flow_id)
 
     # Convert domain model back to appropriate DTO based on format
     if is_elyra:
@@ -938,7 +921,7 @@ async def partial_update_flow(
     Raises:
         HTTPException: If flow not found or update fails (404, 400, 500)
     """
-    logger.debug(f"Partially updating flow: {flow_id}, is_elyra: {is_elyra}")
+    logger.debug("Partially updating flow: %s, is_elyra: %s", flow_id, is_elyra)
 
     # Validate based on format
     if is_elyra:
@@ -949,7 +932,7 @@ async def partial_update_flow(
     # Pass dict directly to service - service handles transformation
     updated_flow = service.partial_update_flow(flow_id, updates.dict(exclude_unset=True))
 
-    logger.info(f"Successfully partially updated flow {flow_id}")
+    logger.info("Successfully partially updated flow %s", flow_id)
 
     # Convert domain model back to appropriate DTO based on format
     if is_elyra:
@@ -1039,12 +1022,12 @@ async def delete_flow(
     Raises:
         HTTPException: If flow not found or delete fails (404, 400, 500)
     """
-    logger.debug(f"Deleting flow: {flow_id}")
+    logger.debug("Deleting flow: %s", flow_id)
 
     # Delete flow using service - service raises typed exceptions
     service.delete_flow(flow_id)
 
-    logger.info(f"Successfully deleted flow {flow_id}")
+    logger.info("Successfully deleted flow %s", flow_id)
 
     # Return 204 No Content on success
     return
@@ -1141,15 +1124,17 @@ async def bulk_delete_flows(
     # Convert comma-separated string to list
     flow_id_list = [fid.strip() for fid in flow_ids.split(",") if fid.strip()]
 
-    logger.debug(f"Bulk deleting {len(flow_id_list)} flows")
+    logger.debug("Bulk deleting %s flows", len(flow_id_list))
 
     # Architectural refactoring: Validation moved to service layer
     # Service layer now validates empty flow_ids list and raises FlowInvalidDataException
     result = service.bulk_delete_flows(flow_id_list)
 
     logger.info(
-        f"Bulk delete completed: {result['total_deleted']} deleted, "
-        f"{result['total_failed']} failed out of {result['total_requested']} requested"
+        "Bulk delete completed: %s deleted, %s failed out of %s requested",
+        result["total_deleted"],
+        result["total_failed"],
+        result["total_requested"],
     )
 
     return result
