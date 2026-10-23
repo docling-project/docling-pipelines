@@ -1118,6 +1118,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Adapter Names
         ADAPTER_DUCKDB: Final[str] = "duckdb"
         ADAPTER_FILESYSTEM: Final[str] = "filesystem"
+        ADAPTER_POSTGRES: Final[str] = "postgres"
 
         # Configuration Keys
         DATABASE_PATH: Final[str] = "database_path"

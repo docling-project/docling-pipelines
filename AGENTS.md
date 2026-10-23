@@ -231,7 +231,8 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
 | `DOCPIPE_STORAGE_BACKEND` | `duckdb` (default) \| `postgres` |
 | `DOCPIPE_FRAMEWORK_TYPE` | `local` (default) \| `prefect` |
-| `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres) |
+| `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres; also the fallback for asset repositories of type `postgres`) |
+| `DOCUMENTSET_REPOSITORY_TYPE` / `DOCUMENTLIBRARY_REPOSITORY_TYPE` | Asset metadata backend: `duckdb` (default) \| `postgres` (overrides `assets_management.<asset>_repository.type`) |
 | `CORS_ORIGINS` | Comma-separated allowed origins, default `http://localhost:3000` |
 
 ## Commands
