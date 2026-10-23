@@ -10,11 +10,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from unittest.mock import patch
 
+import jwt
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
-from jose import jwt
 
 from docpipe.api.auth import dependencies
 from docpipe.api.auth.dependencies import (

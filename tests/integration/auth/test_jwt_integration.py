@@ -76,7 +76,7 @@ class TestJWTAuthentication:
         """Test token without username claim is rejected."""
         from datetime import datetime, timedelta
 
-        from jose import jwt
+        import jwt
 
         # Create token without username
         data = {"email": "test@example.com"}
@@ -93,7 +93,7 @@ class TestJWTAuthentication:
         """Test expired token is rejected."""
         from datetime import datetime, timedelta
 
-        from jose import jwt
+        import jwt
 
         # Create expired token
         data = {"username": "testuser"}
