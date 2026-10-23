@@ -13,8 +13,11 @@ from pydantic import BaseModel
 from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import register_source_adapter
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
+from docpipe.utils.infrastructure.logging import get_logger
 
 from .config import FilesystemSourceConfig
+
+logger = get_logger()
 
 
 @register_source_adapter
@@ -56,8 +59,11 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                     if config.max_file_size_mb:
                         file_size_mb = stat.st_size / (1024 * 1024)
                         if file_size_mb > config.max_file_size_mb:
-                            print(
-                                f"Skipping file {root_path}: size {file_size_mb:.2f}MB exceeds limit {config.max_file_size_mb}MB"
+                            logger.warning(
+                                "Skipping file %s: size %.2fMB exceeds limit %sMB",
+                                root_path,
+                                file_size_mb,
+                                config.max_file_size_mb,
                             )
                             continue
 
@@ -84,7 +90,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                     yield document
 
                 except Exception as e:
-                    print(f"Error processing file {root_path}: {e}")
+                    logger.error("Error processing file %s: %s", root_path, e)
                     raise
 
             else:
@@ -124,7 +130,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
 
                     except Exception as e:
                         # Log error but continue processing other files
-                        print(f"Error processing file {file_path}: {e}")
+                        logger.error("Error processing file %s: %s", file_path, e)
                         continue
 
     @classmethod
@@ -247,26 +253,26 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
 
             # Check if file exists
             if not file_path.exists():
-                print(f"File not found: {file_path}")
+                logger.warning("File not found: %s", file_path)
                 return None
 
             # Check if it's a file (not directory)
             if not file_path.is_file():
-                print(f"Path is not a file: {file_path}")
+                logger.warning("Path is not a file: %s", file_path)
                 return None
 
             # Read and return file content
             with Path(file_path).open("rb") as f:
                 content = f.read()
 
-            print(f"Successfully read {len(content)} bytes from: {file_path}")
+            logger.debug("Successfully read %d bytes from: %s", len(content), file_path)
             return content
 
         except PermissionError as e:
-            print(f"Permission denied reading file {source_id}: {e}")
+            logger.error("Permission denied reading file %s: %s", source_id, e)
             return None
         except Exception as e:
-            print(f"Unexpected error reading file {source_id}: {e}")
+            logger.error("Unexpected error reading file %s: %s", source_id, e)
             return None
 
     def _iter_root_paths(self, config: FilesystemSourceConfig) -> Generator[Path, None, None]:

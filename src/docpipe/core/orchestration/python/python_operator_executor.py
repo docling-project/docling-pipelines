@@ -105,7 +105,10 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
             self.set_default_node_stats(tables=tables)
             is_merge_operator = isinstance(tables, dict)
             if is_merge_operator:
-                logger.info(f"Invoking the transform method with multiple tables for the {op.short_name} operator...")
+                logger.info(
+                    "Invoking the transform method with multiple tables for the %s operator...",
+                    op.short_name,
+                )
                 result = op.transform(table=pa.table({}), tables=tables)
             else:
                 result = op.transform(tables)
@@ -166,7 +169,9 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
 
         # Log error with transaction id
         logger.error(
-            f"Error during transformation in node id: {node_id} transaction_ID: {get_session_info().transaction_id!s}",
+            "Error during transformation in node id: %s transaction_ID: %s",
+            node_id,
+            get_session_info().transaction_id,
             stack_info=True,
             exc_info=True,
         )
@@ -267,7 +272,7 @@ def main():  # pragma: no cover
         params=op_def["config"],
         job_stats_service=None,
     )
-    print("\n\n>>> Starting execution...")
+    logger.debug("Starting execution...")
     content = pa.array(
         [
             "Contact support team via email:  support@ibm.com, or the sales team sales@in.ibm.com.",
@@ -282,10 +287,9 @@ def main():  # pragma: no cover
     data_access = data_access_factory.create_data_access()
     data_access.save_table("", input_table)
 
-    tables, _ = executor.execute(data_access=data_access, deleted_rows_list=None)
-    print(tables[0])
+    _tables, _ = executor.execute(data_access=data_access, deleted_rows_list=None)
 
-    print(">>> Completed execution...")
+    logger.debug("Completed execution...")
 
 
 # main entry point into the program; used for unit testing only

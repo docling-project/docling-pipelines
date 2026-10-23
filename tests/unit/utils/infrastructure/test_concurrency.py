@@ -1,5 +1,6 @@
 """Tests for concurrency utilities."""
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
@@ -107,7 +108,7 @@ class TestProcessBatchesInParallel:
 
         assert sorted(results) == [1, 3]
 
-    def test_process_handles_worker_exceptions(self, capfd):
+    def test_process_handles_worker_exceptions(self, caplog, capfd):
         """Test that worker exceptions are caught and logged."""
 
         def worker_fn(batch):
@@ -116,14 +117,25 @@ class TestProcessBatchesInParallel:
             return batch
 
         batches = [1, 2, 3]
-        results = process_batches_in_parallel(batches=batches, worker_fn=worker_fn)
+
+        # Attach caplog handler directly — docpipe logger has propagate=False when configured
+        target_logger = logging.getLogger("docpipe")
+        target_logger.addHandler(caplog.handler)
+        try:
+            results = process_batches_in_parallel(batches=batches, worker_fn=worker_fn)
+        finally:
+            target_logger.removeHandler(caplog.handler)
 
         # Should continue processing other batches
         assert sorted(results) == [1, 3]
 
-        # Check that error was printed
+        # Check that error was logged
         captured = capfd.readouterr()
-        assert "failed with" in captured.out.lower() or "Test error" in captured.out
+        has_log_record = any(
+            "failed with" in r.message.lower() or "test error" in r.message.lower() for r in caplog.records
+        )
+        has_stdout = "failed with" in captured.out.lower() or "test error" in captured.out.lower()
+        assert has_log_record or has_stdout
 
     def test_process_with_complex_data(self):
         """Test processing with complex data structures."""
