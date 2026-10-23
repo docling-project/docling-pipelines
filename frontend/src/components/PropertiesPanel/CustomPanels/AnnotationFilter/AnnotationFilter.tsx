@@ -36,11 +36,12 @@
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Button, DefinitionTooltip, FormLabel } from '@carbon/react';
 import { Add, Maximize, TrashCan } from '@carbon/icons-react';
 import { NodeOperator } from '@/constants/operators';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
-import type { SharedDataTableRow } from '@/components/common/SharedDataTable';
+import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
 import type { ElyraController, FeatureAttributes, OperatorFeature } from '@/types';
 import {
   type Condition,
@@ -63,11 +64,8 @@ import {
 import {
   ADVANCED_EXPRESSION_ROW_ID,
   ANNOTATION_FILTER_ATTRIBUTE,
-  ANNOTATION_FILTER_DEFAULTS,
-  ANNOTATION_FILTER_LABELS,
-  AVAILABLE_FEATURES_TABLE_HEADERS,
-  CRITERIA_TABLE_HEADERS,
 } from './constants';
+import { messages } from './AnnotationFilter.messages';
 import styles from './AnnotationFilter.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -109,6 +107,7 @@ interface AnnotationFilterPanelBodyProps {
 export function AnnotationFilterPanelBody({
   controller,
 }: AnnotationFilterPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   const [isConditionBuilderOpen, setIsConditionBuilderOpen] = useState(false);
   const [isFullViewOpen, setIsFullViewOpen] = useState(false);
 
@@ -288,7 +287,10 @@ export function AnnotationFilterPanelBody({
   const logicalOp = (elyraCriteriaJson?.logical_operator ?? LOGICAL.AND).toUpperCase();
 
   /** Column definitions for the compact inline criteria table — sourced from constants. */
-  const criteriaTableHeaders = CRITERIA_TABLE_HEADERS;
+  const criteriaTableHeaders: SharedDataTableHeader[] = useMemo(
+    () => [{ key: 'conditionDisplay', header: intl.formatMessage(messages.condition) }],
+    [intl]
+  );
 
   /**
    * Rows for the compact inline criteria table.
@@ -311,20 +313,26 @@ export function AnnotationFilterPanelBody({
                 size="sm"
                 hasIconOnly
                 renderIcon={TrashCan}
-                iconDescription={ANNOTATION_FILTER_LABELS.DELETE}
+                iconDescription={intl.formatMessage(messages.delete)}
                 onClick={() => { handleDeleteCondition(row.id); }}
               />
             </div>
           </div>
         ),
       })),
-    [criteriaRows, logicalOp, handleDeleteCondition]
+    [criteriaRows, logicalOp, handleDeleteCondition, intl]
   );
 
   // ── Available features table ──────────────────────────────────────────
 
   /** Column definition for the read-only available features table — sourced from constants. */
-  const availableFeaturesHeaders = AVAILABLE_FEATURES_TABLE_HEADERS;
+  const availableFeaturesHeaders: SharedDataTableHeader[] = useMemo(
+    () => [
+      { key: 'feature', header: intl.formatMessage(messages.featureName) },
+      { key: 'type', header: intl.formatMessage(messages.type) },
+    ],
+    [intl]
+  );
 
   /**
    * Rows for the available features table, derived from the upstream node's
@@ -352,11 +360,11 @@ export function AnnotationFilterPanelBody({
   /**
    * Tooltip description for the Criteria list label.
    * Prefers the backend-provided description from operator metadata; falls
-   * back to the static default in {@link ANNOTATION_FILTER_DEFAULTS}.
+   * back to the localised default message.
    */
   const criteriaListAttrDescription: string =
     (nodeAttributes[ANNOTATION_FILTER_ATTRIBUTE.CRITERIA_JSON]?.description as string | undefined) ??
-    ANNOTATION_FILTER_DEFAULTS.CRITERIA_DESCRIPTION;
+    intl.formatMessage(messages.criteriaDescription);
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -370,7 +378,7 @@ export function AnnotationFilterPanelBody({
             openOnHover
             align="right"
           >
-            {ANNOTATION_FILTER_LABELS.CRITERIA_LIST}
+            {intl.formatMessage(messages.criteriaList)}
           </DefinitionTooltip>
         </div>
 
@@ -379,7 +387,7 @@ export function AnnotationFilterPanelBody({
             headers={criteriaTableHeaders}
             rows={criteriaTableRows}
             searchable
-            searchPlaceholder={ANNOTATION_FILTER_LABELS.SEARCH_CRITERIA}
+            searchPlaceholder={intl.formatMessage(messages.searchCriteria)}
             size="md"
             renderToolbarActions={() => (
               <Button
@@ -387,7 +395,7 @@ export function AnnotationFilterPanelBody({
                 size="sm"
                 hasIconOnly
                 renderIcon={Maximize}
-                iconDescription={ANNOTATION_FILTER_LABELS.EXPAND_VIEW}
+                iconDescription={intl.formatMessage(messages.expandView)}
                 onClick={() => { setIsFullViewOpen(true); }}
               />
             )}
@@ -401,13 +409,13 @@ export function AnnotationFilterPanelBody({
           className={styles.addCriteriaButton}
           onClick={() => { setIsConditionBuilderOpen(true); }}
         >
-          {hasCriteria ? ANNOTATION_FILTER_LABELS.UPDATE_CRITERIA : ANNOTATION_FILTER_LABELS.ADD_CRITERIA}
+          {intl.formatMessage(hasCriteria ? messages.updateCriteria : messages.addCriteria)}
         </Button>
       </div>
 
       {/* ── Available features ──────────────────────────────────────── */}
       <div className={styles.formField}>
-        <FormLabel>{ANNOTATION_FILTER_LABELS.AVAILABLE_FEATURES}</FormLabel>
+        <FormLabel>{intl.formatMessage(messages.availableFeatures)}</FormLabel>
         <div className={styles.availableFeaturesTable}>
           <SharedDataTable
             headers={availableFeaturesHeaders}
@@ -415,7 +423,7 @@ export function AnnotationFilterPanelBody({
             loading={appData.featuresLoading === true}
             emptyState={
               <p className={styles.emptyFeaturesMessage}>
-                {ANNOTATION_FILTER_DEFAULTS.NO_FEATURES_MESSAGE}
+                {intl.formatMessage(messages.noFeaturesMessage)}
               </p>
             }
             size="md"

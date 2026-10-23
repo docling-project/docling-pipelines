@@ -16,6 +16,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { useIntl, type MessageDescriptor } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
@@ -34,23 +35,41 @@ import {
 import {
   CHUNKER_ATTRIBUTE as ATTR,
   CHUNKER_DEFAULTS,
-  CHUNKER_LABELS as LABEL,
   CHUNK_TYPES,
-  CHUNK_TYPE_LABELS,
   BREAKPOINT_THRESHOLD_TYPES,
-  BREAKPOINT_THRESHOLD_TYPE_LABELS,
-  SUMMARIZATION_DESCRIPTION,
   type ChunkType,
   type BreakpointThresholdType,
 } from './constants';
+import { messages } from './Chunker.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
+
+const DOCLING_SERVE_CONFIG_EXAMPLE =
+  '{"api_base": "https://docling-serve.example.com", "api_key": "...", "timeout": 300}';
+const SUMMARIZATION_CONFIG_EXAMPLE =
+  '{"provider": "litellm", "provider_config": {"model_id": "ollama/llama3.2", "api_base": "http://localhost:11434/v1"}}';
+
+/** Maps backend chunk_type value -> translated dropdown label. */
+const CHUNK_TYPE_MESSAGES: Record<ChunkType, MessageDescriptor> = {
+  simple: messages.chunkTypeSimple,
+  semantic: messages.chunkTypeSemantic,
+  hybrid: messages.chunkTypeHybrid,
+};
+
+/** Maps backend breakpoint_threshold_type value -> translated dropdown label. */
+const BREAKPOINT_THRESHOLD_TYPE_MESSAGES: Record<BreakpointThresholdType, MessageDescriptor> = {
+  percentile: messages.thresholdTypePercentile,
+  standard_deviation: messages.thresholdTypeStandardDeviation,
+  interquartile: messages.thresholdTypeInterquartile,
+  gradient: messages.thresholdTypeGradient,
+};
 
 interface ChunkerPanelBodyProps {
   controller: any;
 }
 
 export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Operator attribute metadata ──────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -225,19 +244,19 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
       <div className={common.formField}>
         <div className={common.labelWithTooltip}>
           <DefinitionTooltip
-            definition="Route chunking to a remote Docling Serve API. When enabled, Chunk type is set to 'hybrid' (recommended) but can still be changed. Provider configuration must include at minimum an api_base URL."
+            definition={intl.formatMessage(messages.useDoclingServeDescription)}
             openOnHover
             align="right"
           >
-            {LABEL.USE_DOCLING_SERVE}
+            {intl.formatMessage(messages.useDoclingServe)}
           </DefinitionTooltip>
         </div>
         <Toggle
           id="chunker-use-docling-serve"
-          labelText={LABEL.USE_DOCLING_SERVE}
+          labelText={intl.formatMessage(messages.useDoclingServe)}
           hideLabel
-          labelA="Off"
-          labelB="On"
+          labelA={intl.formatMessage(messages.off)}
+          labelB={intl.formatMessage(messages.on)}
           toggled={doclingServeEnabled}
           onToggle={handleDoclingServeToggle}
         />
@@ -251,14 +270,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               <RequiredParamTooltip
                 paramId={ATTR.PROVIDER_CONFIG}
                 nodeAttributes={nodeAttributes}
-                definition='Docling Serve connection settings as a JSON object. At minimum provide api_base. E.g. {"api_base": "https://docling-serve.example.com", "api_key": "...", "timeout": 300}'
+                definition={intl.formatMessage(messages.providerConfigDescription, { example: DOCLING_SERVE_CONFIG_EXAMPLE })}
               >
-                {LABEL.PROVIDER_CONFIG}
+                {intl.formatMessage(messages.providerConfig)}
               </RequiredParamTooltip>
             </div>
             <JsonTextArea
               id="chunker-provider-config"
-              labelText={LABEL.PROVIDER_CONFIG}
+              labelText={intl.formatMessage(messages.providerConfig)}
               rows={4}
               storedValue={providerConfigStored ?? null}
               placeholder='{"api_base": "https://docling-serve.example.com"}'
@@ -280,19 +299,19 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
           <RequiredParamTooltip
             paramId={ATTR.CHUNK_TYPE}
             nodeAttributes={nodeAttributes}
-            definition="The strategy used to split document text into chunks."
+            definition={intl.formatMessage(messages.chunkTypeDescription)}
           >
-            {LABEL.CHUNK_TYPE}
+            {intl.formatMessage(messages.chunkType)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="chunker-chunk-type"
-          titleText={LABEL.CHUNK_TYPE}
+          titleText={intl.formatMessage(messages.chunkType)}
           hideLabel
-          label="Select chunk type"
+          label={intl.formatMessage(messages.selectChunkType)}
           items={[...CHUNK_TYPES]}
           selectedItem={chunkType}
-          itemToString={(item: ChunkType | null) => (item ? CHUNK_TYPE_LABELS[item] : '')}
+          itemToString={(item: ChunkType | null) => (item ? intl.formatMessage(CHUNK_TYPE_MESSAGES[item]) : '')}
           invalid={chunkTypeValidation.isInvalid}
           invalidText={chunkTypeValidation.errorMessage}
           onChange={handleChunkTypeChange}
@@ -311,16 +330,16 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
                 nodeAttributes={nodeAttributes}
                 definition={
                   isHybrid
-                    ? 'Chunk size in tokens (100–2048).'
-                    : 'Chunk size in characters (500–5000).'
+                    ? intl.formatMessage(messages.chunkSizeTokensDescription)
+                    : intl.formatMessage(messages.chunkSizeCharsDescription)
                 }
               >
-                {LABEL.CHUNK_SIZE}
+                {intl.formatMessage(messages.chunkSize)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="chunker-chunk-size"
-              label={LABEL.CHUNK_SIZE}
+              label={intl.formatMessage(messages.chunkSize)}
               hideLabel
               value={chunkSize}
               min={isHybrid ? 100 : 500}
@@ -340,14 +359,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               <RequiredParamTooltip
                 paramId={ATTR.CHUNK_OVERLAP}
                 nodeAttributes={nodeAttributes}
-                definition="Number of characters/tokens shared between consecutive chunks (0–512)."
+                definition={intl.formatMessage(messages.chunkOverlapDescription)}
               >
-                {LABEL.CHUNK_OVERLAP}
+                {intl.formatMessage(messages.chunkOverlap)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="chunker-chunk-overlap"
-              label={LABEL.CHUNK_OVERLAP}
+              label={intl.formatMessage(messages.chunkOverlap)}
               hideLabel
               value={chunkOverlap}
               min={0}
@@ -367,14 +386,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               <RequiredParamTooltip
                 paramId={ATTR.CHUNK_OVERLAP_PERCENTAGE}
                 nodeAttributes={nodeAttributes}
-                definition="Overlap expressed as a percentage of Chunk size (0–40). Values above 20 produce a warning."
+                definition={intl.formatMessage(messages.chunkOverlapPercentageDescription)}
               >
-                {LABEL.CHUNK_OVERLAP_PERCENTAGE}
+                {intl.formatMessage(messages.chunkOverlapPercentage)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="chunker-chunk-overlap-percentage"
-              label={LABEL.CHUNK_OVERLAP_PERCENTAGE}
+              label={intl.formatMessage(messages.chunkOverlapPercentage)}
               hideLabel
               value={chunkOverlapPercentage}
               min={0}
@@ -400,14 +419,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
             <RequiredParamTooltip
               paramId={ATTR.DOCLING_TOKENIZER}
               nodeAttributes={nodeAttributes}
-              definition="HuggingFace tokenizer model used for Docling chunking."
+              definition={intl.formatMessage(messages.doclingTokenizerDescription)}
             >
-              {LABEL.DOCLING_TOKENIZER}
+              {intl.formatMessage(messages.doclingTokenizer)}
             </RequiredParamTooltip>
           </div>
           <TextInput
             id="chunker-docling-tokenizer"
-            labelText={LABEL.DOCLING_TOKENIZER}
+            labelText={intl.formatMessage(messages.doclingTokenizer)}
             hideLabel
             placeholder="sentence-transformers/all-MiniLM-L6-v2"
             value={doclingTokenizer}
@@ -430,22 +449,22 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               <RequiredParamTooltip
                 paramId={ATTR.SEMANTIC_EMBEDDINGS_MODEL}
                 nodeAttributes={nodeAttributes}
-                definition="Ollama model used to generate embeddings in semantic chunking."
+                definition={intl.formatMessage(messages.semanticEmbeddingsModelDescription)}
               >
-                {LABEL.SEMANTIC_EMBEDDINGS_MODEL}
+                {intl.formatMessage(messages.semanticEmbeddingsModel)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="chunker-semantic-embeddings-model"
-              labelText={LABEL.SEMANTIC_EMBEDDINGS_MODEL}
+              labelText={intl.formatMessage(messages.semanticEmbeddingsModel)}
               hideLabel
-              placeholder="e.g. nomic-embed-text"
+              placeholder={intl.formatMessage(messages.semanticEmbeddingsModelPlaceholder)}
               value={semanticEmbeddingsModel}
               invalid={semanticEmbeddingsModelValidation.isInvalid || semanticEmbeddingsModel.trim() === ''}
               invalidText={
                 semanticEmbeddingsModelValidation.isInvalid
                   ? semanticEmbeddingsModelValidation.errorMessage
-                  : 'Embeddings model is required for semantic chunking.'
+                  : intl.formatMessage(messages.semanticEmbeddingsModelRequired)
               }
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 update(ATTR.SEMANTIC_EMBEDDINGS_MODEL, e.target.value);
@@ -458,20 +477,20 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               <RequiredParamTooltip
                 paramId={ATTR.BREAKPOINT_THRESHOLD_TYPE}
                 nodeAttributes={nodeAttributes}
-                definition="Method used to determine semantic chunk boundaries."
+                definition={intl.formatMessage(messages.breakpointThresholdTypeDescription)}
               >
-                {LABEL.BREAKPOINT_THRESHOLD_TYPE}
+                {intl.formatMessage(messages.breakpointThresholdType)}
               </RequiredParamTooltip>
             </div>
             <Dropdown
               id="chunker-breakpoint-threshold-type"
-              titleText={LABEL.BREAKPOINT_THRESHOLD_TYPE}
+              titleText={intl.formatMessage(messages.breakpointThresholdType)}
               hideLabel
-              label="Select threshold type"
+              label={intl.formatMessage(messages.selectThresholdType)}
               items={[...BREAKPOINT_THRESHOLD_TYPES]}
               selectedItem={breakpointThresholdType}
               itemToString={(item: BreakpointThresholdType | null) =>
-                item ? BREAKPOINT_THRESHOLD_TYPE_LABELS[item] : ''
+                item ? intl.formatMessage(BREAKPOINT_THRESHOLD_TYPE_MESSAGES[item]) : ''
               }
               invalid={breakpointThresholdTypeValidation.isInvalid}
               invalidText={breakpointThresholdTypeValidation.errorMessage}
@@ -484,14 +503,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               <RequiredParamTooltip
                 paramId={ATTR.BREAKPOINT_THRESHOLD_AMOUNT}
                 nodeAttributes={nodeAttributes}
-                definition="Threshold value for the selected breakpoint type (e.g., 95.0 for 95th percentile)."
+                definition={intl.formatMessage(messages.breakpointThresholdAmountDescription)}
               >
-                {LABEL.BREAKPOINT_THRESHOLD_AMOUNT}
+                {intl.formatMessage(messages.breakpointThresholdAmount)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="chunker-breakpoint-threshold-amount"
-              label={LABEL.BREAKPOINT_THRESHOLD_AMOUNT}
+              label={intl.formatMessage(messages.breakpointThresholdAmount)}
               hideLabel
               value={breakpointThresholdAmount ?? ''}
               min={0}
@@ -515,17 +534,17 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
           <RequiredParamTooltip
             paramId={ATTR.RETAIN_ORIGINAL_CONTENT}
             nodeAttributes={nodeAttributes}
-            definition="Keep the original content column after chunking."
+            definition={intl.formatMessage(messages.retainOriginalContentDescription)}
           >
-            {LABEL.RETAIN_ORIGINAL_CONTENT}
+            {intl.formatMessage(messages.retainOriginalContent)}
           </RequiredParamTooltip>
         </div>
         <Toggle
           id="chunker-retain-original-content"
-          labelText={LABEL.RETAIN_ORIGINAL_CONTENT}
+          labelText={intl.formatMessage(messages.retainOriginalContent)}
           hideLabel
-          labelA="Off"
-          labelB="On"
+          labelA={intl.formatMessage(messages.off)}
+          labelB={intl.formatMessage(messages.on)}
           toggled={retainOriginalContent}
           onToggle={(checked: boolean) => { update(ATTR.RETAIN_ORIGINAL_CONTENT, checked); }}
         />
@@ -535,27 +554,29 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
           SUMMARIZATION
       ═══════════════════════════════════════════════════════════════════ */}
      <Accordion align="start">
-        <AccordionItem title="Summarization">
+        <AccordionItem title={intl.formatMessage(messages.summarizationAccordion)}>
           <div className={common.accordionContent}>
 
-            <p className={common.accordionDescription}>{SUMMARIZATION_DESCRIPTION}</p>
+            <p className={common.accordionDescription}>
+              {intl.formatMessage(messages.summarizationAccordionDescription)}
+            </p>
 
           <div className={common.formField}>
             <div className={common.labelWithTooltip}>
               <RequiredParamTooltip
                 paramId={ATTR.SUMMARIZATION}
                 nodeAttributes={nodeAttributes}
-                definition="Generate a summary for each chunk using LiteLLM or watsonx."
+                definition={intl.formatMessage(messages.summarizationDescription)}
               >
-                {LABEL.SUMMARIZATION}
+                {intl.formatMessage(messages.summarization)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="chunker-summarization-toggle"
-              labelText={LABEL.SUMMARIZATION}
+              labelText={intl.formatMessage(messages.summarization)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={summarizationEnabled}
               onToggle={handleSummarizationToggle}
             />
@@ -573,14 +594,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
                         openOnHover
                         align="right"
                       >
-                        Provider
+                        {intl.formatMessage(messages.provider)}
                       </DefinitionTooltip>
                     </div>
                     <Dropdown
                       id="chunker-summarization-provider"
-                      titleText="Provider"
+                      titleText={intl.formatMessage(messages.provider)}
                       hideLabel
-                      label="Select provider"
+                      label={intl.formatMessage(messages.selectProvider)}
                       items={summarizationProviderItems}
                       selectedItem={summarizationProvider}
                       itemToString={(item: string | null) => item ?? ''}
@@ -616,14 +637,14 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
                     <RequiredParamTooltip
                       paramId={ATTR.SUMMARIZATION}
                       nodeAttributes={nodeAttributes}
-                      definition='Summarization configuration as a JSON object. E.g. {"provider": "litellm", "provider_config": {"model_id": "ollama/llama3.2", "api_base": "http://localhost:11434/v1"}}'
+                      definition={intl.formatMessage(messages.summarizationConfigDescription, { example: SUMMARIZATION_CONFIG_EXAMPLE })}
                     >
-                      {LABEL.SUMMARIZATION_CONFIG}
+                      {intl.formatMessage(messages.summarizationConfig)}
                     </RequiredParamTooltip>
                   </div>
                   <JsonTextArea
                     id="chunker-summarization-config"
-                    labelText={LABEL.SUMMARIZATION_CONFIG}
+                    labelText={intl.formatMessage(messages.summarizationConfig)}
                     rows={5}
                     storedValue={summarizationStored ?? null}
                     invalid={summarizationValidation.isInvalid}

@@ -30,6 +30,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
@@ -48,11 +49,10 @@ import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import {
   PII_AND_HAP_ATTRIBUTE as ATTR,
-  PII_AND_HAP_LABELS as LABEL,
   EXPECTED_REDACTIONS_OPTIONS,
   PII_LIST_OPTIONS,
-  PROVIDER_CONFIG_DESCRIPTION,
 } from './constants';
+import { messages } from './PiiAndHap.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
 
@@ -62,6 +62,7 @@ interface PiiAndHapPanelBodyProps {
 
 /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   // ── Read operator attribute metadata from Redux (passed via Canvas.tsx) ──
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
   const nodeAttributes: Record<string, OperatorFeature> = operatorMetadata[NodeOperator.PII_AND_HAP]?.attributes ?? {};
@@ -195,17 +196,18 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
           <RequiredParamTooltip
             paramId={ATTR.EXPECTED_REDACTIONS}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.EXPECTED_REDACTIONS]?.description ?? 'List of redaction types to perform (PII, HAP).'}
+            definition={nodeAttributes[ATTR.EXPECTED_REDACTIONS]?.description
+              ?? intl.formatMessage(messages.expectedRedactionsDescription)}
           >
-            {LABEL.EXPECTED_REDACTIONS}
+            {intl.formatMessage(messages.expectedRedactions)}
           </RequiredParamTooltip>
         </div>
         <FilterableMultiSelect
           key={selectedExpectedRedactions.join(',')}
           id="expected_redactions"
-          titleText={LABEL.EXPECTED_REDACTIONS}
+          titleText={intl.formatMessage(messages.expectedRedactions)}
           hideLabel
-          placeholder="Select redaction targets"
+          placeholder={intl.formatMessage(messages.expectedRedactionsPlaceholder)}
           items={[...EXPECTED_REDACTIONS_OPTIONS]}
           itemToString={(item: string | null) => item ?? ''}
           initialSelectedItems={selectedExpectedRedactions}
@@ -225,17 +227,18 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
               <RequiredParamTooltip
                 paramId={ATTR.PII_LIST}
                 nodeAttributes={nodeAttributes}
-                definition={nodeAttributes[ATTR.PII_LIST]?.description ?? 'List of PII entity types to detect.'}
+                definition={nodeAttributes[ATTR.PII_LIST]?.description
+                  ?? intl.formatMessage(messages.piiListDescription)}
               >
-                {LABEL.PII_LIST}
+                {intl.formatMessage(messages.piiList)}
               </RequiredParamTooltip>
             </div>
             <FilterableMultiSelect
               key={selectedPiiList.join(',')}
               id="pii_list"
-              titleText={LABEL.PII_LIST}
+              titleText={intl.formatMessage(messages.piiList)}
               hideLabel
-              placeholder="Select PII types"
+              placeholder={intl.formatMessage(messages.piiListPlaceholder)}
               items={[...PII_LIST_OPTIONS]}
               itemToString={(item: string | null) => item ?? ''}
               initialSelectedItems={selectedPiiList}
@@ -250,19 +253,20 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
           <div className={common.formField}>
             <div className={common.labelWithTooltip}>
               <DefinitionTooltip
-                definition={nodeAttributes[ATTR.REDACTION]?.description ?? 'Enable PII redaction in document content.'}
+                definition={nodeAttributes[ATTR.REDACTION]?.description
+                  ?? intl.formatMessage(messages.redactionDescription)}
                 openOnHover
                 align="right"
               >
-                {LABEL.REDACTION}
+                {intl.formatMessage(messages.redaction)}
               </DefinitionTooltip>
             </div>
             <Toggle
               id="redaction"
-              labelText={LABEL.REDACTION}
+              labelText={intl.formatMessage(messages.redaction)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={redaction}
               onToggle={(checked: boolean) => {
                 controller?.updatePropertyValue?.({ name: ATTR.REDACTION }, checked);
@@ -276,14 +280,15 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
                 <RequiredParamTooltip
                   paramId={ATTR.REDACTION_CHARACTER}
                   nodeAttributes={nodeAttributes}
-                  definition={nodeAttributes[ATTR.REDACTION_CHARACTER]?.description ?? 'Character used to mask PII.'}
+                  definition={nodeAttributes[ATTR.REDACTION_CHARACTER]?.description
+                    ?? intl.formatMessage(messages.redactionCharacterDescription)}
                 >
-                  {LABEL.REDACTION_CHARACTER}
+                  {intl.formatMessage(messages.redactionCharacter)}
                 </RequiredParamTooltip>
               </div>
               <TextInput
                 id="redaction_character"
-                labelText={LABEL.REDACTION_CHARACTER}
+                labelText={intl.formatMessage(messages.redactionCharacter)}
                 hideLabel
                 placeholder="*"
                 maxLength={1}
@@ -302,14 +307,15 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
               <RequiredParamTooltip
                 paramId={ATTR.PII_THRESHOLD}
                 nodeAttributes={nodeAttributes}
-                definition={nodeAttributes[ATTR.PII_THRESHOLD]?.description ?? 'Confidence threshold for PII detection (0.0 - 1.0).'}
+                definition={nodeAttributes[ATTR.PII_THRESHOLD]?.description
+                  ?? intl.formatMessage(messages.piiThresholdDescription)}
               >
-                {LABEL.PII_THRESHOLD}
+                {intl.formatMessage(messages.piiThreshold)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="pii_threshold"
-              label={LABEL.PII_THRESHOLD}
+              label={intl.formatMessage(messages.piiThreshold)}
               hideLabel
               value={piiThreshold}
               min={0}
@@ -327,19 +333,20 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
           <div className={common.formField}>
             <div className={common.labelWithTooltip}>
               <DefinitionTooltip
-                definition={nodeAttributes[ATTR.DISPLAY_PII]?.description ?? 'Include actual PII values in output columns for debugging.'}
+                definition={nodeAttributes[ATTR.DISPLAY_PII]?.description
+                  ?? intl.formatMessage(messages.displayPiiDescription)}
                 openOnHover
                 align="right"
               >
-                {LABEL.DISPLAY_PII}
+                {intl.formatMessage(messages.displayPii)}
               </DefinitionTooltip>
             </div>
             <Toggle
               id="display_pii"
-              labelText={LABEL.DISPLAY_PII}
+              labelText={intl.formatMessage(messages.displayPii)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={displayPii}
               onToggle={(checked: boolean) => {
                 controller?.updatePropertyValue?.({ name: ATTR.DISPLAY_PII }, checked);
@@ -355,19 +362,20 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
           <div className={common.formField}>
             <div className={common.labelWithTooltip}>
               <DefinitionTooltip
-                definition={nodeAttributes[ATTR.HAP_REDACTION]?.description ?? 'Enable HAP redaction in document content.'}
+                definition={nodeAttributes[ATTR.HAP_REDACTION]?.description
+                  ?? intl.formatMessage(messages.hapRedactionDescription)}
                 openOnHover
                 align="right"
               >
-                {LABEL.HAP_REDACTION}
+                {intl.formatMessage(messages.hapRedaction)}
               </DefinitionTooltip>
             </div>
             <Toggle
               id="hap_redaction"
-              labelText={LABEL.HAP_REDACTION}
+              labelText={intl.formatMessage(messages.hapRedaction)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={hapRedaction}
               onToggle={(checked: boolean) => {
                 controller?.updatePropertyValue?.({ name: ATTR.HAP_REDACTION }, checked);
@@ -381,14 +389,15 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
                 <RequiredParamTooltip
                   paramId={ATTR.HAP_REDACTION_CHARACTER}
                   nodeAttributes={nodeAttributes}
-                  definition={nodeAttributes[ATTR.HAP_REDACTION_CHARACTER]?.description ?? 'Character used to mask HAP.'}
+                  definition={nodeAttributes[ATTR.HAP_REDACTION_CHARACTER]?.description
+                    ?? intl.formatMessage(messages.hapRedactionCharacterDescription)}
                 >
-                  {LABEL.HAP_REDACTION_CHARACTER}
+                  {intl.formatMessage(messages.hapRedactionCharacter)}
                 </RequiredParamTooltip>
               </div>
               <TextInput
                 id="hap_redaction_character"
-                labelText={LABEL.HAP_REDACTION_CHARACTER}
+                labelText={intl.formatMessage(messages.hapRedactionCharacter)}
                 hideLabel
                 placeholder="*"
                 maxLength={1}
@@ -407,14 +416,15 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
               <RequiredParamTooltip
                 paramId={ATTR.HAP_THRESHOLD}
                 nodeAttributes={nodeAttributes}
-                definition={nodeAttributes[ATTR.HAP_THRESHOLD]?.description ?? 'Confidence threshold for HAP detection (0.0 - 1.0).'}
+                definition={nodeAttributes[ATTR.HAP_THRESHOLD]?.description
+                  ?? intl.formatMessage(messages.hapThresholdDescription)}
               >
-                {LABEL.HAP_THRESHOLD}
+                {intl.formatMessage(messages.hapThreshold)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="hap_threshold"
-              label={LABEL.HAP_THRESHOLD}
+              label={intl.formatMessage(messages.hapThreshold)}
               hideLabel
               value={hapThreshold}
               min={0}
@@ -436,16 +446,17 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
           <RequiredParamTooltip
             paramId={ATTR.PROVIDER}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.PROVIDER]?.description ?? 'Detection provider (watsonx, litellm).'}
+            definition={nodeAttributes[ATTR.PROVIDER]?.description
+              ?? intl.formatMessage(messages.providerDescription)}
           >
-            {LABEL.PROVIDER}
+            {intl.formatMessage(messages.provider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="provider"
-          titleText={LABEL.PROVIDER}
+          titleText={intl.formatMessage(messages.provider)}
           hideLabel
-          label="Select provider"
+          label={intl.formatMessage(messages.selectProvider)}
           items={providerItems}
           selectedItem={provider ?? null}
           onChange={({ selectedItem }: { selectedItem: string | null }) => {
@@ -462,10 +473,12 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
 
       {/* ── Provider configuration accordion ─────────────────────────── */}
       <Accordion align="start">
-        <AccordionItem title="Provider configuration">
+        <AccordionItem title={intl.formatMessage(messages.providerConfigAccordion)}>
           <div className={common.accordionContent}>
 
-            <p className={common.accordionDescription}>{PROVIDER_CONFIG_DESCRIPTION}</p>
+            <p className={common.accordionDescription}>
+              {intl.formatMessage(messages.providerConfigAccordionDescription)}
+            </p>
 
             {provider && (
               <div className={common.subSection}>
@@ -487,14 +500,15 @@ export function PiiAndHapPanelBody({ controller }: PiiAndHapPanelBodyProps): Rea
                       <RequiredParamTooltip
                         paramId={ATTR.PROVIDER_CONFIG}
                         nodeAttributes={nodeAttributes}
-                        definition={nodeAttributes[ATTR.PROVIDER_CONFIG]?.description ?? 'Provider-specific configuration JSON.'}
+                        definition={nodeAttributes[ATTR.PROVIDER_CONFIG]?.description
+                          ?? intl.formatMessage(messages.providerConfigDescription)}
                       >
-                        {LABEL.PROVIDER_CONFIG}
+                        {intl.formatMessage(messages.providerConfig)}
                       </RequiredParamTooltip>
                     </div>
                     <JsonTextArea
                       id="provider_config"
-                      labelText={LABEL.PROVIDER_CONFIG}
+                      labelText={intl.formatMessage(messages.providerConfig)}
                       placeholder='{"model": "ollama/mistral", "api_base": "http://localhost:11434/v1"}'
                       storedValue={providerConfigRaw ?? null}
                       rows={3}
