@@ -583,3 +583,58 @@ class TestGoogleDriveSourceAdapter:
             )
 
         assert result is None
+
+
+class TestBindFileReference:
+    """Test GoogleDriveSourceAdapter.bind_file_reference."""
+
+    def test_valid_file_id_sets_file_id(self):
+        """A Drive file ID is set as file_id without any Drive API call."""
+        provider_config = {"service_account_json_path": "/tmp/sa.json", "folder_id": "folder123"}
+
+        with patch("googleapiclient.discovery.build") as build:
+            GoogleDriveSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="doc-123_abc")
+
+        assert provider_config["file_id"] == "doc-123_abc"
+        build.assert_not_called()
+
+    def test_bound_file_id_reaches_config(self):
+        """The bound file_id ends up in the config, so fetch_documents takes the single-file path."""
+        provider_config = {"service_account_json_path": "/tmp/sa.json", "folder_id": "folder123"}
+
+        GoogleDriveSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="doc123")
+        config = GoogleDriveSourceAdapter().build_config_from_operator_params(provider_config=provider_config)
+
+        assert config.file_id == "doc123"
+        assert config.is_service_account()
+
+    def test_credentials_are_untouched(self):
+        """bind_file_reference only adds file_id; it never reads or rewrites credentials."""
+        provider_config = {"credentials_path": "/tmp/credentials.json", "token_path": "/tmp/token.json"}
+
+        GoogleDriveSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="doc123")
+
+        assert provider_config == {
+            "credentials_path": "/tmp/credentials.json",
+            "token_path": "/tmp/token.json",
+            "file_id": "doc123",
+        }
+
+    @pytest.mark.parametrize(
+        "file_reference",
+        [
+            "",
+            "   ",
+            None,
+            "$HOME",
+            "${GOOGLE_APPLICATION_CREDENTIALS}",
+        ],
+    )
+    def test_invalid_file_reference_raises_value_error(self, file_reference):
+        """Empty, blank, None and env-var references raise a clear ValueError."""
+        provider_config = {"service_account_json_path": "/tmp/sa.json"}
+
+        with pytest.raises(ValueError, match="Google Drive file ID"):
+            GoogleDriveSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=file_reference)
+
+        assert "file_id" not in provider_config
