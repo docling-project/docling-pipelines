@@ -9,10 +9,10 @@ from functools import lru_cache
 
 from fastapi import Depends
 
+from docpipe.core.assets.common.domain.ports import AttachmentRepository
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
-from docpipe.core.assets.common.domain.ports.attachment_repository import AttachmentRepository
-from docpipe.core.assets.common.factories.attachment_repository_factory import AttachmentRepositoryFactory
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory, RepositoryType
+from docpipe.core.assets.common.factories import AttachmentRepositoryFactory
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory, RepositoryType
 from docpipe.core.assets.document_libraries.application.services.document_library_service import (
     DocumentLibraryService,
 )
@@ -60,7 +60,7 @@ def get_flow_repository() -> AssetRepository[Flow]:
     Returns:
         AssetRepository[Flow]: Configured flow repository instance (cached singleton)
     """
-    return RepositoryFactory.create_repository(asset_type=Flow)
+    return AssetRepositoryFactory.create_repository(asset_type=Flow)
 
 
 def get_flow_service(
@@ -152,7 +152,7 @@ def get_document_set_repository() -> AssetRepository[DocumentSet]:
     Returns:
         AssetRepository[DocumentSet]: Configured document set repository instance (cached singleton)
     """
-    return RepositoryFactory.create_repository(asset_type=DocumentSet)
+    return AssetRepositoryFactory.create_repository(asset_type=DocumentSet)
 
 
 @lru_cache(maxsize=1)
@@ -173,7 +173,7 @@ def get_document_set_data_store() -> DocumentSetDataStore:
     """
     from typing import cast
 
-    _, repo_config = RepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
+    _, repo_config = AssetRepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
     adapter_name: str = repo_config.get("storage_adapter", RepositoryType.DUCKDB.value)
     database_path: str = repo_config.get("database_path", DocpipeConstants.DOCUMENT_SET_DEFAULT_DB_PATH)
     data_config: DataStoreConfig = {"database_path": database_path}
@@ -192,7 +192,7 @@ def get_document_set_attachment_repository() -> AttachmentRepository:
     Returns:
         AttachmentRepository: Configured attachment repository instance (cached singleton)
     """
-    _, repo_config = RepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
+    _, repo_config = AssetRepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
     adapter_name: str = repo_config.get("storage_adapter", RepositoryType.DUCKDB.value)
     database_path: str = repo_config.get("database_path", DocpipeConstants.DOCUMENT_SET_DEFAULT_DB_PATH)
     return AttachmentRepositoryFactory.create(
@@ -233,7 +233,7 @@ def get_document_library_repository() -> AssetRepository[DocumentLibrary]:
     Returns:
         AssetRepository[DocumentLibrary]: Configured repository instance (cached singleton)
     """
-    return RepositoryFactory.create_repository(asset_type=DocumentLibrary)
+    return AssetRepositoryFactory.create_repository(asset_type=DocumentLibrary)
 
 
 def get_document_library_service(

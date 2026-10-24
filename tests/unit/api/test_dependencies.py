@@ -85,12 +85,12 @@ class TestGetJobStatsService:
 
 
 class TestGetFlowRepository:
-    """get_flow_repository delegates to RepositoryFactory."""
+    """get_flow_repository delegates to AssetRepositoryFactory."""
 
     def test_returns_repository(self):
         mock_repo = MagicMock()
 
-        with patch("docpipe.api.dependencies.RepositoryFactory.create_repository", return_value=mock_repo):
+        with patch("docpipe.api.dependencies.AssetRepositoryFactory.create_repository", return_value=mock_repo):
             result = get_flow_repository()
 
         assert result is mock_repo
@@ -98,7 +98,7 @@ class TestGetFlowRepository:
     def test_is_cached_singleton(self):
         mock_repo = MagicMock()
 
-        with patch("docpipe.api.dependencies.RepositoryFactory.create_repository", return_value=mock_repo):
+        with patch("docpipe.api.dependencies.AssetRepositoryFactory.create_repository", return_value=mock_repo):
             r1 = get_flow_repository()
             r2 = get_flow_repository()
 
@@ -156,12 +156,12 @@ class TestGetProjectRepository:
 
 
 class TestGetDocumentSetRepository:
-    """get_document_set_repository delegates to RepositoryFactory."""
+    """get_document_set_repository delegates to AssetRepositoryFactory."""
 
     def test_returns_repository(self):
         mock_repo = MagicMock()
 
-        with patch("docpipe.api.dependencies.RepositoryFactory.create_repository", return_value=mock_repo):
+        with patch("docpipe.api.dependencies.AssetRepositoryFactory.create_repository", return_value=mock_repo):
             result = get_document_set_repository()
 
         assert result is mock_repo
@@ -182,7 +182,7 @@ class TestGetDocumentSetDataStore:
         mock_store = MagicMock()
 
         with (
-            patch("docpipe.api.dependencies.RepositoryFactory.get_repository_config", return_value=("duckdb", {})),
+            patch("docpipe.api.dependencies.AssetRepositoryFactory.get_repository_config", return_value=("duckdb", {})),
             patch("docpipe.api.dependencies.DataStoreFactory.create", return_value=mock_store) as mock_create,
         ):
             result = get_document_set_data_store()
@@ -199,7 +199,7 @@ class TestGetDocumentSetDataStore:
 
         with (
             patch(
-                "docpipe.api.dependencies.RepositoryFactory.get_repository_config",
+                "docpipe.api.dependencies.AssetRepositoryFactory.get_repository_config",
                 return_value=("duckdb", repo_config),
             ),
             patch("docpipe.api.dependencies.DataStoreFactory.create", return_value=mock_store) as mock_create,
@@ -224,7 +224,7 @@ class TestGetDocumentSetAttachmentRepository:
         mock_repo = MagicMock()
 
         with (
-            patch("docpipe.api.dependencies.RepositoryFactory.get_repository_config", return_value=("duckdb", {})),
+            patch("docpipe.api.dependencies.AssetRepositoryFactory.get_repository_config", return_value=("duckdb", {})),
             patch("docpipe.api.dependencies.AttachmentRepositoryFactory.create", return_value=mock_repo) as mock_create,
         ):
             result = get_document_set_attachment_repository()
@@ -240,7 +240,7 @@ class TestGetDocumentSetAttachmentRepository:
 
         with (
             patch(
-                "docpipe.api.dependencies.RepositoryFactory.get_repository_config",
+                "docpipe.api.dependencies.AssetRepositoryFactory.get_repository_config",
                 return_value=("duckdb", repo_config),
             ),
             patch("docpipe.api.dependencies.AttachmentRepositoryFactory.create", return_value=mock_repo) as mock_create,
@@ -283,12 +283,12 @@ class TestGetDocumentSetService:
 
 
 class TestGetDocumentLibraryRepository:
-    """get_document_library_repository delegates to RepositoryFactory."""
+    """get_document_library_repository delegates to AssetRepositoryFactory."""
 
     def test_returns_repository(self):
         mock_repo = MagicMock()
 
-        with patch("docpipe.api.dependencies.RepositoryFactory.create_repository", return_value=mock_repo):
+        with patch("docpipe.api.dependencies.AssetRepositoryFactory.create_repository", return_value=mock_repo):
             result = get_document_library_repository()
 
         assert result is mock_repo

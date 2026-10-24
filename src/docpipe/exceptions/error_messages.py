@@ -71,7 +71,7 @@ class ValidationCodeMessages(StrEnum):
 
     INGEST_OPERATOR_MISPLACED = """The first operator in the flow must be an "Ingest data" operator"""
 
-    GENERATE_OUTPUT_MISSING = """The last operator should be a "Vector DB" or "Storage" operator"""
+    GENERATE_OUTPUT_MISSING = """The last operator is not a "Generate Output" operator"""
 
     MULTIPLE_EXTRACTED_DETECTED = """Multiple extract operators detected. Ensure they are used correctly"""
 

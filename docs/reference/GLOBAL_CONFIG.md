@@ -297,13 +297,11 @@ Docling Pipelines supports two storage types for incremental metadata:
 
 You can override configuration using environment variables:
 
-- `DOCPIPE_INCREMENTAL_BASE_DIR`: Override the base directory for incremental metadata
 - `DOCPIPE_INCREMENTAL_STORAGE_BACKEND`: Override the storage backend (filesystem, postgresql)
 - `DOCPIPE_CONFIG_PATH`: Specify a custom path to docling-pipelines-config.yaml
 
 **Example**:
 ```bash
-export DOCPIPE_INCREMENTAL_BASE_DIR="/data/incremental"
 export DOCPIPE_INCREMENTAL_STORAGE_BACKEND="filesystem"
 docling-pipelines --flow-file my_flow.json
 ```
@@ -312,10 +310,9 @@ docling-pipelines --flow-file my_flow.json
 
 Configuration is resolved in the following order (highest to lowest priority):
 
-1. **Environment variables** (`DOCPIPE_INCREMENTAL_BASE_DIR`, `DOCPIPE_INCREMENTAL_STORAGE_BACKEND`)
-2. **Service-specific configuration** (e.g., `incremental_metadata.storage` in docling-pipelines-config.yaml)
-3. **Global storage configuration** (e.g., `global_storage` in docling-pipelines-config.yaml)
-4. **System defaults** (Filesystem backend with `./data`)
+1. **Service-specific configuration** (e.g., `incremental_metadata.storage` in docling-pipelines-config.yaml)
+2. **Global storage configuration** (e.g., `global_storage` in docling-pipelines-config.yaml)
+3. **System defaults** (Filesystem backend with `./data`)
 
 #### Flow JSON Configuration :
 

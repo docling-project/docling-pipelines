@@ -7,6 +7,7 @@ from .concurrency import (
     submit_task_with_context_propagation,
 )
 from .config import get_opensearch_config
+from .config_utils import DocpipeConfigLoader
 from .filesystem import delete_folders, get_data_path
 from .logging import get_logger, setup_logging
 from .performance import (
@@ -19,6 +20,7 @@ from .retry import retry_with_exponential_backoff, should_retry_on_result
 from .telemetry_service import TelemetryConfig, get_telemetry_service
 
 __all__ = [
+    "DocpipeConfigLoader",
     "LRUCache",
     "TelemetryConfig",
     "delete_folders",
