@@ -116,7 +116,6 @@ class TestCreateDefaultFactory:
         # filesystem resolves to StorageBackend.FILESYSTEM
         factory = JobManagementFactory.create_default_factory()
 
-        # <<<<<<< HEAD
         assert factory.storage_backend == StorageBackend.FILESYSTEM
 
     def test_reads_storage_backend_from_service_specific_config(self, *, tmp_path, monkeypatch):
@@ -200,10 +199,10 @@ class TestCreateDefaultFactory:
             JobManagementFactory.create_default_factory()
 
     def test_storage_config_stored_in_merged_config(self, *, tmp_path, monkeypatch):
-        """Storage config sub-dict is placed under 'storage' key in merged_config."""
+        """Storage config keys are merged flat (top level) into the factory config."""
         config_data = {
             "job_management": {
-                "storage": {"type": "inmemory", "config": {"key": "val"}},
+                "storage": {"type": "inmemory", "config": {"base_dir": "/tmp/custom-jobs", "lock_timeout": 7}},
                 "framework": {"type": "default"},
             }
         }
@@ -214,8 +213,10 @@ class TestCreateDefaultFactory:
 
         factory = JobManagementFactory.create_default_factory()
 
-        # merged_config["storage"] should hold the config sub-dict
-        assert factory.config.get("storage") == {"key": "val"}
+        # store factories read these from the top level of self.config
+        assert factory.config.get("base_dir") == "/tmp/custom-jobs"
+        assert factory.config.get("lock_timeout") == 7
+        assert "storage" not in factory.config
 
 
 class TestGetDefaultFactoryJobManagement:

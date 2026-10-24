@@ -371,8 +371,9 @@ class JobManagementFactory:
                 f"Invalid framework type: {framework_str}. Supported: {[e.value for e in FrameworkType]}"
             ) from e
 
-        merged_config: dict[str, Any] = {}
-        merged_config[DocpipeConfigKeys.STORAGE] = storage_config
+        # Keep storage settings flat: the store factories read base_dir, lock_timeout and postgres
+        # from the top level of self.config.
+        merged_config: dict[str, Any] = dict(storage_config or {})
         if DocpipeConfigKeys.POSTGRES in job_mgmt_config:
             merged_config[DocpipeConfigKeys.POSTGRES] = job_mgmt_config[DocpipeConfigKeys.POSTGRES]
         merged_config.update(job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK_CONFIG, {}) or {})
