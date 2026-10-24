@@ -434,7 +434,7 @@ Examples:
   docling-pipelines --list-operators --verbose
   docling-pipelines --list-global-config
   docling-pipelines --list-global-config --verbose
-  docling-pipelines --list-global-config --category "Micro-Batching"
+  docling-pipelines --list-global-config --category "Orchestration configuration"
         """,
     )
 
@@ -463,12 +463,14 @@ Examples:
         "--category",
         "-c",
         type=str,
+        default=argparse.SUPPRESS,
         help="Filter by category (e.g., 'Execution Control', 'Incremental Processing', 'Orchestration configuration')",
     )
     list_global_config_parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
+        default=argparse.SUPPRESS,
         help="Show detailed parameter information",
     )
 
