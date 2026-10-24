@@ -62,7 +62,7 @@ class PayloadValidationMiddleware:
             if not consumed:
                 consumed = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            return {"type": "http.request", "body": b"", "more_body": False}
+            return await receive()
 
         await self.app(scope, replay_receive, send)
 
@@ -113,6 +113,7 @@ async def validate_payload_size(request: Request, call_next):
     consumed = False
 
     async def replay_receive() -> dict:
+        """Replay the buffered body once for downstream handlers."""
         nonlocal consumed
         if not consumed:
             consumed = True
