@@ -104,6 +104,11 @@ class OperatorConstants:
         USER_DEFINED_CONTENT_COLUMN: Final[str] = "user_defined_content_column"
         SUMMARY: Final[str] = "summary"
 
+        # Translation columns
+        TRANSLATED_CONTENT: Final[str] = "translated_content"
+        TRANSLATION_SOURCE_LANGUAGE: Final[str] = "translation_source_language"
+        TRANSLATION_TARGET_LANGUAGE: Final[str] = "translation_target_language"
+
         # Multi-format extraction columns
         CONTENT_MARKDOWN: Final[str] = "content_markdown"
         CONTENT_HTML: Final[str] = "content_html"

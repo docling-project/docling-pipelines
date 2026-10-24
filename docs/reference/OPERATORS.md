@@ -30,6 +30,7 @@ title: Operator Reference
       - [ChunkerOperator](#chunkeroperator)
       - [EntityCurationOperator](#entitycurationoperator)
       - [EmbeddingsOperator](#embeddingsoperator)
+      - [TranslationOperator](#translationoperator)
       - [BranchingOperator](#branchingoperator)
       - [MergeOperator](#mergeoperator)
       - [NOOPOperator](#noopoperator)
@@ -1878,6 +1879,45 @@ Schemas are defined with `target_tables` specifying field mappings and transform
 ```
 
 ---
+#### TranslationOperator
+
+**Purpose:** Translates document text into a configured target language using a provider-agnostic LLM inference interface.
+
+**Category:** Functional
+
+**Class:** `core.operators.functional.translation_operator.TranslationOperator`
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `doc_column` | string | No | `content` | Input column containing text to translate |
+| `output_column` | string | No | `translated_content` | Output column for translated text |
+| `source_language` | string | No | `auto` | Source language or automatic detection |
+| `target_language` | string | Yes | - | Target language for translation |
+| `preserve_markdown` | bool | No | `true` | Instructs the model to preserve Markdown formatting |
+| `max_input_tokens` | int | No | `4096` | Approximate chunk size, estimated at four characters per token |
+| `provider` | string | Yes | - | Inference provider: `litellm` or `watsonx` |
+| `provider_config` | object | Yes | - | Provider settings, including `model_id` and required credentials |
+
+**Input Schema**
+
+- A PyArrow table containing the configured text column, normally `content`
+
+**Output Schema**
+
+- Preserves the input rows and existing columns
+- Adds or updates the configured output column, normally `translated_content`
+- Adds `translation_source_language` and `translation_target_language`
+- Empty input rows are skipped; failed translations receive a null output and are recorded in execution metadata
+
+**Notes**
+
+- Uses `LLMAdapterFactory` and the shared `LLMInferencePort` interface.
+- Long text is split into chunks and translated in order.
+- Provider calls require valid provider configuration and may incur usage costs.
+- Markdown preservation is requested through the translation prompt; exact formatting depends on the model.
+
+---
+
 
 #### BranchingOperator
 

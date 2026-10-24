@@ -24,6 +24,7 @@ from docpipe.core.operators.functional.doc_id_hash import DocIdHashOperator
 from docpipe.core.operators.functional.embeddings.embeddings_operator import EmbeddingsOperator
 from docpipe.core.operators.functional.merge import MergeOperator
 from docpipe.core.operators.functional.noop import NOOPOperator
+from docpipe.core.operators.functional.translation_operator import TranslationOperator
 
 # Ingest Operators
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
@@ -60,6 +61,7 @@ DOCPIPE_OPERATORS = frozenset(
         EmbeddingsOperator,
         MergeOperator,
         NOOPOperator,
+        TranslationOperator,
         # Quality
         EntityCurationOperator,
         DocumentClassifierOperator,
