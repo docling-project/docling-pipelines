@@ -87,18 +87,24 @@ class DocpipeConfigLoader:
         return default
 
     @classmethod
-    def get_storage(cls, key: str, default: Any = None) -> tuple[str, dict[str, Any]]:
+    def get_storage(
+        cls, key: str, default: Any = None, *, default_type: str = DEFAULT_STORAGE_BACKEND
+    ) -> tuple[str, dict[str, Any]]:
         """Return the storage type and storage config for a named service key.
 
         Resolves configuration with the following precedence:
         service-specific ``storage``/``store`` block → ``global_storage`` → built-in
-        default (``"filesystem"``).
+        default (``"filesystem"`` unless *default_type* is given).
 
         Args:
             key: Top-level YAML key identifying the service
                  (e.g. ``"incremental_metadata"``, ``"flow_definition_snapshot"``).
             default: Fallback value passed to :meth:`get` when *key* is absent.
                      Defaults to ``None`` (treated as ``{}``).
+            default_type: Storage type used when neither the service nor ``global_storage``
+                          configures one. Defaults to ``"filesystem"``; a service whose
+                          historical default differs (e.g. job management, ``"inmemory"``)
+                          passes its own value.
 
         Returns:
             A ``(storage_type, config_dict)`` tuple where *storage_type* is a
@@ -115,7 +121,7 @@ class DocpipeConfigLoader:
             if storage_config:
                 logger.info("Using global configuration for for service: %s", key)
             else:
-                storage_config = {DocpipeConfigKeys.TYPE: DEFAULT_STORAGE_BACKEND}
+                storage_config = {DocpipeConfigKeys.TYPE: default_type}
                 logger.info("Using default configuration for for service: %s", key)
 
         storage_type = storage_config.get(DocpipeConfigKeys.TYPE)

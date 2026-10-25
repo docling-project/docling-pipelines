@@ -195,3 +195,23 @@ class TestDocpipeConfigLoaderGetStorage:
 
         assert storage_type == "filesystem"
         assert storage_config == {}
+
+    def test_default_type_overrides_builtin_default(self, *, tmp_path, monkeypatch):
+        """default_type replaces 'filesystem' only when neither service nor global config sets a type."""
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(tmp_path / "absent.yaml"))
+
+        storage_type, storage_config = DocpipeConfigLoader.get_storage(key="job_management", default_type="inmemory")
+
+        assert storage_type == "inmemory"
+        assert storage_config == {}
+
+    def test_default_type_ignored_when_global_storage_configured(self, *, tmp_path, monkeypatch):
+        """global_storage still wins over default_type."""
+        config_path = tmp_path / "config.yaml"
+        with config_path.open("w") as fh:
+            yaml.dump({"global_storage": {"type": "duckdb", "config": {}}}, fh)
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        storage_type, _ = DocpipeConfigLoader.get_storage(key="job_management", default_type="inmemory")
+
+        assert storage_type == "duckdb"

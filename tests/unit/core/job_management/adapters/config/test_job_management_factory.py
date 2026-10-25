@@ -110,10 +110,31 @@ class TestCreateDefaultFactory:
     """Tests for JobManagementFactory.create_default_factory()."""
 
     def test_creates_inmemory_factory_when_no_config(self, *, tmp_path, monkeypatch):
-        """Falls back to 'filesystem' storage (default) when no config file exists."""
+        """Falls back to 'inmemory' storage (nothing persisted) when no config file exists."""
         monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(tmp_path / "absent.yaml"))
 
-        # filesystem resolves to StorageBackend.FILESYSTEM
+        factory = JobManagementFactory.create_default_factory()
+
+        assert factory.storage_backend == StorageBackend.IN_MEMORY
+
+    def test_creates_inmemory_factory_when_config_has_no_storage(self, *, tmp_path, monkeypatch):
+        """A config with no job_management storage and no global_storage still defaults to 'inmemory'."""
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump({"job_management": {"framework": {"type": "default"}}}, f)
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        factory = JobManagementFactory.create_default_factory()
+
+        assert factory.storage_backend == StorageBackend.IN_MEMORY
+
+    def test_explicit_filesystem_storage_is_still_honoured(self, *, tmp_path, monkeypatch):
+        """The inmemory default applies only when nothing is configured."""
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump({"job_management": {"storage": {"type": "filesystem"}}}, f)
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
         factory = JobManagementFactory.create_default_factory()
 
         assert factory.storage_backend == StorageBackend.FILESYSTEM

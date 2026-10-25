@@ -348,7 +348,10 @@ class JobManagementFactory:
 
     @classmethod
     def create_default_factory(cls) -> "JobManagementFactory":
-        storage_type, storage_config = DocpipeConfigLoader.get_storage(key=DocpipeConfigKeys.JOB_MANAGEMENT)
+        # Job stats default to in-memory when nothing is configured (unchanged from before DocpipeConfigLoader)
+        storage_type, storage_config = DocpipeConfigLoader.get_storage(
+            key=DocpipeConfigKeys.JOB_MANAGEMENT, default_type=StorageBackend.IN_MEMORY.value
+        )
         job_mgmt_config = DocpipeConfigLoader.get(key=DocpipeConfigKeys.JOB_MANAGEMENT, default={})
         framework_config = job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK, {})
 
