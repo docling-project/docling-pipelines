@@ -1,3 +1,5 @@
+"""Entity curation transform: numbers with magnitude suffixes (k, M, billion, ...) to floats."""
+
 import re2 as re
 
 
@@ -154,15 +156,8 @@ def to_number(*, number_str: str | None) -> float | None:
     if match:
         # Extract the suffix
         suffix = match.group(1)
-        # Try to find multiplier (case-insensitive for Latin scripts)
-        suffix_upper = suffix.upper()
-        if suffix_upper in multipliers:
-            multiplier = multipliers[suffix_upper]
-        elif suffix in multipliers:
-            # For non-Latin scripts (exact match)
-            multiplier = multipliers[suffix]
-        else:
-            multiplier = 1
+        # All keys are upper case (upper() leaves non-Latin scripts unchanged)
+        multiplier = multipliers.get(suffix.upper(), 1)
         # Remove the suffix from the number string
         number_str = number_str[: match.start()].strip()
     else:
