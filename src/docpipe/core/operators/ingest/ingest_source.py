@@ -736,12 +736,6 @@ class IngestSourceOperator(AbstractOperator):
         # Create adapter instance to access its config builder
         adapter = SourceAdapterFactory.create(provider)
 
-        if self.input_event is not None:
-            adapter.bind_file_reference(
-                provider_config=self.provider_config,
-                file_reference=self.input_event.file_reference,
-            )
-
         # Delegate configuration building to the adapter, passing the unified
         # provider_config dict.
         config = adapter.build_config_from_operator_params(
@@ -749,6 +743,12 @@ class IngestSourceOperator(AbstractOperator):
             included_extensions=self.included_extensions,
             max_files=self.max_files,
         )
+
+        if self.input_event is not None:
+            # Bind after environment resolution, then validate without rebuilding provider settings.
+            event_config = config.model_dump()
+            adapter.bind_file_reference(provider_config=event_config, file_reference=self.input_event.file_reference)
+            config = type(config).model_validate(event_config)
 
         # Return both adapter and config to avoid creating adapter twice
         return adapter, config
