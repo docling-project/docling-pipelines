@@ -1469,7 +1469,7 @@ class ChunkerOperator(AbstractOperator):
             )
 
         # If original content is not to be retained then drop the content column.
-        if table.columns and not self.retain_original_content:
+        if self.doc_column in table.column_names and not self.retain_original_content:
             table = table.drop_columns([self.doc_column])
             logger.info("Dropped original content column: %s", self.doc_column, extra=self.common_log_arguments)
 
