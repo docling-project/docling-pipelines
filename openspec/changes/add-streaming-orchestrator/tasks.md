@@ -23,13 +23,19 @@ Record new unplanned work there; report blockers instead of expanding tasks or w
 - [ ] 1.2 [backend] Load isolated flow definitions through injected `FlowService` and reuse authoring/Elyra conversion
   (90 min); test both formats, missing/unknown formats, saved-flow updates, and definition immutability.
 - [ ] 1.3 [backend] Add lightweight executable-graph integrity checks and topological ordering (90 min); test cycles,
-  duplicate IDs, missing/inconsistent edges, disconnected nodes, multiple roots, and a non-ingest root.
+  empty graphs, invalid node IDs/operator names, duplicate IDs, missing/inconsistent edges, disconnected nodes,
+  multiple roots, and a non-ingest root, including when saved configuration disables full validation.
 - [ ] 1.4 [backend] Resolve built-in/custom operators through the existing Python factory (60 min); test custom
   discovery priority, disabled custom operators, unavailable types, and no execution during identity checks.
-- [ ] 1.5 [backend] Add metadata-only construction with explicit discovery settings for existing feature propagation
-  (120 min); test custom settings, no batch orchestrator/full validation, and feature-propagation regressions.
+- [ ] 1.5 [backend] Add the feature-propagation constructor and method guards from Decision 3a (120 min); test required
+  explicit enablement, conflicting discovery arguments, session logging context, and preservation of orchestrator-based
+  construction. Verify all four full-validation entrypoints reject propagation-mode use before side effects, and the
+  streaming path calls only per-node propagation without operator validation or a batch orchestrator.
 - [ ] 1.6 [backend] Inject prepared feature views and global metadata into isolated node configurations (90 min); test
   extraction, embedding metadata, and merge link-name disambiguation with `test_features_propagator.py` regressions.
+  Share one attempt-local metadata provider between validator and propagator using identical discovery settings; test
+  custom priority, explicit disablement, one metadata load, instance-local cache reuse for a fixed definition, and fresh
+  state after success/failure and on retries or later events with changed definitions/configuration.
 
 ## 2. Attempt configuration and operator invocation
 
