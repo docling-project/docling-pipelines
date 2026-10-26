@@ -98,6 +98,24 @@ class TestStandardLLMClassificationAdapterInit:
             adapter = StandardLLMClassificationAdapter(llm_adapter=mock_llm, config=_BASE_CONFIG)
         assert adapter is not None
 
+    def test_doc_format_defaults_to_markdown(self) -> None:
+        assert _make_adapter().doc_format == "markdown"
+
+    def test_doc_format_read_from_config(self) -> None:
+        assert _make_adapter({**_BASE_CONFIG, "doc_format": "doclang"}).doc_format == "doclang"
+
+    def test_strict_label_matching_defaults_to_false_and_is_forwarded(self) -> None:
+        mock_llm = _make_mock_llm_adapter()
+        adapter_module = "docpipe.core.operators.quality.classification.adapters.outbound.standard_llm_adapter"
+        with patch(f"{adapter_module}._LLMClassificationService") as mock_svc_cls:
+            StandardLLMClassificationAdapter(llm_adapter=mock_llm, config=_BASE_CONFIG)
+            assert mock_svc_cls.call_args.kwargs["strict_label_matching"] is False
+
+            StandardLLMClassificationAdapter(
+                llm_adapter=mock_llm, config={**_BASE_CONFIG, "strict_label_matching": True}
+            )
+            assert mock_svc_cls.call_args.kwargs["strict_label_matching"] is True
+
 
 # ---------------------------------------------------------------------------
 # Tests — from_config (canonical construction path)
@@ -164,7 +182,7 @@ class TestFromConfig:
         assert call_kwargs["provider"] == OperatorConstants.Classification.DEFAULT_PROVIDER
 
     def test_standard_is_rejected_as_provider(self) -> None:
-        """'standard' is the adapter's registry name, not a provider; it must not fall back to litellm."""
+        """'standard' is not an LLM provider for LLMAdapterFactory; it must not fall back to litellm."""
         config = {**_BASE_CONFIG, "provider": "standard"}
         with pytest.raises(ValueError, match="Unsupported provider 'standard'"):
             StandardLLMClassificationAdapter.from_config(config)
@@ -328,12 +346,29 @@ class TestClassifyDocumentFromBinary:
                 existing_text=None,
                 document_types=["invoice"],
             )
-        mock_utils.extract_content.assert_called_once_with(file_path="doc.pdf", binary_content=b"%PDF-fake")
+        mock_utils.extract_content.assert_called_once_with(
+            file_path="doc.pdf", binary_content=b"%PDF-fake", doc_format="markdown"
+        )
         request = adapter._service.classify_document.call_args.kwargs["request"]  # type: ignore[attr-defined]
         assert request.content == "Extracted markdown text"
         assert response.success is True
         assert response.extracted_content == "Extracted markdown text"
         assert response.extraction_metadata == {"page_count": 3}
+
+    def test_extraction_honors_doclang_doc_format(self) -> None:
+        adapter = _make_adapter({**_BASE_CONFIG, "doc_format": "doclang"})
+        with patch(_OPERATOR_UTILS) as mock_utils:
+            mock_utils.extract_content.return_value = {"success": True, "content": "<doclang/>", "metadata": {}}
+            response = adapter.classify_document(
+                doc_name="doc.pdf",
+                binary_content=b"%PDF-fake",
+                existing_text=None,
+                document_types=["invoice"],
+            )
+        mock_utils.extract_content.assert_called_once_with(
+            file_path="doc.pdf", binary_content=b"%PDF-fake", doc_format="doclang"
+        )
+        assert response.extracted_content == "<doclang/>"
 
     def test_does_not_mutate_service_response(self) -> None:
         adapter = _make_adapter()

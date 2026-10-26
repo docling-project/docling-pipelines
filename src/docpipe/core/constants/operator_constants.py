@@ -323,6 +323,7 @@ class OperatorConstants:
         INCLUDE_CONFIDENCE: Final[str] = "include_confidence"
         INCLUDE_REASONING: Final[str] = "include_reasoning"
         MAX_CONTENT_LENGTH: Final[str] = "max_content_length"
+        STRICT_LABEL_MATCHING: Final[str] = "strict_label_matching"
 
         # Watsonx Configuration
         CONTAINER_KIND: Final[str] = "container_kind"
@@ -350,6 +351,7 @@ class OperatorConstants:
         DEFAULT_MAX_CONTENT_LENGTH: Final[int] = 2000
         DEFAULT_TEMPERATURE: Final[float] = 0.0
         DEFAULT_MAX_TOKENS: Final[int] = 500
+        DEFAULT_STRICT_LABEL_MATCHING: Final[bool] = False
 
         # Configuration Keys
         DOC_COLUMN_KEY: Final[str] = "doc_column"  # References Columns.DOC_COLUMN

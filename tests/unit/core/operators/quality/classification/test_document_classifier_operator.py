@@ -13,6 +13,9 @@ from unittest.mock import MagicMock, patch
 import pyarrow as pa
 import pytest
 
+from docpipe.core.operators.quality.classification.adapters.outbound.factories.classification_adapter_factory import (
+    ClassificationAdapterFactory,
+)
 from docpipe.core.operators.quality.classification.adapters.outbound.standard_llm_adapter import (
     StandardLLMClassificationAdapter,
 )
@@ -163,6 +166,43 @@ class TestValidateProviderMessages:
         """watsonx may omit provider_config (WATSONX_* env vars); the adapter enforces the litellm rule."""
         attributes = DocumentClassifierOperator.get_metadata()["attributes"]
         assert attributes["provider_config"]["required"] is False
+
+    def test_strict_label_matching_declared_in_metadata(self) -> None:
+        attribute = DocumentClassifierOperator.get_metadata()["attributes"]["strict_label_matching"]
+        assert attribute["default"] is False
+        assert attribute["required"] is False
+
+
+class TestCustomAdapterSelectedByProvider:
+    """A registered adapter is selectable via ``provider: "<ADAPTER_NAME>"`` through the real factory."""
+
+    @staticmethod
+    def _register_custom() -> type[ClassificationPort]:
+        class _CustomAdapter(ClassificationPort):
+            ADAPTER_NAME = "_operator_test_custom"
+            ADAPTER_DISPLAY_NAME = "Custom"
+
+            @classmethod
+            def from_config(cls, config: dict[str, Any]) -> "_CustomAdapter":
+                return cls()
+
+            def classify_document(self, *, doc_name, binary_content, existing_text, document_types):  # type: ignore[override]
+                return _GOOD_RESPONSE
+
+        ClassificationAdapterFactory.register(_CustomAdapter)
+        return _CustomAdapter
+
+    def test_custom_provider_passes_validate_and_constructs_via_factory(self) -> None:
+        adapter_class = self._register_custom()
+        try:
+            op = DocumentClassifierOperator({"provider": "_operator_test_custom", "document_types": ["invoice"]})
+            errors: list[str] = []
+            op.validate(errors, [], ["content", "id", "name"])
+        finally:
+            ClassificationAdapterFactory._REGISTRY.pop("_operator_test_custom", None)
+
+        assert isinstance(op.adapter, adapter_class)
+        assert [e for e in errors if "provider" in e.lower()] == []
 
 
 # ---------------------------------------------------------------------------

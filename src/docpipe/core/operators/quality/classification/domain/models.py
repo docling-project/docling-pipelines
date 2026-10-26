@@ -35,9 +35,12 @@ class ClassificationResponse:
     """Response from document classification.
 
     Attributes:
-        document_type: Classified document type, in the spelling of the configured
-            document types.  ``None`` when the model returned a label that matches
-            none of them (``reasoning`` then explains why).
+        document_type: Classified document type.  By default this is the model's
+            label normalised with :func:`normalize_label` (lower-case, spaces
+            replaced by underscores).  With strict label matching it is in the
+            spelling of the configured document types, and ``None`` when the
+            model returned a label that matches none of them (``reasoning`` then
+            explains why).
         confidence: Confidence score (1-10 scale)
         reasoning: Explanation for the classification decision
         success: Whether classification was successful
@@ -73,6 +76,11 @@ class ModelInfo:
     provider: str
     supports_json_mode: bool = True
     max_tokens: int = 4096
+
+
+def normalize_label(label: str) -> str:
+    """Return *label* in the legacy output form: lower-case with spaces replaced by underscores."""
+    return label.lower().replace(" ", "_")
 
 
 def _label_key(label: str) -> str:

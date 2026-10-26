@@ -12,7 +12,8 @@ Provider aliases
 ----------------
 Some provider strings used in flow JSON (``"litellm"``, ``"watsonx"``) map to
 the ``"standard"`` adapter.  The alias table lives here as ``_PROVIDER_ALIASES``
-and is the single source of truth for those mappings.
+and is the single source of truth for those mappings.  Registered
+``ADAPTER_NAME`` values are also accepted directly as provider strings.
 """
 
 from typing import Any, ClassVar
@@ -34,10 +35,11 @@ class ClassificationAdapterFactory:
 
     Aliases
     -------
-    ``_PROVIDER_ALIASES`` is the only list of valid flow-JSON provider strings.
-    Each maps to the ``ADAPTER_NAME`` it resolves to.  For example ``"litellm"``
-    and ``"watsonx"`` both resolve to ``"standard"``.  ``ADAPTER_NAME`` is an
-    internal registry key and is not itself a valid provider string.
+    ``_PROVIDER_ALIASES`` maps extra flow-JSON provider strings to the
+    ``ADAPTER_NAME`` they resolve to.  For example ``"litellm"`` and
+    ``"watsonx"`` both resolve to ``"standard"``.  Every registered
+    ``ADAPTER_NAME`` is also a valid provider string, so a custom adapter is
+    selected with ``provider: "<ADAPTER_NAME>"`` without registering an alias.
     """
 
     # Registry: ADAPTER_NAME → adapter class
@@ -80,7 +82,8 @@ class ClassificationAdapterFactory:
 
         1. Normalise to lower-case.
         2. Reject deprecated providers with migration guidance.
-        3. Apply alias table (``"litellm"`` → ``"standard"``, etc.).
+        3. Apply alias table (``"litellm"`` → ``"standard"``, etc.); a name
+           with no alias is used as-is.
         4. Look up the resolved name in the registry.
         5. Delegate to ``adapter_class.from_config(config)`` — all validation
            and dependency construction happen there.
@@ -104,10 +107,11 @@ class ClassificationAdapterFactory:
         if normalised in cls._DEPRECATED:
             raise ValueError(cls._DEPRECATED[normalised])
 
-        # Resolve alias → canonical ADAPTER_NAME.
-        resolved = cls._PROVIDER_ALIASES.get(normalised)
+        # Resolve alias → canonical ADAPTER_NAME; fall back to the name itself
+        # so a registered ADAPTER_NAME is directly selectable.
+        resolved = cls._PROVIDER_ALIASES.get(normalised, normalised)
 
-        adapter_class = cls._REGISTRY.get(resolved) if resolved is not None else None
+        adapter_class = cls._REGISTRY.get(resolved)
         if adapter_class is None:
             supported = sorted(cls.get_supported_providers())
             raise ValueError(f"Unknown classification provider: {provider!r}. Supported values: {supported}")
@@ -126,14 +130,14 @@ class ClassificationAdapterFactory:
 
     @classmethod
     def get_supported_providers(cls) -> set[str]:
-        """Return all valid provider strings (the alias table keys).
+        """Return all valid provider strings (alias keys plus registered ``ADAPTER_NAME`` values).
 
         Deprecated providers are excluded.
 
         Returns:
             Set of valid provider name strings accepted by :meth:`create_adapter`.
         """
-        return set(cls._PROVIDER_ALIASES)
+        return set(cls._PROVIDER_ALIASES) | set(cls._REGISTRY)
 
 
 def register_classification_adapter(adapter_class: type[ClassificationPort]) -> type[ClassificationPort]:
