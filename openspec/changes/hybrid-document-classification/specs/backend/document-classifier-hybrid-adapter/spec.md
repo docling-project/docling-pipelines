@@ -108,7 +108,11 @@ The system SHALL extract up to N pages of content from any file format in `CLASS
 ---
 
 ### Requirement: Hybrid classification adapter
-The system SHALL provide a `HybridClassificationAdapter` registered under the `"hybrid"` provider. The adapter's models are configured entirely inside `provider_config`: the text model is specified via `llm_inference` (provider), `model_id`, `api_base`, and `api_key` at the top level of `provider_config`; the vision model is specified via a nested `vlm` sub-object inside `provider_config` with its own `llm_inference`, `model_id`, `api_base`, and `api_key` keys.
+The system SHALL provide a `HybridClassificationAdapter` registered under the `"hybrid"` provider. The adapter's models can be pre-injected via `config["text_llm_adapter"]` and `config["vlm_llm_adapter"]` (as pre-built `LLMInferencePort` instances) or configured via `provider_config`:
+- Vision model (REQUIRED): specified via a nested `vlm` sub-object inside `provider_config` with `llm_inference`, `model_id`, `api_base`, and `api_key` keys (or injected via `config["vlm_llm_adapter"]`).
+- Text model (OPTIONAL): specified via `llm_inference`, `model_id`, `api_base`, and `api_key` at the top level of `provider_config` (or injected via `config["text_llm_adapter"]`).
+
+If the user does not provide the text-based LLM in config (empty or missing `model_id` and no injected `text_llm_adapter`), the system SHALL always default to scan-based visual classification using the vision VLM for all documents.
 
 #### Scenario: Hybrid provider_config shape — text model
 - **WHEN** a flow config specifies `provider: "hybrid"` with `provider_config.model_id` and `provider_config.llm_inference`
@@ -118,9 +122,21 @@ The system SHALL provide a `HybridClassificationAdapter` registered under the `"
 - **WHEN** a flow config specifies `provider_config.vlm.model_id` and `provider_config.vlm.llm_inference`
 - **THEN** the hybrid adapter uses those values to construct the vision inference adapter via `LLMAdapterFactory`
 
-#### Scenario: Digital PDF routes to text model
-- **WHEN** a PDF is classified and the scan detector returns `is_scanned=False`
-- **THEN** the text model (from `provider_config.model_id`) is called and the vision model is not called
+#### Scenario: Pre-injected LLM adapters
+- **WHEN** `config` contains pre-built `text_llm_adapter` and/or `vlm_llm_adapter` (instances of `LLMInferencePort`)
+- **THEN** the hybrid adapter directly uses the injected adapters without invoking `LLMAdapterFactory`
+
+#### Scenario: Missing text model defaults to scan-based classification
+- **WHEN** a flow config omits `provider_config.model_id` (or leaves it empty) and no `text_llm_adapter` is passed
+- **THEN** the adapter construction succeeds, and all documents (digital PDFs, scanned PDFs, images, text/office formats) are routed to the vision VLM via the scan-based path
+
+#### Scenario: Digital PDF routes to text model when text model is present
+- **WHEN** a PDF is classified, text model is configured, and the scan detector returns `is_scanned=False`
+- **THEN** the text model is called and the vision model is not called
+
+#### Scenario: Digital PDF routes to vision model when text model is absent
+- **WHEN** a PDF is classified, the scan detector returns `is_scanned=False`, but no text model is configured
+- **THEN** the document routes to the vision model via the scan-based path
 
 #### Scenario: Scanned PDF routes to vision model
 - **WHEN** a PDF is classified and the scan detector returns `is_scanned=True`
@@ -130,12 +146,16 @@ The system SHALL provide a `HybridClassificationAdapter` registered under the `"
 - **WHEN** a `.png`, `.jpg`, `.tiff`, or similar image file is classified
 - **THEN** the vision model is called without invoking the scan detector
 
-#### Scenario: Office and text formats always route to text model
-- **WHEN** a `.docx`, `.pptx`, `.xlsx`, `.txt`, `.md`, or `.html` file is classified
+#### Scenario: Office and text formats route to text model when configured
+- **WHEN** a `.docx`, `.pptx`, `.xlsx`, `.txt`, `.md`, or `.html` file is classified AND text model is configured
 - **THEN** the text model is called without invoking the scan detector
 
+#### Scenario: Office and text formats route to vision model when text model is absent
+- **WHEN** a `.docx`, `.pptx`, `.xlsx`, `.txt`, `.md`, or `.html` file is classified AND text model is NOT configured
+- **THEN** the document routes to the vision model via the scan-based path
+
 #### Scenario: Missing vlm sub-object raises at construction
-- **WHEN** a flow config with `provider: "hybrid"` omits `provider_config.vlm`
+- **WHEN** a flow config with `provider: "hybrid"` omits `provider_config.vlm` and no `vlm_llm_adapter` is injected
 - **THEN** adapter construction raises `ValueError` before any document is classified
 
 #### Scenario: Hybrid adapter returns standard output columns

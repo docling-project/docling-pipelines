@@ -14,15 +14,15 @@ The `DocumentClassifierOperator` port/adapter architecture has been partially im
 - **New**: `OperatorConstants.Classification.DEFAULT_MAX_PAGES = 5` added to `operator_constants.py`.
 - **New**: `ScannedDocumentDetector` class in `domain/scanned_detector.py` — deterministic multilingual heuristic (Unicode categories, not ASCII regex) that classifies page text as scanned or digital using three signals: negligible text, watermark trap, and sufficient text density.
 - **New**: `FastDocumentSampler` + `SampleResult` in `src/docpipe/utils/document/` — lightweight per-format extractor (pypdfium2, python-docx, python-pptx, openpyxl, PIL) that reads only the first N pages without invoking Docling.
-- **New**: `HybridClassificationAdapter(ClassificationPort)` in `adapters/outbound/hybrid_adapter.py` — wires sampler → detector → text SLM (digital path) or vision VLM (visual path); registered in `ClassificationAdapterFactory` under `"hybrid"`.
-- **Update**: `DocumentClassifierOperator.get_metadata()` — restructure flat attributes into nested groups (`classification_config.properties.*`, `output_config.properties.*`) following the `ExtractOperator` pattern; add `"hybrid"` as a valid provider; add a hybrid entry to `_get_classifier_provider_schemas()` with text model fields (`llm_inference`, `model_id`, `api_base`, `api_key`) at root level and a `vlm` sub-object with the same four fields for the vision model. `max_pages` remains a top-level operator attribute.
-- **Update**: `docs/operators/quality/document_classifier_readme.md` — add hybrid provider config example with `provider_config.model_id` (text SLM), `provider_config.vlm.model_id` (vision VLM), and top-level `max_pages`.
+- **New**: `HybridClassificationAdapter(ClassificationPort)` in `adapters/outbound/hybrid_adapter.py` — wires sampler → detector → text SLM (digital path) or vision VLM (visual path); registered in `ClassificationAdapterFactory` under `"hybrid"`. Supports dependency injection of pre-built `LLMInferencePort` adapters (`text_llm_adapter`, `vlm_llm_adapter`) or dynamic creation via `LLMAdapterFactory`. If text SLM is omitted in configuration, the adapter defaults to always using scan-based visual classification via the vision VLM for all documents.
+- **Update**: `DocumentClassifierOperator.get_metadata()` — restructure flat attributes into nested groups (`classification_config.properties.*`, `output_config.properties.*`) following the `ExtractOperator` pattern; add `"hybrid"` as a valid provider; add a hybrid entry to `_get_classifier_provider_schemas()` with optional text model fields (`llm_inference`, `model_id`, `api_base`, `api_key`) at root level and a required `vlm` sub-object with the same four fields for the vision model. `max_pages` remains a top-level operator attribute.
+- **Update**: `docs/operators/quality/document_classifier_readme.md` — add hybrid provider config example with optional `provider_config.model_id` (text SLM), required `provider_config.vlm.model_id` (vision VLM), top-level `max_pages`, and explanation of scan-only fallback when text model is omitted.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `backend/document-classifier-hybrid-adapter`: Fast hybrid classification path for `DocumentClassifierOperator` — deterministic scan detection, per-format document sampling without Docling, and dual-model routing (text SLM for digital documents, vision VLM for scanned/image documents).
+- `backend/document-classifier-hybrid-adapter`: Fast hybrid classification path for `DocumentClassifierOperator` — deterministic scan detection, per-format document sampling without Docling, and dual-model routing (text SLM for digital documents, vision VLM for scanned/image documents). Supports injected LLM adapters for both text and vision chats, and defaults to 100% scan-based visual classification if text LLM is not provided in config.
 
 ### Modified Capabilities
 

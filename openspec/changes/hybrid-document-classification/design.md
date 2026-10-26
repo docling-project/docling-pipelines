@@ -64,15 +64,15 @@ The factory uses a `register()` classmethod pattern — not an if/elif chain. Ad
 
 ---
 
-### D5: `HybridClassificationAdapter` config shape — `provider_config` with nested `vlm` sub-object
+### D5: `HybridClassificationAdapter` config shape — `provider_config` with nested `vlm` sub-object and injected LLM adapters
 
-**Decision:** Both the text SLM and the vision VLM are constructed via `LLMAdapterFactory.create_inference_adapter`. Their configuration lives entirely inside `provider_config`:
-- Text model: `provider_config.llm_inference` (provider), `provider_config.model_id`, `provider_config.api_base`, `provider_config.api_key`
-- Vision model: `provider_config.vlm.llm_inference`, `provider_config.vlm.model_id`, `provider_config.vlm.api_base`, `provider_config.vlm.api_key`
+**Decision:** The text SLM and vision VLM can be constructed via `LLMAdapterFactory.create_inference_adapter` OR injected directly via `config["text_llm_adapter"]` and `config["vlm_llm_adapter"]` (supporting custom `LLMInferencePort` implementations or mocks). When configured dynamically, their parameters live inside `provider_config`:
+- Text model (optional): `provider_config.llm_inference` (`"litellm"` or `"watsonx"`), `provider_config.model_id`, `provider_config.api_base`, `provider_config.api_key`
+- Vision model (required): `provider_config.vlm.llm_inference`, `provider_config.vlm.model_id`, `provider_config.vlm.api_base`, `provider_config.vlm.api_key`
 
 `max_pages` is a **top-level** operator config key (sibling of `provider`, `confidence_threshold`, etc.), not inside `provider_config`.
 
-**Rationale:** The `vlm` sub-object inside `provider_config` mirrors how the text model is configured, making both models symmetrical and self-contained within `provider_config`. This is consistent with how the actual flow JSON is written (confirmed example). `max_pages` stays top-level because it is a sampling tuning knob for the operator, not a connection detail for a specific LLM endpoint.
+**Rationale:** The `vlm` sub-object inside `provider_config` mirrors how the text model is configured, making both models symmetrical and self-contained within `provider_config`. Allowing pre-built `LLMInferencePort` injection provides clean dependency inversion, letting external callers inject pre-configured LLM adapters or mock implementations without hardcoding proprietary connections into `docling-pipelines`.
 
 **Alternative considered:** Optional top-level `vlm_provider` / `vlm_provider_config` keys — rejected because the actual confirmed config shape uses the nested `provider_config.vlm` sub-object, which is cleaner and avoids proliferating top-level keys.
 
@@ -82,7 +82,15 @@ The factory uses a `register()` classmethod pattern — not an if/elif chain. Ad
 
 **Decision:** The visual path sends a single user message with a list of `{"type": "image_url", ...}` content items followed by a `{"type": "text", ...}` item — the OpenAI multi-image content format.
 
-**Rationale:** This is the de-facto standard for vision models served via vLLM, OpenAI, LiteLLM, and Watsonx. `LiteLLMAdapter.chat` passes `messages` through without inspecting content types, so no adapter changes are required.
+**Rationale:** This is the standard for vision models served via vLLM, OpenAI, LiteLLM, and Watsonx. `LiteLLMAdapter.chat` and `WatsonXAdapter.chat` pass `messages` through without restricting content type to string-only, natively supporting multimodal dictionaries.
+
+---
+
+### D9: Text SLM Optionality & Scan-Based Fallback
+
+**Decision:** The text SLM configuration is strictly optional. If the user does not provide a text-based LLM in config (no `model_id` in `provider_config` and no injected `text_llm_adapter`), the hybrid adapter **always goes with scan-based** visual classification via the vision VLM.
+
+**Rationale:** Users often want a pure visual classification pipeline without maintaining a secondary text SLM, or may want consistent end-to-end multimodal classification. By defaulting to scan-based classification when the text model is omitted, flows are simplified. When text model IS configured, the dual-model digital/scanned routing operates normally.
 
 ---
 
