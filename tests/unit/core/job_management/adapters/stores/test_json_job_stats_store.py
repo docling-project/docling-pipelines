@@ -474,11 +474,51 @@ class TestDeleteOperations:
         # Directory should be removed
         assert not job_dir.exists()
 
-    def test_delete_nonexistent_job_succeeds_silently(self, *, store):
-        """Deleting nonexistent job should succeed silently (idempotent)."""
-        # JsonJobStatsStore doesn't raise on delete of nonexistent job
-        # It just logs and returns (idempotent delete)
-        store.delete_job_stats("nonexistent")  # Should not raise
+    def test_delete_nonexistent_job_raises_not_found(self, *, store):
+        """Deleting nonexistent job should raise JobStatsStoreDeleteException."""
+        with pytest.raises(JobStatsStoreDeleteException, match="Job run not found: nonexistent"):
+            store.delete_job_stats("nonexistent")
+
+    def test_delete_job_stats_locks_remain_outside_job_dir(self, *, store, sample_job_stats, temp_data_dir):
+        """Lock files should be located in .locks outside the job directory."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        job_dir = Path(temp_data_dir) / "job_stats" / job_run_id
+        assert job_dir.exists()
+
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        # The job dir must not contain .locks directory
+        assert not (job_dir / ".locks").exists()
+
+        store.delete_job_stats(job_run_id)
+        assert not job_dir.exists()
+        assert locks_dir.exists()
+
+    def test_concurrent_delete_job_stats_one_succeeds_one_raises(self, *, store, sample_job_stats):
+        """Concurrent deletion: exactly one thread succeeds, the other raises not found."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                store.delete_job_stats(job_run_id)
+                results.append("success")
+            except JobStatsStoreDeleteException as e:
+                errors.append(e)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(worker)
+            f2 = executor.submit(worker)
+            f1.result()
+            f2.result()
+
+        assert len(results) == 1
+        assert len(errors) == 1
+        assert f"Job run not found: {job_run_id}" in str(errors[0])
 
 
 class TestErrorHandling:
@@ -503,6 +543,19 @@ class TestErrorHandling:
         # Verify get_job_stats returns None for nonexistent job
         result = store.get_job_stats("nonexistent-job-id-12345678-1234-1234")
         assert result is None
+
+    def test_reads_on_unknown_job_do_not_create_job_directory(self, *, store, temp_data_dir):
+        """Reading an unknown job run must not create the job directory or locks inside it."""
+        unknown_id = f"unknown-{uuid.uuid4()}"
+        job_dir = Path(temp_data_dir) / "job_stats" / unknown_id
+
+        assert store.get_job_stats(unknown_id) is None
+        assert store.get_node_stats(job_run_id=unknown_id) == []
+        assert store.get_batch_node_stats(job_run_id=unknown_id) == {}
+        assert store.get_node_stats_by_batch_and_node(job_run_id=unknown_id, node_id="node1", batch_id="b1") is None
+        assert store.get_failed_docs_for_batch(job_run_id=unknown_id, batch_id="b1") == []
+
+        assert not job_dir.exists()
 
 
 class TestGetFailedDocsForBatch:
@@ -964,6 +1017,11 @@ class TestInitAndParseErrorPaths:
 
     # ── delete_job_stats: dir not found ──────────────────────────────────────
 
+    def test_delete_job_stats_raises_when_dir_not_found(self, *, store):
+        """delete_job_stats raises JobStatsStoreDeleteException when job directory does not exist."""
+        with pytest.raises(JobStatsStoreDeleteException, match="Job run not found: missing-run"):
+            store.delete_job_stats("missing-run")
+
     # ── delete_job_stats: rmtree failure ─────────────────────────────────────
 
     def test_delete_job_stats_raises_on_rmtree_error(self, *, store, sample_job_stats):
@@ -1390,14 +1448,11 @@ class TestExceptionPaths:
             with pytest.raises(JobStatsStoreReadException, match="acquire lock for node stats read"):
                 store.get_node_stats_by_batch_and_node(job_run_id=str(uuid.uuid4()), node_id="n1", batch_id=None)
 
-    def test_delete_job_stats_is_noop_when_not_found(self, store):
-        """delete_job_stats is a no-op for an unknown job run.
-        _get_locks_dir creates the job dir as a side-effect of acquiring the lock,
-        so job_dir.exists() is True even for unknown IDs. Verify the method
-        completes without raising.
-        """
-        # Should not raise
-        store.delete_job_stats(str(uuid.uuid4()))
+    def test_delete_job_stats_raises_when_not_found(self, *, store):
+        """delete_job_stats raises JobStatsStoreDeleteException for unknown job runs."""
+        job_run_id = str(uuid.uuid4())
+        with pytest.raises(JobStatsStoreDeleteException, match=f"Job run not found: {job_run_id}"):
+            store.delete_job_stats(job_run_id)
 
     def test_delete_job_stats_raises_on_rmtree_error(self, store):
         """delete_job_stats raises JobStatsStoreDeleteException when shutil.rmtree fails."""
@@ -1431,3 +1486,40 @@ class TestExceptionPaths:
         store.store_job_stats(js)
         ids = store.get_all_job_run_ids()
         assert job_run_id in ids
+
+
+class TestIssue365Regression:
+    """Regression tests for Issue #365: locking isolation, unknown reads/deletes, and atomic write cleanup."""
+
+    def test_sanitize_lock_id(self):
+        """Test sanitization of job_run_id for lock filenames."""
+        # Standard UUID or alphanumeric string remains unchanged
+        valid_id = "job-run-123_abc"
+        assert JsonJobStatsStore._sanitize_lock_id(valid_id) == valid_id
+
+        # Path traversal characters must be replaced and hashed
+        traversal_id = "../../etc/passwd"
+        sanitized = JsonJobStatsStore._sanitize_lock_id(traversal_id)
+        assert "/" not in sanitized
+        assert ".." not in sanitized
+        assert len(sanitized) <= 85
+
+        # Excessively long job_run_id must be truncated and hashed
+        long_id = "a" * 300
+        sanitized_long = JsonJobStatsStore._sanitize_lock_id(long_id)
+        assert len(sanitized_long) <= 85
+        assert sanitized_long.startswith("a" * 64)
+
+    def test_atomic_write_json_cleanup_failure_preserves_original_exception(self, *, store):
+        """When atomic write fails and cleanup also fails with OSError, original error is preserved."""
+        job_run_id = str(uuid.uuid4())
+        target_path = store._get_job_stats_path(job_run_id=job_run_id)
+
+        with patch("pathlib.Path.replace", side_effect=OSError("Primary replace failed")):
+            with patch("pathlib.Path.unlink", side_effect=OSError("Cleanup unlink failed")):
+                with pytest.raises(JobStatsStoreWriteException, match="Primary replace failed") as exc_info:
+                    store._atomic_write_json(path=target_path, data={"key": "val"})
+
+                # The primary exception is preserved in __cause__
+                assert isinstance(exc_info.value.__cause__, OSError)
+                assert "Primary replace failed" in str(exc_info.value.__cause__)
