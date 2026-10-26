@@ -260,7 +260,7 @@ filesystem provider, the referenced path must be a readable regular file in the 
 the Docker sample, `/documents` is the mounted invoice directory. For `box_driver`, `file_reference` is the Box file
 ID (for example `"702199884861"`). For `dropbox`, `file_reference` is a Dropbox path (for example `/Reports/q1.pdf`)
 or file id (for example `id:abc123`). For `sharepoint`, `file_reference` is a Microsoft Graph drive item id in the
-document library already configured on the flow (for example `"01ABCDEFGHIJKLMNOPQRSTUVWXYZ"`), or a SharePoint file
+document library already configured on the flow (for example `"01ABC000000000000000"`), or a SharePoint file
 URL with an `id` or `sourcedoc` query parameter (for example
 `"https://contoso.sharepoint.com/?id=/sites/team/Shared%20Documents/Reports/q1.pdf"`). A URL without one of those
 parameters is rejected, as is any other URI. The reference is stored as `file_path`, so ingest fetches that item
