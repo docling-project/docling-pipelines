@@ -149,7 +149,9 @@ class AssetRepositoryFactory:
         env_base_dir_key = f"{asset_type_name.upper()}_REPOSITORY_BASE_DIR"
 
         repo_type_str = os.getenv(env_type_key, repo_config.get("type", RepositoryType.LOCAL.value))
-        resolved_config = repo_config.get("config", {})
+        # Copy: the loader caches the parsed file, so mutating this dict would leak the env override
+        # into every later lookup in the process.
+        resolved_config = dict(repo_config.get("config", {}) or {})
 
         # Allow environment variable to override base_dir
         if env_base_dir_key in os.environ:
