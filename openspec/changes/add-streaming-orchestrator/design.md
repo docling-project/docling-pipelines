@@ -108,16 +108,68 @@ Use `sort_dag_topologically()` with explicit checks for duplicate IDs, unresolve
 and reachability. Resolve every operator class through the existing Python operator factory, honoring enabled custom
 packages and existing discovery priority. No model-bearing operator construction is needed merely to check identity.
 
-Reuse `FlowValidator.propagate_features_per_node()` in metadata-only mode with no batch orchestrator, never calling
-`validate()`, `validate_dag()`, or operator `validate()`. Keep its lifetime attempt-local so cached metadata cannot leak
-between definitions. Add a narrow metadata-only construction mode with session logging context and explicit operator
-discovery settings instead of the mandatory orchestrator dependency. Pass the same settings to operator metadata and
-the feature propagator so custom-operator enablement remains consistent. Existing validation callers retain their
-orchestrator requirement and behavior. Reuse the existing feature traversal, merge disambiguation, and propagated
-global parameters rather than duplicating feature logic.
+Reuse `FlowValidator.propagate_features_per_node()` in feature-propagation mode as defined in Decision 3a. This mode
+computes per-node column/feature views and propagated parameters without processing documents or performing full
+operator validation. Reuse the existing feature traversal, merge disambiguation, and propagated global parameters
+rather than duplicating feature logic.
 
 Alternative: disable all preparation or run full validation per event. The first loses required sink metadata and
 integrity checks; the second repeats expensive service/configuration validation on the consumer's critical path.
+
+### 3a. Define the feature-propagation construction and lifetime contract
+
+Extend the existing constructor with this keyword-only surface:
+
+```python
+def __init__(
+    self, *, orchestrator: AbstractOrchestrator | None = None,
+    custom_operator_packages: list[str] | None = None, enable_custom_operators: bool | None = None,
+    feature_propagator: FeaturePropagator | None = None,
+) -> None:
+```
+
+- With an orchestrator, retain the existing validation mode, logging context, and optional propagator injection.
+  Discovery settings come from the orchestrator. Explicit discovery arguments in this mode raise `ValueError` rather
+  than silently overriding or conflicting with orchestrator settings.
+- Without an orchestrator, select feature-propagation mode. Require an explicit boolean `enable_custom_operators`;
+  omission raises `ValueError`. `custom_operator_packages=None` retains the existing factory meaning for that value.
+  Read logging context from the current `SessionInfo`, including flow/event correlation, without creating job/run IDs.
+- Streaming constructs a fresh validator and propagator for each attempt and leaves `feature_propagator` unset.
+  Snapshot the effective discovery settings at construction, preserving an explicit `False` enablement value.
+  Add explicit discovery inputs to `OperatorMetadata` and optional metadata-provider injection to `FeaturePropagator`.
+  In feature-propagation mode, load internal feature metadata once and supply the same attempt-local metadata provider
+  to both the validator and propagator. Do not let the propagator independently fall back to default discovery.
+  Existing orchestrator-based callers retain their current construction and validation behavior.
+
+The streaming preparation path has the following method contract:
+
+| Method | Streaming preparation |
+| --- | --- |
+| `propagate_features_per_node()` | Call once after compilation, graph checks, and operator-class resolution |
+| `validate()` | Skip |
+| `validate_dag()` | Skip |
+| `validate_dag_with_features()` | Skip |
+| `validate_last_operator()` | Skip |
+| Operator `validate()` | Never invoke during preparation |
+
+The four skipped `FlowValidator` validation entrypoints raise `RuntimeError` before validation work if called on a
+feature-propagation-mode instance. Per-node metadata computation continues to use the existing propagation helpers.
+
+"Compilation and runtime integrity checks" specifically means saved-format conversion plus the following checks,
+all completed before document processing and independently of full validation or `disable_validation`:
+
+- A nonempty executable DAG with valid node IDs and operator names, and no duplicate node IDs.
+- Resolvable, consistent input/output edges and an acyclic graph ordered with `sort_dag_topologically()`.
+- Exactly one root, whose operator is in the Ingest category, and every node reachable from that root.
+- Every referenced operator class resolves through the configured Python factory and discovery priority, without
+  constructing model-bearing operators merely to check identity.
+
+Keep `_node_features_cache` instance-local and initially `None`. A validator is bound by contract to one fixed prepared
+definition, effective global configuration, and discovery snapshot for its entire lifetime. Streaming computes the
+cache once; repeated access for that same definition can reuse it. Discard the validator, metadata provider, propagator,
+and cached results when the attempt ends, including failures. A retry or later event creates fresh instances and
+recomputes metadata. Instances remain non-thread-safe and must never be shared between attempts or concurrent callers;
+no cross-attempt cache, cache invalidation mechanism, or synchronization is introduced.
 
 ### 4. Build configuration with explicit streaming overrides
 
