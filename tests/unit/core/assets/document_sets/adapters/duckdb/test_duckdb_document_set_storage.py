@@ -295,3 +295,55 @@ class TestFromConfig:
         """from_config() raises DocpipeException when database_path is empty."""
         with pytest.raises(DocpipeException, match="database_path"):
             DuckDBDocumentSetStorage.from_config(config={"database_path": ""})
+
+
+# ---------------------------------------------------------------------------
+# DocpipeException pass-through and exists() failures
+# ---------------------------------------------------------------------------
+
+
+class TestStorageErrors:
+    """DocpipeExceptions from the table storage keep their status; other errors are wrapped."""
+
+    def test_store_keeps_docpipe_exception(self):
+        storage = _make_storage(table_exists=True)
+        error = DocpipeException("storage is read-only", status_code=503)
+        storage.upsert_data.side_effect = error
+        sut = _make_sut(storage=storage)
+
+        with pytest.raises(DocpipeException) as exc_info:
+            sut.store(doc_set_name="My Docs", data=pa.table({"id": ["doc1"]}))
+
+        assert exc_info.value is error
+
+    def test_delete_keeps_docpipe_exception(self):
+        storage = _make_storage(table_exists=True)
+        error = DocpipeException("storage is read-only", status_code=503)
+        storage.delete_table.side_effect = error
+        sut = _make_sut(storage=storage)
+
+        with pytest.raises(DocpipeException) as exc_info:
+            sut.delete(attachment_ref=_make_ref())
+
+        assert exc_info.value is error
+
+    def test_exists_keeps_docpipe_exception(self):
+        storage = _make_storage()
+        error = DocpipeException("storage is offline", status_code=503)
+        storage.table_exists.side_effect = error
+        sut = _make_sut(storage=storage)
+
+        with pytest.raises(DocpipeException) as exc_info:
+            sut.exists(attachment_ref=_make_ref())
+
+        assert exc_info.value is error
+
+    def test_exists_wraps_unexpected_exception(self):
+        storage = _make_storage()
+        storage.table_exists.side_effect = RuntimeError("connection lost")
+        sut = _make_sut(storage=storage)
+
+        with pytest.raises(DocpipeException, match="Failed to check table existence: connection lost") as exc_info:
+            sut.exists(attachment_ref=_make_ref())
+
+        assert exc_info.value.status_code == 500

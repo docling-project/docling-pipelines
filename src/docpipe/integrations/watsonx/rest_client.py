@@ -345,7 +345,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
 
         return embeddings
 
-    @retry_with_backoff(max_retries=5, initial_delay=2.0, max_delay=60)
+    @retry_with_backoff(max_retries=3, initial_delay=1.0, max_delay=60, jitter=True)
     def generate_embeddings(self, text: str) -> list[float]:
         """Generate embeddings for a single text with optional rate limiting.
 
@@ -416,7 +416,7 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
                 error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
             ) from e
 
-    @retry_with_backoff(max_retries=5, initial_delay=2.0, max_delay=60)
+    @retry_with_backoff(max_retries=3, initial_delay=1.0, max_delay=60, jitter=True)
     def generate_embeddings_batch(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
         """Generate embeddings for multiple texts in batches with optional rate limiting.
 

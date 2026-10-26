@@ -24,6 +24,7 @@ from docpipe.core.operators.quality.classification.domain.models import (
     ClassificationRequest,
     ClassificationResponse,
     build_classification_prompt,
+    normalize_label,
     parse_classification_response,
     resolve_document_type,
 )
@@ -56,6 +57,9 @@ class _LLMClassificationService:
         provider_name: Provider name (for logging/metadata only).
         temperature: Sampling temperature forwarded to the LLM.
         max_tokens: Token budget forwarded to the LLM.
+        strict_label_matching: When ``True`` the returned label is resolved to a
+            configured document type and unknown labels are rejected.  When
+            ``False`` the label is only normalised with :func:`normalize_label`.
     """
 
     def __init__(
@@ -66,6 +70,7 @@ class _LLMClassificationService:
         max_tokens: int = OperatorConstants.Classification.DEFAULT_MAX_TOKENS,
         model_id: str = "",
         provider_name: str = "",
+        strict_label_matching: bool = OperatorConstants.Classification.DEFAULT_STRICT_LABEL_MATCHING,
     ) -> None:
         """Initialise the service with a pre-built LLM adapter.
 
@@ -77,6 +82,8 @@ class _LLMClassificationService:
                 (default ``OperatorConstants.Classification.DEFAULT_MAX_TOKENS``).
             model_id: Model identifier stored for logging/metadata only.
             provider_name: Provider name stored for logging/metadata only.
+            strict_label_matching: Resolve labels to configured spellings and
+                reject unknown labels (default ``False``).
 
         Raises:
             DocpipeException: When adapter validation fails.
@@ -85,6 +92,7 @@ class _LLMClassificationService:
         self.max_tokens = max_tokens
         self.model_id = model_id
         self.provider_name = provider_name
+        self.strict_label_matching = strict_label_matching
         self.llm_adapter: LLMInferencePort = llm_adapter
 
         validation_result = self.llm_adapter.validate()
@@ -142,6 +150,9 @@ class _LLMClassificationService:
             )
 
             parsed = parse_classification_response(response_text=result_text)
+            if not self.strict_label_matching:
+                return replace(parsed, document_type=normalize_label(parsed.document_type or ""))
+
             resolved_type = resolve_document_type(
                 label=parsed.document_type or "", document_types=request.document_types
             )
@@ -207,9 +218,10 @@ class StandardLLMClassificationAdapter(ClassificationPort):
     live in :meth:`from_config`, making the factory a pure dispatcher.
 
     Class attributes:
-        ADAPTER_NAME: ``"standard"`` — the internal key under which this adapter is
-            registered in :class:`ClassificationAdapterFactory`.  It is not a valid
-            ``provider`` value in a flow.
+        ADAPTER_NAME: ``"standard"`` — the key under which this adapter is
+            registered in :class:`ClassificationAdapterFactory`.  Like every
+            registered ``ADAPTER_NAME`` it is also accepted as a ``provider``
+            value in a flow.
         ADAPTER_DISPLAY_NAME: Human-readable label.
     """
 
@@ -229,6 +241,7 @@ class StandardLLMClassificationAdapter(ClassificationPort):
                 threshold is enforced by the operator, not by this adapter.
         """
         self.config = config
+        self.doc_format: str = config.get(OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT)
         self.max_content_length: int = config.get(
             OperatorConstants.Config.MAX_CONTENT_LENGTH,
             OperatorConstants.Classification.DEFAULT_MAX_CONTENT_LENGTH,
@@ -251,6 +264,10 @@ class StandardLLMClassificationAdapter(ClassificationPort):
             max_tokens=max_tokens,
             model_id=model_id,
             provider_name=provider,
+            strict_label_matching=config.get(
+                OperatorConstants.Config.STRICT_LABEL_MATCHING,
+                OperatorConstants.Classification.DEFAULT_STRICT_LABEL_MATCHING,
+            ),
         )
 
     @classmethod
@@ -388,7 +405,9 @@ class StandardLLMClassificationAdapter(ClassificationPort):
                 doc_name,
                 len(binary_content),
             )
-            result = OperatorUtils.extract_content(file_path=doc_name, binary_content=binary_content)
+            result = OperatorUtils.extract_content(
+                file_path=doc_name, binary_content=binary_content, doc_format=self.doc_format
+            )
             if not result.get(OperatorConstants.Extraction.SUCCESS):
                 error = result.get(OperatorConstants.Extraction.ERROR, "Extraction failed")
                 logger.warning("StandardLLMAdapter: Docling extraction failed for %s: %s", doc_name, error)

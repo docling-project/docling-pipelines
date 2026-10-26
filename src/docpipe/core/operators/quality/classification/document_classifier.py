@@ -864,6 +864,13 @@ class DocumentClassifierOperator(AbstractOperator):  # type: ignore[misc]
                     OperatorConstants.Config.DEFAULT: False,
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.BOOLEAN,
                 },
+                OperatorConstants.Config.STRICT_LABEL_MATCHING: {
+                    OperatorConstants.Misc.NAME: "Strict Label Matching",
+                    OperatorConstants.Config.DESCRIPTION: "When enabled, the model's label is resolved to the configured document type spelling and labels that match no configured type are rejected (document type is null). When disabled (default), any label is accepted and normalised to lower-case with underscores.",
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Config.DEFAULT: OperatorConstants.Classification.DEFAULT_STRICT_LABEL_MATCHING,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.BOOLEAN,
+                },
                 OperatorConstants.Config.MAX_WORKERS: {
                     OperatorConstants.Misc.NAME: "Max Workers",
                     OperatorConstants.Config.DESCRIPTION: "Maximum number of parallel workers for processing (uses ThreadPoolExecutor for I/O-bound LLM API calls)",

@@ -31,6 +31,21 @@ class BoxSourceAdapter(DocumentSourcePort):
         # auth flow is performed for all documents in a batch.
         self._client_cache: dict[str, BoxClient] = {}
 
+    @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set a Box file ID as the single file to ingest.
+
+        ``file_reference`` is the Box file ID the producer supplies for the
+        event; batch ingestion (``fetch_documents``) already accepts a file
+        ID via ``file_id`` and fetches/validates it against the Box API, so
+        this only does basic input validation rather than duplicating that
+        call here.
+        """
+        if not file_reference or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty Box file ID")
+
+        provider_config["file_id"] = file_reference
+
     def _get_box_client(self, *, config: BoxSourceConfig) -> BoxClient:
         """Return a cached authenticated Box client for the given credentials.
 
@@ -102,7 +117,7 @@ class BoxSourceAdapter(DocumentSourcePort):
 
                 yield file_info
         except Exception as e:
-            logger.error(f"Error iterating Box files: {e}", exc_info=True)
+            logger.exception("Error iterating Box files: %s", e)
             raise
 
     def _compute_relative_path(self, *, file_info, root_folder_id: str) -> str | None:
@@ -142,7 +157,7 @@ class BoxSourceAdapter(DocumentSourcePort):
             stream = client.downloads.download_file(file_id)
             return stream.read()
         except Exception as e:
-            logger.error(f"Error downloading file {file_id}: {e}", exc_info=True)
+            logger.exception("Error downloading file %s: %s", file_id, e)
             raise
 
     def _parse_modified_time(self, modified_at: str | None):
@@ -249,7 +264,7 @@ class BoxSourceAdapter(DocumentSourcePort):
                 "Box SDK dependencies not installed. Install with: uv pip install 'docling-pipelines[box]'"
             ) from e
         except Exception as e:
-            logger.error(f"Error fetching documents from Box: {e}", exc_info=True)
+            logger.exception("Error fetching documents from Box: %s", e)
             raise ValueError(f"Failed to fetch documents from Box: {e!s}") from e
 
     async def test_connection(self, config: BoxSourceConfig) -> tuple[bool, str]:
@@ -328,7 +343,7 @@ class BoxSourceAdapter(DocumentSourcePort):
                 if len(parts) >= 2 and parts[-2] == "file":
                     file_id = parts[-1]
                 else:
-                    logger.error(f"Could not extract file ID from Box URL: {source_id}")
+                    logger.error("Could not extract file ID from Box URL: %s", source_id)
                     return None
 
             credentials_json = provider_config.get("credentials_json")
@@ -349,18 +364,18 @@ class BoxSourceAdapter(DocumentSourcePort):
             client = self._get_box_client(config=config)
 
             # Download file content using existing method
-            logger.info(f"Downloading binary content from Box: file_id={file_id}")
+            logger.info("Downloading binary content from Box: file_id=%s", file_id)
             content = self._download_file_content(client=client, file_id=file_id)
 
-            logger.info(f"Successfully downloaded {len(content)} bytes from Box: {source_id}")
+            logger.info("Successfully downloaded %d bytes from Box: %s", len(content), source_id)
             return content
 
         except FileNotFoundError as e:
-            logger.error(f"Box credentials file not found: {e}")
+            logger.error("Box credentials file not found: %s", e)
             return None
         except ValueError as e:
-            logger.error(f"Box authentication error: {e}")
+            logger.error("Box authentication error: %s", e)
             return None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching binary content from Box {source_id}: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Unexpected error fetching binary content from Box %s", source_id)
             return None

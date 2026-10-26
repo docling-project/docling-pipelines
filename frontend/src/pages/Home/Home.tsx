@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useIntl, type MessageDescriptor } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { Grid, Column, Button, InlineNotification } from '@carbon/react';
 import { go } from '@/utils';
@@ -15,28 +16,36 @@ import {
 import { ROUTES, generateRoute } from '@/config';
 import { useTheme } from '@/hooks';
 import { useAppSelector } from '@/hooks/useAppSelector';
-import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
+import { useRecentlyVisited, type RecentItemType } from '@/hooks/useRecentlyVisited';
 import { selectProjectsArray } from '@/selectors/projectsSelectors';
 import { selectFlowsArray } from '@/selectors/flowSelectors';
 import { PageLayout, ProjectsCard, RunsCard, FlowsCard } from '@/components';
 import { TileContent } from '@/components/TileContent';
 import { SampleProjectModal } from '@/components/Home';
+import { messages } from './Home.messages';
 import styles from './Home.module.scss';
-
-const ARIA_LABELS: AriaLabels = {
-  welcome: 'Welcomes the user',
-  description: 'Short description of the product',
-  collapseButton: 'Collapse header details',
-  expandButton: 'Expand header details',
-  tilesContainer: 'Feature tiles list',
-};
 
 const MAX_RECENT = 4;
 
+const RECENT_TYPE_MESSAGES: Record<RecentItemType, MessageDescriptor> = {
+  project: messages.recentTypeProject,
+  flow: messages.recentTypeFlow,
+  run: messages.recentTypeRun,
+};
+
 export function Home(): React.JSX.Element {
+  const intl = useIntl();
   const navigate = useNavigate();
   const { theme } = useTheme();
   const [sampleModalOpen, setSampleModalOpen] = useState(false);
+
+  const ariaLabels: AriaLabels = useMemo(() => ({
+    welcome: intl.formatMessage(messages.ariaWelcome),
+    description: intl.formatMessage(messages.ariaDescription),
+    collapseButton: intl.formatMessage(messages.ariaCollapseButton),
+    expandButton: intl.formatMessage(messages.ariaExpandButton),
+    tilesContainer: intl.formatMessage(messages.ariaTilesContainer),
+  }), [intl]);
 
   // localStorage LRU list — populated as the user opens projects / flows
   const { recent } = useRecentlyVisited();
@@ -88,18 +97,18 @@ export function Home(): React.JSX.Element {
   const headerTiles: TileGroup[] = useMemo(() => [
     {
       id: 1,
-      label: 'Quick start',
+      label: intl.formatMessage(messages.tileGroupQuickStart),
       tiles: [
         {
           tileId: 'tile-sample',
           variant: 'glass' as const,
-          ariaLabel: 'Get started with sample project',
+          ariaLabel: intl.formatMessage(messages.sampleTileAriaLabel),
           customContent: (
             <TileContent
-              label="Sample project"
-              title="Get started with sample data"
-              subtitle="Guided journeys for pipeline creation"
-              buttonLabel="Start"
+              label={intl.formatMessage(messages.sampleTileLabel)}
+              title={intl.formatMessage(messages.sampleTileTitle)}
+              subtitle={intl.formatMessage(messages.sampleTileSubtitle)}
+              buttonLabel={intl.formatMessage(messages.sampleTileButton)}
               onAction={() => { setSampleModalOpen(true); }}
             />
           ),
@@ -107,20 +116,20 @@ export function Home(): React.JSX.Element {
         {
           tileId: 'tile-learn',
           variant: 'glass' as const,
-          ariaLabel: 'Learn more about the product',
+          ariaLabel: intl.formatMessage(messages.learnTileAriaLabel),
           customContent: (
             <TileContent
-              label="Learn more"
-              title="See how it works"
-              subtitle="View demos and documents"
-              buttonLabel="Learn more"
+              label={intl.formatMessage(messages.learnTileLabel)}
+              title={intl.formatMessage(messages.learnTileTitle)}
+              subtitle={intl.formatMessage(messages.learnTileSubtitle)}
+              buttonLabel={intl.formatMessage(messages.learnTileButton)}
               href="https://docling-project.github.io/docling-pipelines/book/site/docling-pipelines/1.0/index.html"
             />
           ),
         },
       ],
     },
-  ], []);
+  ], [intl]);
 
   const defaultTileGroup: TileGroup | undefined = headerTiles[0];
   const [selectedTileGroup, setSelectedTileGroup] = useState<TileGroup | undefined>(defaultTileGroup);
@@ -143,10 +152,10 @@ export function Home(): React.JSX.Element {
         data-carbon-theme={theme === 'g100' ? 'g100' : 'g10'}
       >
         <AnimatedHeader
-          welcomeText="Welcome"
-          description="Build unstructured data pipelines and unlock your data's full potential."
-          productName="Docling Pipelines"
-          ariaLabels={ARIA_LABELS}
+          welcomeText={intl.formatMessage(messages.welcomeText)}
+          description={intl.formatMessage(messages.description)}
+          productName={intl.formatMessage(messages.productName)}
+          ariaLabels={ariaLabels}
           headerAnimation={(theme === 'g100' ? watsonXAnimatedDark : watsonXAnimatedLight) as object}
           headerStatic={(theme === 'g100' ? watsonXStaticDark : watsonXStaticLight) as string}
           allTileGroups={headerTiles}
@@ -159,8 +168,8 @@ export function Home(): React.JSX.Element {
       <InlineNotification
         className={styles.betaBanner}
         kind="warning"
-        title="Beta: "
-        subtitle="The web UI is experimental and not yet production-ready. For production workloads, use the CLI or Python API."
+        title={intl.formatMessage(messages.betaTitle)}
+        subtitle={intl.formatMessage(messages.betaSubtitle)}
         lowContrast
         hideCloseButton
       />
@@ -172,10 +181,10 @@ export function Home(): React.JSX.Element {
             <Column sm={4} md={8} lg={16}>
               <div className={styles.recentBarInner}>
                 <div className={styles.recentBarLabel}>
-                  <span className={styles.recentBarHeading}>Overview</span>
+                  <span className={styles.recentBarHeading}>{intl.formatMessage(messages.recentOverview)}</span>
                   <span className={styles.recentBarSub}>
                     <RecentlyViewed size={16} aria-hidden="true" />
-                    Recently visited
+                    {intl.formatMessage(messages.recentlyVisited)}
                   </span>
                 </div>
                 <div className={styles.recentItems}>
@@ -188,7 +197,7 @@ export function Home(): React.JSX.Element {
                       className={styles.recentItem}
                     >
                       <span className={styles.recentItemType}>
-                        {item.type.charAt(0).toUpperCase() + item.type.slice(1)} /
+                        {intl.formatMessage(RECENT_TYPE_MESSAGES[item.type])}
                       </span>
                       <span className={styles.recentItemName}>{item.label}</span>
                     </Button>
@@ -205,7 +214,7 @@ export function Home(): React.JSX.Element {
         <Grid>
           <Column sm={4} md={8} lg={16}>
             <div className={styles.cardZoneInner}>
-              <h2 className={styles.cardZoneHeading}>Recent work</h2>
+              <h2 className={styles.cardZoneHeading}>{intl.formatMessage(messages.recentWork)}</h2>
               <div className={styles.cardGrid}>
                 <ProjectsCard />
                 <FlowsCard />

@@ -8,6 +8,7 @@ Provides abstract base class with retry logic, error handling,
 and validation utilities for LLM client implementations.
 """
 
+import random
 import time
 from abc import ABC, abstractmethod
 from functools import wraps
@@ -32,6 +33,7 @@ def retry_with_backoff(
     initial_delay: float = DEFAULT_INITIAL_DELAY,
     backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
     max_delay: float = 60.0,
+    jitter: bool = False,
     exceptions: tuple = (Exception,),
 ) -> Callable:
     """
@@ -42,6 +44,8 @@ def retry_with_backoff(
         initial_delay: Initial delay in seconds before first retry
         backoff_factor: Multiplier for delay between retries
         max_delay: Maximum delay in seconds (caps exponential backoff)
+        jitter: Sleep a random duration between 0 and the current delay ("full jitter")
+            instead of the exact delay, so concurrent callers do not retry in lockstep
         exceptions: Tuple of exception types to catch and retry
 
     Returns:
@@ -49,8 +53,11 @@ def retry_with_backoff(
     """
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        """Wrap ``func`` with the configured retry loop."""
+
         @wraps(func)
         def wrapper(*args, **kwargs) -> T:
+            """Call ``func``, retrying matching exceptions with exponential backoff."""
             delay = initial_delay
 
             for attempt in range(max_retries):
@@ -58,14 +65,19 @@ def retry_with_backoff(
                     return func(*args, **kwargs)
                 except exceptions as e:
                     if attempt < max_retries - 1:
+                        sleep_for = random.uniform(0.0, delay) if jitter else delay  # nosec B311 — retry jitter, not security-sensitive
                         logger.warning(
-                            f"Attempt {attempt + 1}/{max_retries} failed for {func.__name__}: {e}. "
-                            f"Retrying in {delay:.1f}s..."
+                            "Attempt %s/%s failed for %s: %s. Retrying in %.1fs...",
+                            attempt + 1,
+                            max_retries,
+                            func.__name__,
+                            e,
+                            sleep_for,
                         )
-                        time.sleep(delay)
+                        time.sleep(sleep_for)
                         delay = min(delay * backoff_factor, max_delay)
                     else:
-                        logger.error(f"All {max_retries} attempts failed for {func.__name__}: {e}")
+                        logger.error("All %s attempts failed for %s: %s", max_retries, func.__name__, e)
                         raise
 
             # This should never be reached, but satisfies type checker

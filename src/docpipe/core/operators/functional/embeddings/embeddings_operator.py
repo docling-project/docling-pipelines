@@ -264,9 +264,6 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         """Validate provider type and value against supported providers."""
         if not self.should_validate_field(field_value=self.provider):
             return
-        if not isinstance(self.provider, str):
-            errors.append(f"provider must be a string, got {type(self.provider)}")
-            return
         supported_providers = LLMAdapterFactory.get_supported_providers(capability="embedding")
         if self.provider not in supported_providers:
             errors.append(f"provider must be one of {sorted(supported_providers)}, got '{self.provider}'")
@@ -288,9 +285,6 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
     def _validate_provider_config(self, *, errors: list[str]) -> None:
         """Validate provider_config dict including model_id, max_concurrent_requests, and batch_size."""
         if not self.should_validate_field(field_value=self.provider_config):
-            return
-        if not isinstance(self.provider_config, dict):
-            errors.append(f"provider_config must be a dictionary, got {type(self.provider_config)}")
             return
 
         model_id = self.provider_config.get(OperatorConstants.Config.MODEL_ID)
@@ -1092,32 +1086,6 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         ).value
         return [table.slice(0, 0)], metadata
 
-    def _update_doc_hash_column(self, table: pa.Table, doc_id_hashes: list[str]) -> pa.Table:
-        """
-        Update or add document hash column to table.
-
-        Args:
-            table: PyArrow table to update
-            doc_id_hashes: List of document hashes
-
-        Returns:
-            Updated PyArrow table with hash column
-        """
-        if not doc_id_hashes:
-            return table
-
-        if self.doc_id_hash_column in table.column_names:
-            table = table.drop_columns([self.doc_id_hash_column])
-
-        table = TransformUtils.add_column(table=table, name=self.doc_id_hash_column, content=doc_id_hashes)
-
-        logger.info(
-            "Added document hash column '%s' to table",
-            self.doc_id_hash_column,
-            extra=self.common_log_arguments,
-        )
-        return table
-
     def _store_embedding_for_row(
         self,
         *,
@@ -1200,12 +1168,9 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         )
         logger.info("Added embeddings column '%s' to table", self.embeddings_column, extra=self.common_log_arguments)
 
-        if self.doc_id_hash_column in slice_table.column_names:
-            slice_table = slice_table.drop_columns([self.doc_id_hash_column])
-            slice_table = TransformUtils.add_column(
-                table=slice_table, name=self.doc_id_hash_column, content=slice_doc_id_hashes
-            )
-        return slice_table
+        # transform() ensured the doc_id_hash column before slicing
+        slice_table = slice_table.drop_columns([self.doc_id_hash_column])
+        return TransformUtils.add_column(table=slice_table, name=self.doc_id_hash_column, content=slice_doc_id_hashes)
 
     def _ensure_doc_id_hash_column(self, *, table: pa.Table) -> tuple[pa.Table, Exception | None]:
         """

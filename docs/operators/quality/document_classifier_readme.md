@@ -26,6 +26,22 @@ reasoning text. Unsupported file formats are skipped, not failed.
 
 ---
 
+## Breaking Changes
+
+The classifier now sits behind `ClassificationPort`. These internal names were removed without
+compatibility shims:
+
+| Removed | Replacement |
+|---|---|
+| `docpipe.core.operators.quality.classification.classification_service.ClassificationService` | A `ClassificationPort` implementation resolved by `ClassificationAdapterFactory`, or pass `classification_adapter=` to `DocumentClassifierOperator` |
+| `DocumentClassifierOperator.classification_service` | `DocumentClassifierOperator.adapter` |
+| `DocumentClassifierOperator.model_id` and `.provider_config` | Read `model_id` / `provider_config` from the operator `config` |
+
+Flow JSON is unaffected: default label output matches the previous behavior (see
+[Label matching](#label-matching)).
+
+---
+
 ## Architecture
 
 ### Hexagonal (Ports and Adapters) Architecture
@@ -61,7 +77,7 @@ graph TD
 - `ClassificationResponse` may carry optional `extracted_content` and `extraction_metadata` for adapters that extract text as a by-product
 
 #### 3. Factory ([`classification_adapter_factory.py`](../../../src/docpipe/core/operators/quality/classification/adapters/outbound/factories/classification_adapter_factory.py))
-- Registry of adapters keyed by `ADAPTER_NAME`
+- Registry of adapters keyed by `ADAPTER_NAME`; every registered name is a valid `provider`
 - Alias table (`litellm`, `watsonx` resolve to the `standard` adapter)
 - Rejects deprecated providers (`ollama`) with migration guidance
 
@@ -79,7 +95,8 @@ graph TD
 Implement `ClassificationPort` (set `ADAPTER_NAME`, implement `from_config()` and
 `classify_document()`) and decorate the class with `@register_classification_adapter`. The
 decorator registers the adapter with `ClassificationAdapterFactory`; the module must be imported
-(for example from `adapters/outbound/__init__.py`) for registration to occur.
+(for example from `adapters/outbound/__init__.py`) for registration to occur. Select the adapter in a
+flow with `"provider": "<ADAPTER_NAME>"`; no alias registration is needed.
 
 Adapters that do not need Docling text (for example, ones that classify from raw bytes) simply
 leave `extracted_content` and `extraction_metadata` as `None`; the operator then never runs
@@ -191,7 +208,7 @@ never sees mixed content.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `provider` | string | LLM provider: `"litellm"` or `"watsonx"` |
+| `provider` | string | LLM provider: `"litellm"` or `"watsonx"`. A custom adapter registered with `@register_classification_adapter` is selected by its `ADAPTER_NAME` |
 | `model_id` | string | Text model identifier (inside `provider_config`). For LiteLLM: `"openai/granite3.1-dense:8b"`; for WatsonX: `"ibm/granite-13b-chat-v2"` |
 
 ### Optional Parameters
@@ -205,6 +222,7 @@ never sees mixed content.
 | `include_confidence` | boolean | true | Include confidence score in output |
 | `include_reasoning` | boolean | false | Include reasoning explanation in output |
 | `max_content_length` | integer | 2000 | Maximum content length to send to LLM |
+| `strict_label_matching` | boolean | false | Write the configured spelling of the matched document type and reject labels that match none (output `None`). When false, any label is accepted and normalised to lower-case with underscores. See [Label matching](#label-matching) |
 | `max_workers` | integer | Auto | Number of parallel workers |
 | `use_processes` | boolean | false | Use processes instead of threads |
 
@@ -305,11 +323,15 @@ never sees mixed content.
 
 ### Label matching
 
-The label returned by the model is matched against your document types ignoring case, spaces and
-underscores, and the output column holds the type exactly as you spelled it. For example, with a
-type named `"Purchase Order"`, a model answer of `purchase_order` is written as `"Purchase Order"`.
-If the label matches none of the configured types, the output is `None` and the reasoning column
-explains which label was rejected.
+By default the label returned by the model is written as `label.lower().replace(" ", "_")` and any
+label is accepted. For example, with a type named `"Purchase Order"`, a model answer of
+`purchase_order` is written as `"purchase_order"`, and `"Expense Report"` is written as
+`"expense_report"` even if you configured `"Expense Reports"`.
+
+Set `strict_label_matching` to `true` to match the label against your document types ignoring case,
+spaces and underscores and write the type exactly as you spelled it (`"Purchase Order"` in the
+example above). If the label matches none of the configured types, the output is `None` and the
+reasoning column explains which label was rejected.
 
 ---
 
@@ -680,9 +702,10 @@ class ClassificationPort(ABC):
 
 ### StandardLLMClassificationAdapter
 
-Built-in adapter registered internally as `"standard"` (a registry key, not a valid `provider` value).
-It serves the `litellm` and `watsonx` providers and
-builds its `LLMInferencePort` through `LLMAdapterFactory` in `from_config()`. See the
+Built-in adapter registered as `"standard"`. It serves the `litellm` and `watsonx` providers (and
+`"standard"` itself, like any registered `ADAPTER_NAME`) and
+builds its `LLMInferencePort` through `LLMAdapterFactory` in `from_config()`. When it extracts text itself
+it honors the flow's `doc_format` (`markdown` by default, or `doclang`). See the
 [Architecture](#architecture) section for how the operator, factory, and adapter interact.
 
 ### Domain Models
@@ -697,7 +720,7 @@ class ClassificationRequest:
 
 @dataclass
 class ClassificationResponse:
-    document_type: str | None  # None when the returned label is not a configured type
+    document_type: str | None  # normalised label; with strict_label_matching, None when not a configured type
     confidence: float
     reasoning: str
     success: bool
@@ -715,7 +738,8 @@ class ModelInfo:
 
 The module `domain/models.py` also exposes the reusable pure functions `build_classification_prompt()`,
 `parse_classification_response()` (raw LLM text to `ClassificationResponse`: JSON parse, required-field
-check, confidence clamp) and `resolve_document_type()` (maps a returned label onto the configured types).
+check, confidence clamp), `normalize_label()` (lower-case, spaces to underscores) and
+`resolve_document_type()` (maps a returned label onto the configured types, used with `strict_label_matching`).
 
 ---
 
@@ -736,7 +760,8 @@ check, confidence clamp) and `resolve_document_type()` (maps a returned label on
   - Adapters self-register via `@register_classification_adapter`
   - `provider_config` is required for `litellm` and optional for `watsonx` (environment-variable credentials); its metadata flag is `required: false` and the adapter enforces the `litellm` rule
   - Unsupported providers raise at construction instead of silently falling back to `litellm`
-  - The returned label is resolved against `document_types`; unmatched labels yield `None`
+  - Optional `strict_label_matching` resolves the returned label against `document_types`; unmatched labels yield `None`
+  - Registered `ADAPTER_NAME` values are accepted as `provider` values
 - **v2.1.0** : Dependency injection and pluggable document class provider
   - The classifier accepts an optional pre-built `LLMInferencePort`, bypassing `LLMAdapterFactory`
   - Added `DocumentClassProvider` port; default `StaticDocumentClassProvider` preserves existing local-file behaviour
