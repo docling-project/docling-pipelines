@@ -494,7 +494,6 @@ operator_error_count_total
 
 ## Additional Resources
 
-- [OpenLineage Integration Guide](../integrations/openlineage/OPENLINEAGE_GUIDE.md) - Telemetry shows how a run executed; OpenLineage records which datasets each run read and wrote
 - [OpenTelemetry Documentation](https://opentelemetry.io/docs/)
 - [Jaeger Documentation](https://www.jaegertracing.io/docs/)
 - [OTLP Specification](https://opentelemetry.io/docs/specs/otlp/)

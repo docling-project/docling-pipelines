@@ -8,7 +8,6 @@ This guide covers advanced configuration topics for production deployments, dist
 2. [Incremental Metadata Configuration](#incremental-metadata-configuration)
 3. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
 4. [Execution Models](#execution-models)
-5. [Data Lineage (OpenLineage)](#data-lineage-openlineage)
 
 ---
 
@@ -347,33 +346,10 @@ This guide covers:
 - Docker deployment configurations
 - Troubleshooting and performance tuning
 
-## Data Lineage (OpenLineage)
-
-Docling Pipelines can emit [OpenLineage](https://openlineage.io) run events for each flow run, so a backend such as Marquez can show which datasets a pipeline read and wrote. It is disabled by default.
-
-```bash
-uv pip install -e ".[lineage]"
-export DOCPIPE_LINEAGE_ENABLED=true
-export DOCPIPE_LINEAGE_MODE=flow          # or operator, for per-node events
-export DOCPIPE_LINEAGE_NAMESPACE=docpipe://production
-export OPENLINEAGE__TRANSPORT__TYPE=http
-export OPENLINEAGE__TRANSPORT__URL=http://marquez:5000
-```
-
-Production notes:
-
-- **Namespace**: set `DOCPIPE_LINEAGE_NAMESPACE` to a stable value per environment so runs from different environments do not mix.
-- **Event volume**: `flow` mode emits a few events per run. `operator` mode emits events per DAG node, so use it for debugging or per-operator audit.
-- **Distributed execution**: Prefect batch subflows rebuild the lineage observer from environment variables. Set the `DOCPIPE_LINEAGE_*` and `OPENLINEAGE__*` variables in the worker environment, for example through the work pool [`env`](../reference/GLOBAL_CONFIG.md#env) setting.
-- **Failure behaviour**: lineage errors are logged as warnings and the flow continues. Set `DOCPIPE_LINEAGE_STRICT=true` to halt the run instead.
-
-See the [OpenLineage Integration Guide](../integrations/openlineage/OPENLINEAGE_GUIDE.md) for all settings.
-
 ---
 
 ## Related Documentation
 
-- **[OpenLineage Integration Guide](../integrations/openlineage/OPENLINEAGE_GUIDE.md)** - Data lineage configuration and events
 - **[User Guide: Pipeline Setup](../../USER_GUIDE_PIPELINE_SETUP.md)** - Basic setup and first pipeline
 - **[Prefect Distributed Execution Guide](../integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md)** - Detailed distributed execution setup
 - **[Job Stats Management](../internals/NODE_METADATA_AGGREGATION_STRATEGY.md)** - Maintainer guide for metadata aggregation

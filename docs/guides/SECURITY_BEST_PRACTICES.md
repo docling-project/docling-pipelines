@@ -268,25 +268,6 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://your-collector:4317
 
 See [Telemetry Setup](TELEMETRY_SETUP.md) for full configuration instructions.
 
-### Enable data lineage where an audit trail is required
-
-OpenLineage records which datasets each run read and wrote, which helps answer "where did this data come from" during an audit. It is disabled by default:
-
-```bash
-DOCPIPE_LINEAGE_ENABLED=true
-OPENLINEAGE__TRANSPORT__TYPE=http
-OPENLINEAGE__TRANSPORT__URL=https://your-lineage-backend
-```
-
-Security notes:
-
-- Flow definitions are stripped of credential keys (including `connection_params`) before any event is built, and operator metadata is filtered the same way. Dataset names use only hosts, buckets, and paths; query strings, URL user info, and Milvus API keys are never included.
-- Events still contain source paths, bucket names, index names, and flow names. Treat the lineage backend as internal infrastructure.
-- Use TLS and authentication for the HTTP transport (`OPENLINEAGE__TRANSPORT__AUTH__TYPE` and `OPENLINEAGE__TRANSPORT__AUTH__APIKEY`). Load the key from your secrets manager, not from a committed file.
-- With `DOCPIPE_LINEAGE_STRICT=false` (default), a lineage failure never stops a pipeline. Set it to `true` only if a missing audit record must halt the run.
-
-See the [OpenLineage Integration Guide](../integrations/openlineage/OPENLINEAGE_GUIDE.md) for the full configuration reference.
-
 ---
 
 ## 9. Quick-Reference Checklist
@@ -323,7 +304,6 @@ Use this checklist when preparing a production deployment.
 
 ### Operations
 - [ ] Authentication and access-denied logs are forwarded to a centralised log store
-- [ ] If OpenLineage is enabled, the HTTP transport uses TLS and an API key loaded from a secrets manager
 - [ ] Dependency audit (`uv pip audit`) is scheduled in CI
 - [ ] Pre-commit hooks are installed and passing
 
