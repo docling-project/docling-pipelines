@@ -96,7 +96,7 @@ Ingest sources and storage sinks (for example a vector database or a document se
 
 | Provider | Namespace | Name |
 | --- | --- | --- |
-| `filesystem`, `local`, `file` | `file` | First of `paths`, or `root_path` / `path`, without a trailing `/` |
+| `filesystem`, `local`, `file` | `file` | `root_path`, else the first entry of `paths`, else `path`, without a trailing `/` |
 | `s3` (also `ibm_cos`) | `s3://{bucket}` | `prefix` / `key_prefix` |
 | `box` (also `box_driver`) | `box://app.box.com:443/default` | `file_id`, else `folder_id` (default `0`) |
 | `sharepoint` | `mssharepoint://graph.microsoft.com:443/{drive}` | `file_path`, else `folder_path` |
@@ -107,14 +107,15 @@ Ingest sources and storage sinks (for example a vector database or a document se
 | `opensearch` | `opensearch://{host}:{port}` | `index_name` |
 | `milvus` | `milvus://{host}:{port}`, or `milvus://lite/{uri}` for Milvus Lite | `{database}.{collection}` |
 | `document_set` | `docpipe://document_set` | `document_set_name` |
-| Any other provider | `{type}://{host}[:{port}]` when a host is set, otherwise `{type}://source` or `{type}://destination` | Index or collection name, else the path |
+| Any other provider | `{type}://{host}[:{port}]` when a host is set, otherwise `{type}://source` or `{type}://destination` | With a host: `index_name`, else `collection_name`, else `unknown`. Without a host: the first of `paths` or `path`, else `source` / `output` |
 
 Between operators, datasets live in the `inmemory://` namespace with the name `{flow_name}/{node_name}/output`. A node whose output is stored by a sink and also feeds a downstream node emits both datasets, so the graph edge to the next node is kept.
 
-Naming never fails a flow and never leaks secrets:
+How values are resolved:
 
-- `${VAR}` placeholders are resolved the same way the adapters resolve them. An unset variable is kept as written.
-- Query strings and fragments are dropped from paths and URLs, and URL user info is never used.
+- `${VAR}` placeholders are resolved the same way the adapters resolve them. If a variable is not set, the text is kept as written.
+- For `s3`, `sharepoint`, `onedrive`, `dropbox`, the Google Drive `folder_path` and the `web` path, a `?query` or `#fragment` is dropped from the name. Local `filesystem` paths are used as given.
+- `web` uses only the scheme, host, port and path of the first URL; user info in the URL is not used.
 - Milvus URIs that embed an API key contribute only their host and port.
 
 ### Credential safety

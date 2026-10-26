@@ -3474,11 +3474,11 @@ graph TB
     style BE fill:#e1f5ff
 ```
 
-- **Wiring**: `OrchestratorFactory` calls `lineage_factory.create_lineage_observer()`, which returns `None` when lineage is disabled, so a disabled run adds no overhead. If `openlineage-python` is missing or fails to initialise, the factory logs a warning and falls back to the no-op publisher.
+- **Wiring**: `OrchestratorFactory` calls `lineage_factory.create_lineage_observer()`, which returns `None` when lineage is disabled, so no observer is attached. If `openlineage-python` is missing or fails to initialise, the factory logs a warning and falls back to the no-op publisher.
 - **Modes**: `flow` emits one job per run. `operator` also emits a child run per DAG node, linked to the flow run through the `parent` run facet.
 - **Dataset identity**: `dataset_naming.get_dataset_info()` maps an adapter config to an OpenLineage `(namespace, name)`. Sources and sinks share the rules, and inter-operator tables use the `inmemory://` namespace, so a node's output matches the next node's input and the backend can draw the edge.
 - **Credential safety**: the service strips credential keys from flow definitions and operator metadata before building any facet.
-- **Failure isolation**: observer errors are logged as warnings and the flow continues, unless `DOCPIPE_LINEAGE_STRICT=true`.
+- **Failure isolation**: exceptions raised inside the observer are logged as warnings and the flow continues, unless `DOCPIPE_LINEAGE_STRICT=true`.
 - **Distributed runs**: Prefect batch subflows rebuild the observer from environment variables, so the `DOCPIPE_LINEAGE_*` and `OPENLINEAGE__*` variables must be set in the worker environment.
 
 See the [OpenLineage Integration Guide](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md) for configuration, emitted events, custom facets, and adding a custom publisher.
