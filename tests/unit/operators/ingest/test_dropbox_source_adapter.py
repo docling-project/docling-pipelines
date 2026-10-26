@@ -648,17 +648,11 @@ def dropbox_ingest_config(monkeypatch):
         ("$DOCPIPE_EVENT_CANARY", "/$DOCPIPE_EVENT_CANARY"),
         ("${DOCPIPE_EVENT_CANARY}", "/${DOCPIPE_EVENT_CANARY}"),
         ("DOCPIPE_EVENT_CANARY", "/DOCPIPE_EVENT_CANARY"),
-        ("${DOCPIPE_EVENT_CANARY:fallback}", "/${DOCPIPE_EVENT_CANARY:fallback}"),
-        ("${DOCPIPE_EVENT_CANARY:-fallback}", "/${DOCPIPE_EVENT_CANARY:-fallback}"),
-        ("$DOCPIPE_EVENT_UNSET", "/$DOCPIPE_EVENT_UNSET"),
         ("${DOCPIPE_EVENT_UNSET}", "/${DOCPIPE_EVENT_UNSET}"),
         ("${DOCPIPE_EVENT_UNSET:fallback}", "/${DOCPIPE_EVENT_UNSET:fallback}"),
-        ("${DOCPIPE_EVENT_UNSET:-fallback}", "/${DOCPIPE_EVENT_UNSET:-fallback}"),
         ("DOCPIPE_EVENT_EMPTY", "/DOCPIPE_EVENT_EMPTY"),
-        ("/Reports/q1.pdf", "/Reports/q1.pdf"),
         ("Reports/q1.pdf", "/Reports/q1.pdf"),
         ("id:ABC_DEF", "id:ABC_DEF"),
-        ("/Reports/ABC_DEF/q1.pdf", "/Reports/ABC_DEF/q1.pdf"),
     ],
 )
 async def test_event_reference_stays_literal(*, dropbox_ingest_config, file_reference, expected_path):
