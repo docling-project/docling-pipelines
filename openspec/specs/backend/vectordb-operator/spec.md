@@ -43,19 +43,19 @@ The operator SHALL support pure dense vectors, pure sparse vectors (BM25), and d
 - **THEN** the operator indexes both dense vector embeddings and sparse text representations into the target vector store
 
 ### Requirement: Index and collection lifecycle management
-The operator SHALL manage the target vector store index or collection lifecycle according to operator configuration, checking if the resource exists and performing schema validation or index creation.
+The operator SHALL manage the target vector store index or collection lifecycle automatically during transform, creating the index/collection when absent and validating schema compatibility when present, without exposing a user-configurable `create_index` option. When legacy configurations provide `create_index`, the operator SHALL log a deprecation warning and proceed with automatic index lifecycle handling.
 
 #### Scenario: Index creation when absent
-- **WHEN** `create_index` is true and the target index or collection does not exist
-- **THEN** the operator creates the index or collection with detected vector dimensions and feature mappings
+- **WHEN** the target index or collection does not exist at transform time
+- **THEN** the operator creates the index or collection with detected vector dimensions and feature mappings before inserting documents
 
 #### Scenario: Schema validation on existing index
-- **WHEN** `create_index` is true and the target index or collection already exists
-- **THEN** the operator validates the existing schema against detected dimensions and feature mappings
+- **WHEN** the target index or collection already exists at transform time
+- **THEN** the operator validates the existing schema against detected dimensions and feature mappings without recreating the index
 
 #### Scenario: Index creation disabled
-- **WHEN** `create_index` is false
-- **THEN** the operator bypasses index creation and schema validation checks
+- **WHEN** `create_index` is provided in operator configuration
+- **THEN** the operator logs a deprecation warning that `create_index` is deprecated and proceeds with automatic index lifecycle handling
 
 #### Scenario: Index creation or schema validation failure
 - **WHEN** index creation or schema validation raises an exception
@@ -76,11 +76,11 @@ The operator SHALL index documents in batches according to configured batch size
 - **THEN** the parent documents of the failed chunks are recorded in metadata as failed documents, and successful documents are recorded in `processed_docs`
 
 ### Requirement: Operator metadata and parameter introspection
-The operator SHALL expose its configurable parameters, defaults, and data types via `get_metadata()` for API introspection.
+The operator SHALL expose its configurable parameters, defaults, and data types via `get_metadata()` for API introspection without including `create_index`.
 
 #### Scenario: Operator metadata query
 - **WHEN** `GET /api/v1/operators/metadata` is called
-- **THEN** the metadata response includes parameter definitions for provider, doc ID column, create index, vector dimensions, and sparse vector settings
+- **THEN** the metadata response includes parameter definitions for provider, doc ID column, vector dimensions, and sparse vector settings, and excludes `create_index`
 
 ### Requirement: Vector store resource metadata and flow enrichment
 The vector database adapters SHALL provide live resource introspection for flow enrichment endpoints, retrieving available indices/collections, existing schema definitions, and resolving default feature mappings.
