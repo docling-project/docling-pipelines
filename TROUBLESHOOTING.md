@@ -182,12 +182,12 @@ uv sync --extra dev
 
 ---
 
-#### Issue: `fasttext-wheel` Build Failure on macOS 15+ (Sequoia / Tahoe)
+#### Issue: `fasttext-numpy2` Build Failure on macOS 15+ (Sequoia / Tahoe)
 
 **Symptoms:**
 
 ```
-× Failed to build `fasttext-wheel==0.9.2`
+× Failed to build `fasttext-numpy2==0.10.4`
 ...
 fatal error: 'istream' file not found
 error: command '/usr/bin/c++' failed with exit code 1
@@ -195,9 +195,10 @@ error: command '/usr/bin/c++' failed with exit code 1
 
 **Cause:**
 
-`fasttext-wheel` 0.9.2 compiles a C++ extension from source. On macOS 15+ with clang 17, the
-compiler no longer resolves the C++ standard library headers at the deployment target hardcoded
-by `fasttext-wheel` (`-mmacosx-version-min=11.0`). No pre-built binary is available for arm64.
+`fasttext-numpy2` 0.10.4 compiles a C++ extension from source on macOS because no pre-built
+macOS or arm64 wheel is published on PyPI (only Linux `manylinux` wheels are available). On
+macOS 15+ with clang 17, the compiler no longer resolves C++ standard library headers at the
+deployment target hardcoded in the build (`-mmacosx-version-min=11.0`).
 
 **Solution:**
 

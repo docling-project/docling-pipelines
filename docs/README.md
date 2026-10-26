@@ -31,6 +31,9 @@ Task-oriented guides to help you accomplish specific goals:
 
 ### Advanced Topics
 - **[Advanced Configuration](guides/ADVANCED_CONFIGURATION.md)** - Production deployment and optimization
+- **[Event Streaming Guide](guides/EVENT_STREAMING_GUIDE.md)** - Kafka event-driven execution and routing-key mappings
+- **[Telemetry Setup](guides/TELEMETRY_SETUP.md)** - OpenTelemetry distributed tracing and metrics
+- **[Job Report Generation](guides/JOB_REPORT_GENERATION.md)** - Automated per-run CSV job reports
 - **[Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)** - Credential management, authentication, ACL, and production hardening
 - **[Unified LLM Architecture](guides/UNIFIED_LLM_ARCHITECTURE_GUIDE.md)** - LLM integration patterns
 - **[Document Libraries](guides/USER_GUIDE_DOCUMENT_LIBRARIES.md)** - Managing document collections
@@ -104,6 +107,7 @@ Internal documentation for maintainers:
 
 Deployment guides for production environments:
 
+- **[Docker Compose Deployment](deployment/DOCKER_COMPOSE.md)** - Run Docling Pipelines locally or in containers with Docker Compose
 - **[OpenShift Deployment](deployment/OPENSHIFT.md)** - Deploy Docling Pipelines on OpenShift
 
 ## 💡 Architecture
