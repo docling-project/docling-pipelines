@@ -1719,6 +1719,7 @@ Schemas are defined with `target_tables` specifying field mappings and transform
 | `provider`          | string  |      Yes | `litellm`     | Provider type: `litellm`, `watsonx`, `huggingface`                                               |
 | `provider_config`   | object  |      Yes | -             | Provider-specific configuration (see table below)                                                |
 | `embeddings_column` | string  |       No | `embeddings`  | Output vector column                                                                             |
+| `quantization`      | string  |       No | `none`        | Vector quantization method: `"none"`, `"binary"` (1-bit sign thresholding packed to bytes), or `"ubinary"` |
 | `doc_column`        | string  |       No | `content`     | Input content column                                                                             |
 | `doc_id_hash`       | string  |       No | `doc_id_hash` | Hash column name                                                                                 |
 | `overlap_ratio`     | float   |       No | `0.2`         | Long-text chunk overlap ratio                                                                    |
@@ -2064,11 +2065,14 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
    - **Index Types**:
      - Dense: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX
      - Sparse: SPARSE_INVERTED_INDEX, SPARSE_WAND
+     - Binary: BIN_FLAT, BIN_IVF_FLAT (1-bit quantized binary vectors)
    - **Metric Types**:
      - Dense: L2 (Euclidean), IP (Inner Product), COSINE
      - Sparse: BM25 (required for sparse mode)
+     - Binary: HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE
    - **Vector Modes**:
      - Dense vectors only (default)
+     - Binary vectors (1-bit quantized with `BIN_FLAT` / `BIN_IVF_FLAT`)
      - Sparse + Dense vectors (dual storage with BM25 function)
    - **Deployment Options**:
      - Standalone Milvus (local or remote)

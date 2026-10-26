@@ -65,7 +65,13 @@ def calculate_batch_size_bytes(*, documents: list[dict[str, Any]]) -> int:
         Size in bytes, or 0 if calculation fails
     """
     try:
-        return len(json.dumps(documents).encode("utf-8"))
+
+        def _default_serializer(obj: Any) -> Any:
+            if isinstance(obj, (bytes, bytearray)):
+                return len(obj)
+            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+        return len(json.dumps(documents, default=_default_serializer).encode("utf-8"))
     except Exception:
         return 0
 
@@ -75,8 +81,10 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
     Auto-detect vector dimension from the embeddings column in the PyArrow table.
 
     Handles both flat embeddings and nested (chunked) embeddings:
-    - Flat: [float1, float2, ..., floatN] -> dimension is length of list
-    - Nested: [[emb1], [emb2], ...] -> dimension is length of first inner list
+    - Flat float: [float1, float2, ..., floatN] -> dimension is length of list
+    - Flat binary: bytes / bytearray -> dimension in bits is len(bytes) * 8
+    - Nested float: [[emb1], [emb2], ...] -> dimension is length of first inner list
+    - Nested binary: [b'...', b'...'] -> dimension in bits is len(b) * 8
     - Memmap files: Reads dimension from file metadata
 
     Args:
@@ -87,7 +95,7 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
         Detected dimension or None if detection fails
     """
     if embeddings_column not in table.column_names:
-        logger.debug(f"Embeddings column '{embeddings_column}' not found in table")
+        logger.debug("Embeddings column '%s' not found in table", embeddings_column)
         return None
 
     if table.num_rows == 0:
@@ -105,20 +113,30 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
             if embedding_value is None:
                 continue
 
+            # Handle raw bytes / bytearray for binary vector embeddings
+            if isinstance(embedding_value, (bytes, bytearray)):
+                bit_dim = len(embedding_value) * 8
+                logger.info(
+                    "Auto-detected binary vector dimension: %s bits (%s bytes)",
+                    bit_dim,
+                    len(embedding_value),
+                )
+                return bit_dim
+
             # Handle memmap file path references
             if isinstance(embedding_value, dict) and DocpipeConstants.EMBEDDINGS_MEMMAP_FILE in embedding_value:
                 from docpipe.utils.core.memmap_file_utils import read_embedding_metadata
 
                 embeddings_filepath = embedding_value[DocpipeConstants.EMBEDDINGS_MEMMAP_FILE]
-                logger.debug(f"Reading dimension from memmap file metadata: {embeddings_filepath}")
+                logger.debug("Reading dimension from memmap file metadata: %s", embeddings_filepath)
 
                 # Get dimension directly from metadata
                 dim = read_embedding_metadata(embeddings_filepath)
-                logger.info(f"Auto-detected vector dimension: {dim} (from memmap file metadata)")
+                logger.info("Auto-detected vector dimension: %s (from memmap file metadata)", dim)
                 return dim
 
             if not isinstance(embedding_value, list):
-                logger.warning(f"Embedding at row {idx} is not a list: {type(embedding_value)}")
+                logger.warning("Embedding at row %s is not a list or bytes: %s", idx, type(embedding_value))
                 continue
 
             if len(embedding_value) == 0:
@@ -129,16 +147,26 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
                 # Nested structure: [[emb1], [emb2], ...]
                 if len(embedding_value[0]) > 0:
                     nested_dimension: int = len(embedding_value[0])
-                    logger.info(f"Auto-detected vector dimension: {nested_dimension} (from chunked embeddings)")
+                    logger.info("Auto-detected vector dimension: %s (from chunked embeddings)", nested_dimension)
                     return nested_dimension
+            elif isinstance(embedding_value[0], (bytes, bytearray)):
+                nested_bit_dim = len(embedding_value[0]) * 8
+                logger.info(
+                    "Auto-detected binary vector dimension: %s bits (%s bytes) (from chunked byte embeddings)",
+                    nested_bit_dim,
+                    len(embedding_value[0]),
+                )
+                return nested_bit_dim
             elif isinstance(embedding_value[0], (int, float)):
                 # Flat structure: [float1, float2, ...]
                 flat_dimension: int = len(embedding_value)
-                logger.info(f"Auto-detected vector dimension: {flat_dimension} (from flat embeddings)")
+                logger.info("Auto-detected vector dimension: %s (from flat embeddings)", flat_dimension)
                 return flat_dimension
             else:
                 logger.warning(
-                    f"Unexpected embedding structure at row {idx}: first element is {type(embedding_value[0])}"
+                    "Unexpected embedding structure at row %s: first element is %s",
+                    idx,
+                    type(embedding_value[0]),
                 )
                 continue
 
@@ -146,7 +174,7 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
         return None
 
     except Exception as e:
-        logger.warning(f"Error detecting vector dimension: {e!s}")
+        logger.warning("Error detecting vector dimension: %s", e)
         return None
 
 
@@ -168,9 +196,9 @@ def detect_all_vector_dimensions(*, table: pa.Table, vector_columns: list[str]) 
         detected_dim = detect_vector_dimension(table=table, embeddings_column=column_name)
         if detected_dim is not None:
             dimension_mapping[column_name] = detected_dim
-            logger.info(f"Detected dimension {detected_dim} for column '{column_name}'")
+            logger.info("Detected dimension %s for column '%s'", detected_dim, column_name)
         else:
-            logger.warning(f"Could not detect dimension for column '{column_name}'")
+            logger.warning("Could not detect dimension for column '%s'", column_name)
 
     return dimension_mapping
 

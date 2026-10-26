@@ -108,6 +108,8 @@ class TestMilvusAdapterGetConfigSchema:
             "AUTOINDEX",
             "SPARSE_INVERTED_INDEX",
             "SPARSE_WAND",
+            "BIN_FLAT",
+            "BIN_IVF_FLAT",
         ],
     )
     def test_index_type_valid(self, value):
@@ -122,7 +124,20 @@ class TestMilvusAdapterGetConfigSchema:
 
     # --- Literal: metric_type ---
 
-    @pytest.mark.parametrize("value", ["L2", "IP", "COSINE", "BM25"])
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "L2",
+            "IP",
+            "COSINE",
+            "BM25",
+            "HAMMING",
+            "JACCARD",
+            "TANIMOTO",
+            "SUBSTRUCTURE",
+            "SUPERSTRUCTURE",
+        ],
+    )
     def test_metric_type_valid(self, value):
         cfg = self.Config(collection_name="col", metric_type=value)
         assert cfg.metric_type == value

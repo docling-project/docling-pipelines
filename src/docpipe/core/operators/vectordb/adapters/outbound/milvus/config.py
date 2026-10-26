@@ -78,14 +78,26 @@ class MilvusConfig(BaseModel):
         "AUTOINDEX",
         "SPARSE_INVERTED_INDEX",
         "SPARSE_WAND",
+        "BIN_FLAT",
+        "BIN_IVF_FLAT",
     ] = Field(
         default="HNSW",
         description=(
             "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
-            "Use HNSW for standalone/remote deployments."
+            "Use HNSW for standalone/remote deployments, or BIN_FLAT / BIN_IVF_FLAT for binary vectors."
         ),
     )
-    metric_type: Literal["L2", "IP", "COSINE", "BM25"] = Field(
+    metric_type: Literal[
+        "L2",
+        "IP",
+        "COSINE",
+        "BM25",
+        "HAMMING",
+        "JACCARD",
+        "TANIMOTO",
+        "SUBSTRUCTURE",
+        "SUPERSTRUCTURE",
+    ] = Field(
         default="L2",
         description="Vector similarity metric.",
     )

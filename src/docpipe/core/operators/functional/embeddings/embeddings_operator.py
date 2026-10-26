@@ -153,6 +153,15 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
             OperatorConstants.Columns.DOC_ID_HASH, OperatorConstants.Columns.DOC_ID_HASH_DEFAULT
         )
 
+        # Quantization configuration
+        self.quantization: str = str(config.get(OperatorConstants.Config.QUANTIZATION, "none")).lower()
+        if self.quantization not in ("none", "binary", "ubinary"):
+            raise DocpipeException(
+                f"Invalid quantization '{self.quantization}'. Supported: ['none', 'binary', 'ubinary']",
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+
         # Chunking configuration
         self.overlap_ratio: float = config.get(OVERLAP_RATIO_KEY, OVERLAP_RATIO_DEFAULT)
         self.token_limit: int = config.get(TOKEN_LIMIT_KEY, TOKEN_LIMIT_DEFAULT)
@@ -436,8 +445,34 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
                     OperatorConstants.Config.DEFAULT: TOKEN_LIMIT_DEFAULT,
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.INTEGER,
                 },
+                OperatorConstants.Config.QUANTIZATION: {
+                    OperatorConstants.Misc.NAME: "Quantization",
+                    OperatorConstants.Config.DESCRIPTION: "Quantization method for generated embeddings: none (default, float32 embeddings), binary/ubinary (1-bit packed binary vector).",
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Config.DEFAULT: "none",
+                    OperatorConstants.Config.VALID_VALUES: ["none", "binary", "ubinary"],
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                },
             },
         }
+
+    @staticmethod
+    def _quantize_vectors_to_binary(*, vectors: list[list[float]]) -> list[bytes]:
+        """
+        Quantize float vectors to packed binary byte sequences using 1-bit sign thresholding (>0).
+
+        Args:
+            vectors: List of float vectors
+
+        Returns:
+            List of packed bytes objects of length ceil(dim / 8)
+        """
+        if not vectors:
+            return []
+        arr = np.asarray(vectors, dtype=np.float32)
+        bool_mask = arr > 0
+        packed = np.packbits(bool_mask, axis=-1)
+        return [row.tobytes() for row in packed]
 
     @staticmethod
     def _build_chunk_text_for_embedding(*, chunk: dict[str, Any]) -> str:
@@ -1210,7 +1245,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
 
         Returns (embeddings, doc_id_hashes, indices of rows that failed).
         """
-        slice_embeddings: list[list[float] | list[list[float]]] = []
+        slice_embeddings: list[list[float] | list[list[float]] | bytes | list[bytes]] = []
         slice_doc_id_hashes: list[str] = []
         slice_remove_idx: list[int] = []
         slice_hash_values: list[str] = slice_table[self.doc_id_hash_column].to_pylist()
@@ -1253,7 +1288,11 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
 
             # For chunked content, store all embeddings; for full doc, store single embedding
             doc_embeddings = row_vectors[i]
-            slice_embeddings.append(doc_embeddings if has_chunked_content else doc_embeddings[0])
+            if self.quantization in ("binary", "ubinary"):
+                quantized_doc = self._quantize_vectors_to_binary(vectors=doc_embeddings)
+                slice_embeddings.append(quantized_doc if has_chunked_content else quantized_doc[0])
+            else:
+                slice_embeddings.append(doc_embeddings if has_chunked_content else doc_embeddings[0])
             slice_doc_id_hashes.append(slice_hash_values[i])
             metadata[Metrics.External.PROCESSED_DOCS] += 1
             logger.debug(

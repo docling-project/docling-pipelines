@@ -248,6 +248,7 @@ class OperatorConstants:
         MANDATORY_FOR_VECTOR_DB: Final[str] = "mandatory_for_vector_db"
         NEW_COLLECTION_DEFAULT_FEATURE_MAPPINGS: Final[str] = "new_collection_default_feature_mappings"
         OUTPUT_FEATURES: Final[str] = "output_features"
+        QUANTIZATION: Final[str] = "quantization"
         VALID_COLUMNS: Final[str] = "valid_columns"
         VALID_VALUES: Final[str] = "valid_values"
 
@@ -521,6 +522,7 @@ class OperatorConstants:
         # Complex Data Types
         TYPE_JSON: Final[str] = "json"
         TYPE_VECTOR: Final[str] = "vector"
+        TYPE_VECTOR_BINARY: Final[str] = "vector_binary"
         TYPE_VECTOR_SPARSE: Final[str] = "vector_sparse"
 
     class FileExtensions:
