@@ -27,13 +27,14 @@ flows SHALL fail explicitly before document processing.
 
 ### Requirement: Runtime integrity without full per-event validation
 
-Streaming execution SHALL retain compilation and runtime integrity checks without running full operator validation
-for each event. A cycle, unresolved edge, duplicate node identity, invalid root, or unavailable operator SHALL fail
-explicitly. The executable graph SHALL have exactly one ingest root and be connected to that root.
+Before document processing, streaming preparation SHALL convert the saved format and check a nonempty DAG, valid node
+IDs and operator names, unique IDs, consistent/resolvable edges, acyclicity, one ingest root, root reachability, and
+operator-class resolution through configured discovery. These checks SHALL run independently of full flow/operator
+validation and SHALL NOT be bypassed by `disable_validation`.
 
 #### Scenario: Invalid executable graph
-- **WHEN** a saved graph contains a cycle, missing edge target, duplicate node identity, disconnected node,
-  or multiple roots
+- **WHEN** a saved graph is empty or contains an invalid node ID/operator name, duplicate node identity, inconsistent
+  or unresolved edge, cycle, disconnected node, multiple roots, or a non-ingest root
 - **THEN** preparation fails before document processing rather than executing a partial graph
 
 #### Scenario: Required operator is unavailable
@@ -42,8 +43,38 @@ explicitly. The executable graph SHALL have exactly one ingest root and be conne
 
 #### Scenario: Per-event validation is avoided
 - **WHEN** a valid saved flow processes several events
-- **THEN** execution does not invoke full flow or operator validation for each event, while compilation checks
-  remain active
+- **THEN** each attempt performs saved-format conversion, graph-integrity checks, operator-class resolution, and
+  feature propagation without invoking full flow or operator validation
+
+#### Scenario: Saved validation setting does not disable integrity checks
+- **WHEN** a saved flow sets `disable_validation=true` and contains a cycle or unresolved edge
+- **THEN** preparation fails before document processing
+
+### Requirement: Feature-propagation preparation
+
+Each attempt SHALL compute per-node feature metadata without constructing a batch orchestrator or running full
+flow/operator validation. Operator metadata and feature propagation SHALL use the same effective discovery settings
+as execution. Propagation state and cached results SHALL be isolated per attempt and SHALL NOT be reused across
+retries or events.
+
+#### Scenario: Preparation without a batch orchestrator
+- **WHEN** streaming prepares a valid saved flow
+- **THEN** it computes the downstream feature views and global parameters without creating a batch orchestrator or
+  processing document tables during preparation
+
+#### Scenario: Custom operator metadata matches execution discovery
+- **WHEN** configured discovery selects a custom operator class for a saved node
+- **THEN** preparation propagates that selected class's declared features and downstream metadata consistently with
+  the class selected for execution
+
+#### Scenario: Disabled custom operators remain disabled during propagation
+- **WHEN** custom operators are explicitly disabled and a flow requires an operator available only from a custom package
+- **THEN** preparation reports the operator as unavailable rather than enabling it through default metadata discovery
+
+#### Scenario: Retry recomputes feature metadata
+- **WHEN** an attempt fails and the saved flow changes its output features before a permitted retry
+- **THEN** the retry uses fresh propagation state and computes feature views from the updated definition without
+  reusing the earlier attempt's cached results
 
 ### Requirement: One document bound through the configured provider
 
