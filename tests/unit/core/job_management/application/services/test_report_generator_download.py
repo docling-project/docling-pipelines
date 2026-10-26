@@ -319,7 +319,8 @@ def _record_cancelled_batched_run(*, tracker: JobTrackerService, data_root: Path
 
 
 async def _read_body(response: StreamingResponse) -> str:
-    return "".join([chunk async for chunk in response.body_iterator])
+    chunks = [chunk async for chunk in response.body_iterator]
+    return "".join(chunk if isinstance(chunk, str) else bytes(chunk).decode("utf-8") for chunk in chunks)
 
 
 def _download(tracker: JobTrackerService) -> tuple[StreamingResponse, list[dict[str, str]], str]:
