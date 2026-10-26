@@ -330,7 +330,7 @@ class HashiCorpVaultProvider(SecretProvider):
             ExternalServiceError: If the secret cannot be read.
         """
         # get_secret() always runs _ensure_authenticated() first, which builds the session.
-        assert self._session is not None
+        assert self._session is not None, "authenticate() must be called before reading secrets"
         base_url = self._config.addr.rstrip("/")
         mount = self._config.mount_point
 
