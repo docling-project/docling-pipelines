@@ -39,7 +39,7 @@ services:
     networks:
       - docpipe-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags 2>/dev/null | grep -q 'models' || exit 1"]
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 20
@@ -59,7 +59,7 @@ services:
   # ============================================================================
 
   opensearch:
-    image: opensearchproject/opensearch:3.60.0
+    image: opensearchproject/opensearch:3.6.0
     container_name: docpipe-opensearch
     environment:
       - cluster.name=docpipe-cluster

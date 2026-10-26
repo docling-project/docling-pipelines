@@ -343,7 +343,6 @@ Stores documents and embeddings in OpenSearch for vector similarity search.
     "provider": "opensearch",
     "doc_id_column": "doc_id_hash",
     "embeddings_column": "embeddings",
-    "create_index": true,
     "vector_dimension": 384,
     "provider_config": {
       "index_name": "documents",
@@ -419,7 +418,6 @@ Stores documents and embeddings in OpenSearch for vector similarity search.
 - **username/password**: Authentication credentials
 - **use_ssl**: Enable SSL (default: true)
 - **verify_certs**: Verify SSL certificates (default: true)
-- **create_index**: Auto-create index if missing (default: true)
 - **vector_dimension**: Embedding dimension (default: 384, auto-detected from data)
   - **Must match the embedding model's output dimension**
   - Common dimensions: `nomic-embed-text`: 768, `llama3.2`: 4096, `granite-embedding`: 384
@@ -467,7 +465,6 @@ Schema templates provide reusable index configurations with consistent settings 
     "provider": "opensearch",
     "doc_id_column": "doc_id_hash",
     "embeddings_column": "embeddings",
-    "create_index": true,
     "vector_dimension": 384,
     "provider_config": {
       "index_name": "document_chunks",

@@ -44,7 +44,7 @@ The authentication system supports:
 
 The following packages are already included in `requirements.txt`:
 - `httpx>=0.28.1` - HTTP client for OAuth2 requests
-- `python-jose[cryptography]` - JWT token handling
+- `pyjwt` - JWT token handling
 - `pydantic-settings>=2.12.0` - Configuration management
 - `fastapi>=0.128.8` - Web framework
 

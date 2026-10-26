@@ -49,6 +49,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/core/adapters/` | LLM adapters: `HuggingFaceAdapter`, `LiteLLMAdapter`, `WatsonxAdapter`; factory: `llm_adapter_factory.py` |
 | `src/docpipe/core/ports/` | Port interfaces: `LLMInferencePort`, `LLMEmbeddingPort`, `TextDetectionPort` |
 | `src/docpipe/core/incremental_metadata/` | Tracks previously processed docs for incremental/delta runs |
+| `src/docpipe/core/lineage/` | Optional OpenLineage support (hexagonal): `domain/` (models, ports), `application/` (`LineageService`, `lineage_factory`), `adapters/` (`openlineage/` observer + publisher, `noop/`), `dataset_naming.py` (provider config to dataset namespace/name); disabled unless `DOCPIPE_LINEAGE_ENABLED=true` |
 | `src/docpipe/core/models/session_info.py` | `SessionInfo` — thread-local context: `job_id`, `job_run_id`; use `get_session_info()` / `set_session_info()` |
 | `src/docpipe/core/data_access/` | Wraps `data_processing.DataAccess` — parquet-based document table IO |
 | `src/docpipe/core/document_classes/` | YAML schema definitions for document column structures |
@@ -231,6 +232,12 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
 | `DOCPIPE_STORAGE_BACKEND` | `duckdb` (default) \| `postgres` |
 | `DOCPIPE_FRAMEWORK_TYPE` | `local` (default) \| `prefect` |
+| `DOCPIPE_LINEAGE_ENABLED` | `false` (default) \| `true` — emit OpenLineage events (requires the `lineage` extra) |
+| `DOCPIPE_LINEAGE_MODE` | `flow` (default) \| `operator` — add per-node events |
+| `DOCPIPE_LINEAGE_NAMESPACE` | OpenLineage namespace, default `docpipe://local` |
+| `DOCPIPE_LINEAGE_PRODUCER` | Producer URI embedded in facets, default `https://github.com/docling-project/docling-pipelines` |
+| `DOCPIPE_LINEAGE_STRICT` | `false` (default) \| `true` — re-raise observer errors instead of logging a warning |
+| `OPENLINEAGE__TRANSPORT__*` | OpenLineage SDK transport settings (`console` default, `file`, `http`); read by the SDK, not by docpipe |
 | `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres) |
 | `CORS_ORIGINS` | Comma-separated allowed origins, default `http://localhost:3000` |
 

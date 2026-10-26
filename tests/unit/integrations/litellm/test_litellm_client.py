@@ -269,6 +269,40 @@ class TestGenerateEmbeddingsBatch:
         with pytest.raises(ExternalServiceError, match="Failed to generate batch embeddings"):
             client.generate_embeddings_batch(["text"])
 
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.litellm.client.require_package")
+    def test_retry_resends_only_failed_request(self, mock_req, mock_sleep, *, mock_litellm_module):
+        """A transient failure in the second request must not re-send the first one."""
+        client = LiteLLMLLMClient(
+            model_name="text-embedding-ada-002", api_key="k", batch_size=2
+        )  # pragma: allowlist secret
+        sent: list[list[str]] = []
+
+        def _embedding(**kwargs):
+            sent.append(list(kwargs["input"]))
+            if len(sent) == 2:
+                raise RuntimeError("transient")
+            return {"data": [{"embedding": [float(len(t))]} for t in kwargs["input"]]}
+
+        client.litellm.embedding.side_effect = _embedding
+
+        result = client.generate_embeddings_batch(["a", "bb", "ccc", "dddd"])
+
+        assert result == [[1.0], [2.0], [3.0], [4.0]]
+        assert sent == [["a", "bb"], ["ccc", "dddd"], ["ccc", "dddd"]]
+        assert mock_sleep.call_count == 1
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.litellm.client.require_package")
+    def test_invalid_input_is_not_retried(self, mock_req, mock_sleep, *, mock_litellm_module):
+        client = LiteLLMLLMClient(model_name="text-embedding-ada-002", api_key="k")  # pragma: allowlist secret
+
+        with pytest.raises(ConfigurationError):
+            client.generate_embeddings_batch([])
+
+        mock_sleep.assert_not_called()
+        client.litellm.embedding.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # chat
