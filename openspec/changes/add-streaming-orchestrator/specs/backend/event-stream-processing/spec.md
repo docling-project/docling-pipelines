@@ -127,14 +127,39 @@ SHALL fail listener configuration before consumption starts.
 
 ### Requirement: Cooperative draining shutdown
 
-A stop request SHALL prevent the listener from starting another event and allow an active event to reach a terminal
-outcome, including its allowed retries and cleanup, before committing and closing the consumer. Shutdown SHALL NOT
-commit unfinished work or declare the listener stopped while its processing thread is still running.
+A stop request SHALL prevent new events from starting and drain the active event through its permitted retries,
+cleanup, terminal reporting, and offset-commit attempt before closing the consumer. Shutdown SHALL NOT cancel or
+abandon running operators, count a stop request as retry exhaustion, or commit unfinished work.
 
-#### Scenario: Stop arrives during sink processing
-- **WHEN** shutdown is requested while a sink is executing
-- **THEN** shutdown waits for the event's terminal outcome and commit attempt, closes the consumer, and polls no
-  next event
+#### Scenario: Stop arrives during operator or sink processing
+- **WHEN** shutdown is requested while an operator or sink is executing
+- **THEN** `stop()` remains pending without interrupting that execution, waits for the event's terminal outcome and
+  commit attempt, and returns only after consumer closure and thread exit, without polling another event
+
+#### Scenario: Stop arrives with retries remaining
+- **WHEN** shutdown is requested for an active event whose failed attempt has a retry remaining
+- **THEN** the listener completes the permitted retry sequence until success or exhaustion, performs cleanup and
+  terminal reporting, attempts the offset commit, and only then closes the consumer and exits
+
+#### Scenario: Shutdown awaits cleanup and the commit attempt
+- **WHEN** shutdown is requested and the active event's cleanup or offset-commit attempt is still in progress
+- **THEN** `stop()` remains pending and the consumer remains open until cleanup, terminal reporting, and the commit
+  attempt finish, including when the commit attempt reports a failure
+
+#### Scenario: Stop arrives after poll but before execution
+- **WHEN** the stop flag is set after a record is polled but before its event begins execution
+- **THEN** the listener leaves that record unprocessed and uncommitted, closes the consumer, and exits its processing
+  thread before `stop()` returns
+
+### Requirement: Awaitable shutdown completion
+
+`stop()` SHALL be awaitable and return only after the listener's processing thread exits, with the consumer closed.
+Waiting SHALL keep the asyncio event loop responsive to unrelated asynchronous tasks. Shutdown SHALL NOT impose a
+drain timeout; an operator that never returns can keep `stop()` pending indefinitely.
+
+#### Scenario: Waiting for shutdown keeps the event loop responsive
+- **WHEN** the shutdown caller awaits `stop()` while the listener thread is processing an active event
+- **THEN** `stop()` remains pending and unrelated asynchronous tasks can run on the asyncio event loop
 
 ### Requirement: Existing application and batch execution compatibility
 

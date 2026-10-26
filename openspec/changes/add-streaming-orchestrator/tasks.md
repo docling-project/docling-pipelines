@@ -101,12 +101,16 @@ Record new unplanned work there; report blockers instead of expanding tasks or w
 
 ## 6. Listener lifecycle and shutdown
 
-- [ ] 6.1 [backend] Replace the five-second shutdown join with asynchronous draining and post-poll stop checks
-  (90 min); test stop before polling, between poll/dispatch, during active sinks/retries, and repeated start/stop calls.
+- [ ] 6.1 [backend] Replace the five-second shutdown join with an awaitable drain until thread exit and post-poll stop
+  checks (90 min); test stop before polling, between poll/dispatch, during active operators/sinks/retries, and repeated
+  start/stop calls. Verify no running operator is cancelled and no next event starts after the stop request.
 - [ ] 6.2 [backend] Verify API lifespan waits for real listener exit and preserves opt-in startup (60 min); update
-  `test_event_streaming_startup.py` and listener tests to prove no unfinished commit or premature consumer close.
+  `test_event_streaming_startup.py` and listener tests to prove `stop()` stays pending through retries, cleanup,
+  terminal reporting, and the commit attempt, including commit failure, with consumer closure before thread exit.
+  Verify unrelated asyncio tasks run while shutdown awaits thread exit and unfinished work remains uncommitted.
 - [ ] 6.3 [backend] Document graceful shutdown, cutover, and rollback in the Docker README (45 min); verify the
-  procedure drains active processing and previously submitted asynchronous jobs before switching versions.
+  procedure drains active processing and previously submitted asynchronous jobs before switching versions, and states
+  that draining has no timeout and an operator that never returns can keep shutdown pending indefinitely.
 
 ## 7. Integration and final verification
 
