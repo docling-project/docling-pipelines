@@ -125,6 +125,11 @@ class DocpipeConfigLoader:
                 logger.info("Using default configuration for for service: %s", key)
 
         storage_type = storage_config.get(DocpipeConfigKeys.TYPE)
+        if not storage_type:
+            # A service block that sets only ``config`` still needs a type: use the
+            # global type if there is one, otherwise the built-in default.
+            global_type = (cls.get(key=DocpipeConfigKeys.GLOBAL_STORAGE) or {}).get(DocpipeConfigKeys.TYPE)
+            storage_type = global_type or default_type
         config = storage_config.get(DocpipeConfigKeys.CONFIG, {})
         logger.info("Storage type for service, %s is: %s", key, storage_type)
         return storage_type, config

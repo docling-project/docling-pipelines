@@ -231,8 +231,8 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `true` (default) \| `false` |
 | `DOCPIPE_CUSTOM_OPERATORS` | Comma-separated package paths injected as operator providers |
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
-| `DOCPIPE_STORAGE_BACKEND` | `duckdb` (default) \| `postgres` |
-| `DOCPIPE_FRAMEWORK_TYPE` | `local` (default) \| `prefect` |
+| `DOCPIPE_STORAGE_BACKEND` | Forwarded to workers only; no longer overrides `job_management.storage` in the config file |
+| `DOCPIPE_FRAMEWORK_TYPE` | Forwarded to workers only; no longer overrides `job_management.framework` in the config file |
 | `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres; also the fallback for asset repositories of type `postgres`) |
 | `DOCUMENTSET_REPOSITORY_TYPE` / `DOCUMENTLIBRARY_REPOSITORY_TYPE` | Asset metadata backend: `duckdb` (default) \| `postgres` (overrides `assets_management.<asset>_repository.type`) |
 | `DOCPIPE_LINEAGE_ENABLED` | `false` (default) \| `true` — emit OpenLineage events (requires the `lineage` extra) |

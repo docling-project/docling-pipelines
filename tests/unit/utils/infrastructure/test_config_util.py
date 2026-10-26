@@ -215,3 +215,33 @@ class TestDocpipeConfigLoaderGetStorage:
         storage_type, _ = DocpipeConfigLoader.get_storage(key="job_management", default_type="inmemory")
 
         assert storage_type == "duckdb"
+
+    def test_service_block_without_type_falls_back_to_global_type(self, *, tmp_path, monkeypatch):
+        """A service block with only config keeps its config and borrows the global type."""
+        config_path = tmp_path / "config.yaml"
+        with config_path.open("w") as fh:
+            yaml.dump(
+                {
+                    "global_storage": {"type": "duckdb", "config": {"base_dir": "./global"}},
+                    "job_management": {"storage": {"config": {"base_dir": "./svc"}}},
+                },
+                fh,
+            )
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        storage_type, storage_config = DocpipeConfigLoader.get_storage(key="job_management", default_type="inmemory")
+
+        assert storage_type == "duckdb"
+        assert storage_config == {"base_dir": "./svc"}
+
+    def test_service_block_without_type_falls_back_to_default_type(self, *, tmp_path, monkeypatch):
+        """With no global type either, default_type is used."""
+        config_path = tmp_path / "config.yaml"
+        with config_path.open("w") as fh:
+            yaml.dump({"job_management": {"storage": {"config": {"base_dir": "./svc"}}}}, fh)
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        storage_type, storage_config = DocpipeConfigLoader.get_storage(key="job_management", default_type="inmemory")
+
+        assert storage_type == "inmemory"
+        assert storage_config == {"base_dir": "./svc"}

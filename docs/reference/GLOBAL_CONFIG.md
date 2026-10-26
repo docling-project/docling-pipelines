@@ -295,16 +295,17 @@ Docling Pipelines supports two storage types for incremental metadata:
 
 #### Environment Variables :
 
-You can override configuration using environment variables:
+The storage backend is selected only from `docling-pipelines-config.yaml`; there is no environment override for it. The following variable is supported:
 
-- `DOCPIPE_INCREMENTAL_STORAGE_BACKEND`: Override the storage backend (filesystem, postgresql)
 - `DOCPIPE_CONFIG_PATH`: Specify a custom path to docling-pipelines-config.yaml
 
 **Example**:
 ```bash
-export DOCPIPE_INCREMENTAL_STORAGE_BACKEND="filesystem"
+export DOCPIPE_CONFIG_PATH="/etc/docpipe/docling-pipelines-config.yaml"
 docling-pipelines --flow-file my_flow.json
 ```
+
+`global_storage.config` and `global_storage.postgres` are not merged into a service block. See [Breaking Changes from the Central Config Loader](../guides/ADVANCED_CONFIGURATION.md#breaking-changes-from-the-central-config-loader).
 
 #### Configuration Precedence :
 

@@ -9,10 +9,15 @@
 # Service-specific configurations will override these global defaults
 #
 # Configuration Precedence (highest to lowest):
-#   1. Environment Variables
-#   2. Service-Specific Config (job_management.storage or incremental_metadata.storage)
-#   3. Global Storage Config (global_storage) ← YOU ARE HERE
-#   4. Built-in Defaults
+#   1. Service-Specific Config (job_management.storage or incremental_metadata.storage)
+#   2. Global Storage Config (global_storage) ← YOU ARE HERE
+#   3. Built-in Defaults (filesystem for every service except job_management,
+#      which defaults to inmemory and persists nothing until a type is configured)
+#
+# NOTE: global_storage supplies the storage TYPE (and, when a service has no storage
+# block, that block's config). Its "config" and "postgres" values are NOT merged into
+# a service block that exists. DOCPIPE_STORAGE_BACKEND and DOCPIPE_FRAMEWORK_TYPE no
+# longer override this file. See docs/guides/ADVANCED_CONFIGURATION.md, "Breaking Changes".
 #
 # Supported storage types: filesystem, postgresql, duckdb, inmemory
 global_storage:

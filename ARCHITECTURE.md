@@ -4275,8 +4275,9 @@ docpipe/
 - **Thread-safe singleton**: The file is read at most once per process and cached; `DocpipeConfigLoader.reset()` clears the cache (intended for tests)
 - **Path resolution**: `DOCPIPE_CONFIG_PATH` environment variable, otherwise `<project_root>/docling-pipelines-config.yaml`
 - **Fault tolerant**: A missing file or invalid YAML returns an empty dict (with a log message), so callers fall back to their own defaults
-- **API**: `get_config()` returns the full dict; `get(key=..., default=...)` returns a top-level section; `get_storage(key, default)` returns a `(storage_type, config)` tuple
-- **Storage precedence** in `get_storage()`: service-specific `storage` section, then `global_storage`, then the default `filesystem` backend
+- **API**: `get_config()` returns the full dict; `get(key=..., default=...)` returns a top-level section; `get_storage(key, default, *, default_type)` returns a `(storage_type, config)` tuple
+- **Storage precedence** in `get_storage()`: service-specific `storage` section, then `global_storage`, then the built-in default. The built-in default is `filesystem` unless the caller passes `default_type`
+- **Per-service defaults**: incremental metadata, job run reports and flow definition snapshots use the `filesystem` default. Job management passes `default_type="inmemory"`, so job stats are not persisted unless `job_management.storage` or `global_storage` is configured
 
 #### Document Classes (`common/document_classes/`)
 #### Constants (`core/constants/`)
