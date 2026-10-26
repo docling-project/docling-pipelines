@@ -160,33 +160,6 @@ class FastTextModelManager:
 
         try:
             import fasttext
-            import numpy as np
-            from fasttext.FastText import _FastText
-
-            # Patch fasttext predict for NumPy 2.x compatibility where copy=False is disallowed
-            if not getattr(_FastText, "_numpy2_patched", False):
-
-                def _patched_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
-                    def check(entry):
-                        if entry.find("\n") != -1:
-                            raise ValueError("predict processes one line at a time (remove '\\n')")
-                        entry += "\n"
-                        return entry
-
-                    if isinstance(text, list):
-                        text = [check(entry) for entry in text]
-                        return self.f.multilinePredict(text, k, threshold, on_unicode_error)
-
-                    text = check(text)
-                    predictions = self.f.predict(text, k, threshold, on_unicode_error)
-                    if predictions:
-                        probs, labels = zip(*predictions, strict=False)
-                    else:
-                        probs, labels = ((), ())
-                    return labels, np.asarray(probs)
-
-                _FastText.predict = _patched_predict
-                _FastText._numpy2_patched = True
 
             model_path = self._get_model_path()
 
