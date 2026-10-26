@@ -199,13 +199,20 @@ no poll-interval configuration or special handling for the deferred corner cases
 
 ### 8. Drain the processing thread during shutdown
 
-`stop()` sets the stop flag and awaits the actual listener thread exit using a nonblocking asynchronous join. Replace
-the current five-second join that can return while processing is active. An active event completes all allowed retries,
-cleanup, terminal reporting, and its commit attempt, then the loop exits and closes the consumer. If stop arrives after
-poll but before new event execution, leave that record uncommitted and exit. Preserve idempotent start/stop behavior.
+`stop()` is awaitable: it sets the stop flag to prevent new events from starting and returns only after the listener
+thread exits. Waiting for thread exit must keep the asyncio event loop responsive; the shutdown caller continues
+awaiting completion while unrelated asynchronous tasks can run. Replace the current five-second join with this wait.
 
-Automatic commits/offset storage remain disabled, so unfinished work is not committed by this shutdown path.
-Do not interrupt a running operator or treat a stop request as retry exhaustion.
+An active event finishes its configured retry sequence, cleanup, terminal reporting, and offset-commit attempt before
+the listener closes the consumer and exits its processing thread. `stop()` remains pending throughout that work,
+including sink writes and the commit attempt. Running operators are allowed to finish; a stop request neither cancels
+nor abandons them and does not count as retry exhaustion. If stop arrives after poll but before new event execution,
+leave that record uncommitted and exit. Preserve idempotent start/stop behavior.
+
+Automatic commits/offset storage remain disabled, so unfinished work is not committed by this shutdown path. There is
+no drain timeout in this change: an operator that never returns can keep shutdown pending indefinitely. Bounded
+termination and forced-cancellation policy remain deferred under
+[STR-008](#str-008---forced-termination-during-active-processing).
 
 Alternative: bound the join at five seconds or cancel the running transform. The former falsely completes shutdown;
 the latter has no safe general contract across existing synchronous operators.
