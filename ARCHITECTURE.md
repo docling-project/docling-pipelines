@@ -3838,7 +3838,7 @@ CORS is configurable via the `CORS_ORIGINS` environment variable (comma-separate
 
 ### 3. Request Validation and DoS Protection
 
-`validate_payload_size` middleware ([`src/docpipe/api/middleware/payload_validation.py`](src/docpipe/api/middleware/payload_validation.py)) rejects `POST`/`PUT`/`PATCH` requests with a `Content-Length` exceeding **5 MB**, returning HTTP 413.
+`PayloadValidationMiddleware` ([`src/docpipe/api/middleware/payload_validation.py`](src/docpipe/api/middleware/payload_validation.py)) rejects `POST`/`PUT`/`PATCH` requests whose `Content-Length` or streamed body exceeds **5 MB**, returning HTTP 413.
 
 ---
 

@@ -1,5 +1,7 @@
 """Unit tests for ClassificationAdapterFactory (registry-based dispatcher)."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -37,6 +39,28 @@ _WATSONX_CONFIG: dict[str, Any] = {
 }
 
 
+@contextmanager
+def _registered_custom_adapter(*, name: str = "_custom_test_adapter") -> Iterator[type[ClassificationPort]]:
+    """Register a throwaway adapter under *name* and remove it on exit."""
+
+    class _CustomAdapter(ClassificationPort):
+        ADAPTER_NAME = name
+        ADAPTER_DISPLAY_NAME = "Custom"
+
+        @classmethod
+        def from_config(cls, config: dict[str, Any]) -> "_CustomAdapter":
+            return cls()
+
+        def classify_document(self, *, doc_name, binary_content, existing_text, document_types):  # type: ignore[override]
+            ...
+
+    ClassificationAdapterFactory.register(_CustomAdapter)
+    try:
+        yield _CustomAdapter
+    finally:
+        ClassificationAdapterFactory._REGISTRY.pop(name, None)
+
+
 # ---------------------------------------------------------------------------
 # Tests — registry mechanics
 # ---------------------------------------------------------------------------
@@ -67,10 +91,14 @@ class TestRegistry:
         # clean up so other tests aren't affected
         del ClassificationAdapterFactory._REGISTRY["_fake_test_adapter"]
 
-    def test_get_supported_providers_are_the_alias_keys(self) -> None:
+    def test_get_supported_providers_are_alias_keys_plus_registered_names(self) -> None:
         supported = ClassificationAdapterFactory.get_supported_providers()
-        assert supported == {"litellm", "watsonx"}
-        assert "standard" not in supported
+        assert supported == {"litellm", "watsonx", "standard"}
+
+    def test_get_supported_providers_includes_custom_registered_adapter(self) -> None:
+        with _registered_custom_adapter():
+            assert "_custom_test_adapter" in ClassificationAdapterFactory.get_supported_providers()
+        assert "_custom_test_adapter" not in ClassificationAdapterFactory.get_supported_providers()
 
     def test_get_supported_providers_excludes_deprecated(self) -> None:
         supported = ClassificationAdapterFactory.get_supported_providers()
@@ -98,12 +126,19 @@ class TestAliasResolution:
             ClassificationAdapterFactory.create_adapter(provider="watsonx", config=_WATSONX_CONFIG)
         mock_fc.assert_called_once_with(_WATSONX_CONFIG)
 
-    def test_standard_is_not_a_valid_provider(self) -> None:
-        """'standard' is the internal ADAPTER_NAME, not a provider string."""
+    def test_standard_is_a_valid_provider(self) -> None:
+        """'standard' is a registered ADAPTER_NAME, so it resolves directly as a provider."""
         with patch.object(StandardLLMClassificationAdapter, "from_config") as mock_fc:
-            with pytest.raises(ValueError, match="Unknown classification provider"):
-                ClassificationAdapterFactory.create_adapter(provider="standard", config=_LITELLM_CONFIG)
-        mock_fc.assert_not_called()
+            mock_fc.return_value = MagicMock(spec=StandardLLMClassificationAdapter)
+            ClassificationAdapterFactory.create_adapter(provider="standard", config=_LITELLM_CONFIG)
+        mock_fc.assert_called_once_with(_LITELLM_CONFIG)
+
+    def test_registered_adapter_name_is_selectable_as_provider(self) -> None:
+        """A custom adapter is selected by its ADAPTER_NAME without registering an alias."""
+        config = {"provider": "_custom_test_adapter"}
+        with _registered_custom_adapter() as adapter_class:
+            result = ClassificationAdapterFactory.create_adapter(provider="_Custom_Test_Adapter", config=config)
+        assert isinstance(result, adapter_class)
 
     def test_provider_string_is_case_insensitive(self) -> None:
         """Provider strings are normalised to lower-case before resolution."""
@@ -125,6 +160,12 @@ class TestInvalidProviders:
                 provider="ollama",
                 config={"provider": "ollama", "provider_config": {}, "document_types": []},
             )
+
+    def test_deprecated_check_wins_over_registered_adapter(self) -> None:
+        """A deprecated provider is rejected even if an adapter is registered under that name."""
+        with _registered_custom_adapter(name="ollama"):
+            with pytest.raises(ValueError, match="no longer supported"):
+                ClassificationAdapterFactory.create_adapter(provider="ollama", config={})
 
     def test_unknown_provider_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown classification provider"):

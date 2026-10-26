@@ -562,3 +562,59 @@ class TestClientCaching:
         kwargs = mock_dropbox.call_args.kwargs
         assert kwargs["oauth2_refresh_token"] == "refresh"
         assert kwargs["app_key"] == "key"
+
+
+class TestBindFileReference:
+    """Test DropboxSourceAdapter.bind_file_reference."""
+
+    def test_valid_path_reference_sets_file_path(self):
+        """A non-empty path reference is set as file_path without any Dropbox API call."""
+        provider_config = {"access_token": "token-value", "folder_path": "/Reports"}  # pragma: allowlist secret
+
+        DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="/Reports/q1.pdf")
+
+        assert provider_config["file_path"] == "/Reports/q1.pdf"
+
+    def test_valid_id_reference_sets_file_path(self):
+        """A Dropbox file id reference is accepted as-is."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="id:abc123")
+
+        assert provider_config["file_path"] == "id:abc123"
+
+    def test_credentials_are_untouched(self):
+        """bind_file_reference only adds file_path; it never reads or rewrites credentials."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="/q1.pdf")
+
+        assert provider_config["access_token"] == "token-value"  # pragma: allowlist secret
+        assert "refresh_token" not in provider_config
+
+    def test_empty_file_reference_raises_value_error(self):
+        """An empty file_reference raises a clear ValueError."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        with pytest.raises(ValueError, match="non-empty Dropbox path or id"):
+            DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="")
+
+        assert "file_path" not in provider_config
+
+    def test_blank_file_reference_raises_value_error(self):
+        """A whitespace-only file_reference raises a clear ValueError."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        with pytest.raises(ValueError, match="non-empty Dropbox path or id"):
+            DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="   ")
+
+        assert "file_path" not in provider_config
+
+    def test_none_file_reference_raises_value_error(self):
+        """A None file_reference raises a clear ValueError, not an AttributeError."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        with pytest.raises(ValueError, match="non-empty Dropbox path or id"):
+            DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=None)
+
+        assert "file_path" not in provider_config

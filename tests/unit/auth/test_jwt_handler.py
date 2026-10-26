@@ -6,9 +6,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
+import jwt
 import pytest
-from jose import jwt
-from jose.exceptions import JWSError
 from pydantic import ValidationError
 
 from docpipe.api.auth.jwt_handler import (
@@ -272,7 +271,7 @@ class TestCreateAccessTokenEdgeCases:
     def test_unsupported_algorithm_raises(self):
         config = JWTConfig(jwt_secret_key=_VALID_SECRET, jwt_algorithm="NOT-AN-ALG")
 
-        with pytest.raises(JWSError, match="not supported"):
+        with pytest.raises(NotImplementedError, match="not supported"):
             create_access_token({"username": "testuser"}, config)
 
 
@@ -346,7 +345,7 @@ class TestVerifyTokenTampering:
         assert verify_token(token, jwt_config) is None
 
     def test_non_string_token_is_rejected_not_raised(self, jwt_config):
-        """Non-JWTError failures inside the decoder are swallowed and reported as invalid."""
+        """Non-PyJWTError failures inside the decoder are swallowed and reported as invalid."""
         assert verify_token(None, jwt_config) is None  # type: ignore[arg-type]
 
     def test_unexpected_decoder_error_returns_none(self, jwt_config):
