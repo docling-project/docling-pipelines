@@ -714,3 +714,100 @@ class TestS3DestinationAdapterCaching:
             adapter.write_document(content=b"x", destination_path="doc1.md", config=cfg)
 
         mock_boto3.client.assert_called_once()
+
+
+class TestS3DestinationAdapterCoverage:
+    def test_is_available_returns_true(self):
+        assert S3DestinationAdapter.is_available() is True
+
+    def test_create_s3_client_passes_endpoint_url(self):
+        adapter = S3DestinationAdapter()
+        cfg = _make_config(endpoint_url="http://localhost:9000", region="us-east-1")
+        with patch("docpipe.core.operators.storage.adapters.outbound.destinations.s3.adapter.boto3") as mock_boto3:
+            mock_client = MagicMock()
+            mock_boto3.client.return_value = mock_client
+            client = adapter._create_s3_client(cfg)
+            assert client == mock_client
+            mock_boto3.client.assert_called_once_with(
+                "s3",
+                aws_access_key_id=cfg.access_key,
+                aws_secret_access_key=cfg.secret_key,
+                endpoint_url="http://localhost:9000",
+                region_name="us-east-1",
+            )
+
+    def test_validate_destination_prefix_check_with_account_id(self):
+        adapter = S3DestinationAdapter()
+        cfg = _make_config(create_dirs=False, key_prefix="exports/")
+        mock_client = MagicMock()
+        mock_client.head_bucket.return_value = {}
+        mock_client.list_objects_v2.return_value = {"KeyCount": 1}
+
+        with (
+            patch.object(adapter, "_create_s3_client", return_value=mock_client),
+            patch.object(adapter, "_get_aws_account_id", return_value="123456789012"),
+        ):
+            res = adapter.validate_destination(config=cfg)
+
+        assert res is None
+        mock_client.list_objects_v2.assert_called_once_with(
+            Bucket="test-bucket",
+            Prefix="exports/",
+            MaxKeys=1,
+            ExpectedBucketOwner="123456789012",
+        )
+
+    def test_write_document_overwrite_false_with_account_id(self):
+        adapter = S3DestinationAdapter()
+        cfg = _make_config()
+        mock_client = MagicMock()
+        from botocore.exceptions import ClientError
+
+        mock_client.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+
+        with (
+            patch.object(adapter, "_create_s3_client", return_value=mock_client),
+            patch.object(adapter, "_get_aws_account_id", return_value="123456789012"),
+        ):
+            res = adapter.write_document(content=b"content", destination_path="doc.txt", overwrite=False, config=cfg)
+
+        assert res.success is True
+        mock_client.head_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="doc.txt",
+            ExpectedBucketOwner="123456789012",
+        )
+
+    def test_write_document_overwrite_false_head_object_non_404_error(self):
+        adapter = S3DestinationAdapter()
+        cfg = _make_config()
+        mock_client = MagicMock()
+        from botocore.exceptions import ClientError
+
+        mock_client.head_object.side_effect = ClientError(
+            {"Error": {"Code": "500", "Message": "Internal"}}, "HeadObject"
+        )
+
+        with (
+            patch.object(adapter, "_create_s3_client", return_value=mock_client),
+            patch.object(adapter, "_get_aws_account_id", return_value=None),
+        ):
+            res = adapter.write_document(content=b"content", destination_path="doc.txt", overwrite=False, config=cfg)
+
+        assert res.success is False
+        assert "500" in res.error_message
+
+    def test_write_document_unexpected_exception(self):
+        adapter = S3DestinationAdapter()
+        cfg = _make_config()
+        mock_client = MagicMock()
+        mock_client.put_object.side_effect = RuntimeError("Fatal hardware failure")
+
+        with (
+            patch.object(adapter, "_create_s3_client", return_value=mock_client),
+            patch.object(adapter, "_get_aws_account_id", return_value=None),
+        ):
+            res = adapter.write_document(content=b"content", destination_path="doc.txt", overwrite=True, config=cfg)
+
+        assert res.success is False
+        assert "Unexpected error writing to S3" in res.error_message

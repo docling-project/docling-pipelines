@@ -2,13 +2,8 @@
 
 from typing import Any
 
-try:
-    import boto3
-    from botocore.exceptions import ClientError
-
-    _BOTO3_AVAILABLE = True
-except ImportError:
-    _BOTO3_AVAILABLE = False
+import boto3
+from botocore.exceptions import ClientError
 
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -46,14 +41,6 @@ def resolve_aws_account_id(
     """
     if endpoint_url:
         # S3-compatible storage (IBM COS, MinIO, etc.) - STS not applicable
-        return None
-
-    if not _BOTO3_AVAILABLE:
-        if strict:
-            raise RuntimeError(
-                "boto3 is required to resolve AWS account ID for ExpectedBucketOwner enforcement. "
-                "Install with: uv pip install boto3 or uv sync --extra aws"
-            )
         return None
 
     try:

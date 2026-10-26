@@ -679,6 +679,7 @@ botocore==1.42.55
 ```
 
 ### Provider-Specific Dependencies
+All storage provider dependencies are included in the core dependencies of `docling-pipelines` without requiring optional extras:
 - **AWS/S3:** `boto3==1.42.55`, `langchain-community==0.4.1`
 - **Google Drive:** `google-auth-oauthlib==1.2.4`, `google-auth-httplib2==0.3.0`, `google-api-python-client==2.190.0`, `langchain-google-community==3.0.5`
 - **SharePoint/OneDrive:** `O365==2.1.9`, `langchain-community==0.4.1`
@@ -690,26 +691,13 @@ botocore==1.42.55
 
 ### Installation
 
+All storage provider clients are installed automatically with the core package. No provider-specific optional extras are required.
+
 Using uv (recommended):
 ```bash
 # From project root directory
-# Core installation (includes langchain and langchain-core)
+# Core installation (includes all storage provider dependencies)
 uv sync
-
-# AWS/S3 support
-uv sync --extra aws
-
-# Google Drive support
-uv sync --extra google-drive
-
-# Microsoft (SharePoint/OneDrive) support
-uv sync --extra microsoft
-
-# Box support
-uv sync --extra box
-
-# All cloud providers
-uv sync --extra all-cloud
 
 # Development dependencies
 uv sync --extra dev
@@ -717,20 +705,11 @@ uv sync --extra dev
 
 Using pip:
 ```bash
-# Core installation
-pip install langchain==1.2.10 langchain-core==1.2.14 pyarrow==24.0.0 pandas==2.3.3
+# Core installation from source
+pip install -e .
 
-# AWS/S3 support
-pip install boto3==1.42.55 langchain-community==0.4.1
-
-# Google Drive support
-pip install google-auth-oauthlib==1.2.4 google-auth-httplib2==0.3.0 google-api-python-client==2.190.0 langchain-google-community==3.0.5 pypdf2==3.0.1 "unstructured[pdf]>=0.10.0"
-
-# Microsoft support
-pip install O365==2.1.9 langchain-community==0.4.1
-
-# Box support
-pip install box-sdk-gen==1.17.0 langchain-community==0.4.1
+# Or install from PyPI
+pip install docling-pipelines
 ```
 
 ## API Reference

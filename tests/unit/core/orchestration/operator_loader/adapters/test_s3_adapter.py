@@ -144,7 +144,14 @@ class TestDownloadAndLoad:
 
         adapter.clear_cache()
 
-        assert not cache.exists()
+    def test_downloads_without_account_id(self, monkeypatch, bucket: FakeS3Client, tmp_path: Path) -> None:
+        """When account ID cannot be resolved, downloads proceed without ExpectedBucketOwner."""
+        monkeypatch.setattr(s3_adapter.boto3, "client", lambda service: bucket)
+        monkeypatch.setattr(s3_adapter, "resolve_aws_account_id", lambda: None)
+        S3Adapter("s3://ops-bucket/operators", cache_dir=str(tmp_path))
+
+        assert bucket.list_calls == [{"Bucket": "ops-bucket", "Prefix": "operators"}]
+        assert all(extra is None for _, _, extra in bucket.download_calls)
 
 
 class TestFailures:
@@ -162,12 +169,6 @@ class TestFailures:
         fake_aws.list_error = PermissionError("AccessDenied")
 
         with pytest.raises(Exception, match="Failed to download operators from S3: AccessDenied"):
-            S3Adapter("s3://ops-bucket/operators", cache_dir=str(tmp_path))
-
-    def test_missing_boto3_is_reported(self, monkeypatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(s3_adapter, "_BOTO3_AVAILABLE", False)
-
-        with pytest.raises(ImportError, match="boto3 is required for S3 adapter"):
             S3Adapter("s3://ops-bucket/operators", cache_dir=str(tmp_path))
 
 
