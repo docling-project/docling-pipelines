@@ -260,11 +260,24 @@ class TestJsonStore:
         with holder, pytest.raises(JobStatsStoreReadException, match="Failed to acquire lock for job stats read"):
             json_store.get_job_stats(RUN)
 
-    def test_file_name_too_long_for_the_file_system_is_a_write_error(self, json_store):
-        with pytest.raises(JobStatsStoreWriteException, match="Failed to write JSON file"):
-            json_store.store_node_stats(job_run_id=RUN, node_stats=_node("n" * 300))
+    def test_failed_rename_is_a_write_error_and_removes_the_temp_file(self, json_store):
+        # A directory where the node stats file belongs: the temp file is written,
+        # but replacing the directory with it fails on every platform.
+        target = json_store._get_node_stats_path(job_run_id=RUN, node_id="node-1")
+        (target / "occupied").mkdir(parents=True)
 
+        with pytest.raises(JobStatsStoreWriteException, match="Failed to write JSON file"):
+            json_store.store_node_stats(job_run_id=RUN, node_stats=_node())
+
+        assert target.is_dir()
         assert list(json_store._get_node_stats_dir(job_run_id=RUN).glob("*.tmp")) == []
+
+    def test_unopenable_file_name_is_a_write_error(self, json_store):
+        # A NUL character makes open() fail on every platform before the temp file exists.
+        with pytest.raises(JobStatsStoreWriteException, match="Failed to write JSON file"):
+            json_store.store_node_stats(job_run_id=RUN, node_stats=_node("bad" + chr(0) + "id"))
+
+        assert list(json_store._get_node_stats_dir(job_run_id=RUN).iterdir()) == []
 
     def test_empty_node_files_are_skipped(self, json_store):
         json_store.store_node_stats(job_run_id=RUN, node_stats=_node(batch_id="b1"))
