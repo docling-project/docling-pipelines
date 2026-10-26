@@ -355,7 +355,12 @@ jobs:
         run: sudo apt-get install -y libldap2-dev libsasl2-dev
 
       - name: Install Dependencies
-        run: uv pip install --system -e ".[dev]"
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Unit Tests
         run: python -m pytest tests/unit -m "unit and not integration" -v --cov=src --cov-report=xml --cov-report=term-missing

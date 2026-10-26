@@ -90,6 +90,34 @@ Every pipeline run produces a **flow job** in the lineage graph — a single job
 
 Lineage graphs are built from dataset edges. The output dataset name of one node matches the input dataset name of the next downstream node, which is how the lineage backend draws edges between operator jobs. Ingest nodes receive a dataset name derived from the source provider and path (for example namespace `file` with name `./my-docs`, or namespace `s3://my-bucket`) so the graph shows the actual data origin.
 
+### Dataset naming
+
+Ingest sources and storage sinks (for example a vector database or a document set) are named by the same rules, so the same physical location gets the same dataset on either side of a flow. Names are derived from the operator's `provider_config`:
+
+| Provider | Namespace | Name |
+| --- | --- | --- |
+| `filesystem`, `local`, `file` | `file` | `root_path`, else the first entry of `paths`, else `path`, without a trailing `/` |
+| `s3` (also `ibm_cos`) | `s3://{bucket}` | `prefix` / `key_prefix` |
+| `box` (also `box_driver`) | `box://app.box.com:443/default` | `file_id`, else `folder_id` (default `0`) |
+| `sharepoint` | `mssharepoint://graph.microsoft.com:443/{drive}` | `file_path`, else `folder_path` |
+| `onedrive` | `onedrive://graph.microsoft.com:443/{drive}` | `file_path`, else `folder_path` |
+| `dropbox` | `dropbox://api.dropbox.com` | `file_path`, else `folder_path` |
+| `google_drive` | `googledrive://drive.google.com` (plus `/{drive_id}` when set) | `file_id`, `folder_id`, `folder_path`, or `root` |
+| `web` | `{scheme}://{host}[:{port}]` of the first URL | URL path |
+| `opensearch` | `opensearch://{host}:{port}` | `index_name` |
+| `milvus` | `milvus://{host}:{port}`, or `milvus://lite/{uri}` for Milvus Lite | `{database}.{collection}` |
+| `document_set` | `docpipe://document_set` | `document_set_name` |
+| Any other provider | `{type}://{host}[:{port}]` when a host is set, otherwise `{type}://source` or `{type}://destination` | With a host: `index_name`, else `collection_name`, else `unknown`. Without a host: the first of `paths` or `path`, else `source` / `output` |
+
+Between operators, datasets live in the `inmemory://` namespace with the name `{flow_name}/{node_name}/output`. A node whose output is stored by a sink and also feeds a downstream node emits both datasets, so the graph edge to the next node is kept.
+
+How values are resolved:
+
+- `${VAR}` placeholders are resolved the same way the adapters resolve them. If a variable is not set, the text is kept as written.
+- For `s3`, `sharepoint`, `onedrive`, `dropbox`, the Google Drive `folder_path` and the `web` path, a `?query` or `#fragment` is dropped from the name. Local `filesystem` paths are used as given.
+- `web` uses only the scheme, host, port and path of the first URL; user info in the URL is not used.
+- Milvus URIs that embed an API key contribute only their host and port.
+
 ### Credential safety
 
 Flow definitions are never sent to the lineage backend as-is. Before any facet is built, the service strips all credential keys (`api_key`, `apikey`, `secret`, `secret_key`, `password`, `token`, `auth_token`, `access_token`, `credentials`, `connection_params`) from the flow definition — including keys nested inside the DAG node list. Operator output metadata passed into `docpipeStats` facets is filtered with the same credential key set before emission.
