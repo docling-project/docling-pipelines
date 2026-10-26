@@ -103,7 +103,9 @@ class FakeVault(BaseAdapter):
         """Nothing to release."""
 
     def _login(self, request: requests.PreparedRequest) -> requests.Response:
-        credentials = json.loads(request.body or b"{}")
+        body = request.body or b"{}"
+        assert isinstance(body, (bytes, str))
+        credentials = json.loads(body)
         if credentials != {"role_id": ROLE_ID, "secret_id": SECRET_ID}:
             return self._respond(request, status=400, body={"errors": ["invalid role or secret ID"]})
         if self.login_body is not None:
