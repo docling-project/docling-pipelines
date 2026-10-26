@@ -35,19 +35,9 @@
 - [ ] 5.3 [backend] Add `"hybrid"` to `VALID_VALUES` for the `provider` attribute and update the description string — verify `"hybrid"` is present in `meta['attributes']['provider']['valid_values']`
 - [ ] 5.4 [backend] Update `docs/operators/quality/document_classifier_readme.md` to add a `provider: "hybrid"` config example showing `provider_config.model_id` + `provider_config.llm_inference` (text SLM), `provider_config.vlm.model_id` + `provider_config.vlm.llm_inference` (vision VLM), and top-level `max_pages`, and noting that output columns are identical to the standard adapter — verify the file renders without broken links and the example JSON is valid
 
-## 6. Frontend panel update
+## 6. Full regression check
 
-- [ ] 6.1 [frontend] Add `MAX_PAGES: 'max_pages'`, `MAX_CONTENT_LENGTH: 'max_content_length'`, `CLASSIFICATION_CONFIG: 'classification_config'`, and `OUTPUT_CONFIG: 'output_config'` to `DOCUMENT_CLASSIFIER_ATTRIBUTE` in `constants.ts`; add matching label strings to `DOCUMENT_CLASSIFIER_LABELS` — verify TypeScript compiles without errors: `cd frontend && npx tsc --noEmit`
-- [ ] 6.2 [frontend] Update `DocumentClassifierPanelBody` to read nested attribute metadata: source `document_types`, `confidence_threshold`, `doc_column` from `nodeAttributes['classification_config']?.properties`, and `output_column`, `include_confidence`, `include_reasoning` from `nodeAttributes['output_config']?.properties`; read `max_pages` and `max_content_length` from top-level `nodeAttributes` — verify existing fields still display correctly with the updated metadata shape
-- [ ] 6.3 [frontend] Add `"hybrid"` conditional VLM block inside the Provider configuration accordion: when `provider === "hybrid"`, render a "Vision model" sub-section with `TextInput` fields for `vlm.llm_inference`, `vlm.model_id`, `vlm.api_base`, and `vlm.api_key` — these map to `provider_config.vlm.*` and are stored by merging into `providerFieldValues.vlm`; also render a `NumberInput` for `max_pages` (sourced from top-level `ATTR.MAX_PAGES`, default 5, min 1) — verify fields appear/disappear when toggling the provider dropdown
-- [ ] 6.4 [frontend] Wire VLM sub-object persistence: on VLM field change, merge into `providerFieldValues.vlm` and call `controller.updatePropertyValue({ name: ATTR.PROVIDER_CONFIG }, updated)`; wire `max_pages` to `controller.updatePropertyValue({ name: ATTR.MAX_PAGES }, value)` (top-level, not inside `provider_config`) — verify values round-trip through save/reload of the panel
-- [ ] 6.5 [frontend] Add `provider_config.vlm.model_id` to required-field validation for the hybrid provider: call `controller.setSaveButtonDisable(true)` when `provider === "hybrid"` and `providerFieldValues?.vlm?.model_id` is empty — verify Save button is disabled with hybrid selected and no VLM model_id entered
-- [ ] 6.6 [frontend] Verify keyboard accessibility: confirm Tab order visits VLM sub-object fields and `max_pages` in sequence, and that all new fields have accessible labels — verify with a quick browser keyboard navigation check
-
-## 7. Full regression check
-
-- [ ] 7.1 [backend] Run the full classification test suite and confirm no regressions: `pytest tests/unit/core/operators/quality/classification/ tests/unit/utils/document/ -v` — all tests pass, no new failures
-- [ ] 7.2 [frontend] Confirm the frontend TypeScript build is clean and no new lint errors are introduced: `cd frontend && npx tsc --noEmit` — exits with code 0
+- [ ] 6.1 [backend] Run the full classification test suite and confirm no regressions: `pytest tests/unit/core/operators/quality/classification/ tests/unit/utils/document/ -v` — all tests pass, no new failures
 
 ## Workflow follow-up
 
