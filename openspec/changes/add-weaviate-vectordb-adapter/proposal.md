@@ -34,7 +34,7 @@ A backend adapter alone is not a usable feature. The VectorDB properties panel b
 ### Frontend
 
 - **Provider configuration map.** Add a Weaviate entry (`hasEngine: false`, collection naming rule and placeholder, distance labels and options, sparse capability). Separate the keys stripped before enrichment from the keys hidden from the Advanced JSON field.
-- **Connection and authentication controls** in the VectorDB panel: custom versus Weaviate Cloud connection, HTTP and gRPC address and TLS settings, and authentication-method-specific masked credential inputs. Unset `grpc_host` and `grpc_secure` stay unset so they inherit the HTTP values. Credentials accept literals and `$VAR`/`${VAR}` references; there is no Vault mode for this provider.
+- **Connection and authentication controls** in the VectorDB panel: custom versus Weaviate Cloud connection, HTTP and gRPC address and TLS settings, and authentication-method-specific credential inputs. Unset `grpc_host` and `grpc_secure` stay unset so they inherit the HTTP values. Credentials use the existing `VaultInput` (masked literal or `$VAR`/`${VAR}` reference, with the existing Vault toggle for `vault://` references), as the OpenSearch panel does.
 - **Validation that blocks.** Required connection and credential fields, and the TLS rule for authenticated custom connections, show accessible inline errors and block opening the feature-mapping tearsheet and enrichment while invalid.
 - **Feature-mapping tearsheet.** Provider-specific collection-name rule and placeholder, distance metric selection without an engine control, and a capability- and eligibility-driven BM25 checkbox whose saved state is preserved on reopen, and display of the enrichment `error`. `index_type` and `index_parameters` stay editable in Advanced JSON.
 - **Strings.** New strings are colocated message definitions, extracted into the catalogue with `npm run extract:messages`.
@@ -72,7 +72,7 @@ Both PRs MUST ship in the same release. If only the API PR is released, the pane
 ## Non-goals
 
 - Frontend changes beyond the VectorDB panel and tearsheet: no routing, BFF proxy, or Redux slice changes, no panel-wide string migration into the message catalogue, and no generic provider-form rewrite.
-- A shared Vault credential redesign. The Weaviate fields use plain masked inputs; `vault://` references are not offered or resolved.
+- A shared Vault credential redesign. The Weaviate credential fields reuse the existing `VaultInput` unchanged.
 - Shared lazy validation (letting flow validation skip the connection) and sparse-only support for memory-mapped chunks. Both are operator-wide changes.
 - Reimplementing any part of the Weaviate server. The adapter is a client of an existing Weaviate deployment through the official `weaviate-client`.
 - Search or query features beyond what `VectorStorePort` requires: no hybrid/BM25/near-vector query API, generative modules, or reranking.
@@ -86,7 +86,7 @@ Both PRs MUST ship in the same release. If only the API PR is released, the pane
 - Embedded Weaviate. It is experimental and downloads a server binary at runtime.
 - Changing OpenSearch or Milvus adapters, `VectorStoreFactory`, or the factory's 500 wrapping of adapter errors.
 - A CI job for the real-server suite. It stays manual-only, like the other vector database container tests; a CI job is a possible follow-up.
-- Vault secret resolution (`vault://` URIs) for any vector database adapter.
+- Adapter-specific Vault handling. `vault://` references are resolved upstream by the flow executor (and by flow enrichment) before the adapter is built, exactly as for the other adapters; the Weaviate adapter contains no Vault code.
 
 ## Impact
 

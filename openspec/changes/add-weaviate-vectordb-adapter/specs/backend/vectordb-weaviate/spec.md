@@ -50,7 +50,7 @@ The Weaviate `provider_config` SHALL require `collection_name`, matching `^[A-Z]
 - **THEN** the collection-name rule is enforced by the backend only; clients that need it carry their own copy
 
 ### Requirement: Weaviate authentication
-The Weaviate provider SHALL support four authentication methods: no authentication, API key, bearer token, and OIDC username/password. Each method SHALL require its credential fields. Credential values SHALL be literal values or `$VAR` / `${VAR}` environment references; `vault://` references are not supported. Credentials MUST NOT appear in log output or in any raised message.
+The Weaviate provider SHALL support four authentication methods: none, API key, bearer token, and OIDC username/password. Each method SHALL require its credential fields. Credentials SHALL be literals or `$VAR` / `${VAR}` references; a `vault://` reference is resolved by the executor before the adapter is built. Credentials MUST NOT appear in log output or in any raised message.
 
 #### Scenario: API key method without key
 - **WHEN** the authentication method is API key and no API key is provided
@@ -59,6 +59,10 @@ The Weaviate provider SHALL support four authentication methods: no authenticati
 #### Scenario: Environment variable credential
 - **WHEN** the API key is configured as `$WEAVIATE_API_KEY` or `${WEAVIATE_API_KEY}` and that variable is set
 - **THEN** the connection authenticates with the variable's value and the value is not logged
+
+#### Scenario: Vault reference resolved upstream
+- **WHEN** a credential is configured as a `vault://` reference and the secret provider is registered
+- **THEN** the adapter receives the resolved plain value, contains no Vault-specific code, and the value is not logged
 
 #### Scenario: Unset environment variable
 - **WHEN** the API key is configured as `${WEAVIATE_API_KEY}` and that variable is not set

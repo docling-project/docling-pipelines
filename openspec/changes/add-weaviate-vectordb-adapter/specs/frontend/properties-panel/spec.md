@@ -35,13 +35,13 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 
 #### Scenario: Authentication method changes credential fields
 - **WHEN** the user selects the Weaviate authentication method "API key", "Bearer token", or "Username and password"
-- **THEN** only the credential inputs of that method are displayed, each as a masked input, and no Vault selection control is offered
+- **THEN** only the credential inputs of that method are displayed, each masked by default and offering the same Vault toggle as the OpenSearch credential inputs
 - **AND WHEN** the user switches to another method
 - **THEN** the previous method's credentials are removed from the saved `provider_config` in the same update that writes the new `auth_type`
 
-#### Scenario: Credentials accept literals and environment references
-- **WHEN** the user enters a literal value, `$WEAVIATE_API_KEY`, or `${WEAVIATE_API_KEY}` in a credential input
-- **THEN** the value is stored unchanged and the input's helper text states that a literal value or an environment-variable reference is accepted
+#### Scenario: Credentials accept literals, environment references, and Vault references
+- **WHEN** the user enters a literal value, `$WEAVIATE_API_KEY`, or `${WEAVIATE_API_KEY}` in a credential input, or turns on the Vault toggle and enters a path
+- **THEN** the value is stored unchanged (a Vault path is stored with the `vault://` prefix) and a non-empty value satisfies the required-credential check
 
 #### Scenario: Required connection and credential fields
 - **WHEN** a Weaviate field required for the current connection type or authentication method is empty or invalid, such as a missing host, a port outside 1-65535, a missing cluster URL, or a missing credential

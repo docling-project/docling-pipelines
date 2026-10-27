@@ -114,7 +114,7 @@ The application layer (`VectorDBOperator`) touches only `VectorStorePort` and `V
 
 `connection_type: Literal["custom","cloud"] = "custom"`; `host = "localhost"`; `port = 8080`; `secure = False`; `grpc_host: str | None` (defaults to `host`); `grpc_port = 50051`; `grpc_secure: bool | None` (defaults to `secure`); `cluster_url: str | None`.
 
-`auth_type: Literal["none","api_key","bearer_token","client_password"] = "none"`; `api_key`, `bearer_token`, `username`, `password` (`str | None`). Credentials are **literal values or `$VAR` / `${VAR}` references**. Vault references (`vault://`) are not supported and are not offered by the UI.
+`auth_type: Literal["none","api_key","bearer_token","client_password"] = "none"`; `api_key`, `bearer_token`, `username`, `password` (`str | None`). Credentials are **literal values or `$VAR` / `${VAR}` references**. **`vault://` references need no adapter code.** `PythonOperatorExecutor._resolve_operator_params` resolves them through the registered secret provider before the operator is constructed, and flow enrichment does the same before it builds the metadata fetcher (and expands `$VAR`/`${VAR}` with `os.path.expandvars`). During flow validation `FlowValidator` replaces them with placeholder strings. By the time `WeaviateConfig` sees a credential it is already a plain string, so the model validator, the TLS rule, and the redaction helper treat it like any other value, and the OpenSearch adapter relies on the same path. If the secret provider is not registered or resolution fails, the unresolved `vault://` text reaches the adapter as a literal, authentication fails, and the redaction helper keeps the text out of the raised message. The UI offers the existing Vault toggle for these fields (D16).
 
 `timeout_init = 30`, `timeout_query = 60`, `timeout_insert = 120` (seconds), `skip_init_checks = False`, `batch_size = 100` (≥1).
 
@@ -311,7 +311,7 @@ The suite follows the OpenSearch container test's skip-if-no-Docker helpers and 
 
 **Alternatives.**
 
-- Reject a mapped `allowed_users` at startup. This is stricter, but was not chosen in review: a flow that maps `allowed_users` keeps running on Weaviate, with the warning as the signal.
+- Reject a mapped `allowed_users` at startup. Not chosen, by maintainer decision: dropping the ACL column and still ingesting the document is the intended behavior, because Weaviate has no ACL read path in docpipe and the column carries no meaning there. The warning is the signal; the run does not fail.
 - Store it as a plain TEXT property. Rejected because the data would look access-controlled when nothing enforces it, and any Weaviate client could read it.
 
 ### D14. Sparse (BM25) mode
@@ -373,8 +373,8 @@ VectorDBPanelBody (VectorDB.tsx)
 │  ├─ "Authentication" [AccordionItem]
 │  │   ├─ opensearch / milvus: existing fields (unchanged)
 │  │   └─ weaviate: Authentication method [Dropdown]  none | API key | Bearer token | Username and password
-│  │        ├─ API key / Bearer token [PasswordInput]
-│  │        └─ Username [TextInput] + Password [PasswordInput]
+│  │        ├─ API key / Bearer token [VaultInput]
+│  │        └─ Username [TextInput] + Password [VaultInput]
 │  └─ "Advanced" [AccordionItem] → provider_config JSON [TextArea]  (unrelated keys preserved)
 ├─ VectorDBSummaryTable / NoDataEmptyState (existing)
 └─ VectorDBFeatureMappingTearsheet (existing)
@@ -394,7 +394,7 @@ VectorDBPanelBody (VectorDB.tsx)
 - **Inactive keys are removed.** Switching custom ↔ cloud deletes the other mode's keys in one atomic `provider_config` write. Switching authentication method deletes the previous method's credentials and writes `auth_type` in the same write, so the backend never sees a mix.
 - **Defaults merged for enrichment.** The payload sent to enrichment is the displayed defaults (`connection_type: custom`, `host`, `port`, `secure`) merged under the saved values, minus any unset inherited gRPC fields. Saving writes only explicit values plus the resource keys; the backend supplies its own defaults for anything absent.
 - **Advanced JSON.** Managed keys always win over Advanced JSON, and unrelated keys survive mode and method switches because only the specific inactive keys are deleted.
-- **Credentials.** Masked [PasswordInput] with helper text that a literal value or `$VAR`/`${VAR}` reference is accepted. There is no Vault toggle for this provider.
+- **Credentials.** The existing shared `VaultInput` (`@/components/common`), as the OpenSearch and Milvus fields use it. In direct mode it renders a masked `PasswordInput` that accepts a literal or a `$VAR`/`${VAR}` reference; the toggle switches it to a `vault://` reference. The value is stored unchanged either way, and the backend resolves it (D3). `VaultInput` is reused as-is; its internals and messages are not modified. An empty `vault://` is flagged invalid by `VaultInput` itself, and `validateWeaviateConfig` treats any non-empty credential, including a `vault://` reference, as present.
 
 **Validation that blocks.** `vectordb-weaviate.ts` exposes `validateWeaviateConfig(config)` returning per-field errors that mirror the backend messages: custom requires a host and ports in 1-65535; cloud requires a cluster URL; each authentication method requires its credential fields; an authenticated custom connection requires HTTP TLS and effective gRPC TLS (explicit gRPC setting, else HTTP). Errors render as Carbon `invalid`/`invalidText` on the field (for the TLS rule, an error `InlineNotification` with `role="alert"` plus `invalid` on the controls involved) once the user has edited the field or tried to open the tearsheet. While any error exists, the "Add / Edit feature mappings" action does not open the tearsheet or call enrichment; it shows the errors and moves keyboard focus to the first invalid field. In the tearsheet, an invalid new collection name blocks Save through the existing `submitted` gating, with the provider's own message.
 
@@ -416,7 +416,7 @@ VectorDBPanelBody (VectorDB.tsx)
 
 **Strings and styling.** New strings are defined in a colocated `VectorDB.messages.ts` with `defineMessages` and ids in the existing `src.components.<path>.<key>` form, rendered with `useIntl`. The catalogue is regenerated with `npm run extract:messages` (never hand-edited). Existing hardcoded strings in the panel are not migrated. New styling, if any, goes in `VectorDB.module.scss` using `var(--cds-*)` tokens with no hard-coded colors or pixel literals.
 
-**Accessibility.** Every control has a visible label; credential inputs are masked by `PasswordInput` with its visibility toggle reachable by keyboard; every validation message is attached to its field (`invalid` + `invalidText`, which sets `aria-invalid` and `aria-describedby`) and the TLS rule alert has `role="alert"`; tab order follows visual order; a blocked open moves focus to the first invalid field; dropdowns operate with arrow keys and Enter; the tearsheet keeps Carbon's focus trap and Escape-to-close.
+**Accessibility.** Every control has a visible label; credential inputs are masked (`VaultInput` direct mode uses `PasswordInput`, with its visibility toggle reachable by keyboard, and its Vault toggle is a labelled switch); every validation message is attached to its field (`invalid` + `invalidText`, which sets `aria-invalid` and `aria-describedby`) and the TLS rule alert has `role="alert"`; tab order follows visual order; a blocked open moves focus to the first invalid field; dropdowns operate with arrow keys and Enter; the tearsheet keeps Carbon's focus trap and Escape-to-close.
 
 **Frontend tests** (`frontend/tests/unit/components/PropertiesPanel/CustomPanels/VectorDB/`): metadata-driven and fallback provider lists; Weaviate resolves to its own configuration rather than the OpenSearch fallback; custom/cloud switching and credential cleanup; gRPC inheritance and explicit overrides; required-field and TLS gating (tearsheet does not open, enrichment not called, focus on first invalid field); valid and invalid collection names (the same example table as the backend spec scenario); sparse toggle, saved-state reopening, and re-enrichment, **including a collection that is keyword-searchable and unsupported with a saved `false` flag (checkbox shown, checking it re-enriches and the collection becomes supported) and one that is unsupported and not eligible (no checkbox)**; Advanced JSON preservation and the saved `provider_config` shape, **including `index_parameters` staying visible and editable in Advanced JSON, round-tripping through save, and being absent from the enrichment payload**; loading, error, empty-collections, and unsupported states, **with an unreachable Weaviate (`error` present) tested separately from a reachable one with no collections**; keyboard interaction and focus; OpenSearch/Milvus regression. The vacuous "renders provider dropdown" test (it looks up an id that does not exist and falls back to `document.body`) is replaced with assertions on `vectordb-provider-dropdown` and its options; provider-switch tests assert the expected option is present and the interaction took effect.
 
