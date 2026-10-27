@@ -247,7 +247,7 @@ chaining with downstream operators.
 }
 ```
 
-> Set `enable_micro_batching: false` in `global_config` — Milvus Lite holds a single-process file lock. See [`sample_flows/vectordb/milvus_lite_integration.json`](../../sample_flows/vectordb/milvus_lite_integration.json) for a complete working flow.
+> Set `enable_micro_batching: false` in `global_config` — Milvus Lite holds a single-process file lock. See [`sample_flows/quickstart/milvus_lite_integration.json`](../../../sample_flows/quickstart/milvus_lite_integration.json) for a complete working flow.
 
 ### Example 6 — Milvus (standalone)
 
