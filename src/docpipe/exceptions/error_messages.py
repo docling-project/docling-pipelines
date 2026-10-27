@@ -1,3 +1,5 @@
+"""Shared validation messages and structured alert payloads."""
+
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
@@ -43,6 +45,8 @@ class ValidationMessage(BaseModel):
 
 class ValidationCodeMessages(StrEnum):
     """Validationcodemessages."""
+
+    INGEST_PROVIDER_MISSING = "Provider not added. Select a provider for the ingest source operator."
 
     MISSING_FEATURES = """Not all required features for {operator_name} operator are available - required: {missing_features},
         Missing one or more operators:  {missing_operators},

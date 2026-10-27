@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import React from 'react';
 import { AnnotationFilterPanelBody } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/AnnotationFilter';
 import type { CriteriaJson } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
@@ -53,29 +54,29 @@ describe('AnnotationFilterPanelBody', () => {
   // ── Basic rendering ──────────────────────────────────────────────────────
 
   it('renders without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={makeController() as any} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders the "Criteria list" label', () => {
-    render(<AnnotationFilterPanelBody controller={makeController() as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={makeController() as any} />);
     expect(screen.getByText('Criteria list')).toBeDefined();
   });
 
   it('renders the "Available features" label', () => {
-    render(<AnnotationFilterPanelBody controller={makeController() as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={makeController() as any} />);
     expect(screen.getByText('Available features')).toBeDefined();
   });
 
   it('renders the "Add Criteria" button when no criteria are saved', () => {
-    render(<AnnotationFilterPanelBody controller={makeController() as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={makeController() as any} />);
     expect(screen.getByText('Add Criteria')).toBeDefined();
   });
 
   it('renders the available feature names in the features table', () => {
-    render(<AnnotationFilterPanelBody controller={makeController() as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={makeController() as any} />);
     expect(screen.getByText('lang_score')).toBeDefined();
     expect(screen.getByText('pii_score')).toBeDefined();
   });
@@ -90,7 +91,7 @@ describe('AnnotationFilterPanelBody', () => {
         nodeFeatureMap: {},
       })),
     });
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     expect(container => container).toBeDefined();
   });
 
@@ -102,7 +103,7 @@ describe('AnnotationFilterPanelBody', () => {
         nodeFeatureMap: { 'node-1': {} },
       })),
     });
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     expect(document.body).toBeInTheDocument();
   });
 
@@ -113,7 +114,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c1', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     expect(screen.getByText('Update Criteria')).toBeDefined();
   });
 
@@ -122,7 +123,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c1', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     expect(screen.getByText('lang_score >= 0.5')).toBeDefined();
   });
 
@@ -134,7 +135,7 @@ describe('AnnotationFilterPanelBody', () => {
         { id: 'c2', variable: 'pii_score', operator: '<', value: '0.1' },
       ],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     expect(screen.getByText('lang_score >= 0.5')).toBeDefined();
     expect(screen.getByText('pii_score < 0.1')).toBeDefined();
     // AND badge should appear between the two rows
@@ -150,7 +151,7 @@ describe('AnnotationFilterPanelBody', () => {
         { id: 'c2', variable: 'pii_score', operator: '<', value: '0.1' },
       ],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     const badges = screen.queryAllByText('OR');
     expect(badges.length).toBeGreaterThan(0);
   });
@@ -158,7 +159,7 @@ describe('AnnotationFilterPanelBody', () => {
   // ── Advanced mode ────────────────────────────────────────────────────────
 
   it('renders the advanced expression in the criteria table', () => {
-    render(
+    renderWithProviders(
       <AnnotationFilterPanelBody
         controller={withAdvancedExpression('lang_score > 0.3 AND pii_score < 0.1') as any}
       />
@@ -167,7 +168,7 @@ describe('AnnotationFilterPanelBody', () => {
   });
 
   it('renders "Update Criteria" button in advanced mode', () => {
-    render(
+    renderWithProviders(
       <AnnotationFilterPanelBody
         controller={withAdvancedExpression('lang_score > 0.3') as any}
       />
@@ -178,7 +179,7 @@ describe('AnnotationFilterPanelBody', () => {
   // ── Interactions — opening tearsheets ─────────────────────────────────────
 
   it('opens the ConditionBuilderTearsheet when "Add Criteria" is clicked', () => {
-    render(<AnnotationFilterPanelBody controller={makeController() as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={makeController() as any} />);
     const addBtn = screen.getByText('Add Criteria');
     fireEvent.click(addBtn);
     // The tearsheet label appears after clicking Add
@@ -190,7 +191,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c1', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     const updateBtn = screen.getByText('Update Criteria');
     fireEvent.click(updateBtn);
     expect(screen.queryAllByText('Criteria').length).toBeGreaterThan(0);
@@ -203,7 +204,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c1', variable: 'lang_score', operator: '>=', value: '0.5' }],
     });
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     const deleteBtn = document.querySelector('button[aria-label="Delete"]') as HTMLElement | null;
     if (deleteBtn) {
       fireEvent.click(deleteBtn);
@@ -217,7 +218,7 @@ describe('AnnotationFilterPanelBody', () => {
 
   it('calls updatePropertyValue to clear criteria_list when advanced expression Delete is clicked', () => {
     const controller = withAdvancedExpression('lang_score > 0.3');
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     const deleteBtn = document.querySelector('button[aria-label="Delete"]') as HTMLElement | null;
     if (deleteBtn) {
       fireEvent.click(deleteBtn);
@@ -234,7 +235,7 @@ describe('AnnotationFilterPanelBody', () => {
 
   it('persists advanced expression via onSave flow (verifies updatePropertyValue calls)', () => {
     const controller = makeController();
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     // Open the builder
     fireEvent.click(screen.getByText('Add Criteria'));
     // The builder should be open; find the Advanced tab and switch to it
@@ -274,7 +275,7 @@ describe('AnnotationFilterPanelBody', () => {
         nodeFeatureMap: { 'node-1': { input_features: FEATURES } },
       })),
     });
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     expect(document.body).toBeInTheDocument();
   });
 
@@ -289,7 +290,7 @@ describe('AnnotationFilterPanelBody', () => {
         nodeFeatureMap: { 'node-1': { input_features: FEATURES } },
       })),
     });
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     expect(document.body).toBeInTheDocument();
   });
 
@@ -300,7 +301,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c1', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     // Maximize button has iconDescription "Expand view" — find it by aria-label
     const maximizeBtn = document.querySelector('button[aria-label="Expand view"]') as HTMLElement | null;
     if (maximizeBtn) {
@@ -317,7 +318,7 @@ describe('AnnotationFilterPanelBody', () => {
 
   it('handleSaveConditions with advancedExpression writes criteria_list and clears criteria_json', () => {
     const controller = makeController();
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     // Open the ConditionBuilderTearsheet
     fireEvent.click(screen.getByText('Add Criteria'));
     // Switch to the Advanced tab
@@ -349,7 +350,7 @@ describe('AnnotationFilterPanelBody', () => {
 
   it('handleSaveConditions with simple conditions writes criteria_json and clears criteria_list', () => {
     const controller = makeController();
-    render(<AnnotationFilterPanelBody controller={controller as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
     // Open the ConditionBuilderTearsheet (defaults to Simple tab)
     fireEvent.click(screen.getByText('Add Criteria'));
     const saveBtn = screen.queryByText('Save');
@@ -372,7 +373,7 @@ describe('AnnotationFilterPanelBody', () => {
   // ── ConditionBuilderTearsheet renders when isConditionBuilderOpen=true ─────
 
   it('ConditionBuilderTearsheet renders its Save button after opening', () => {
-    render(<AnnotationFilterPanelBody controller={makeController() as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={makeController() as any} />);
     fireEvent.click(screen.getByText('Add Criteria'));
     // The tearsheet exposes a "Save" action button
     const saveBtn = screen.queryByText('Save');
@@ -386,7 +387,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c1', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    render(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
+    renderWithProviders(<AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />);
     // Without clicking Maximize, full-view tearsheet is absent from DOM
     // Checking indirectly: "Expand view" button is present but tearsheet body is not doubled
     expect(document.body).toBeInTheDocument();
@@ -401,7 +402,7 @@ describe('AnnotationFilterPanelBody', () => {
         { id: 'cond-1', variable: 'lang_score', operator: '>', value: '0.5' },
       ],
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />
     );
     // Find delete button — Carbon hasIconOnly ghost button; aria-label comes from iconDescription
@@ -427,7 +428,7 @@ describe('AnnotationFilterPanelBody', () => {
         { id: 'cond-2', variable: 'pii_score', operator: '<', value: '0.1' },
       ],
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />
     );
     const expandBtn = Array.from(container.querySelectorAll('button')).find(
@@ -445,7 +446,7 @@ describe('AnnotationFilterPanelBody', () => {
   // ── ConditionBuilderTearsheet conditional render ──────────────────────────
 
   it('renders ConditionBuilderTearsheet when Add criteria button is clicked', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={makeController() as any} />
     );
     // The Add criteria button is a ghost button with text "Add Criteria" or "Update Criteria"
@@ -469,7 +470,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'cond-del', variable: 'lang_score', operator: '>', value: '0.5' }],
     });
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     // Non-pagination icon-only buttons: [0]=Expand, [1]=Delete
@@ -502,7 +503,7 @@ describe('AnnotationFilterPanelBody', () => {
       ),
       updatePropertyValue: vi.fn(),
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     // Only one non-pagination icon-only button in advanced mode (no Expand, just Delete)
@@ -530,7 +531,7 @@ describe('AnnotationFilterPanelBody', () => {
         { id: 'keep-2', variable: 'pii_score', operator: '<', value: '0.1' },
       ],
     });
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     // Two rows = two Delete buttons; click the first one (deletes keep-1)
@@ -555,7 +556,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c-max', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />
     );
     // First non-pagination icon-only button is the Maximize/Expand button
@@ -575,7 +576,7 @@ describe('AnnotationFilterPanelBody', () => {
   // The tearsheet's close button has aria-label="Close".
 
   it('closing ConditionBuilderTearsheet via close button fires setIsConditionBuilderOpen(false) (line 430)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={makeController() as any} />
     );
     // Open the tearsheet
@@ -605,7 +606,7 @@ describe('AnnotationFilterPanelBody', () => {
       logical_operator: 'AND',
       criteria_list: [{ id: 'c-fv', variable: 'lang_score', operator: '>=', value: '0.5' }],
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={withCriteriaJson(criteria) as any} />
     );
     // Open full view via Expand button (first non-pagination icon-only)
@@ -653,7 +654,7 @@ describe('AnnotationFilterPanelBody', () => {
       ),
       updatePropertyValue: vi.fn(),
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     // Open ConditionBuilderTearsheet — this triggers initialConditions computation
@@ -671,7 +672,7 @@ describe('AnnotationFilterPanelBody', () => {
 
   it('handleSaveConditions simple path: condition without id gets one generated (line 242)', () => {
     const controller = makeController();
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     fireEvent.click(screen.getByText('Add Criteria'));
@@ -710,7 +711,7 @@ describe('AnnotationFilterPanelBody', () => {
       }),
       updatePropertyValue: vi.fn(),
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     // Open tearsheet (pre-populated with the condition that has no id)
@@ -766,7 +767,7 @@ describe('AnnotationFilterPanelBody', () => {
       }),
       updatePropertyValue: vi.fn(),
     };
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AnnotationFilterPanelBody controller={controller as any} />
     );
     const updateBtn = Array.from(container.querySelectorAll('button')).find(

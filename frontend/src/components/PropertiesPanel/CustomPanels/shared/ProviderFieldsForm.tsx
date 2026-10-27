@@ -12,7 +12,7 @@
  *   int64 / double (nullable)  → NullableNumberInput (toggle + number input)
  *   int64 / double (required)  → NumberInput
  *   boolean → Toggle
- *   list → TagInput  (comma-separated string[] stored as array)
+ *   list → ListInput  (Add button + table; string[] stored as array)
  *   json → JsonTextArea  (raw JSON object)
  *
  * Sensitivity is determined by `keyInfo.sensitive === true` from operator metadata.
@@ -30,9 +30,7 @@ import {
   Toggle,
 } from '@carbon/react';
 import { DefinitionTooltip } from '@carbon/react';
-import { TagInput } from '@/components/common/TagInput/TagInput';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { VaultInput } from '@/components/common';
+import { JsonTextArea, ListInput, VaultInput } from '@/components/common';
 import type { OperatorFeature } from '@/types';
 import common from '../../CommonPropertiesPanel.module.scss';
 
@@ -290,15 +288,15 @@ export function ProviderFieldsForm({
               />
             )}
 
-            {/* list → TagInput */}
+            {/* list → ListInput (explicit Add button; never commits on blur) */}
             {keyInfo.type === 'list' && (
-              <TagInput
+              <ListInput
                 id={inputId}
                 labelText={label}
-                hideLabel
-                tags={asStringArray(values[fieldKey])}
-                placeholder={`Add ${label.toLowerCase()}`}
-                helperText={`Press Enter or comma to add ${label.toLowerCase()}.`}
+                tableTitle={`Added ${label.toLowerCase()}`}
+                items={asStringArray(values[fieldKey])}
+                placeholder={`Enter ${label.toLowerCase()}`}
+                helperText="Type a value and press Enter, comma, or click Add to add it."
                 onChange={(items: string[]) => {onChange(fieldKey, items);}}
               />
             )}

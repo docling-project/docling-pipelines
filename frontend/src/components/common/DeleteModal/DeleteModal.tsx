@@ -7,6 +7,8 @@ import {
   ModalFooter,
   Button,
 } from '@carbon/react';
+import { useIntl } from 'react-intl';
+import { messages } from './DeleteModal.messages';
 import styles from './DeleteModal.module.scss';
 
 interface DeleteModalProps {
@@ -42,6 +44,7 @@ export function DeleteModal({
   onCancel,
   onDelete,
 }: DeleteModalProps): React.JSX.Element {
+  const intl = useIntl();
   const [deleting, setDeleting] = useState(false);
 
   const handleConfirm = (): void => {
@@ -64,20 +67,20 @@ export function DeleteModal({
       preventCloseOnClickOutside
       containerClassName={styles.modal}
     >
-      <ModalHeader title={`Delete ${assetType}`} buttonOnClick={onCancel} />
+      <ModalHeader title={intl.formatMessage(messages.title, { assetType })} buttonOnClick={onCancel} />
       <ModalBody className={styles.body}>
         <p>
-          {'You are going to delete '}
-          <strong>{assetName}</strong>
-          {" permanently. This action can't be undone."}
+          {intl.formatMessage(messages.body, {
+            assetName: <strong>{assetName}</strong>,
+          })}
         </p>
       </ModalBody>
       <ModalFooter className={styles.footer}>
         <Button kind="secondary" onClick={onCancel} disabled={deleting} className={styles.footerBtn}>
-          Cancel
+          {intl.formatMessage(messages.cancel)}
         </Button>
         <Button kind="danger" onClick={handleConfirm} disabled={deleting} className={styles.footerBtn}>
-          {deleting ? <InlineLoading description="Deleting..." /> : 'Delete'}
+          {deleting ? <InlineLoading description={intl.formatMessage(messages.deleting)} /> : intl.formatMessage(messages.delete)}
         </Button>
       </ModalFooter>
     </ComposedModal>

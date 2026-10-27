@@ -203,13 +203,7 @@ class DuckDBDocumentSetStorage(DocumentSetStorage):
                 query=f"SELECT {', '.join(select_clauses)} FROM {table_name}"  # nosec B608 — table_name is a sanitized identifier, not user input
             )
 
-            if len(result_table) == 0:
-                raise DocpipeException(
-                    f"Failed to retrieve metrics for table '{table_name}'",
-                    status_code=500,
-                    error_code=ErrorCode.DOCUMENT_SET_DATA_STORE_ERROR,
-                )
-
+            # Aggregates without GROUP BY always return exactly one row
             result = result_table.to_pylist()[0]
             metrics = {
                 "total_documents": int(result["total_documents"]),

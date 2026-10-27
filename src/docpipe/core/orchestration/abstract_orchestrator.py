@@ -26,6 +26,7 @@ from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.orchestration.abstract_operator_executor import AbstractOperatorExecutor
 from docpipe.core.orchestration.batch_manager import BatchManager
 from docpipe.core.orchestration.flow_execution_event_handler import FlowExecutionEventHandler
+from docpipe.core.orchestration.models.execution_event_context import NodeTableSummary, SinkDatasetInfo
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults, FlowEnginePort
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.core.datetime import get_current_timestamp
@@ -104,6 +105,10 @@ class AbstractOrchestrator(ABC):
         # path and setting it to FAILING would short-circuit the batches still running.
         self._failed_batch_nums: set[Any] = set()
         self._failed_batch_lock = threading.Lock()
+        # External sink datasets written by this flow, keyed by (namespace, name). Batches share this
+        # orchestrator, so a sink that runs once per batch is aggregated into a single entry.
+        self.sink_datasets: dict[tuple[str, str], SinkDatasetInfo] = {}
+        self._sink_datasets_lock = threading.Lock()
 
     @property
     def non_recoverable_docs_tables(self) -> list[pa.Table]:
@@ -561,11 +566,17 @@ class AbstractOrchestrator(ABC):
         )
 
         if not skip:
+            from docpipe.core.lineage.utils import LineageUtils
             from docpipe.core.orchestration.models.execution_event_context import NodeCompleteContext
 
             # Track the last output table for flow-level COMPLETE lineage event
             if tables:
                 self.last_output_table = tables[0]
+
+            sink_info = LineageUtils.derive_dataset_info_from_sink(operator_def=op_def)
+            sink_ns, sink_name = (sink_info[0], sink_info[1]) if sink_info else (None, None)
+            if sink_info:
+                self._record_sink_dataset(namespace=sink_info[0], name=sink_info[1], tables=tables)
 
             end_time = get_current_timestamp()
             predecessor_node_ids = self._resolve_predecessor_names(op_def=op_def)
@@ -584,6 +595,9 @@ class AbstractOrchestrator(ABC):
                     start_time=start,
                     end_time=end_time,
                     predecessor_node_ids=predecessor_node_ids,
+                    sink_dataset_namespace=sink_ns,
+                    sink_dataset_name=sink_name,
+                    has_downstream=bool(op_def.get(DocpipeConstants.OUTPUT_EDGES)),
                 ),
             )
 
@@ -591,6 +605,19 @@ class AbstractOrchestrator(ABC):
         self._refresh_job_status()
 
         return ExecuteStepResults(data_accesses, tables, internal_metadata)
+
+    def _record_sink_dataset(self, *, namespace: str, name: str, tables: list[pa.Table | None]) -> None:
+        """Record what a sink wrote, aggregating row counts when the sink runs once per micro-batch."""
+        table = next((t for t in tables if t is not None), None)
+        if table is None:
+            return
+        summary = NodeTableSummary.from_table(table)
+        with self._sink_datasets_lock:
+            existing = self.sink_datasets.get((namespace, name))
+            if existing is None:
+                self.sink_datasets[(namespace, name)] = SinkDatasetInfo(namespace=namespace, name=name, summary=summary)
+            else:
+                existing.summary.row_count += summary.row_count
 
     def __get_tables_from_data_accesses(self, *, executor, data_accesses):
         """Read tables from the data accesses produced by an operator.
@@ -662,9 +689,9 @@ class AbstractOrchestrator(ABC):
                 # delete table if exists already
                 parquet_table_handler.delete_file(path=deleted_rows_table_path)
                 parquet_table_handler.save_table(path=deleted_rows_table_path, table=cumulative_deleted_rows)
-                self.logger.info(f"Successfully captured {cumulative_deleted_rows.num_rows} deleted documents.")
+                self.logger.info("Successfully captured %d deleted documents.", cumulative_deleted_rows.num_rows)
             except Exception as e:
-                self.logger.warning(f"Failed to save unprocessed docs table — skipping it. Error: {e}")
+                self.logger.warning("Failed to save unprocessed docs table — skipping it. Error: %s", e)
 
     def get_parquet_table_handler_impl(self) -> BaseParquetTableHandler:
         """Return the parquet table handler implementation.
@@ -702,7 +729,7 @@ class AbstractOrchestrator(ABC):
                 "Marked pending batches as skipped due to fail-fast mode failure", extra=self.common_log_arguments
             )
         except Exception as e:
-            self.logger.warning(f"Failed to mark pending batches as skipped: {e}", extra=self.common_log_arguments)
+            self.logger.warning("Failed to mark pending batches as skipped: %s", e, extra=self.common_log_arguments)
 
     def _cleanup_memmap_files(self):
         """Clean up temporary memmap files after flow execution if memmap storage was used."""
@@ -716,7 +743,7 @@ class AbstractOrchestrator(ABC):
 
             cleanup_memmap_files(job_id=self.job_id, job_run_id=self.job_run_id)
         except Exception as e:
-            self.logger.warning(f"Failed to cleanup memmap files: {e}")
+            self.logger.warning("Failed to cleanup memmap files: %s", e)
 
     def _collect_non_recoverable_docs(
         self,
@@ -866,7 +893,9 @@ class AbstractOrchestrator(ABC):
         global_config = {} if global_config is None else global_config
         operator_name = op_def.get(OperatorConstants.Columns.NAME, "unknown")
         self.logger.debug(
-            f"create_executor for '{operator_name}': ingest_source in global_config={OperatorConstants.Config.INGEST_SOURCE in global_config}",
+            "create_executor for '%s': ingest_source in global_config=%s",
+            operator_name,
+            OperatorConstants.Config.INGEST_SOURCE in global_config,
             extra=self.common_log_arguments,
         )
         operator_config = op_def.get(OperatorConstants.Config.CONFIG, {})
@@ -1130,12 +1159,20 @@ class AbstractOrchestrator(ABC):
                         if getattr(self, "last_output_table", None) is not None
                         else [],
                         ingest_dataset_name=getattr(self, "ingest_dataset_name", None),
+                        sink_datasets=list(self.sink_datasets.values()),
                         completed_docs=_completed,
                         failed_docs=_failed,
                         skipped_docs=_skipped,
                         total_docs=_total,
                     ),
                 )
+
+    @staticmethod
+    def _derive_ingest_dataset_info(*, ingest_operator: dict) -> tuple[str, str]:
+        """Derive standard OpenLineage (namespace, name) tuple from the ingest operator config."""
+        from docpipe.core.lineage.utils import LineageUtils
+
+        return LineageUtils.derive_dataset_info_from_ingest(ingest_operator=ingest_operator)
 
     def _derive_ingest_dataset_name(self, *, ingest_operator: dict) -> str:
         """Derive a human-readable dataset name from the ingest operator config.
@@ -1156,7 +1193,8 @@ class AbstractOrchestrator(ABC):
         """
         operator_type = ingest_operator.get(OperatorConstants.Misc.OPERATOR, "")
         self.logger.info(
-            f"Checking if operator is ingest_source: operator_type='{operator_type}'",
+            "Checking if operator is ingest_source: operator_type='%s'",
+            operator_type,
             extra=self.common_log_arguments,
         )
         if "ingest_source" in operator_type.lower() or "IngestSourceOperator" in operator_type:
@@ -1168,12 +1206,14 @@ class AbstractOrchestrator(ABC):
                 OperatorConstants.Config.PROVIDER_CONFIG: provider_config,
             }
             self.logger.info(
-                f"Populated global_config with ingest_source params for provider: {operator_config.get(OperatorConstants.Config.PROVIDER)}",
+                "Populated global_config with ingest_source params for provider: %s",
+                operator_config.get(OperatorConstants.Config.PROVIDER),
                 extra=self.common_log_arguments,
             )
             self.logger.debug(
-                f"global_config after population: ingest_source keys={list(global_config.get(OperatorConstants.Config.INGEST_SOURCE, {}).keys())}, "
-                f"provider_config keys={list(provider_config.keys())}",
+                "global_config after population: ingest_source keys=%s, provider_config keys=%s",
+                list(global_config.get(OperatorConstants.Config.INGEST_SOURCE, {}).keys()),
+                list(provider_config.keys()),
                 extra=self.common_log_arguments,
             )
         else:
@@ -1196,6 +1236,10 @@ class AbstractOrchestrator(ABC):
 
         """
 
+        # Sinks are collected per flow execution; a reused orchestrator must not carry them over.
+        with self._sink_datasets_lock:
+            self.sink_datasets = {}
+
         # Configure prefect server logging
         _ = get_logger(name="prefect")
 
@@ -1211,13 +1255,15 @@ class AbstractOrchestrator(ABC):
             if OperatorConstants.Columns.ID in node and OperatorConstants.Columns.NAME in node
         }
 
-        # Derive the ingest source name early — it is available from config alone,
+        # Derive the ingest source name and namespace early — it is available from config alone,
         # before execution, and is needed for the ingest node's input dataset label.
-        self.ingest_dataset_name = self._derive_ingest_dataset_name(ingest_operator=ingest_operator)
+        ingest_ns, ingest_name = self._derive_ingest_dataset_info(ingest_operator=ingest_operator)
+        self.ingest_dataset_namespace = ingest_ns
+        self.ingest_dataset_name = ingest_name
 
         # Emit node START for ingest before execution — ingest bypasses _inner_task
         # so on_node_start must be fired manually here.  The input dataset is the
-        # ingest source itself (e.g. filesystem://./tests/fixtures/customer_support_docs).
+        # ingest source itself (e.g. file / ./tests/fixtures/customer_support_docs).
         from docpipe.core.orchestration.models.execution_event_context import NodeStartContext as _NodeStartContext
         from docpipe.core.orchestration.models.execution_event_context import NodeTableSummary as _NodeTableSummary
 
@@ -1232,9 +1278,10 @@ class AbstractOrchestrator(ABC):
                 node_name=ingest_operator[OperatorConstants.Columns.NAME],
                 operator_type=ingest_operator.get(OperatorConstants.Misc.OPERATOR, ""),
                 # Use ingest source path as the input dataset so Marquez shows
-                # where data originates (e.g. filesystem://./tests/fixtures/...).
+                # where data originates (e.g. file / ./tests/fixtures/...).
                 # No table exists yet so we pass a zero-row placeholder summary.
                 input_summary=_NodeTableSummary(schema_fields=[], row_count=0),
+                ingest_source_dataset_namespace=self.ingest_dataset_namespace,
                 ingest_source_dataset_name=self.ingest_dataset_name,
                 parent_run_id=self.job_run_id or "",
                 start_time=ingest_start_time,
@@ -1276,6 +1323,7 @@ class AbstractOrchestrator(ABC):
                 job_run_id=self.job_run_id or "",
                 ingested_table=ingested_table,
                 ingest_node_id=op_flow[0].get(OperatorConstants.Columns.ID) if op_flow else None,
+                ingest_source_namespace=self.ingest_dataset_namespace,
                 ingest_source_name=self.ingest_dataset_name,
             ),
         )
@@ -1312,14 +1360,16 @@ class AbstractOrchestrator(ABC):
 
         # Prepare batches using batch manager
         self.logger.debug(
-            f"Before prepare_batches: ingest_source in global_config={OperatorConstants.Config.INGEST_SOURCE in global_config}",
+            "Before prepare_batches: ingest_source in global_config=%s",
+            OperatorConstants.Config.INGEST_SOURCE in global_config,
             extra=self.common_log_arguments,
         )
         batches, global_config = self.batch_manager.prepare_batches(
             ingested_table=ingested_table, global_config=global_config, common_log_arguments=self.common_log_arguments
         )
         self.logger.debug(
-            f"After prepare_batches: ingest_source in global_config={OperatorConstants.Config.INGEST_SOURCE in global_config}",
+            "After prepare_batches: ingest_source in global_config=%s",
+            OperatorConstants.Config.INGEST_SOURCE in global_config,
             extra=self.common_log_arguments,
         )
 

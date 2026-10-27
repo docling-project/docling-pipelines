@@ -74,7 +74,6 @@
       "config": {
         "provider": "milvus",
         "doc_id_column": "doc_id_hash",
-        "create_index": true,
         "add_sparse_vector": false,
         "provider_config": {
           "collection_name": "local_documents",

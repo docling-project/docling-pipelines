@@ -19,7 +19,13 @@ jobs:
   verify-commits:
     name: Verify DCO, GPG & PR Template
     # Only meaningful on pull requests; push and workflow_dispatch have no PR payload.
-    if: github.event_name == 'pull_request'
+    # PRs opened by allowlisted dependency bots are skipped: their commits carry no
+    # Signed-off-by trailer and their PR body is generated, so DCO and template
+    # checks cannot pass. Keep this an explicit
+    # allowlist; do not widen it to user.type == 'Bot'.
+    if: >
+      github.event_name == 'pull_request' &&
+      !contains(fromJSON('["renovate[bot]","dependabot[bot]"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -315,6 +321,9 @@ jobs:
     name: Test Suite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
 
     strategy:
       fail-fast: false
@@ -346,7 +355,12 @@ jobs:
         run: sudo apt-get install -y libldap2-dev libsasl2-dev
 
       - name: Install Dependencies
-        run: uv pip install --system -e ".[dev]"
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Unit Tests
         run: python -m pytest tests/unit -m "unit and not integration" -v --cov=src --cov-report=xml --cov-report=term-missing

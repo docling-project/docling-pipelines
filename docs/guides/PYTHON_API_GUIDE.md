@@ -193,7 +193,6 @@ def build_flow_definition(input_folder: str, index_name: str) -> dict:
                     "doc_id_column": "doc_id_hash",
                     "embeddings_column": "embeddings",
                     "vector_dimension": 768,
-                    "create_index": True,
                     "provider_config": {
                         "index_name": index_name,
                         "host": "localhost",

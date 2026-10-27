@@ -5,15 +5,34 @@
   "additionalProperties": false,
   "required": [
     "event_id",
-    "event_timestamp"
+    "event_timestamp",
+    "routing_key",
+    "operation",
+    "file_reference"
   ],
   "properties": {
     "event_id": {
-      "type": "string"
+      "type": "string",
+      "format": "uuid"
     },
     "event_timestamp": {
       "type": "string",
       "format": "date-time"
+    },
+    "routing_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "create",
+        "update"
+      ]
+    },
+    "file_reference": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

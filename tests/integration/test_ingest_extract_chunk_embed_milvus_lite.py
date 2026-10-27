@@ -74,7 +74,6 @@ def _vdb_config(*, db_path: str, collection: str = "test_collection") -> dict[st
     return {
         "provider": "milvus",
         "doc_id_column": "doc_id_hash",
-        "create_index": True,
         "add_sparse_vector": False,
         "available_features": AVAILABLE_FEATURES,
         "feature_mappings": FEATURE_MAPPINGS,
@@ -270,7 +269,6 @@ class TestIngestExtractChunkEmbedMilvusLite:
                 config={
                     "provider": "milvus",
                     "doc_id_column": "doc_id_hash",
-                    "create_index": True,
                     "provider_config": {
                         "collection_name": "bad_index",
                         "auth_type": "lite",
