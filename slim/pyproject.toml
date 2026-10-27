@@ -212,6 +212,8 @@ override-dependencies = [
     "rapidocr==3.9.0",
     # CVE-2026-49476, CVE-2026-49477: Security fix for soupsieve vulnerability (transitive via beautifulsoup4).
     "soupsieve>=2.8.4",
+    # CVE-2026-85670: tokenizers <= 0.23.2 vulnerable (CVSS 6.5); fix is 0.23.3+ (transitive via sentence-transformers/transformers).
+    "tokenizers>=0.23.3",
 ]
 
 [tool.ruff]

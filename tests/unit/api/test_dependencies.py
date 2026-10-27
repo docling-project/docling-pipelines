@@ -252,6 +252,26 @@ class TestGetDocumentSetAttachmentRepository:
         assert call_kwargs["adapter_name"] == "duckdb"
         assert call_kwargs["config"]["database_path"] == "/custom/path/ds.duckdb"
 
+    def test_postgres_repository_type_stores_attachments_in_postgres(self):
+        """type: postgres co-locates attachments with metadata, like DocumentSetOperator does."""
+        mock_repo = MagicMock()
+        repo_config = {"postgres": {"host": "db", "schema": "assets"}}
+
+        with (
+            patch(
+                "docpipe.api.dependencies.RepositoryFactory.get_repository_config",
+                return_value=("Postgres", repo_config),
+            ),
+            patch("docpipe.api.dependencies.AttachmentRepositoryFactory.create", return_value=mock_repo) as mock_create,
+        ):
+            result = get_document_set_attachment_repository()
+
+        assert result is mock_repo
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs["adapter_name"] == "postgres"
+        assert call_kwargs["config"]["postgres"] == {"host": "db", "schema": "assets"}
+        assert call_kwargs["config"]["database_path"].endswith("document_sets.duckdb")
+
 
 # ---------------------------------------------------------------------------
 # get_document_set_service
