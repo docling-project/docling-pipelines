@@ -13,7 +13,7 @@ Delivery order follows the proposal's Rollout: groups 1-6 are the API PR, groups
 - [ ] 2.1 [backend] Create the `adapters/outbound/weaviate/` package with an `__init__.py` that exports nothing. Implement `config.py` (`ADAPTER_NAME`, `WeaviateConfig`, `format_config_errors`) per design D3 and D15:
   - field validator messages for `collection_name`;
   - a `model_validator` for cloud → `cluster_url`, `auth_type` → its credentials, credentials over plaintext (a custom connection with `auth_type != "none"` requires `secure` and the resolved `grpc_secure` to both be true), and credential references resolvable through `resolve_env_var` with the result discarded;
-  - `json_schema_extra={"sensitive": True}` on `api_key`, `bearer_token`, and `password`;
+  - the sensitive flag (via `json_schema_extra`) on the API key, bearer token, and password fields;
   - `format_config_errors` built only from error location and message, never from input values.
 
   `config.py` must not import `weaviate`. Verify `ruff` and `mypy` are clean on the module and that importing it loads no `weaviate` module.
