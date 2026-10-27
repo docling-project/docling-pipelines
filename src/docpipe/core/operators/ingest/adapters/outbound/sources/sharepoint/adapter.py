@@ -69,6 +69,34 @@ class SharePointSourceAdapter(DocumentSourcePort):
         # secret_hash ensures a rotated client_secret invalidates the cached loader.
         self._loader_cache: dict[tuple[str, str, str, str], MicrosoftGraphLoader] = {}
 
+    @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set one SharePoint item as the only file to ingest.
+
+        ``file_reference`` is a Microsoft Graph drive item id in the document
+        library already configured on the flow, or a SharePoint file URL.
+        ``fetch_documents`` already loads that value from ``file_path`` and
+        checks it with Microsoft Graph, so this method only validates the
+        reference. Credentials and the document library stay in
+        ``provider_config`` and are never read from the event.
+        """
+        if not isinstance(file_reference, str) or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty SharePoint item id or file URL")
+
+        reference = file_reference.strip()
+        lowered = reference.lower()
+        if "://" in reference and not lowered.startswith(("http://", "https://")):
+            raise ValueError("File reference must be a SharePoint item id or file URL, not a URI")
+
+        if lowered.startswith(("http://", "https://")):
+            extracted = extract_msgraph_file_id_from_url(reference)
+            if not isinstance(extracted, str) or not extracted.strip():
+                raise ValueError(
+                    "File reference must be a SharePoint item id or a file URL with an id or sourcedoc parameter"
+                )
+
+        provider_config["file_path"] = reference
+
     def _get_loader(
         self,
         *,
@@ -427,8 +455,8 @@ class SharePointSourceAdapter(DocumentSourcePort):
             logger.info("Successfully downloaded %s bytes from SharePoint: %s", len(content), item_id)
             return content
 
-        except Exception as e:
-            logger.error("Error fetching binary content from SharePoint %s: %s", source_id, e, exc_info=True)
+        except Exception:
+            logger.exception("Error fetching binary content from SharePoint %s", source_id)
             return None
 
     def build_config_from_operator_params(
