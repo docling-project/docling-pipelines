@@ -32,7 +32,12 @@ Guarantees
   so two configurations that differ in any setting never share an instance.
 * **Bounded idle memory** -- idle instances are dropped after ``idle_ttl_seconds``
   (default 600 s) by a daemon reaper thread so a long-lived API process does not
-  keep models resident forever after a job finishes.
+  keep models resident forever after a job finishes. After dropping instances the
+  pool runs a garbage collection pass and, if torch is loaded, empties the CUDA/MPS
+  allocator caches, so the memory actually goes back to the system and the GPU.
+* **Retirement** -- a closed pool builds nothing new: callers that ask it for an
+  instance, including ones already waiting for a free slot, get
+  :class:`DoclingPoolClosedError` instead of constructing models nobody keeps.
 
 Configuration
 -------------
@@ -56,10 +61,12 @@ from __future__ import annotations
 
 import atexit
 import enum
+import gc
 import hashlib
 import json
 import math
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -199,6 +206,29 @@ def options_fingerprint(options: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+class DoclingPoolClosedError(RuntimeError):
+    """Raised when an instance is requested from a pool that has been closed."""
+
+
+def _release_accelerator_memory() -> None:
+    """Hand the memory of dropped instances back to the OS and the accelerator driver.
+
+    Docling pipelines hold PyTorch models whose modules often form reference cycles, so
+    a collection pass is needed before their tensors are actually freed, and PyTorch's
+    caching allocators keep freed GPU blocks reserved until ``empty_cache()`` is called.
+    Torch is only consulted if something already imported it, and CUDA only if it has
+    been initialised, so this never imports torch or creates a CUDA context.
+    """
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    if torch.cuda.is_initialized():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 class DoclingInstancePool:
     """Thread-safe, bounded, keyed pool of expensive Docling objects.
 
@@ -268,9 +298,17 @@ class DoclingInstancePool:
             self._release(key=key, instance=instance)
 
     def _acquire(self, *, key: str, factory: Callable[[], Any]) -> Any:
-        """Check out an idle instance for ``key`` or reserve a slot and build one."""
+        """Check out an idle instance for ``key`` or reserve a slot and build one.
+
+        Raises:
+            DoclingPoolClosedError: If the pool is closed, also while waiting for a free
+                slot, so no instance is built for a pool that has been retired.
+        """
         with self._cond:
             while True:
+                if self._closed:
+                    msg = "DoclingInstancePool has been closed"
+                    raise DoclingPoolClosedError(msg)
                 stack = self._idle.get(key)
                 if stack:
                     instance, _ = stack.pop()
@@ -401,11 +439,39 @@ class DoclingInstancePool:
         if self._idle_ttl_seconds <= 0:
             return 0
         current = time.monotonic() if now is None else now
+        dropped = self._drop_idle(released_before=current - self._idle_ttl_seconds)
+        if dropped:
+            logger.info(
+                "Released %s idle Docling instance(s) after %.0f s of inactivity", dropped, self._idle_ttl_seconds
+            )
+            _release_accelerator_memory()
+        return dropped
+
+    def clear_idle(self) -> int:
+        """Drop every idle instance (checked-out instances are unaffected).
+
+        Returns:
+            Number of instances dropped.
+        """
+        dropped = self._drop_idle(released_before=None)
+        if dropped:
+            _release_accelerator_memory()
+        return dropped
+
+    def _drop_idle(self, *, released_before: float | None) -> int:
+        """Drop idle instances released at or before ``released_before`` (all of them if ``None``).
+
+        Kept separate from the public callers so that no local variable still references
+        a dropped instance when they release accelerator memory afterwards.
+
+        Returns:
+            Number of instances dropped.
+        """
         dropped = 0
         with self._cond:
             for key in list(self._idle):
                 stack = self._idle[key]
-                keep = [entry for entry in stack if current - entry[1] < self._idle_ttl_seconds]
+                keep = [] if released_before is None else [entry for entry in stack if entry[1] > released_before]
                 for _ in range(len(stack) - len(keep)):
                     self._forget_locked(key=key)
                     dropped += 1
@@ -415,26 +481,6 @@ class DoclingInstancePool:
                     del self._idle[key]
             if dropped:
                 self._cond.notify_all()
-        if dropped:
-            logger.info(
-                "Released %s idle Docling instance(s) after %.0f s of inactivity", dropped, self._idle_ttl_seconds
-            )
-        return dropped
-
-    def clear_idle(self) -> int:
-        """Drop every idle instance (checked-out instances are unaffected).
-
-        Returns:
-            Number of instances dropped.
-        """
-        with self._cond:
-            dropped = 0
-            for key, stack in self._idle.items():
-                for _ in stack:
-                    self._forget_locked(key=key)
-                    dropped += 1
-            self._idle.clear()
-            self._cond.notify_all()
         return dropped
 
     def shutdown(self) -> None:
@@ -451,9 +497,11 @@ class DoclingInstancePool:
 
         Leases still active when the pool is closed finish normally, but their instances
         are discarded on release instead of being kept idle, and no reaper is restarted.
+        Callers waiting for a free slot are woken and get :class:`DoclingPoolClosedError`.
         """
         with self._cond:
             self._closed = True
+            self._cond.notify_all()
         self.shutdown()
 
     def _ensure_reaper(self) -> None:

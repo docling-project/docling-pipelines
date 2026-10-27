@@ -1,9 +1,13 @@
 """Unit tests for the process-wide Docling converter pool."""
 
+import gc
 import logging
+import sys
 import threading
 import time
+import weakref
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel, SecretStr
@@ -12,6 +16,7 @@ from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.integrations.docling import converter_pool
 from docpipe.integrations.docling.converter_pool import (
     DoclingInstancePool,
+    DoclingPoolClosedError,
     get_docling_pool,
     options_fingerprint,
     reset_docling_pool,
@@ -380,6 +385,160 @@ class TestDoclingInstancePool:
             pool.close()
         assert pool.stats() == {"max_size": 2, "live": 0, "idle": 0, "constructed": 1, "keys": 0}
         assert pool._reaper is None
+
+    def test_closed_pool_builds_nothing_for_new_callers(self):
+        pool = DoclingInstancePool(max_size=2, idle_ttl_seconds=0)
+        pool.close()
+
+        with pytest.raises(DoclingPoolClosedError, match="closed"):
+            with pool.lease(key="k", factory=_Instrumented):
+                pass
+
+        assert _Instrumented.constructed == 0
+        assert pool.stats()["live"] == 0
+
+    def test_close_wakes_waiters_without_building_on_the_retired_pool(self):
+        """A caller blocked on a full pool fails fast when the pool is closed instead of building."""
+        pool = DoclingInstancePool(max_size=1, idle_ttl_seconds=0)
+        holder_has_instance = threading.Event()
+        let_holder_finish = threading.Event()
+        waiter_errors: list[BaseException] = []
+
+        def holder() -> None:
+            with pool.lease(key="k", factory=_Instrumented):
+                holder_has_instance.set()
+                let_holder_finish.wait(timeout=5)
+
+        def waiter() -> None:
+            try:
+                with pool.lease(key="k", factory=_Instrumented):
+                    pass
+            except DoclingPoolClosedError as exc:
+                waiter_errors.append(exc)
+
+        holder_thread = threading.Thread(target=holder)
+        holder_thread.start()
+        assert holder_has_instance.wait(timeout=5)
+        waiter_thread = threading.Thread(target=waiter)
+        waiter_thread.start()
+        time.sleep(0.05)  # let the waiter block on the full pool
+
+        pool.close()
+        waiter_thread.join(timeout=5)
+        let_holder_finish.set()
+        holder_thread.join(timeout=5)
+
+        assert not waiter_thread.is_alive()
+        assert len(waiter_errors) == 1
+        assert _Instrumented.constructed == 1
+        assert pool.stats()["live"] == 0
+
+
+class _CyclicInstance:
+    """Stand-in for a model-holding converter whose objects reference each other."""
+
+    def __init__(self) -> None:
+        self.me = self
+
+
+class _FakeCuda:
+    def __init__(self, *, initialized: bool) -> None:
+        self.initialized = initialized
+        self.emptied = 0
+
+    def is_initialized(self) -> bool:
+        return self.initialized
+
+    def empty_cache(self) -> None:
+        self.emptied += 1
+
+
+class _FakeMps:
+    def __init__(self) -> None:
+        self.emptied = 0
+
+    def empty_cache(self) -> None:
+        self.emptied += 1
+
+
+def _fake_torch(*, cuda_initialized: bool, mps_available: bool) -> SimpleNamespace:
+    """A minimal stand-in for the torch accelerator API (no GPU is available in CI)."""
+    return SimpleNamespace(
+        cuda=_FakeCuda(initialized=cuda_initialized),
+        mps=_FakeMps(),
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps_available)),
+    )
+
+
+class TestAcceleratorMemoryRelease:
+    """Dropping idle instances returns their memory instead of leaving it to the allocator caches."""
+
+    @pytest.fixture
+    def automatic_gc_off(self):
+        """Make collection depend on the pool only, not on an incidental automatic gc run."""
+        gc.disable()
+        try:
+            yield
+        finally:
+            gc.enable()
+
+    @pytest.mark.usefixtures("automatic_gc_off")
+    @pytest.mark.parametrize("drop", ["evict_expired", "clear_idle"])
+    def test_dropped_cyclic_instances_are_collected(self, drop):
+        pool = DoclingInstancePool(max_size=2, idle_ttl_seconds=10)
+        with pool.lease(key="k", factory=_CyclicInstance) as instance:
+            ref = weakref.ref(instance)
+        del instance
+
+        if drop == "evict_expired":
+            assert pool.evict_expired(now=time.monotonic() + 11) == 1
+        else:
+            assert pool.clear_idle() == 1
+
+        assert ref() is None
+        pool.shutdown()
+
+    @pytest.mark.parametrize(
+        ("cuda_initialized", "mps_available", "cuda_emptied", "mps_emptied"),
+        [(True, False, 1, 0), (False, True, 0, 1), (False, False, 0, 0)],
+        ids=["cuda-in-use", "mps", "cuda-never-initialised"],
+    )
+    def test_accelerator_caches_are_emptied_only_when_in_use(
+        self, monkeypatch, cuda_initialized, mps_available, cuda_emptied, mps_emptied
+    ):
+        torch = _fake_torch(cuda_initialized=cuda_initialized, mps_available=mps_available)
+        monkeypatch.setitem(sys.modules, "torch", torch)
+        pool = DoclingInstancePool(max_size=2, idle_ttl_seconds=0)
+        with pool.lease(key="k", factory=_Instrumented):
+            pass
+
+        assert pool.clear_idle() == 1
+
+        assert (torch.cuda.emptied, torch.mps.emptied) == (cuda_emptied, mps_emptied)
+
+    def test_torch_is_not_imported_when_nothing_loaded_it(self, monkeypatch):
+        monkeypatch.delitem(sys.modules, "torch", raising=False)
+        pool = DoclingInstancePool(max_size=2, idle_ttl_seconds=0)
+        with pool.lease(key="k", factory=_Instrumented):
+            pass
+
+        assert pool.clear_idle() == 1
+
+        assert "torch" not in sys.modules
+
+    def test_nothing_is_released_when_nothing_was_dropped(self, monkeypatch):
+        calls: list[None] = []
+        monkeypatch.setattr(converter_pool, "_release_accelerator_memory", lambda: calls.append(None))
+        pool = DoclingInstancePool(max_size=2, idle_ttl_seconds=10)
+        with pool.lease(key="k", factory=_Instrumented):
+            pass
+
+        assert pool.evict_expired(now=time.monotonic()) == 0
+        assert calls == []
+        assert pool.clear_idle() == 1
+        assert pool.clear_idle() == 0
+        assert calls == [None]
+        pool.shutdown()
 
 
 # ---------------------------------------------------------------------------
