@@ -480,8 +480,7 @@ class DoclingServeClient:
             # Only retry on 404 errors (task not found during pod transitions)
             if e.status_code == 404:
                 logger.warning(
-                    "Task not found (404) at %s. "
-                    "This may occur during pod restarts or HPA scaling. Retrying...",
+                    "Task not found (404) at %s. This may occur during pod restarts or HPA scaling. Retrying...",
                     endpoint,
                 )
                 raise  # Let decorator handle retry
