@@ -25,12 +25,12 @@ dependencies = [
     "datatrove==0.10.0",
     "datefinder==1.0.0",
     "defusedxml==0.7.1",
-    "docling[rapidocr]==2.132.0",
+    "docling[rapidocr]==2.142.1",
     "dropbox==12.2.1",
     "duckdb==1.3.2",
     "fastapi==0.141.1",
-    "fasttext-wheel==0.9.2",
-    "filelock==3.24.2",
+    "fasttext-numpy2==0.10.4",
+    "filelock==4.2.1",
     "ftfy==6.3.1",
     "google-api-python-client==2.190.0",
     "google-auth-httplib2==0.3.0",
@@ -54,7 +54,7 @@ dependencies = [
     "mako==1.4.3",
     "mlx==0.32.2; sys_platform == 'darwin'",
     "msal==1.37.0",
-    "nltk==3.10.3",
+    "nltk==3.10.4",
     "o365==2.1.9",
     "ollama==0.6.1",
     "openai==2.33.0",
@@ -62,9 +62,9 @@ dependencies = [
     "orjson==3.13.0",
     "pandas==2.3.3",
     "passlib[bcrypt]==1.7.4",
-    "pillow==12.3.0",
+    "pillow==13.0.0",
     "polars==1.32.3",
-    "prefect==3.8.3",
+    "prefect==3.8.4",
     "psycopg2-binary==2.9.12",
     "pyarrow==24.0.0",
     "pyasn1==0.6.4",
@@ -77,16 +77,15 @@ dependencies = [
     "milvus-lite==3.2.2",
     "pymilvus==2.6.13",
     "pyopenssl==26.4.0",
-    "pypdf==6.20.0",
+    "pypdf==6.21.2",
     "pyphen==0.17.2",
     "python-dotenv==1.2.2",
-    "python-jose[cryptography]==3.5.0",
     "python-ldap==3.4.5",
     "python-multipart==0.0.32",
     "pyyaml==6.0.3",
     "requests==2.34.2",
     "sentence-transformers==5.6.0",
-    "setuptools==84.0.0",
+    "setuptools==84.1.0",
     "spacy>=3.7.4",
     "sqlalchemy==2.0.49",
     "sqlglot==27.13.2",
@@ -94,7 +93,7 @@ dependencies = [
     "tabulate==0.10.0",
     "tenacity==8.3.0",
     "toml==0.10.2",
-    "torch==2.13.0",
+    "torch==2.14.1",
     "transformers>=5.17,<5.18",
     "unicategories==0.1.2",
     "unicodedataplus==16.0.0.post1",
@@ -122,9 +121,9 @@ benchmark = [
 ]
 
 dev = [
-    "black==26.3.1",
+    "black==26.10.1",
     "detect-secrets==1.5.0",
-    "faker==40.8.0",
+    "faker==40.43.0",
     "flake8==7.3.0",
     "httpx==0.28.1",  # For testing FastAPI
     "interrogate==1.7.0",
@@ -136,46 +135,46 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-mock==3.15.1",
     "pytest-timeout==2.4.0",
-    "pytest-xdist==3.6.1",
+    "pytest-xdist==3.8.0",
     "ruff==0.15.20",
 ]
 
 notebooks = [
-    "ipykernel==7.3.0",
+    "ipykernel==7.4.0",
     "jupyter==1.1.1",
     # CVE-2026-102831, CVE-2026-102904, CVE-2026-102830: fixed in JupyterLab 4.6.4.
     "jupyterlab==4.6.4",
     "matplotlib==3.11.2",
-    "nbconvert==7.17.1",
+    "nbconvert==7.17.2",
     "nbformat==5.10.4",
     "seaborn==0.13.2",
 ]
 
 telemetry = [
-    "opentelemetry-api==1.41.1",
-    "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
-    "opentelemetry-instrumentation-fastapi==0.62b1",
-    "opentelemetry-sdk==1.41.1",
+    "opentelemetry-api==1.45.1",
+    "opentelemetry-exporter-otlp-proto-grpc==1.45.1",
+    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-sdk==1.45.1",
 ]
 
 rapidocr = [
-    "docling[rapidocr]==2.132.0",
+    "docling[rapidocr]==2.142.1",
 ]
 
 easyocr = [
-    "docling[easyocr]==2.132.0",
+    "docling[easyocr]==2.142.1",
 ]
 
 ocrmac = [
-    "docling[ocrmac]==2.132.0",
+    "docling[ocrmac]==2.142.1",
 ]
 
 tesserocr = [
-    "docling[tesserocr]==2.132.0",
+    "docling[tesserocr]==2.142.1",
 ]
 
 vlm_asr = [
-    "docling[vlm,asr]==2.132.0",
+    "docling[vlm,asr]==2.142.1",
 ]
 
 [project.urls]
@@ -399,7 +398,7 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
-    "anyio==4.14.2",
+    "anyio==4.15.1",
     "httpx==0.28.1",
     "mypy==2.1.0",
     "pytest==9.0.3",

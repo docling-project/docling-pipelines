@@ -28,6 +28,19 @@ class NodeTableSummary:
 
 
 @dataclass
+class SinkDatasetInfo:
+    """External sink dataset written during a flow, with a summary of what was written to it.
+
+    One entry exists per distinct ``(namespace, name)``. When a sink runs once per micro-batch,
+    ``summary.row_count`` is the total across batches.
+    """
+
+    namespace: str
+    name: str
+    summary: NodeTableSummary
+
+
+@dataclass
 class FlowStartContext:
     """Context delivered when flow execution is starting."""
 
@@ -49,6 +62,7 @@ class FlowRunningContext:
     ingested_table: pa.Table | None = None
     ingest_node_id: str | None = None
     ingest_source_name: str | None = None
+    ingest_source_namespace: str | None = None
     progress: dict[str, Any] = field(default_factory=dict)
     event_time: datetime | str | None = None
 
@@ -65,6 +79,7 @@ class FlowCompleteContext:
     output_tables: list[pa.Table] = field(default_factory=list)
     output_metadata: dict[str, Any] = field(default_factory=dict)
     ingest_dataset_name: str | None = None
+    sink_datasets: list[SinkDatasetInfo] = field(default_factory=list)
     completed_docs: int = 0
     failed_docs: int = 0
     skipped_docs: int = 0
@@ -118,6 +133,7 @@ class NodeStartContext:
     parent_run_id: str | None = None
     start_time: datetime | str | None = None
     ingest_source_dataset_name: str | None = None
+    ingest_source_dataset_namespace: str | None = None
 
 
 @dataclass
@@ -134,6 +150,9 @@ class NodeCompleteContext:
     output_summaries: list[NodeTableSummary] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     predecessor_node_ids: list[str] = field(default_factory=list)
+    sink_dataset_namespace: str | None = None
+    sink_dataset_name: str | None = None
+    has_downstream: bool = False
     start_time: datetime | str | None = None
     end_time: datetime | str | None = None
     batch_id: str | None = None
