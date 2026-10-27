@@ -105,7 +105,7 @@ class LiteLLMLLMClient(BaseLLMClient):
             provider = self._get_provider_from_model(model_name)
             self._set_provider_api_key(provider, self.api_key)
 
-        logger.info(f"Initialized LiteLLM client with model '{model_name}'")
+        logger.info("Initialized LiteLLM client with model '%s'", model_name)
 
     def _get_provider_from_model(self, model_name: str) -> str:
         """
@@ -238,13 +238,14 @@ class LiteLLMLLMClient(BaseLLMClient):
             msg = f"Failed to generate embeddings with LiteLLM model '{self.model_name}': {e}"
             raise ExternalServiceError(msg) from e
 
-    @retry_with_backoff(max_retries=3, initial_delay=1.0)
     def generate_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for multiple texts in batches.
 
         LiteLLM supports batch embedding requests, which reduces API calls
-        and improves performance by 30-40%.
+        and improves performance by 30-40%. Texts are sent in requests of at most
+        ``batch_size`` texts; each request is retried on its own, so a transient
+        failure re-sends only the request that failed.
 
         Args:
             texts: List of input texts to generate embeddings for
@@ -269,31 +270,7 @@ class LiteLLMLLMClient(BaseLLMClient):
 
             # Process in batches to avoid rate limits and timeouts
             for i in range(0, len(texts), self.batch_size):
-                batch = texts[i : i + self.batch_size]
-
-                # LiteLLM supports batch input
-                response = self.litellm.embedding(
-                    model=self.model_name,
-                    input=batch,
-                    api_key=self.api_key,
-                    api_base=self.api_base,
-                    **self.config,
-                )
-
-                # Extract embeddings from response
-                if hasattr(response, "data") and response.data:
-                    batch_embeddings = [item["embedding"] for item in response.data]
-                elif isinstance(response, dict) and "data" in response:
-                    batch_embeddings = [item["embedding"] for item in response["data"]]
-                else:
-                    msg = f"Unexpected response format from LiteLLM: {type(response)}"
-                    raise ExternalServiceError(msg)
-
-                # Validate each embedding
-                for emb in batch_embeddings:
-                    self._validate_embeddings_output(emb)
-
-                all_embeddings.extend(batch_embeddings)
+                all_embeddings.extend(self._embed_request(batch=texts[i : i + self.batch_size]))
 
             return all_embeddings
 
@@ -301,6 +278,44 @@ class LiteLLMLLMClient(BaseLLMClient):
             logger.error("Failed to generate batch embeddings with LiteLLM: %s", e)
             msg = f"Failed to generate batch embeddings with LiteLLM model '{self.model_name}': {e}"
             raise ExternalServiceError(msg) from e
+
+    @retry_with_backoff(max_retries=3, initial_delay=1.0)
+    def _embed_request(self, *, batch: list[str]) -> list[list[float]]:
+        """
+        Send one embedding request for ``batch`` and return its validated vectors.
+
+        Args:
+            batch: Texts sent together in a single provider request
+
+        Returns:
+            List of embedding vectors, one per text in ``batch``
+
+        Raises:
+            ExternalServiceError: If the response format is unexpected or embeddings are malformed
+        """
+        # LiteLLM supports batch input
+        response = self.litellm.embedding(
+            model=self.model_name,
+            input=batch,
+            api_key=self.api_key,
+            api_base=self.api_base,
+            **self.config,
+        )
+
+        # Extract embeddings from response
+        if hasattr(response, "data") and response.data:
+            batch_embeddings = [item["embedding"] for item in response.data]
+        elif isinstance(response, dict) and "data" in response:
+            batch_embeddings = [item["embedding"] for item in response["data"]]
+        else:
+            msg = f"Unexpected response format from LiteLLM: {type(response)}"
+            raise ExternalServiceError(msg)
+
+        # Validate each embedding
+        for emb in batch_embeddings:
+            self._validate_embeddings_output(emb)
+
+        return batch_embeddings
 
     @staticmethod
     def _extract_streaming_content(response: Any) -> str:

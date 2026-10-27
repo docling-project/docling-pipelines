@@ -108,14 +108,14 @@ class DuckDBTableStorage(TableStoragePort):
             return
 
         cls._validated_paths.add(db_path)
-        logger.info(f"Using DuckDB database at: {db_path}")
+        logger.info("Using DuckDB database at: %s", db_path)
 
         if db_path == _IN_MEMORY_DB:
             return
 
         db_dir = Path(db_path).parent
         if not db_dir.exists():
-            logger.warning(f"Database directory does not exist: {db_dir}")
+            logger.warning("Database directory does not exist: %s", db_dir)
             logger.info("Directory will be created on first write")
 
     def __init__(self, *, database_path: str) -> None:
@@ -139,7 +139,7 @@ class DuckDBTableStorage(TableStoragePort):
         self.database_path = database_path
         self.connection_manager = DuckDBConnectionManager()
         self._initialized = True
-        logger.info(f"Initialized DuckDBTableStorage at: {database_path}")
+        logger.info("Initialized DuckDBTableStorage at: %s", database_path)
 
     def _validate_table_name(self, *, table_name: str) -> None:
         """
@@ -221,7 +221,7 @@ class DuckDBTableStorage(TableStoragePort):
 
             with self.connection_manager.get_connection(self.database_path) as conn:
                 conn.execute(create_table_sql)
-                logger.info(f"Created data table: {table_name}")
+                logger.info("Created data table: %s", table_name)
         except StorageException:
             raise
         except duckdb.Error as e:
@@ -265,7 +265,7 @@ class DuckDBTableStorage(TableStoragePort):
                 conn.execute(upsert_sql)
                 conn.unregister("temp_data")
 
-                logger.debug(f"Upserted {len(data)} rows into {table_name}")
+                logger.debug("Upserted %s rows into %s", len(data), table_name)
         except StorageException:
             raise
         except duckdb.Error as e:
@@ -301,10 +301,8 @@ class DuckDBTableStorage(TableStoragePort):
             read_only = self.database_path != _IN_MEMORY_DB
             with self.connection_manager.get_connection(self.database_path, read_only=read_only) as conn:
                 result = conn.execute(query).fetch_arrow_table()
-                logger.debug(f"Read {len(result)} rows from {table_name} (limit={limit}, offset={offset})")
+                logger.debug("Read %s rows from %s (limit=%s, offset=%s)", len(result), table_name, limit, offset)
                 return result
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to read data from {table_name}: {e}") from e
         except Exception as e:
@@ -328,10 +326,8 @@ class DuckDBTableStorage(TableStoragePort):
             quoted_table = self._quote_identifier(identifier=table_name)
             with self.connection_manager.get_connection(self.database_path) as conn:
                 conn.execute(f"DROP TABLE IF EXISTS {quoted_table}")
-                logger.info(f"Deleted table: {table_name}")
+                logger.info("Deleted table: %s", table_name)
                 return True
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to delete table {table_name}: {e}") from e
         except Exception as e:
@@ -358,7 +354,7 @@ class DuckDBTableStorage(TableStoragePort):
                 result = conn.execute(query, [table_name]).fetchone()
                 return result[0] > 0 if result else False
         except Exception as e:
-            logger.error(f"Failed to check if table {table_name} exists: {e}")
+            logger.error("Failed to check if table %s exists: %s", table_name, e)
             return False
 
     def get_row_count(self, *, table_name: str) -> int:
@@ -382,8 +378,6 @@ class DuckDBTableStorage(TableStoragePort):
                 count_query = f"SELECT COUNT(*) as total FROM {quoted_table}"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
                 count_result = conn.execute(count_query).fetchone()
                 return count_result[0] if count_result else 0
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to get row count for {table_name}: {e}") from e
         except Exception as e:
@@ -407,7 +401,7 @@ class DuckDBTableStorage(TableStoragePort):
                     result = conn.execute(query, params).fetch_arrow_table()
                 else:
                     result = conn.execute(query).fetch_arrow_table()
-                logger.debug(f"Executed query, returned {len(result)} rows")
+                logger.debug("Executed query, returned %s rows", len(result))
                 return result
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to execute query: {e}") from e
@@ -435,8 +429,6 @@ class DuckDBTableStorage(TableStoragePort):
                 query = f"SELECT * FROM {quoted_table} LIMIT 1"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
                 result = conn.execute(query).fetch_arrow_table()
                 return result.schema
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to get schema for {table_name}: {e}") from e
         except Exception as e:
@@ -457,7 +449,7 @@ class DuckDBTableStorage(TableStoragePort):
             if type_check(pa_type):
                 return duckdb_type
 
-        logger.warning(f"Unknown PyArrow type {pa_type}, defaulting to VARCHAR")
+        logger.warning("Unknown PyArrow type %s, defaulting to VARCHAR", pa_type)
         return "VARCHAR"
 
     def _handle_schema_evolution(self, *, table_name: str, new_schema: pa.Schema) -> None:
@@ -486,4 +478,4 @@ class DuckDBTableStorage(TableStoragePort):
 
                     alter_sql = f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_col} {duckdb_type}"
                     conn.execute(alter_sql)
-                    logger.info(f"Added column {col_name} to {table_name}")
+                    logger.info("Added column %s to %s", col_name, table_name)
