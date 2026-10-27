@@ -10,14 +10,13 @@ dependency injection pattern.
 
 Architecture:
     - AbstractRepositoryType: Base enum for all repository types
-    - RepositoryType: Concrete repository types (LOCAL)
+    - RepositoryType: Concrete repository types (LOCAL, DUCKDB, POSTGRES)
     - get_available_repository_types(): Registry mapping types to implementation classes
     - create_repository(): Generic factory method using registry pattern
 
 
 """
 
-import logging
 import os
 from enum import Enum
 from pathlib import Path
@@ -30,8 +29,9 @@ from docpipe.core.assets.common.domain.models.asset import Asset
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
 from docpipe.core.constants.constants import _find_project_root
 from docpipe.exceptions.docpipe_exceptions import RepositoryConfigurationException
+from docpipe.utils.infrastructure.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 T = TypeVar("T", bound=Asset)
 
@@ -50,6 +50,7 @@ class RepositoryType(AbstractRepositoryType):
 
     LOCAL = "local"
     DUCKDB = "duckdb"
+    POSTGRES = "postgres"
 
 
 DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
@@ -73,10 +74,17 @@ class RepositoryFactory:
             type: local
             config:
               base_dir: sample_flows
+          documentset_repository:
+            type: postgres
+            config:
+              postgres:            # falls back to DOCPIPE_POSTGRES_* env vars
+                host: localhost
+                database: docpipe
 
     Environment Variables:
         FLOW_REPOSITORY_TYPE: Repository type for flows (default: "local")
         FLOW_REPOSITORY_BASE_DIR: Directory for local flow storage
+        DOCUMENTSET_REPOSITORY_TYPE / DOCUMENTLIBRARY_REPOSITORY_TYPE: e.g. "duckdb" or "postgres"
     """
 
     @classmethod
@@ -98,15 +106,20 @@ class RepositoryFactory:
 
         Example:
             {
-                RepositoryType.LOCAL:  LocalAssetRepository,
-                RepositoryType.DUCKDB: DuckDBAssetRepository,
+                RepositoryType.LOCAL:    LocalAssetRepository,
+                RepositoryType.DUCKDB:   DuckDBAssetRepository,
+                RepositoryType.POSTGRES: PostgresAssetRepository,
             }
         """
         from docpipe.core.assets.common.adapters.repositories.duckdb_asset_repository import DuckDBAssetRepository
+        from docpipe.core.assets.common.adapters.repositories.postgres_asset_repository import (
+            PostgresAssetRepository,
+        )
 
         return {
             RepositoryType.LOCAL: LocalAssetRepository,
             RepositoryType.DUCKDB: DuckDBAssetRepository,
+            RepositoryType.POSTGRES: PostgresAssetRepository,
         }
 
     @classmethod
@@ -139,7 +152,7 @@ class RepositoryFactory:
             with Path(config_path).open() as file:
                 yaml_config = yaml.safe_load(file)
         except yaml.YAMLError as exc:
-            logger.warning(f"Invalid repository YAML configuration at {config_path}: {exc}")
+            logger.warning("Invalid repository YAML configuration at %s: %s", config_path, exc)
             return {}
 
         return yaml_config or {}

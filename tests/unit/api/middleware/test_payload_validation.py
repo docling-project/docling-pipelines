@@ -8,7 +8,7 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.testclient import TestClient
 
 from docpipe.api.middleware.payload_validation import (
@@ -279,3 +279,45 @@ class TestStreamedBodies:
 
         assert response.status_code == 200
         assert response.json() == {"body": '{"flow_name": "invoices"}'}
+
+
+# ---------------------------------------------------------------------------
+# Streaming responses
+# ---------------------------------------------------------------------------
+
+
+def _make_streaming_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/stream")
+    async def stream():
+        async def gen():
+            yield b"a"
+            yield b"b"
+
+        return StreamingResponse(gen())
+
+    return app
+
+
+class TestStreamingResponses:
+    @pytest.mark.timeout(5, method="thread")
+    def test_streaming_post_alone(self):
+        app = _make_streaming_app()
+        app.add_middleware(PayloadValidationMiddleware)
+
+        response = TestClient(app).post("/stream", content=b"hi")
+
+        assert response.status_code == 200
+        assert response.content == b"ab"
+
+    @pytest.mark.timeout(5, method="thread")
+    def test_streaming_post_behind_transaction_middleware(self):
+        app = _make_streaming_app()
+        app.add_middleware(TransactionMiddleware)
+        app.add_middleware(PayloadValidationMiddleware)
+
+        response = TestClient(app).post("/stream", content=b"hi")
+
+        assert response.status_code == 200
+        assert response.content == b"ab"
