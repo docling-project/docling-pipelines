@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Type definitions for document set domain.
 
 This module defines TypedDict classes for type-safe configuration and responses

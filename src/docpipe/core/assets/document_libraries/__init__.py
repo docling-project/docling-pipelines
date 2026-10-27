@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document Library assets management package.
 
 This package implements the Document Library feature using hexagonal architecture.

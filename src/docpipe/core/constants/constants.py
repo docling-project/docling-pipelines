@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project-wide string constants, enums, and configuration keys for docpipe."""
 
 import os

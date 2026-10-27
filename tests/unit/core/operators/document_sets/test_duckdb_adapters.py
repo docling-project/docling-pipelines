@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DuckDB adapters implementing hexagonal architecture ports."""
 
 from datetime import UTC, datetime

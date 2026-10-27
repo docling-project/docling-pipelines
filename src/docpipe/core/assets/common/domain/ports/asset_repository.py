@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Generic repository interface for all asset types.
 
 This module defines the abstract repository interface that all asset repositories
