@@ -2,7 +2,9 @@
 
 ## Purpose
 
-The `vectordb` operator persists chunked documents and their dense embeddings into a configured vector database so downstream retrieval systems can search them. This capability defines the provider-agnostic contract: provider selection, the input table, and the output metadata. Provider-specific behavior is specified in separate capabilities, such as `backend/vectordb-weaviate`.
+The `vectordb` operator persists chunked documents and their dense embeddings, and optionally enables sparse retrieval, into a configured vector database so downstream retrieval systems can search them. This capability defines the provider-agnostic contract: provider selection, the input table, sparse (`add_sparse_vector`) mode, the output metadata, and release of the adapter after flow validation. Provider-specific behavior is specified in separate capabilities, such as `backend/vectordb-weaviate`.
+
+These requirements describe behavior the operator already has for OpenSearch and Milvus, with one exception: releasing the adapter after flow validation is new behavior, described in its own requirement. The change that adds this capability pins the existing behavior with tests so that every future provider is held to the same contract.
 
 ## ADDED Requirements
 
@@ -27,6 +29,36 @@ The operator SHALL require the document ID column (`doc_id_column`, default `doc
 #### Scenario: Chunked row expands to one object per chunk
 - **WHEN** a row has N chunks in `chunked_content` and N embeddings in each vector column
 - **THEN** N objects are written for that document, each carrying its chunk text and one vector per vector column
+
+### Requirement: Sparse retrieval mode
+The operator SHALL read the top-level `add_sparse_vector` flag (default false) and pass it to the provider. When it is true, dense vector columns are optional: with none, the operator SHALL detect no dimensions and continue, and with some, it SHALL detect dimensions for them as usual. The `sparse_embeddings` feature MAY be mapped. Whether a provider stores sparse vectors or scores text on the server is defined by that provider's own capability.
+
+#### Scenario: Sparse-only run
+- **WHEN** `add_sparse_vector` is true, `available_features` declares no dense vector column, and the chunks are provided in memory
+- **THEN** the dimension mapping is empty, the run is not marked `FAILED` for lack of vectors, and each chunk is written with its text and no dense vector
+
+#### Scenario: Sparse and dense run
+- **WHEN** `add_sparse_vector` is true and `available_features` declares a dense vector column
+- **THEN** the dimensions of the dense columns are detected and each chunk is written with its dense vector as well
+
+#### Scenario: Provider that stores no sparse vector
+- **WHEN** `add_sparse_vector` is true and the mappings include `sparse_embeddings`
+- **THEN** a provider that does not store sparse vectors accepts the mapping and ignores it
+
+### Requirement: Adapter release after flow validation
+When the operator is constructed for flow validation (the `validating_flow` configuration key is set), `validate()` SHALL release the adapter's resources before it returns, whether validation succeeds or raises. The release SHALL NOT depend on `transform()` running. A provider that fails after opening a connection during construction SHALL release that connection before raising.
+
+#### Scenario: Validation completes
+- **WHEN** an operator constructed for flow validation finishes `validate()` without error
+- **THEN** the adapter's `close()` has been called exactly once
+
+#### Scenario: Validation raises
+- **WHEN** an operator constructed for flow validation raises from `validate()`
+- **THEN** the adapter's `close()` has been called before the error propagates
+
+#### Scenario: Normal run is unaffected
+- **WHEN** an operator constructed for a normal run calls `validate()` and then `transform()`
+- **THEN** `validate()` does not close the adapter and `transform()` still closes it once in its `finally` block
 
 ### Requirement: Transform output and metadata contract
 The operator SHALL return its input table unchanged as the single output table. It SHALL return metadata containing `documents_in_scope` (unique documents), `processed_docs`, `failed_docs_count`, `failed_docs`, `skipped_docs_count`, `skipped_docs`, `total_chunks_to_index`, `chunks_indexed_successfully`, `chunks_failed_to_index`, `number_of_batches`, and `node_status`.
