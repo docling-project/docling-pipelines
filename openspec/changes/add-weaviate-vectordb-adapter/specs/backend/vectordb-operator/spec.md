@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The `vectordb` operator persists chunked documents and their dense embeddings, and optionally enables sparse retrieval, into a configured vector database so downstream retrieval systems can search them. This capability defines the provider-agnostic contract: provider selection, the input table, sparse (`add_sparse_vector`) mode, the output metadata, and release of the adapter after flow validation. Provider-specific behavior is specified in separate capabilities, such as `backend/vectordb-weaviate`.
+The `vectordb` operator persists chunked documents and their dense embeddings, and optionally enables sparse retrieval, into a configured vector database so downstream retrieval systems can search them. This capability defines the provider-agnostic contract: provider selection, the input table, document identity, sparse (`add_sparse_vector`) mode, the output metadata, and release of the adapter after flow validation. Provider-specific behavior is specified in separate capabilities, such as `backend/vectordb-weaviate`.
 
-These requirements describe behavior the operator already has for OpenSearch and Milvus, with one exception: releasing the adapter after flow validation is new behavior, described in its own requirement. The change that adds this capability pins the existing behavior with tests so that every future provider is held to the same contract.
+These requirements describe behavior the operator already has for OpenSearch and Milvus, with two exceptions, each described in its own requirement: document identity when `id` is missing or null, and releasing the adapter after flow validation. The change that adds this capability pins the remaining behavior with tests so that every future provider is held to the same contract.
 
 ## ADDED Requirements
 
@@ -16,7 +16,7 @@ The operator SHALL route all writes to the vector database selected by `provider
 - **THEN** the operator fails to initialize with an error that names the unknown provider and lists the available providers
 
 ### Requirement: Input table contract
-The operator SHALL require the document ID column (`doc_id_column`, default `doc_id_hash`) in its input table. It SHALL write every dense vector column that `available_features` marks as `type: "vector"` and `available_for_vector_db: true`. Chunked rows SHALL be read from `chunked_content`, either as an in-memory list or as memory-mapped file references. The `id` and `name` columns are optional and are used for document attribution.
+The operator SHALL require the document ID column (`doc_id_column`, default `doc_id_hash`) in its input table. It SHALL write every dense vector column that `available_features` marks as `type: "vector"` and `available_for_vector_db: true`. Chunked rows SHALL be read from `chunked_content`, either as an in-memory list or as memory-mapped file references. The `id` and `name` columns are optional; `name` is used for attribution and `id` for document identity (next requirement).
 
 #### Scenario: Missing document ID column
 - **WHEN** the input table lacks the configured document ID column
@@ -29,6 +29,21 @@ The operator SHALL require the document ID column (`doc_id_column`, default `doc
 #### Scenario: Chunked row expands to one object per chunk
 - **WHEN** a row has N chunks in `chunked_content` and N embeddings in each vector column
 - **THEN** N objects are written for that document, each carrying its chunk text and one vector per vector column
+
+### Requirement: Document identity
+The operator SHALL identify a document by its `id` value when that value is present and non-empty, and by its document ID column value otherwise. That identity SHALL generate the document's chunk keys and drive the lookup and deletion of its stale chunks. Documents without a usable `id` MUST NOT share an identity.
+
+#### Scenario: Null id on several documents
+- **WHEN** two documents in one table have a null `id` and different document IDs
+- **THEN** their chunk keys differ and the chunks of both documents are persisted
+
+#### Scenario: Missing id column still requests cleanup
+- **WHEN** the input table has no `id` column
+- **THEN** the stale-chunk lookup is called with each document's document ID, and chunk keys are generated from that same value
+
+#### Scenario: Null id still requests cleanup
+- **WHEN** a document's `id` is null
+- **THEN** the stale-chunk lookup is called with that document's document ID, and chunks that the lookup returns and the run no longer produces are deleted
 
 ### Requirement: Sparse retrieval mode
 The operator SHALL read the top-level `add_sparse_vector` flag (default false) and pass it to the provider. When it is true, dense vector columns are optional: with none, the operator SHALL detect no dimensions and continue, and with some, it SHALL detect dimensions for them as usual. The `sparse_embeddings` feature MAY be mapped. Whether a provider stores sparse vectors or scores text on the server is defined by that provider's own capability.

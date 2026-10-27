@@ -62,7 +62,19 @@ The Weaviate provider SHALL support four authentication methods: none, API key, 
 
 #### Scenario: Vault reference resolved upstream
 - **WHEN** a credential is configured as a `vault://` reference and the secret provider is registered
-- **THEN** the adapter receives the resolved plain value, contains no Vault-specific code, and the value is not logged
+- **THEN** the adapter receives the resolved plain value, contains no Vault resolution code, and the value is not logged
+
+#### Scenario: Vault reference during flow validation
+- **WHEN** a flow containing a `vectordb` node with a `vault://` credential over TLS is validated, so that flow validation has replaced the credential with its placeholder
+- **THEN** configuration and TLS checks still run, no connection to the server is attempted, and validation does not fail because of the placeholder credential
+
+#### Scenario: Placeholder text outside flow validation
+- **WHEN** a run, not a flow validation, configures a credential whose text equals the validation placeholder
+- **THEN** the connection is attempted with that value like any other credential
+
+#### Scenario: Unresolvable Vault reference on a run
+- **WHEN** a run's `vault://` credential cannot be resolved because the secret provider is not registered or resolution fails
+- **THEN** the run fails before the adapter is built, and the reference text is not sent to the server as a credential
 
 #### Scenario: Unset environment variable
 - **WHEN** the API key is configured as `${WEAVIATE_API_KEY}` and that variable is not set

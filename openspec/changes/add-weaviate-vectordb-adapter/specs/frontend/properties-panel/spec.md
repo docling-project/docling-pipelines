@@ -40,8 +40,12 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 - **THEN** the previous method's credentials are removed from the saved `provider_config` in the same update that writes the new `auth_type`
 
 #### Scenario: Credentials accept literals, environment references, and Vault references
-- **WHEN** the user enters a literal value, `$WEAVIATE_API_KEY`, or `${WEAVIATE_API_KEY}` in a credential input, or turns on the Vault toggle and enters a path
-- **THEN** the value is stored unchanged (a Vault path is stored with the `vault://` prefix) and a non-empty value satisfies the required-credential check
+- **WHEN** the user enters a literal value, `$WEAVIATE_API_KEY`, or `${WEAVIATE_API_KEY}` in a credential input, or turns on the Vault toggle and enters a provider and path
+- **THEN** the value is stored unchanged (a Vault reference is stored with the `vault://` prefix) and satisfies the required-credential check
+
+#### Scenario: Empty Vault reference blocked
+- **WHEN** a credential is `vault://` with no provider and path after the prefix, for example after the user turns the Vault toggle on and enters nothing
+- **THEN** an inline error is displayed on that field, the feature-mapping tearsheet is not opened, enrichment is not requested, and keyboard focus moves to that field
 
 #### Scenario: Required connection and credential fields
 - **WHEN** a Weaviate field required for the current connection type or authentication method is empty or invalid, such as a missing host, a port outside 1-65535, a missing cluster URL, or a missing credential
