@@ -5,9 +5,10 @@ This guide covers advanced configuration topics for production deployments, dist
 ## Table of Contents
 
 1. [Job Stats Storage Configuration](#job-stats-storage-configuration)
-2. [Incremental Metadata Configuration](#incremental-metadata-configuration)
-3. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
-4. [Execution Models](#execution-models)
+2. [Asset Metadata Storage Configuration](#asset-metadata-storage-configuration)
+3. [Incremental Metadata Configuration](#incremental-metadata-configuration)
+4. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
+5. [Execution Models](#execution-models)
 
 ---
 
@@ -147,6 +148,68 @@ Important behavior:
 This makes it possible to configure job management via environment variables per environment or per deployment.
 
 For full distributed execution examples and work-pool-specific configuration, see [`DISTRIBUTED_EXECUTION_GUIDE.md`](../integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md).
+
+---
+
+## Asset Metadata Storage Configuration
+
+Document sets and document libraries store their metadata (name, description, statistics, library membership) and the document set attachment references through a pluggable asset repository. The backend is selected per asset type under `assets_management` in `docling-pipelines-config.yaml`.
+
+### Available Backends
+
+| `type` | Repository | Use when |
+|---|---|---|
+| `duckdb` (default in the shipped config) | `DuckDBAssetRepository` | Single process, local development. DuckDB is an embedded single-writer file, so only one process can write to it at a time. |
+| `postgres` | `PostgresAssetRepository` | More than one API replica or worker reads and writes the same document sets and libraries. |
+
+The repositories are created by [`RepositoryFactory`](../../src/docpipe/core/assets/common/factories/repository_factory.py). Both the REST API and the `document_set` operator resolve the backend from the same configuration, so flow runs and API requests always see the same records.
+
+### PostgreSQL Configuration
+
+```yaml
+assets_management:
+  documentset_repository:
+    type: postgres
+    config:
+      database_path: data/duckdb/document_sets.duckdb  # document set data tables (DuckDB)
+      postgres:
+        host: localhost
+        port: 5432
+        database: docpipe
+        user: docpipe_user
+        # password: prefer the DOCPIPE_POSTGRES_PASSWORD environment variable
+        schema: docpipe_assets
+        pool_size: 5
+        max_overflow: 10
+        pool_timeout: 30
+
+  documentlibrary_repository:
+    type: postgres
+    config:
+      postgres:
+        host: localhost
+        database: docpipe
+        user: docpipe_user
+```
+
+Configuration rules:
+
+- Connection keys use the same names as the PostgreSQL job stats store. Any key that is not set falls back to `DOCPIPE_POSTGRES_HOST`, `DOCPIPE_POSTGRES_PORT`, `DOCPIPE_POSTGRES_DB`, `DOCPIPE_POSTGRES_USER` and `DOCPIPE_POSTGRES_PASSWORD`, so one set of environment variables can serve job stats and asset metadata.
+- A password is required (YAML or `DOCPIPE_POSTGRES_PASSWORD`). Without one, startup fails with a `RepositoryConfigurationException` that names the missing setting.
+- The backend type can be overridden per asset type with `DOCUMENTSET_REPOSITORY_TYPE=postgres` and `DOCUMENTLIBRARY_REPOSITORY_TYPE=postgres`.
+- `schema` is optional (default `docpipe_assets`) and must be a lowercase PostgreSQL identifier.
+
+### Schema and Concurrency
+
+- The tables `<schema>.asset_records` and `<schema>.asset_attachments` are created automatically on first use. Creation runs inside one transaction guarded by a PostgreSQL advisory lock, so several replicas can start at the same time.
+- Each asset is stored as one JSONB row keyed by collection (`document_sets`, `document_libraries`, `document_set_attachments`) and asset ID.
+- Asset names are unique per collection, enforced by a database constraint. When two replicas create the same document set at the same moment, one insert wins and the other receives a `409` conflict, which the document set service resolves by returning the existing set.
+- Every write runs in its own transaction. Updates lock the target row (`SELECT ... FOR UPDATE`).
+- The asset tables live in their own schema, separate from the job stats tables and their Alembic migrations.
+
+### Scope
+
+The `postgres` backend covers asset metadata and attachment references. The document set data tables (the stored PyArrow rows) are still written by the data store selected with the `document_set` operator option `data_backend` (DuckDB by default) at `database_path`. DuckDB lets only one process open a database file for writing, so in multi-replica deployments plan which process writes each data store file.
 
 ---
 

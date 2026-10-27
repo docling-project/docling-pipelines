@@ -51,8 +51,8 @@ point in a pipeline without disrupting downstream operators.
 | `description` | string | No | `""` | Human-readable description of the document set |
 | `metadata` | object | No | `{}` | Arbitrary JSON object stored as document set metadata |
 | `document_set_id` | string | No | — | UUID of an existing document set to update instead of creating a new one |
-| `database_path` | string | No | `data/duckdb/document_sets.duckdb` | File path for the DuckDB database (metadata + data share this file) |
-| `data_backend` | string | No | `duckdb` | Data store backend for PyArrow table data. The metadata and attachment backend is configured separately via `assets_management.document_set_repository.type` in `docling-pipelines-config.yaml`. |
+| `database_path` | string | No | `data/duckdb/document_sets.duckdb` | File path for the DuckDB database (metadata + data share this file when the metadata backend is `duckdb`) |
+| `data_backend` | string | No | `duckdb` | Data store backend for PyArrow table data. The metadata and attachment backend is configured separately via `assets_management.documentset_repository.type` (`duckdb` or `postgres`) in `docling-pipelines-config.yaml`; see [Asset Metadata Storage Configuration](../../guides/ADVANCED_CONFIGURATION.md#asset-metadata-storage-configuration). |
 
 ---
 
@@ -149,6 +149,11 @@ DocumentSetOperator
             └── AttachmentRepositoryFactory      → DuckDBAttachmentRepository
                                                    └── DuckDBKeyValueStorage (attachment coordinates)
 ```
+
+With `assets_management.documentset_repository.type: postgres`, the registry and attachment
+layers become `PostgresAssetRepository[DocumentSet]` and `PostgresAttachmentRepository`
+(tables `asset_records` and `asset_attachments` in a dedicated PostgreSQL schema); the data
+store layer is unchanged.
 
 The data store adapter derives the physical `table_name` from the document set name (via
 `sanitize_table_name`) and returns an `AttachmentRef`. The service persists that ref via the
