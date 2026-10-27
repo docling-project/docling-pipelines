@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Domain layer for Document Library.
 
 Contains pure Python domain models. The repository port is the generic
