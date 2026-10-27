@@ -2072,7 +2072,7 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
      - Binary: HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE
    - **Vector Modes**:
      - Dense vectors only (default)
-     - Binary vectors (1-bit quantized with `BIN_FLAT` / `BIN_IVF_FLAT`)
+     - Binary vectors (1-bit quantized with `BIN_FLAT` / `BIN_IVF_FLAT`); a field is binary when its feature type is `vector_binary` (set automatically when `EmbeddingsOperator` uses `quantization: binary|ubinary`). The configured `index_type` / `metric_type` / `index_parameters` apply to the matching field kind; binary fields fall back to `BIN_FLAT` + `HAMMING` when a dense index is configured (see the Milvus operator guide)
      - Sparse + Dense vectors (dual storage with BM25 function)
    - **Deployment Options**:
      - Standalone Milvus (local or remote)

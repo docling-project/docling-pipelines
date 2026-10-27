@@ -16,6 +16,35 @@ from docpipe.utils.infrastructure.logging import get_logger
 logger = get_logger(__name__)
 
 
+# "binary_vector" is accepted as an alias of the canonical TYPE_VECTOR_BINARY ("vector_binary").
+_BINARY_VECTOR_TYPES: frozenset[str] = frozenset({OperatorConstants.Types.TYPE_VECTOR_BINARY, "binary_vector"})
+
+
+def is_binary_vector_feature(*, feature_config: dict[str, Any]) -> bool:
+    """Return True when a feature definition describes a packed-bit (binary) vector.
+
+    This is the single source of truth for per-field binary classification. The feature's own
+    type decides; index or metric configuration must never be used to infer it.
+
+    Args:
+        feature_config: Feature definition (as found in ``available_features``).
+
+    Returns:
+        True for ``type`` ``vector_binary`` / ``binary_vector`` or ``vector_type == "binary"``.
+    """
+    return (
+        feature_config.get(OperatorConstants.Misc.TYPE) in _BINARY_VECTOR_TYPES
+        or feature_config.get("vector_type") == "binary"
+    )
+
+
+def is_dense_or_binary_vector_feature(*, feature_config: dict[str, Any]) -> bool:
+    """Return True for float (``vector``) or binary vector features."""
+    return feature_config.get(OperatorConstants.Misc.TYPE) == OperatorConstants.Types.TYPE_VECTOR or (
+        is_binary_vector_feature(feature_config=feature_config)
+    )
+
+
 def feature_mapping_lookup(
     mappings: list[dict[str, str]],
     feature_name: str,
@@ -51,6 +80,23 @@ def feature_mapping_items(
             yield e[_fn], e[_mc]
 
 
+def _json_size_default(obj: Any) -> int:
+    """JSON ``default`` hook for size estimation: count raw bytes (binary vectors) by their length.
+
+    Args:
+        obj: Object the JSON encoder could not serialize.
+
+    Returns:
+        Length of the byte string.
+
+    Raises:
+        TypeError: The object is not bytes-like.
+    """
+    if isinstance(obj, (bytes, bytearray)):
+        return len(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def calculate_batch_size_bytes(*, documents: list[dict[str, Any]]) -> int:
     """Calculate approximate size of documents in bytes.
 
@@ -65,13 +111,7 @@ def calculate_batch_size_bytes(*, documents: list[dict[str, Any]]) -> int:
         Size in bytes, or 0 if calculation fails
     """
     try:
-
-        def _default_serializer(obj: Any) -> Any:
-            if isinstance(obj, (bytes, bytearray)):
-                return len(obj)
-            raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
-        return len(json.dumps(documents, default=_default_serializer).encode("utf-8"))
+        return len(json.dumps(documents, default=_json_size_default).encode("utf-8"))
     except Exception:
         return 0
 

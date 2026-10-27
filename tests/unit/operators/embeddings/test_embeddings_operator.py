@@ -23,6 +23,7 @@ from docpipe.core.operators.functional.embeddings import EmbeddingsOperator
 from docpipe.core.operators.functional.embeddings.adapters.outbound.factories.llm_adapter_factory import (
     LLMAdapterFactory,
 )
+from docpipe.utils.operators.vectordb_utils import detect_vector_dimension
 
 
 # Test Fixtures
@@ -1388,13 +1389,32 @@ class TestEmbeddingsQuantization:
         assert len(quantized_384[0]) == 48
         assert all(b == 0xFF for b in quantized_384[0])
 
+    def test_quantize_non_multiple_of_8_dimension_pads_to_whole_bytes(self):
+        # 250 dims -> ceil(250 / 8) = 32 bytes -> 256 bits, a valid BINARY_VECTOR dimension
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[[1.0] * 250])
+        assert len(quantized[0]) == 32
+        table = pa.table({"embeddings": pa.array(quantized, type=pa.binary())})
+        assert detect_vector_dimension(table=table, embeddings_column="embeddings") == 256
+
+    @pytest.mark.parametrize("quantization", ["none", "binary", "ubinary", "BINARY", "None"])
     @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
-    def test_init_with_valid_quantization(self, mock_factory, litellm_config, mock_llm_adapter):
+    def test_init_with_valid_quantization(self, mock_factory, litellm_config, mock_llm_adapter, quantization):
         mock_factory.return_value = mock_llm_adapter
-        for q in ("none", "binary", "ubinary", "BINARY", "None"):
-            cfg = {**litellm_config, "quantization": q}
-            op = EmbeddingsOperator(cfg)
-            assert op.quantization == q.lower()
+        op = EmbeddingsOperator({**litellm_config, "quantization": quantization})
+        assert op.quantization == quantization.lower()
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_ubinary_output_is_identical_to_binary(
+        self, mock_factory, litellm_config, mock_llm_adapter, sample_pyarrow_table
+    ):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [1.0, -1.0, 0.5, -0.5] * 96
+        outputs = {}
+        for quantization in ("binary", "ubinary"):
+            op = EmbeddingsOperator({**litellm_config, "quantization": quantization})
+            tables, _ = op.transform(sample_pyarrow_table)
+            outputs[quantization] = tables[0]["embeddings"].to_pylist()
+        assert outputs["binary"] == outputs["ubinary"]
 
     @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
     def test_init_with_invalid_quantization_raises(self, mock_factory, litellm_config, mock_llm_adapter):

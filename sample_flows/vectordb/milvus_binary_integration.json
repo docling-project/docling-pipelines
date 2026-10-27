@@ -1,6 +1,6 @@
 {
   "flow_name": "milvus-binary-embeddings-pipeline",
-  "description": "Binary vector embeddings pipeline for Milvus: Ingest -> Extract -> Chunk -> Binary Quantized Embeddings -> Milvus Binary Vector Index",
+  "description": "Binary vector embeddings pipeline for Milvus: Ingest -> Extract -> Chunk -> Binary Quantized Embeddings -> Milvus Binary Vector Index. Binary quantization uses 1-bit sign thresholding, so it works best with zero-centred (normalized) embedding models.",
   "global_config": {
     "doc_column": "content",
     "disable_validation": false,

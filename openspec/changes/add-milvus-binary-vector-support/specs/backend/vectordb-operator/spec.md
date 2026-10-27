@@ -21,6 +21,18 @@ The operator SHALL support pure dense vectors, pure sparse vectors (BM25), pure 
 - **WHEN** both binary vector and dense float vector columns are configured for Milvus
 - **THEN** the operator creates a collection with both binary and float vector fields and indexes both representations for hybrid and two-stage retrieval
 
+#### Scenario: Field kind is decided by feature type, not index configuration
+- **WHEN** a vector feature has type `vector` and `index_type` is a `BIN_*` index
+- **THEN** the field is still created as `FLOAT_VECTOR`; the operator never infers binary from `index_type`, and fails with an invalid-configuration error if the collection has no binary field to use that index
+
+#### Scenario: Flow validation rejects a binary index without a binary vector feature
+- **WHEN** a flow is validated and the Milvus `index_type` is a `BIN_*` index while no upstream feature has type `vector_binary`
+- **THEN** validation fails with an invalid-configuration error naming the `quantization` setting of the embeddings operator, before any collection is created
+
+#### Scenario: Binary quantization types the embeddings feature
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary`
+- **THEN** feature propagation exposes the embeddings feature as `vector_binary` so downstream VectorDB nodes create a `BINARY_VECTOR` field
+
 ## ADDED Requirements
 
 ### Requirement: Milvus binary index and metric configuration
@@ -33,6 +45,18 @@ The Milvus adapter SHALL support binary vector index algorithms (`BIN_FLAT`, `BI
 #### Scenario: Configured BIN_FLAT index with JACCARD metric
 - **WHEN** `index_type="BIN_FLAT"` and `metric_type="JACCARD"` are configured
 - **THEN** the Milvus adapter creates the collection index using exact binary flat scanning and the `JACCARD` similarity metric
+
+#### Scenario: Dense index configured for a collection with a binary field
+- **WHEN** `index_type` is a dense index (e.g. `HNSW`) and the collection contains a binary vector field
+- **THEN** the dense field uses the configured index, metric and parameters and the binary field is indexed with `BIN_FLAT` and `HAMMING`
+
+#### Scenario: Binary index configured for a mixed collection
+- **WHEN** `index_type` is a `BIN_*` index and the collection contains both a binary and a dense vector field
+- **THEN** the binary field uses the configured index, binary metric and parameters and the dense field is indexed with `HNSW` and `L2` defaults
+
+#### Scenario: Dense index with binary-only metric
+- **WHEN** `index_type` is a dense index and `metric_type` is one of `HAMMING`, `JACCARD`, `TANIMOTO`, `SUBSTRUCTURE`, `SUPERSTRUCTURE`
+- **THEN** initialization fails with an invalid-configuration error
 
 ### Requirement: Milvus binary vector dimension and data format validation
 The Milvus adapter SHALL enforce that binary vector dimensions represent total bit counts divisible by 8 and that document values are ingested as raw byte sequences.

@@ -12,7 +12,12 @@ from pymilvus import MilvusClient
 
 from docpipe.core.constants import OperatorConstants
 from docpipe.utils.infrastructure.logging import get_logger
-from docpipe.utils.operators.vectordb_utils import build_mapping_dict, calculate_batch_size_bytes, feature_mapping_items
+from docpipe.utils.operators.vectordb_utils import (
+    build_mapping_dict,
+    calculate_batch_size_bytes,
+    feature_mapping_items,
+    is_dense_or_binary_vector_feature,
+)
 
 logger = get_logger()
 
@@ -108,24 +113,10 @@ class MilvusBatchProcessor:
                 continue
 
             feature_type: str = feature_config.get(OperatorConstants.Misc.TYPE, "text")
-            is_vector_field: bool = (
-                feature_name in (self.embeddings_column, OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT)
-                or feature_type
-                in (
-                    "vector",
-                    "binary_vector",
-                    "vector_binary",
-                    OperatorConstants.Types.TYPE_VECTOR,
-                    OperatorConstants.Types.TYPE_VECTOR_BINARY,
-                )
-                or feature_config.get("vector_type") == "binary"
-                or mapped_name
-                in (
-                    OperatorConstants.VectorDB.DENSE_VECTOR_FIELD_NAME,
-                    "binary_vector",
-                    "vector_embeddings",
-                )
-            )
+            is_vector_field: bool = feature_name in (
+                self.embeddings_column,
+                OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT,
+            ) or is_dense_or_binary_vector_feature(feature_config=feature_config)
 
             # Handle binary vector values: convert to raw bytes for Milvus ingestion
             if is_vector_field and isinstance(value, (bytes, bytearray)):

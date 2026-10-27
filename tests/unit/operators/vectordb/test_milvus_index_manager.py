@@ -3,6 +3,7 @@
 Unit tests for MilvusIndexManager
 """
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -261,6 +262,24 @@ class TestCollectionValidation:
 
         with pytest.raises(DocpipeException, match="existing dimension 768 but current run produced 384"):
             manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+
+    def test_validate_existing_binary_collection_matches_bit_dimension(self, mock_client):
+        """A binary field stores its dimension in bits; the runtime bit count must match it."""
+        mock_client.describe_collection.return_value = {
+            "fields": [{"name": "binary_vec", "type": "BINARY_VECTOR", "params": {"dim": 256}}]
+        }
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="existing_binary_collection",
+            index_type=MilvusIndexTypes.BIN_FLAT,
+            metric_type=MilvusMetricTypes.HAMMING,
+            available_features={"binary_embeddings": {"type": "vector_binary"}},
+            feature_mappings=[{"feature_name": "binary_embeddings", "mapped_column_name": "binary_vec"}],
+        )
+
+        manager.validate_existing_collection(dimension_mapping={"binary_embeddings": 256})
+        with pytest.raises(DocpipeException, match="existing dimension 256 but current run produced 32"):
+            manager.validate_existing_collection(dimension_mapping={"binary_embeddings": 32})
 
 
 class TestVectorDimensionDetection:
@@ -986,7 +1005,7 @@ class TestBinaryVectorIndexSupport:
         assert "requires a binary metric type" in str(exc_info.value)
 
     def test_dense_index_with_binary_metric_raises(self, mock_client):
-        """Dense index type requires a dense metric type."""
+        """Dense index type cannot be paired with a binary-only metric."""
         with pytest.raises(DocpipeException) as exc_info:
             MilvusIndexManager(
                 client=mock_client,
@@ -994,7 +1013,17 @@ class TestBinaryVectorIndexSupport:
                 index_type=MilvusIndexTypes.HNSW,
                 metric_type=MilvusMetricTypes.HAMMING,
             )
-        assert "requires a dense metric type" in str(exc_info.value)
+        assert "cannot use binary metric" in str(exc_info.value)
+
+    def test_dense_index_with_bm25_metric_is_accepted(self, mock_client):
+        """BM25 is not a binary metric, so a dense index may be paired with it."""
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_dense_col",
+            index_type=MilvusIndexTypes.HNSW,
+            metric_type=MilvusMetricTypes.BM25,
+        )
+        assert manager.metric_type == MilvusMetricTypes.BM25
 
     def test_milvus_lite_rejects_binary_index_type(self, mock_client):
         """Milvus Lite must reject binary index types at initialization."""
@@ -1079,49 +1108,194 @@ class TestBinaryVectorIndexSupport:
             manager._create_schema_fields(dimension_mapping={"binary_embeddings": 128})
         assert "not supported by Milvus Lite" in str(exc_info.value)
 
-    def test_multi_vector_dense_and_binary_schema_and_indexes(self, mock_client):
-        """Multi-vector collection supports both dense float and binary vector fields."""
-        from pymilvus import DataType
-
-        mock_client.has_collection.return_value = False
-        index_params_mock = MagicMock()
-        mock_client.prepare_index_params.return_value = index_params_mock
-
+    @staticmethod
+    def _hybrid_manager(
+        client: MagicMock, *, binary_type: str = "binary_vector", **overrides: Any
+    ) -> MilvusIndexManager:
+        """Build a manager with one dense and one binary feature (dense_vec / binary_vec)."""
         features = {
-            "dense_embeddings": {
-                "name": "Dense Embeddings",
-                "available_for_vector_db": True,
-                "type": "vector",
-            },
-            "binary_embeddings": {
-                "name": "Binary Embeddings",
-                "available_for_vector_db": True,
-                "type": "binary_vector",
-            },
+            "dense_embeddings": {"name": "Dense", "available_for_vector_db": True, "type": "vector"},
+            "binary_embeddings": {"name": "Binary", "available_for_vector_db": True, "type": binary_type},
         }
         mappings = [
             {"feature_name": "dense_embeddings", "mapped_column_name": "dense_vec"},
             {"feature_name": "binary_embeddings", "mapped_column_name": "binary_vec"},
         ]
-        manager = MilvusIndexManager(
-            client=mock_client,
+        kwargs: dict[str, Any] = {
+            "index_type": MilvusIndexTypes.HNSW,
+            "metric_type": MilvusMetricTypes.COSINE,
+            "index_parameters": {"M": 24, "efConstruction": 300},
+        }
+        kwargs.update(overrides)
+        return MilvusIndexManager(
+            client=client,
             collection_name="test_hybrid_col",
-            index_type=MilvusIndexTypes.HNSW,
-            metric_type=MilvusMetricTypes.COSINE,
             available_features=features,
             feature_mappings=mappings,
+            **kwargs,
         )
 
+    @staticmethod
+    def _add_index_calls(client: MagicMock) -> dict[str, dict[str, Any]]:
+        """Return the kwargs of each add_index call keyed by field_name."""
+        params = client.prepare_index_params.return_value
+        return {c.kwargs["field_name"]: c.kwargs for c in params.add_index.call_args_list}
+
+    @pytest.mark.parametrize("binary_type", ["binary_vector", "vector_binary"])
+    def test_multi_vector_dense_and_binary_schema_and_indexes(self, mock_client, binary_type):
+        """Mixed collection: dense keeps its own index/metric/params; binary defaults to BIN_FLAT + HAMMING."""
+        from pymilvus import DataType
+
+        manager = self._hybrid_manager(mock_client, binary_type=binary_type)
         dim_mapping = {"dense_embeddings": 384, "binary_embeddings": 256}
         fields = manager._create_schema_fields(dimension_mapping=dim_mapping)
 
         dense_field = next((f for f in fields if f.name == "dense_vec"), None)
         bin_field = next((f for f in fields if f.name == "binary_vec"), None)
-
         assert dense_field is not None and dense_field.dtype == DataType.FLOAT_VECTOR
         assert bin_field is not None and bin_field.dtype == DataType.BINARY_VECTOR
 
         manager.create_collection(dimension_mapping=dim_mapping)
         mock_client.create_collection.assert_called_once()
         mock_client.create_index.assert_called_once()
-        assert index_params_mock.add_index.call_count == 2
+
+        calls = self._add_index_calls(mock_client)
+        assert set(calls) == {"dense_vec", "binary_vec"}
+        assert calls["dense_vec"]["index_type"] == MilvusIndexTypes.HNSW
+        assert calls["dense_vec"]["metric_type"] == MilvusMetricTypes.COSINE
+        assert calls["dense_vec"]["params"] == {"M": 24, "efConstruction": 300}
+        assert calls["binary_vec"]["index_type"] == MilvusIndexTypes.BIN_FLAT
+        assert calls["binary_vec"]["metric_type"] == MilvusMetricTypes.HAMMING
+        assert calls["binary_vec"]["params"] == {}
+
+    def test_vector_type_binary_marks_field_binary(self, mock_client):
+        """A feature with vector_type == 'binary' is binary regardless of its type string."""
+        from pymilvus import DataType
+
+        manager = self._hybrid_manager(mock_client)
+        manager.available_features["binary_embeddings"] = {
+            "available_for_vector_db": True,
+            "type": "vector",
+            "vector_type": "binary",
+        }
+        fields = manager._create_schema_fields(dimension_mapping={"dense_embeddings": 384, "binary_embeddings": 256})
+        bin_field = next(f for f in fields if f.name == "binary_vec")
+        assert bin_field.dtype == DataType.BINARY_VECTOR
+
+    def test_binary_index_config_applies_to_binary_field_in_mixed_collection(self, mock_client):
+        """BIN_* index_type/metric/params configure the binary field; the dense field gets HNSW/L2 defaults."""
+        manager = self._hybrid_manager(
+            mock_client,
+            index_type=MilvusIndexTypes.BIN_IVF_FLAT,
+            metric_type=MilvusMetricTypes.JACCARD,
+            index_parameters={"nlist": 64},
+        )
+        manager.create_collection(dimension_mapping={"dense_embeddings": 384, "binary_embeddings": 256})
+
+        calls = self._add_index_calls(mock_client)
+        assert calls["binary_vec"]["index_type"] == MilvusIndexTypes.BIN_IVF_FLAT
+        assert calls["binary_vec"]["metric_type"] == MilvusMetricTypes.JACCARD
+        assert calls["binary_vec"]["params"] == {"nlist": 64}
+        assert calls["dense_vec"]["index_type"] == MilvusIndexTypes.HNSW
+        assert calls["dense_vec"]["metric_type"] == MilvusMetricTypes.L2
+        assert calls["dense_vec"]["params"] == INDEX_DEFAULT_PARAMETERS[MilvusIndexTypes.HNSW]
+
+    def test_binary_only_collection_honors_bin_index_config(self, mock_client):
+        """Binary-only collection with a BIN_* index_type/metric/params uses them as configured."""
+        features = {"binary_embeddings": {"available_for_vector_db": True, "type": "vector_binary"}}
+        mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "binary_vec"}]
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_bin_col",
+            index_type=MilvusIndexTypes.BIN_IVF_FLAT,
+            metric_type=MilvusMetricTypes.JACCARD,
+            index_parameters={"nlist": 32},
+            available_features=features,
+            feature_mappings=mappings,
+        )
+        manager.create_collection(dimension_mapping={"binary_embeddings": 128})
+
+        calls = self._add_index_calls(mock_client)
+        assert calls["binary_vec"]["index_type"] == MilvusIndexTypes.BIN_IVF_FLAT
+        assert calls["binary_vec"]["metric_type"] == MilvusMetricTypes.JACCARD
+        assert calls["binary_vec"]["params"] == {"nlist": 32}
+
+    def test_binary_field_with_dense_index_and_dense_metric_defaults_to_bin_flat_hamming(self, mock_client):
+        """A dense index_type never leaks into a binary field: the field falls back to BIN_FLAT / HAMMING."""
+        features = {"binary_embeddings": {"available_for_vector_db": True, "type": "vector_binary"}}
+        mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "binary_vec"}]
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_bin_col",
+            index_type=MilvusIndexTypes.HNSW,
+            metric_type=MilvusMetricTypes.COSINE,
+            index_parameters={"M": 8},
+            available_features=features,
+            feature_mappings=mappings,
+        )
+        manager.create_collection(dimension_mapping={"binary_embeddings": 128})
+
+        calls = self._add_index_calls(mock_client)
+        assert calls["binary_vec"]["index_type"] == MilvusIndexTypes.BIN_FLAT
+        assert calls["binary_vec"]["metric_type"] == MilvusMetricTypes.HAMMING
+        assert calls["binary_vec"]["params"] == {}
+
+    def test_float_only_collection_with_bin_index_type_raises(self, mock_client):
+        """A float field must not be silently treated as binary because index_type is BIN_*."""
+        features = {"dense_embeddings": {"available_for_vector_db": True, "type": "vector"}}
+        mappings = [{"feature_name": "dense_embeddings", "mapped_column_name": "dense_vec"}]
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_col",
+            index_type=MilvusIndexTypes.BIN_FLAT,
+            metric_type=MilvusMetricTypes.HAMMING,
+            available_features=features,
+            feature_mappings=mappings,
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager._create_schema_fields(dimension_mapping={"dense_embeddings": 128})
+        assert "no binary vector field" in str(exc_info.value)
+
+    def test_dense_field_stays_float_with_bin_index_type_in_mixed_mode(self, mock_client):
+        """In a mixed collection with a BIN_* index_type the dense field stays FLOAT_VECTOR."""
+        from pymilvus import DataType
+
+        manager = self._hybrid_manager(
+            mock_client,
+            index_type=MilvusIndexTypes.BIN_FLAT,
+            metric_type=MilvusMetricTypes.HAMMING,
+            index_parameters={},
+        )
+        fields = manager._create_schema_fields(dimension_mapping={"dense_embeddings": 384, "binary_embeddings": 256})
+        dense_field = next(f for f in fields if f.name == "dense_vec")
+        assert dense_field.dtype == DataType.FLOAT_VECTOR
+
+
+class TestValidateVectorFeatureTypes:
+    """validate_vector_feature_types rejects BIN_* index configs without an upstream binary vector feature."""
+
+    @staticmethod
+    def _manager(mock_client, **kwargs):
+        return MilvusIndexManager(client=mock_client, collection_name="c", **kwargs)
+
+    def test_bin_index_without_binary_feature_raises(self, mock_client):
+        manager = self._manager(mock_client, index_type="BIN_IVF_FLAT", metric_type="HAMMING")
+        with pytest.raises(DocpipeException, match="requires a binary vector feature"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector", "content": "string"})
+
+    @pytest.mark.parametrize("binary_type", ["vector_binary", "binary_vector"])
+    def test_bin_index_with_binary_feature_passes(self, mock_client, binary_type):
+        manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING")
+        manager.validate_vector_feature_types(feature_types={"embeddings": binary_type})
+
+    def test_dense_index_never_requires_binary_feature(self, mock_client):
+        manager = self._manager(mock_client, index_type="HNSW", metric_type="COSINE")
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_mixed_collection_with_one_binary_feature_passes(self, mock_client):
+        manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING")
+        manager.validate_vector_feature_types(feature_types={"dense_vec": "vector", "bin_vec": "vector_binary"})
+
+    def test_sparse_mode_skips_check(self, mock_client):
+        manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING", add_sparse_vector=True)
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})

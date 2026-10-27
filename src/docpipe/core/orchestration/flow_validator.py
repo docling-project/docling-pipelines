@@ -601,7 +601,13 @@ class FlowValidator:
                     config = (
                         global_config
                         | op_def.get(OperatorConstants.Config.CONFIG, {})
-                        | {DocpipeConstants.VALIDATING_FLOW: True}
+                        | {
+                            DocpipeConstants.VALIDATING_FLOW: True,
+                            DocpipeConstants.VALIDATION_FEATURE_TYPES: {
+                                name: feature.get("type")
+                                for name, feature in node_result.get_input_features(node_id=node_id).items()
+                            },
+                        }
                     )
                     config = self._sanitize_vault_refs_for_validation(config)
                     operator = operator_class(config=config)

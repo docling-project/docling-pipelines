@@ -28,10 +28,31 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 | IVF_SQ8 | Dense Float | Very Fast | Medium | Very Low | Memory-constrained environments |
 | FLAT | Dense Float | Slow | Perfect | High | Small datasets, exact search |
 | AUTOINDEX | Dense Float | Varies | High | Varies | Automatic optimization |
-| BIN_FLAT | Binary | Fast | Perfect | Very Low | Exact search for 1-bit quantized binary vectors |
+| BIN_FLAT | Binary | Brute force | Perfect | Very Low | Exact search for 1-bit quantized binary vectors |
 | BIN_IVF_FLAT | Binary | Very Fast | High | Very Low | Inverted index for large-scale binary vector retrieval |
 
 > **Note on Milvus Lite (`auth_type: "lite"`):** Milvus Lite does not support binary vectors or binary index types (`BIN_FLAT`, `BIN_IVF_FLAT`). For binary vector storage, use standalone, cluster, or wx.data deployments.
+
+#### How `index_type`, `metric_type` and `index_parameters` apply to each vector field
+
+Whether a vector field is dense (`FLOAT_VECTOR`) or binary (`BINARY_VECTOR`) is decided only by the feature's own
+type (`vector` vs `vector_binary`) -- never by `index_type`. The single `index_type` / `metric_type` /
+`index_parameters` configuration is applied to every vector field according to that kind:
+
+| Configured `index_type` | Dense field | Binary field |
+|---|---|---|
+| Dense (`HNSW`, `IVF_FLAT`, ...) | Used as configured | `BIN_FLAT` + `HAMMING` (dense metrics and parameters are not valid for binary fields) |
+| Binary (`BIN_FLAT`, `BIN_IVF_FLAT`) | `HNSW` + `L2` defaults (mixed collections only) | Used as configured, with a binary `metric_type` |
+
+A `BIN_*` `index_type` on a collection with no binary vector field is rejected, as is a dense `index_type` paired
+with a binary-only `metric_type` (`HAMMING`, `JACCARD`, `TANIMOTO`, `SUBSTRUCTURE`, `SUPERSTRUCTURE`). The `BIN_*`
+check also runs during flow validation (`POST /api/v1/validation/validate_flow`): it fails when no upstream feature is
+typed `vector_binary`, for example when the embeddings operator has no `quantization: "binary"` or `"ubinary"`.
+
+When `EmbeddingsOperator` runs with `quantization: "binary"` or `"ubinary"`, the flow's feature propagation types its
+`embeddings` feature as `vector_binary`, so the binary schema and index are selected automatically.
+
+> **Embedding quality:** 1-bit quantization keeps only the sign of each dimension, so it works best with zero-centred (e.g. normalized) embedding models. `quantization: ubinary` behaves identically to `binary`.
 
 ### Similarity Metrics
 

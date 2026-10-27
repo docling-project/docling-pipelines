@@ -447,7 +447,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
                 },
                 OperatorConstants.Config.QUANTIZATION: {
                     OperatorConstants.Misc.NAME: "Quantization",
-                    OperatorConstants.Config.DESCRIPTION: "Quantization method for generated embeddings: none (default, float32 embeddings), binary/ubinary (1-bit packed binary vector).",
+                    OperatorConstants.Config.DESCRIPTION: "Quantization method for generated embeddings: none (default, float32 embeddings), binary/ubinary (identical: 1-bit sign thresholding packed 8 dimensions per byte; works best with zero-centred, e.g. normalized, embeddings).",
                     OperatorConstants.Config.REQUIRED: False,
                     OperatorConstants.Config.DEFAULT: "none",
                     OperatorConstants.Config.VALID_VALUES: ["none", "binary", "ubinary"],
@@ -1125,11 +1125,11 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         self,
         *,
         idx: int,
-        embeddings: list[float] | list[list[float]],
+        embeddings: list[float] | list[list[float]] | bytes | list[bytes],
         chunks_column_data: list | None,
         doc_ids: list | None,
         embeddings_dir_ref: list[str | None],
-    ) -> dict[str, str] | list[float] | list[list[float]]:
+    ) -> dict[str, str] | list[float] | list[list[float]] | bytes | list[bytes]:
         """
         Decide whether to write embeddings to a memmap file (when the matching
         chunk row is already file-backed) or keep them in memory.
@@ -1144,7 +1144,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
             and DocpipeConstants.CHUNKS_MEMMAP_FILE in chunks_column_data[idx]
         )
         if not row_chunks_as_files:
-            return embeddings  # type: ignore[return-value]
+            return embeddings
 
         # Lazy-initialise the embeddings directory once per slice
         if embeddings_dir_ref[0] is None:
@@ -1187,7 +1187,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         )
         embeddings_dir_ref: list[str | None] = [None]
 
-        embeddings_column_data: list[dict[str, str] | list[float] | list[list[float]]] = [
+        embeddings_column_data: list[dict[str, str] | list[float] | list[list[float]] | bytes | list[bytes]] = [
             self._store_embedding_for_row(
                 idx=idx,
                 embeddings=emb,

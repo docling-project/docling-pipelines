@@ -23,9 +23,10 @@ See `proposal.md` for background and motivation.
 
 ### 1. DataType and Schema Definition for Binary Vectors
 
-**Decision:** In `MilvusIndexManager._create_schema_fields`, recognize binary vector columns (configured via `vector_type: "binary"` or feature type `binary_vector`) and generate `FieldSchema(name=field_name, dtype=DataType.BINARY_VECTOR, dim=dimension)`.
+**Decision:** In `MilvusIndexManager._create_schema_fields`, recognize binary vector columns and generate `FieldSchema(name=field_name, dtype=DataType.BINARY_VECTOR, dim=dimension)`. Classification is **per field and decided only by the feature's own type** (`vector_binary`, alias `binary_vector`, or `vector_type: "binary"`), via the single helper `is_binary_vector_feature`. `index_type` / `metric_type` are never used to infer it.
 - Enforce validation rule: `dimension % 8 == 0`.
-- Keep `FLOAT_VECTOR` as the default when `vector_type` is not `"binary"`.
+- Keep `FLOAT_VECTOR` as the default when the feature is not binary.
+- `EmbeddingsOperator` with `quantization: binary|ubinary` types its `embeddings` feature as `vector_binary` in `FeaturePropagator`, so the binary path is selected without extra user configuration.
 
 *Alternatives considered:*
 - Storing binary vectors as `DataType.ARRAY` of `INT8`: Rejected because Milvus vector indexes (`BIN_FLAT`, `BIN_IVF_FLAT`) and vector similarity search require native `DataType.BINARY_VECTOR`.
@@ -36,30 +37,31 @@ See `proposal.md` for background and motivation.
 - `MilvusIndexTypes`: add `BIN_FLAT = "BIN_FLAT"`, `BIN_IVF_FLAT = "BIN_IVF_FLAT"`.
 - `MilvusMetricTypes`: add `HAMMING = "HAMMING"`, `JACCARD = "JACCARD"`, `TANIMOTO = "TANIMOTO"`, `SUBSTRUCTURE = "SUBSTRUCTURE"`, `SUPERSTRUCTURE = "SUPERSTRUCTURE"`.
 - `INDEX_DEFAULT_PARAMETERS`: add `BIN_FLAT: {}`, `BIN_IVF_FLAT: {"nlist": 128}`.
-- Validate metric compatibility: binary index types only allow binary metrics.
+- Validate metric compatibility: binary index types only allow binary metrics; dense index types reject binary-only metrics.
+- **No separate binary configuration keys.** The existing `index_type` / `metric_type` / `index_parameters` are applied dynamically per field kind (`MilvusIndexManager._resolve_vector_index_config`):
+  - Dense field + dense `index_type`: used as configured.
+  - Binary field + `BIN_*` `index_type`: used as configured (metric must be binary; `index_parameters` applied).
+  - Binary field + dense `index_type`: falls back to `BIN_FLAT` / `HAMMING` (a binary-only metric in `metric_type` is honoured).
+  - Dense field + `BIN_*` `index_type` in a mixed collection: falls back to `HNSW` / `L2` with default HNSW parameters.
+  - Dense field + `BIN_*` `index_type` with no binary field in the collection: rejected with `OPERATOR_CONFIGURATION_INVALID`.
 
 *Alternatives considered:*
 - Allowing arbitrary index string names without validation: Rejected to prevent runtime Milvus RPC failures and provide early pipeline validation.
 
 ### 3. Binary Vector Serialization in `MilvusBatchProcessor`
 
-**Decision:** Ensure vector values passed to `client.insert()` are converted to raw `bytes` if they are lists of integers, boolean arrays, or packed PyArrow binary buffers:
-```python
-if is_binary_vector:
-    if isinstance(val, (bytes, bytearray)):
-        doc[field_name] = bytes(val)
-    elif isinstance(val, (list, np.ndarray)):
-        doc[field_name] = bytes(val)
-```
+**Decision:** Binary vector values are expected to arrive as Python `bytes` / `bytearray` (produced by `EmbeddingsOperator` quantization, in memory or via the packed-bit memmap path). `MilvusBatchProcessor.prepare_document` passes them to `client.insert()` as raw `bytes` for any vector field (identified by `is_dense_or_binary_vector_feature`), and skips non-vector `bytes` columns that cannot be JSON serialized. `vectordb_utils.calculate_batch_size_bytes` counts `bytes` by length so batch sizing keeps working.
 
 *Alternatives considered:*
-- Expecting upstream operators to always pass Python `bytes`: While upstream can emit bytes, adding normalization in `prepare_document` ensures defensive handling of PyArrow binary buffers and uint8 lists.
+- Normalising lists / ndarrays of ints to `bytes` inside `prepare_document`: Not implemented. The only producer in this repository emits `bytes`, so extra coercion would be speculative; revisit if another operator emits uint8 lists.
+- Asserting `len(bytes) == dim / 8` per row: Not implemented. The dimension is derived from the data itself (`len(bytes) * 8`), so the check would be tautological; mismatches against an existing collection are caught by `validate_existing_collection`.
 
 ### 4. Binary Quantization in `EmbeddingsOperator`
 
 **Decision:** Add an optional `quantization` configuration key to `EmbeddingsOperator` (`"none" | "binary" | "ubinary"`).
 - When `quantization: "binary"` or `"ubinary"`, apply 1-bit sign thresholding (`arr > 0`) followed by `np.packbits(..., axis=-1).tobytes()`.
 - Store the resulting byte sequence in the output table column (as `pa.binary()` or Python `bytes`).
+- **File-backed (memmap) path:** `write_content_to_file` writes `bytes` rows verbatim and records the dimension in bits (`len(bytes) * 8`) with metadata `{"dim": N, "dtype": "packed_bits"}`; float files keep `{"dim": N}`. Readers (`yield_embeddings_from_memmap_file`, `load_embeddings_from_memmap_file`) return `bytes` rows for packed-bit files, so `VectorDBOperator` streams them to Milvus without `.tolist()`.
 
 *Alternatives considered:*
 - Creating a separate `BinaryQuantizationOperator`: Rejected to avoid unnecessary DAG node overhead; quantizing at embedding generation time is more performant and matches provider patterns (e.g. Cohere binary embeddings).
@@ -75,7 +77,7 @@ if is_binary_vector:
 - **[Risk]** Milvus Lite users attempting to use binary vectors encounter runtime RPC failures.  
   *Mitigation:* Add eager validation in `MilvusIndexManager` with a clear explanation directing users to standalone Milvus / watsonx.data.
 - **[Risk]** Dimension mismatch between bit count and byte array length.  
-  *Mitigation:* Add strict assertions: `len(byte_vector) == dimension // 8` and `dimension % 8 == 0`.
+  *Mitigation:* The dimension is always derived from the packed data (`len(bytes) * 8`), so it is a multiple of 8 by construction; `MilvusIndexManager` still rejects other values and `validate_existing_collection` compares the bit count with the existing schema.
 
 ## Migration Plan
 

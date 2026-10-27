@@ -333,7 +333,9 @@ class FeaturePropagator:
                     mandatory_for_vector_db_key,
                     input_feature.get(mandatory_for_vector_db_key, False),
                 ),
-                type=feature_def.get("type", input_feature.get("type", OperatorConstants.Types.TYPE_STRING)),
+                type=self._resolve_feature_type(
+                    declared_type=feature_def.get("type"), inherited_type=input_feature.get("type")
+                ),
                 is_primary=feature_def.get(
                     OperatorConstants.Misc.IS_PRIMARY,
                     input_feature.get(OperatorConstants.Misc.IS_PRIMARY, False),
@@ -435,6 +437,41 @@ class FeaturePropagator:
                 )
 
     @staticmethod
+    def _resolve_feature_type(*, declared_type: str | None, inherited_type: str | None) -> str:
+        """Pick the type of an operator-declared feature that may already exist upstream.
+
+        The declared type wins, except that a plain ``vector`` declaration (e.g. the vectordb
+        operator accepting any dense embeddings) must not erase an upstream ``vector_binary``
+        type set by embeddings quantization.
+
+        Args:
+            declared_type: Type declared by the operator metadata, if any.
+            inherited_type: Type carried by the same feature from the parent nodes, if any.
+
+        Returns:
+            The resolved feature type, defaulting to string.
+        """
+        if declared_type == OperatorConstants.Types.TYPE_VECTOR and inherited_type == (
+            OperatorConstants.Types.TYPE_VECTOR_BINARY
+        ):
+            return OperatorConstants.Types.TYPE_VECTOR_BINARY
+        return declared_type or inherited_type or OperatorConstants.Types.TYPE_STRING
+
+    @staticmethod
+    def _apply_embeddings_special_case(
+        *,
+        operator_config: dict[str, Any],
+        result: FeaturePropagationResult,
+    ) -> None:
+        """Mark the embeddings feature as a binary vector when the operator quantizes to packed bits."""
+        quantization = str(operator_config.get(OperatorConstants.Config.QUANTIZATION, "none")).lower()
+        if quantization not in ("binary", "ubinary"):
+            return
+        embeddings_feature = result.feature_metadata.get(OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT)
+        if embeddings_feature is not None:
+            embeddings_feature.type = OperatorConstants.Types.TYPE_VECTOR_BINARY
+
+    @staticmethod
     def _apply_sql_filter_special_case(
         *,
         operator_config: dict[str, Any],
@@ -477,10 +514,11 @@ class FeaturePropagator:
     ) -> FeaturePropagationResult:
         """Apply operator-specific feature propagation logic.
 
-        Only three operators need special handling:
+        Only four operators need special handling:
         1. Extract: Adds/removes entity features based on entity_extraction.provider
         2. SQLFilter: Drops explicitly listed features via features_to_drop config key
         3. Merge: Combines features from multiple inputs
+        4. Embeddings: Types the embeddings feature as vector_binary when quantization is binary/ubinary
 
         Args:
             operator_short_name: Operator short name
@@ -494,6 +532,8 @@ class FeaturePropagator:
         """
         if operator_short_name == OperatorConstants.Operators.EXTRACT_OPERATOR:
             self._apply_extract_special_case(operator_config=operator_config, result=result, node_id=node_id)
+        elif operator_short_name == OperatorConstants.Operators.EMBEDDINGS:
+            self._apply_embeddings_special_case(operator_config=operator_config, result=result)
         elif operator_short_name == OperatorConstants.Operators.SQL_FILTER:
             self._apply_sql_filter_special_case(operator_config=operator_config, result=result, node_id=node_id)
         elif operator_short_name == OperatorConstants.Operators.MERGE and parent_results:

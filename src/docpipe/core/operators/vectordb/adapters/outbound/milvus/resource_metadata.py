@@ -13,6 +13,7 @@ from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.operators.vectordb_utils import is_binary_vector_feature
 
 logger = get_logger()
 
@@ -331,6 +332,10 @@ class MilvusResourceMetadata:
                 ),
                 None,
             )
+            binary_vector_feature = next(
+                (n for n, m in available_features.items() if is_binary_vector_feature(feature_config=m)),
+                None,
+            )
             sparse_feature = (
                 next(
                     (
@@ -358,6 +363,9 @@ class MilvusResourceMetadata:
                 elif "FLOAT_VECTOR" in field_type and vector_feature and vector_feature not in covered:
                     result.append({"feature_name": vector_feature, "mapped_column_name": field_name})
                     covered.add(vector_feature)
+                elif "BINARY_VECTOR" in field_type and binary_vector_feature and binary_vector_feature not in covered:
+                    result.append({"feature_name": binary_vector_feature, "mapped_column_name": field_name})
+                    covered.add(binary_vector_feature)
                 elif field_name in available_features and field_name not in covered:
                     result.append({"feature_name": field_name, "mapped_column_name": field_name})
                     covered.add(field_name)

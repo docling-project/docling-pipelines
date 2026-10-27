@@ -12,7 +12,11 @@ from docpipe.core.constants import OperatorConstants
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
-from docpipe.utils.operators.vectordb_utils import build_mapping_dict, feature_mapping_items
+from docpipe.utils.operators.vectordb_utils import (
+    build_mapping_dict,
+    feature_mapping_items,
+    is_binary_vector_feature,
+)
 
 logger = get_logger()
 
@@ -121,17 +125,24 @@ class MilvusIndexManager:
         """
         Initialize the index manager.
 
+        Whether a vector field is dense (``FLOAT_VECTOR``) or binary (``BINARY_VECTOR``) is decided
+        only by the feature's own type. ``index_type`` / ``metric_type`` / ``index_parameters`` are
+        applied to each field according to its kind: dense fields use them as configured; binary
+        fields use them when ``index_type`` is a ``BIN_*`` type, otherwise ``BIN_FLAT`` / ``HAMMING``.
+
         Args:
             client: Milvus client instance
             collection_name: Name of the collection
-            index_type: Index type (FLAT, IVF_FLAT, HNSW, etc.)
-            metric_type: Similarity metric (L2, IP, COSINE)
+            index_type: Index type for dense fields (FLAT, IVF_FLAT, HNSW, etc.), or a BIN_* type
+                for collections that only hold binary vectors
+            metric_type: Similarity metric for dense fields (L2, IP, COSINE), or a binary metric
             index_parameters: Custom index-specific parameters
             available_features: Feature configuration
             feature_mappings: Column to field mappings
             primary_key_field: Name of primary key field
             auto_id: Whether to auto-generate IDs
             add_sparse_vector: Whether to use sparse vectors instead of dense vectors
+            is_lite: Whether the collection lives in Milvus Lite
         """
         self.client = client
         self.collection_name = collection_name
@@ -168,7 +179,8 @@ class MilvusIndexManager:
             raise DocpipeException(
                 message=(
                     f"MilvusDB Error: Binary vector index type '{self.index_type}' is not supported by Milvus Lite. "
-                    "Milvus Lite only supports dense vectors with FLAT index. Use standalone Milvus or watsonx.data for binary vector indexing."
+                    "Milvus Lite only supports dense vectors with FLAT index. "
+                    "Use standalone Milvus or watsonx.data for binary vector indexing."
                 ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
@@ -189,7 +201,9 @@ class MilvusIndexManager:
         # Validate index types
         if self.index_type not in MilvusIndexTypes.ALL_TYPES:
             raise DocpipeException(
-                message=f"MilvusDB Error: Invalid index type '{self.index_type}'. Supported: {MilvusIndexTypes.ALL_TYPES}",
+                message=(
+                    f"MilvusDB Error: Invalid index type '{self.index_type}'. Supported: {MilvusIndexTypes.ALL_TYPES}"
+                ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
@@ -208,19 +222,107 @@ class MilvusIndexManager:
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        # Validate dense index type pairs with dense metric type
+        # Dense index types must not be paired with a binary-only metric
         if (
             self.index_type in MilvusIndexTypes.ALL_DENSE_TYPES
-            and self.metric_type not in MilvusMetricTypes.ALL_DENSE_METRIC_TYPES
+            and self.metric_type in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES
         ):
             raise DocpipeException(
                 message=(
-                    f"MilvusDB Error: Dense index type '{self.index_type}' requires a dense metric type. "
-                    f"Supported dense metrics: {MilvusMetricTypes.ALL_DENSE_METRIC_TYPES}, got: '{self.metric_type}'"
+                    f"MilvusDB Error: Dense index type '{self.index_type}' cannot use binary metric "
+                    f"'{self.metric_type}'. Use a dense metric ({MilvusMetricTypes.ALL_DENSE_METRIC_TYPES})."
                 ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
+
+    def validate_vector_feature_types(self, *, feature_types: dict[str, str | None]) -> None:
+        """Check the index configuration against the vector feature types known before the run.
+
+        A ``BIN_*`` ``index_type`` needs at least one binary vector feature, which only exists when an
+        upstream operator emits one (e.g. embeddings with ``quantization: binary``). Without it the
+        collection cannot be created, so the mismatch is reported at validation time.
+
+        Args:
+            feature_types: Mapping of input feature name to its propagated feature type.
+
+        Raises:
+            DocpipeException: A ``BIN_*`` index type is configured but no binary vector feature is available.
+        """
+        if self.add_sparse_vector or self.index_type not in MilvusIndexTypes.ALL_BINARY_TYPES:
+            return
+        if any(is_binary_vector_feature(feature_config={"type": ftype}) for ftype in feature_types.values()):
+            return
+        raise DocpipeException(
+            message=(
+                f"MilvusDB Error: Binary index type '{self.index_type}' requires a binary vector feature, but none "
+                "is available from upstream operators. Set 'quantization' to 'binary' or 'ubinary' on the "
+                "embeddings operator, or set 'index_type' to a dense index (e.g. HNSW)."
+            ),
+            status_code=400,
+            error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+        )
+
+    def _has_binary_field(self, *, dimension_mapping: dict[str, int]) -> bool:
+        """Return True when any vector column in the mapping is a binary vector feature."""
+        return any(
+            is_binary_vector_feature(feature_config=self.available_features.get(column, {}))
+            for column in dimension_mapping
+        )
+
+    def _resolve_vector_index_config(
+        self, *, vector_field_name: str, is_binary: bool, has_binary_field: bool
+    ) -> tuple[str, str, dict[str, Any]]:
+        """Resolve the (index_type, metric_type, params) used to index one vector field.
+
+        The configured ``index_type`` / ``metric_type`` / ``index_parameters`` are applied to the fields
+        they are valid for; the other kind of field gets a safe default derived from its own data type:
+
+        - Dense index type (HNSW, ...): dense fields use the configuration as-is; binary fields use
+          ``BIN_FLAT`` / ``HAMMING``.
+        - Binary index type (BIN_*): binary fields use the configuration as-is; dense fields (only possible
+          in a mixed collection) use ``HNSW`` / ``L2`` defaults.
+
+        Args:
+            vector_field_name: Milvus field name (for error messages)
+            is_binary: Whether the field is a binary vector
+            has_binary_field: Whether the collection holds at least one binary vector field
+
+        Returns:
+            Tuple of (index_type, metric_type, index parameters)
+
+        Raises:
+            DocpipeException: A BIN_* index type is configured but the collection has no binary vector field.
+        """
+        config_is_binary = self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES
+
+        if is_binary and config_is_binary:
+            return self.index_type, self.metric_type, self._get_index_parameters()
+
+        if is_binary:
+            metric = (
+                self.metric_type if self.metric_type in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES else None
+            ) or MilvusMetricTypes.HAMMING
+            return MilvusIndexTypes.BIN_FLAT, metric, INDEX_DEFAULT_PARAMETERS.get(MilvusIndexTypes.BIN_FLAT, {}).copy()
+
+        if not config_is_binary:
+            return self.index_type, self.metric_type, self._get_index_parameters()
+
+        if not has_binary_field:
+            raise DocpipeException(
+                message=(
+                    f"MilvusDB Error: Dense vector field '{vector_field_name}' cannot use binary index type "
+                    f"'{self.index_type}' and the collection has no binary vector field. "
+                    "Set 'index_type' to a dense index (e.g. HNSW)."
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+        return (
+            MilvusIndexTypes.HNSW,
+            MilvusMetricTypes.L2,
+            INDEX_DEFAULT_PARAMETERS.get(MilvusIndexTypes.HNSW, {}).copy(),
+        )
 
     def _validate_metric_type(self) -> None:
         """Validate metric type and ensure sparse mode uses BM25."""
@@ -290,28 +392,25 @@ class MilvusIndexManager:
                 )
             )
 
+        has_binary_field = self._has_binary_field(dimension_mapping=dimension_mapping)
+
         # Add ALL vector fields from dimension_mapping (supports dense, binary, and multi-model)
         for vector_column, dimension in dimension_mapping.items():
             # Get the mapped field name for this vector column
             vector_field_name = self._mapping_dict.get(vector_column, vector_column)
-            feature_config = self.available_features.get(vector_column, {})
-            feature_type = feature_config.get(OperatorConstants.Misc.TYPE, "")
-            is_binary = (
-                feature_type
-                in (
-                    "binary_vector",
-                    "vector_binary",
-                    OperatorConstants.Types.TYPE_VECTOR_BINARY,
-                )
-                or feature_config.get("vector_type") == "binary"
-                or self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES
+            is_binary = is_binary_vector_feature(feature_config=self.available_features.get(vector_column, {}))
+
+            # Fail before any schema/collection is created if this field cannot be indexed as configured
+            self._resolve_vector_index_config(
+                vector_field_name=vector_field_name, is_binary=is_binary, has_binary_field=has_binary_field
             )
 
             if is_binary:
                 if self.is_lite:
                     raise DocpipeException(
                         message=(
-                            f"MilvusDB Error: Binary vector field '{vector_field_name}' is not supported by Milvus Lite. "
+                            f"MilvusDB Error: Binary vector field '{vector_field_name}' is not supported by "
+                            "Milvus Lite. "
                             "Use standalone Milvus or watsonx.data for binary vector indexing."
                         ),
                         status_code=400,
@@ -320,7 +419,8 @@ class MilvusIndexManager:
                 if dimension % 8 != 0:
                     raise DocpipeException(
                         message=(
-                            f"MilvusDB Error: Binary vector field '{vector_field_name}' dimension must be a multiple of 8 (got {dimension})."
+                            f"MilvusDB Error: Binary vector field '{vector_field_name}' dimension must be a "
+                            f"multiple of 8 (got {dimension})."
                         ),
                         status_code=400,
                         error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
@@ -662,81 +762,32 @@ class MilvusIndexManager:
 
             # Create vector indexes for ALL vector fields (dense, binary, and multi-model)
             dense_index_params = self.client.prepare_index_params()
+            has_binary_field = self._has_binary_field(dimension_mapping=dimension_mapping)
 
             for vector_column, dimension in dimension_mapping.items():
                 # Get the mapped field name for this vector column
                 vector_field_name = self._mapping_dict.get(vector_column, vector_column)
-                feature_config = self.available_features.get(vector_column, {})
-                feature_type = feature_config.get(OperatorConstants.Misc.TYPE, "")
-                is_binary = (
-                    feature_type
-                    in (
-                        "binary_vector",
-                        "vector_binary",
-                        OperatorConstants.Types.TYPE_VECTOR_BINARY,
-                    )
-                    or feature_config.get("vector_type") == "binary"
-                    or self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES
+                is_binary = is_binary_vector_feature(feature_config=self.available_features.get(vector_column, {}))
+                field_index_type, field_metric_type, field_params = self._resolve_vector_index_config(
+                    vector_field_name=vector_field_name, is_binary=is_binary, has_binary_field=has_binary_field
                 )
 
-                if is_binary:
-                    field_index_type = (
-                        self.index_type
-                        if self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES
-                        else MilvusIndexTypes.BIN_FLAT
-                    )
-                    field_metric_type = (
-                        self.metric_type
-                        if self.metric_type in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES
-                        else MilvusMetricTypes.HAMMING
-                    )
-                    field_params = INDEX_DEFAULT_PARAMETERS.get(field_index_type, {}).copy()
-                    if self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES and self.index_parameters:
-                        field_params.update(self.index_parameters)
-
-                    logger.info(
-                        "[MILVUS COLLECTION] Creating index on binary vector field '%s' (source: '%s', dimension: %s, index_type=%s, metric=%s)",
-                        vector_field_name,
-                        vector_column,
-                        dimension,
-                        field_index_type,
-                        field_metric_type,
-                    )
-                    dense_index_params.add_index(
-                        field_name=vector_field_name,
-                        index_type=field_index_type,
-                        metric_type=field_metric_type,
-                        params=field_params,
-                    )
-                else:
-                    field_index_type = (
-                        self.index_type
-                        if self.index_type in MilvusIndexTypes.ALL_DENSE_TYPES
-                        else MilvusIndexTypes.FLAT
-                    )
-                    field_metric_type = (
-                        self.metric_type
-                        if self.metric_type in MilvusMetricTypes.ALL_DENSE_METRIC_TYPES
-                        else MilvusMetricTypes.L2
-                    )
-                    field_params = INDEX_DEFAULT_PARAMETERS.get(field_index_type, {}).copy()
-                    if self.index_type in MilvusIndexTypes.ALL_DENSE_TYPES and self.index_parameters:
-                        field_params.update(self.index_parameters)
-
-                    logger.info(
-                        "[MILVUS COLLECTION] Creating index on dense vector field '%s' (source: '%s', dimension: %s, index_type=%s, metric=%s)",
-                        vector_field_name,
-                        vector_column,
-                        dimension,
-                        field_index_type,
-                        field_metric_type,
-                    )
-                    dense_index_params.add_index(
-                        field_name=vector_field_name,
-                        index_type=field_index_type,
-                        metric_type=field_metric_type,
-                        params=field_params,
-                    )
+                logger.info(
+                    "[MILVUS COLLECTION] Creating index on %s vector field '%s' "
+                    "(source: '%s', dimension: %s, index_type=%s, metric=%s)",
+                    "binary" if is_binary else "dense",
+                    vector_field_name,
+                    vector_column,
+                    dimension,
+                    field_index_type,
+                    field_metric_type,
+                )
+                dense_index_params.add_index(
+                    field_name=vector_field_name,
+                    index_type=field_index_type,
+                    metric_type=field_metric_type,
+                    params=field_params,
+                )
 
             # Create indexes for vector fields
             self.client.create_index(
@@ -745,10 +796,8 @@ class MilvusIndexManager:
             )
 
             logger.info(
-                "[MILVUS COLLECTION] Vector indexes created for %s field(s) (index_type=%s, metric=%s)",
+                "[MILVUS COLLECTION] Vector indexes created for %s field(s)",
                 len(dimension_mapping),
-                self.index_type,
-                self.metric_type,
             )
 
         except Exception as e:
