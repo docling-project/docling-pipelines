@@ -29,6 +29,10 @@ The operator SHALL support pure dense vectors, pure sparse vectors (BM25), pure 
 - **WHEN** a flow is validated and the Milvus `index_type` is a `BIN_*` index while no upstream feature has type `vector_binary`
 - **THEN** validation fails with an invalid-configuration error naming the `quantization` setting of the embeddings operator, before any collection is created
 
+#### Scenario: Flow validation rejects binary vector features for OpenSearch
+- **WHEN** a flow is validated and an OpenSearch VectorDB node receives an upstream feature of type `vector_binary` (for example from `EmbeddingsOperator` with `quantization` of `binary` or `ubinary`)
+- **THEN** validation fails with an invalid-configuration error stating that binary vector features are not supported by OpenSearch, instead of silently creating a `text` field
+
 #### Scenario: Binary quantization types the embeddings feature
 - **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary`
 - **THEN** feature propagation exposes the embeddings feature as `vector_binary` so downstream VectorDB nodes create a `BINARY_VECTOR` field

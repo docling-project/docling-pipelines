@@ -197,7 +197,7 @@ class TestDocumentPreparation:
             "binary_embeddings": {
                 "name": "Binary Embeddings",
                 "available_for_vector_db": True,
-                "type": "binary_vector",
+                "type": "vector_binary",
             },
         }
         mappings = [

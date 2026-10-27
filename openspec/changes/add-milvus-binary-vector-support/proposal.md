@@ -17,7 +17,7 @@ Milvus supports binary vectors (`DataType.BINARY_VECTOR`), enabling up to 32× s
 
 - **Milvus Lite Engine Implementation**: We will not attempt to implement binary vector operations inside the C++ `milvus-lite` engine itself, as upstream Milvus Lite does not support `BinaryVector`.
 - **Client-side Search Execution Engine**: We will not replace external vector database search clients or build a custom vector query engine in `docpipe`; the focus is on schema management, ingestion, indexing, and vector data transformation within the pipeline.
-- **Non-Milvus Vector DB Binary Quantization**: This proposal does not add binary indexing to OpenSearch or other backends.
+- **Non-Milvus Vector DB Binary Quantization**: This proposal does not add binary indexing to OpenSearch or other backends. OpenSearch instead rejects binary vector features at flow validation so the unsupported combination fails early.
 
 ## Capabilities
 

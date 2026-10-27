@@ -1045,7 +1045,7 @@ class TestBinaryVectorIndexSupport:
             "binary_embeddings": {
                 "name": "Binary Embeddings",
                 "available_for_vector_db": True,
-                "type": "binary_vector",
+                "type": "vector_binary",
             }
         }
         mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "bin_vec"}]
@@ -1069,7 +1069,7 @@ class TestBinaryVectorIndexSupport:
             "binary_embeddings": {
                 "name": "Binary Embeddings",
                 "available_for_vector_db": True,
-                "type": "binary_vector",
+                "type": "vector_binary",
             }
         }
         mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "bin_vec"}]
@@ -1091,7 +1091,7 @@ class TestBinaryVectorIndexSupport:
             "binary_embeddings": {
                 "name": "Binary Embeddings",
                 "available_for_vector_db": True,
-                "type": "binary_vector",
+                "type": "vector_binary",
             }
         }
         mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "bin_vec"}]
@@ -1110,7 +1110,7 @@ class TestBinaryVectorIndexSupport:
 
     @staticmethod
     def _hybrid_manager(
-        client: MagicMock, *, binary_type: str = "binary_vector", **overrides: Any
+        client: MagicMock, *, binary_type: str = "vector_binary", **overrides: Any
     ) -> MilvusIndexManager:
         """Build a manager with one dense and one binary feature (dense_vec / binary_vec)."""
         features = {
@@ -1141,12 +1141,11 @@ class TestBinaryVectorIndexSupport:
         params = client.prepare_index_params.return_value
         return {c.kwargs["field_name"]: c.kwargs for c in params.add_index.call_args_list}
 
-    @pytest.mark.parametrize("binary_type", ["binary_vector", "vector_binary"])
-    def test_multi_vector_dense_and_binary_schema_and_indexes(self, mock_client, binary_type):
+    def test_multi_vector_dense_and_binary_schema_and_indexes(self, mock_client):
         """Mixed collection: dense keeps its own index/metric/params; binary defaults to BIN_FLAT + HAMMING."""
         from pymilvus import DataType
 
-        manager = self._hybrid_manager(mock_client, binary_type=binary_type)
+        manager = self._hybrid_manager(mock_client)
         dim_mapping = {"dense_embeddings": 384, "binary_embeddings": 256}
         fields = manager._create_schema_fields(dimension_mapping=dim_mapping)
 
@@ -1283,10 +1282,9 @@ class TestValidateVectorFeatureTypes:
         with pytest.raises(DocpipeException, match="requires a binary vector feature"):
             manager.validate_vector_feature_types(feature_types={"embeddings": "vector", "content": "string"})
 
-    @pytest.mark.parametrize("binary_type", ["vector_binary", "binary_vector"])
-    def test_bin_index_with_binary_feature_passes(self, mock_client, binary_type):
+    def test_bin_index_with_binary_feature_passes(self, mock_client):
         manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING")
-        manager.validate_vector_feature_types(feature_types={"embeddings": binary_type})
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector_binary"})
 
     def test_dense_index_never_requires_binary_feature(self, mock_client):
         manager = self._manager(mock_client, index_type="HNSW", metric_type="COSINE")

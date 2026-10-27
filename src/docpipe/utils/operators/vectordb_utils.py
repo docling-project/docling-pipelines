@@ -16,10 +16,6 @@ from docpipe.utils.infrastructure.logging import get_logger
 logger = get_logger(__name__)
 
 
-# "binary_vector" is accepted as an alias of the canonical TYPE_VECTOR_BINARY ("vector_binary").
-_BINARY_VECTOR_TYPES: frozenset[str] = frozenset({OperatorConstants.Types.TYPE_VECTOR_BINARY, "binary_vector"})
-
-
 def is_binary_vector_feature(*, feature_config: dict[str, Any]) -> bool:
     """Return True when a feature definition describes a packed-bit (binary) vector.
 
@@ -30,10 +26,10 @@ def is_binary_vector_feature(*, feature_config: dict[str, Any]) -> bool:
         feature_config: Feature definition (as found in ``available_features``).
 
     Returns:
-        True for ``type`` ``vector_binary`` / ``binary_vector`` or ``vector_type == "binary"``.
+        True for ``type`` ``vector_binary`` or ``vector_type == "binary"``.
     """
     return (
-        feature_config.get(OperatorConstants.Misc.TYPE) in _BINARY_VECTOR_TYPES
+        feature_config.get(OperatorConstants.Misc.TYPE) == OperatorConstants.Types.TYPE_VECTOR_BINARY
         or feature_config.get("vector_type") == "binary"
     )
 

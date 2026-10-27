@@ -15,7 +15,7 @@ from docpipe.utils.operators.vectordb_utils import (
 class TestIsBinaryVectorFeature:
     """Per-field binary classification is decided by the feature's own type only."""
 
-    @pytest.mark.parametrize("type_", [OperatorConstants.Types.TYPE_VECTOR_BINARY, "vector_binary", "binary_vector"])
+    @pytest.mark.parametrize("type_", [OperatorConstants.Types.TYPE_VECTOR_BINARY, "vector_binary"])
     def test_binary_type_strings(self, type_):
         assert is_binary_vector_feature(feature_config={"type": type_}) is True
 
@@ -33,7 +33,7 @@ class TestIsBinaryVectorFeature:
 
 
 class TestIsDenseOrBinaryVectorFeature:
-    @pytest.mark.parametrize("type_", ["vector", "vector_binary", "binary_vector"])
+    @pytest.mark.parametrize("type_", ["vector", "vector_binary"])
     def test_vector_types(self, type_):
         assert is_dense_or_binary_vector_feature(feature_config={"type": type_}) is True
 

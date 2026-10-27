@@ -541,11 +541,7 @@ class MilvusIndexManager:
         Returns:
             Milvus DataType or None if not supported
         """
-        if feature_type in (
-            "binary_vector",
-            "vector_binary",
-            OperatorConstants.Types.TYPE_VECTOR_BINARY,
-        ):
+        if feature_type == OperatorConstants.Types.TYPE_VECTOR_BINARY:
             return DataType.BINARY_VECTOR
 
         type_mapping: dict[str, DataType] = {

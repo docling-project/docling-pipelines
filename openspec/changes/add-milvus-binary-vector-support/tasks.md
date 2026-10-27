@@ -22,3 +22,8 @@
 - [x] 4.1 [backend] Update Milvus operator documentation in `docs/operators/vectordb/milvus.md` and `docs/reference/OPERATORS.md` with binary index types, metrics, quantization examples, and Milvus Lite compatibility notes.
 - [x] 4.2 [backend] Add sample flow JSON `sample_flows/vectordb/milvus_binary_integration.json` demonstrating an end-to-end ingest -> extract -> chunk -> binary embedding -> Milvus binary vector storage pipeline.
 - [x] 4.3 [backend] Run test suite and pre-commit checks (`pytest tests/unit/operators/vectordb/` and `pytest tests/unit/operators/embeddings/`) to verify clean passage.
+
+## 5. Flow Validation Coverage
+
+- [x] 5.1 [backend] Override `validate_vector_feature_types` in `OpenSearchAdapter` (`src/docpipe/core/operators/vectordb/adapters/outbound/opensearch/adapter.py`) to reject `vector_binary` features, and verify with unit tests in `tests/unit/operators/vectordb/test_opensearch_adapter.py`.
+- [x] 5.2 [backend] Add a validator-level test over `sample_flows/vectordb/milvus_binary_integration.json` in `tests/unit/core/orchestrator/test_milvus_binary_flow_validation.py` (passes as shipped, fails without `quantization`).

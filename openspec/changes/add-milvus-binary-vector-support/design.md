@@ -23,7 +23,7 @@ See `proposal.md` for background and motivation.
 
 ### 1. DataType and Schema Definition for Binary Vectors
 
-**Decision:** In `MilvusIndexManager._create_schema_fields`, recognize binary vector columns and generate `FieldSchema(name=field_name, dtype=DataType.BINARY_VECTOR, dim=dimension)`. Classification is **per field and decided only by the feature's own type** (`vector_binary`, alias `binary_vector`, or `vector_type: "binary"`), via the single helper `is_binary_vector_feature`. `index_type` / `metric_type` are never used to infer it.
+**Decision:** In `MilvusIndexManager._create_schema_fields`, recognize binary vector columns and generate `FieldSchema(name=field_name, dtype=DataType.BINARY_VECTOR, dim=dimension)`. Classification is **per field and decided only by the feature's own type** (`vector_binary` or `vector_type: "binary"`), via the single helper `is_binary_vector_feature`. `index_type` / `metric_type` are never used to infer it.
 - Enforce validation rule: `dimension % 8 == 0`.
 - Keep `FLOAT_VECTOR` as the default when the feature is not binary.
 - `EmbeddingsOperator` with `quantization: binary|ubinary` types its `embeddings` feature as `vector_binary` in `FeaturePropagator`, so the binary path is selected without extra user configuration.
