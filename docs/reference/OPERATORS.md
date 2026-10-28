@@ -38,6 +38,7 @@ title: Operator Reference
       - [VectorDBOperator](#vectordboperator)
     - [Storage Operators](#storage-operators)
       - [DocumentSetOperator](#documentsetoperator)
+      - [EntityStoreOperator](#entitystoreoperator)
       - [StorageOutputOperator](#storageoutputoperator)
   - [DocpipeFlowManager API](#docpipeflowmanager-api)
     - [Constructor](#constructor)
@@ -2569,6 +2570,26 @@ uv run pytest tests/integration/api/test_document_sets_api.py -v
 **Extension**
 
 For new backends, implement the `DocumentSetStorage` and `DocumentSetMetadataRepository` ports, register the adapters with `DataStoreFactory` and `MetadataRepositoryFactory` respectively. Configure `data_backend` in the operator config to select the data adapter, and `global_config.metadata_storage_type` to select the metadata adapter. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+
+---
+
+#### EntityStoreOperator
+
+**Purpose:** Store the curated entities of each document (`transformed_entities`) in one DuckDB or PostgreSQL table per entity type, and pass the data through unchanged.
+
+**Category:** Storage
+
+**Class:** `core.operators.storage.entity_store_operator.EntityStoreOperator`
+
+| Parameter         | Type   | Required | Default                | Description                                                              |
+| ----------------- | ------ | -------: | ---------------------- | ------------------------------------------------------------------------ |
+| `data_backend`    | string |       No | `duckdb`               | `duckdb` or `postgres`                                                   |
+| `database_path`   | string |       No | `:memory:`             | DuckDB database file, or `:memory:` (`duckdb` backend)                   |
+| `schema`          | string |       No | `docpipe_entities`     | PostgreSQL schema of the entity tables (`postgres` backend)              |
+| `table_prefix`    | string |       No | `entity_`              | Prefix of every entity table name                                        |
+| `entities_column` | string |       No | `transformed_entities` | Column that holds the curated entities                                   |
+
+The `postgres` backend connects with the `DOCPIPE_POSTGRES_*` environment variables; connection settings in the operator configuration are rejected. See [Entity Store README](../operators/storage/entity_store_operator_readme.md).
 
 ---
 

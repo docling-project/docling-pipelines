@@ -69,17 +69,6 @@ LibraryIdPath = Annotated[
     ),
 ]
 
-DocumentSetIdPath = Annotated[
-    str,
-    Path(
-        description="Unique identifier for the document set",
-        min_length=UUID_LENGTH,
-        max_length=UUID_LENGTH,
-        pattern=UUID_PATTERN,
-        examples=["660e8400-e29b-41d4-a716-446655440001"],
-    ),
-]
-
 # Query parameter type definitions
 LimitQuery = Annotated[
     int,
@@ -132,21 +121,6 @@ def get_library_id(library_id: LibraryIdPath) -> str:
         400: If library_id is not a valid UUID format (handled by validation_exception_handler)
     """
     return library_id
-
-
-def get_document_set_id(document_set_id: DocumentSetIdPath) -> str:
-    """Extract and validate document set ID from path parameter.
-
-    Args:
-        document_set_id: Document set identifier from path
-
-    Returns:
-        Validated document set ID
-
-    Raises:
-        400: If document_set_id is not a valid UUID format (handled by validation_exception_handler)
-    """
-    return document_set_id
 
 
 def get_pagination_params(
@@ -257,7 +231,7 @@ def create_library(
         DocumentLibraryInvalidDataException: If validation fails (400)
         DocumentLibraryStorageException: If storage operation fails (500)
     """
-    logger.info(msg=f"Creating library: {library.name}")
+    logger.info("Creating library: %s", library.name)
 
     # Create library via service with fields from request
     domain_library = service.create_library(
@@ -272,7 +246,7 @@ def create_library(
     # Convert to response DTO
     response = DocumentLibraryMapper.domain_to_response(domain=domain_library)
 
-    logger.info(msg=f"Library created successfully: {response.library_id}")
+    logger.info("Library created successfully: %s", response.library_id)
     return response
 
 
@@ -332,7 +306,7 @@ def get_library(
         DocumentLibraryInvalidDataException: If library_id is invalid (400)
         DocumentLibraryStorageException: If storage operation fails (500)
     """
-    logger.info(msg=f"Retrieving library: {library_id}")
+    logger.info("Retrieving library: %s", library_id)
 
     # Get library via service
     domain_library = service.get_library(library_id=library_id)
@@ -340,7 +314,7 @@ def get_library(
     # Convert to response DTO
     response = DocumentLibraryMapper.domain_to_response(domain=domain_library)
 
-    logger.info(msg=f"Library retrieved successfully: {library_id}")
+    logger.info("Library retrieved successfully: %s", library_id)
     return response
 
 
@@ -398,7 +372,7 @@ def list_libraries(
     """
     limit, offset = pagination
 
-    logger.info(msg=f"Listing libraries: limit={limit}, offset={offset}")
+    logger.info("Listing libraries: limit=%s, offset=%s", limit, offset)
 
     # Get libraries via service
     libraries = service.list_libraries(
@@ -409,7 +383,7 @@ def list_libraries(
     # Convert to response DTOs
     responses = [DocumentLibraryMapper.domain_to_response(domain=lib) for lib in libraries]
 
-    logger.info(msg=f"Listed {len(responses)} libraries")
+    logger.info("Listed %s libraries", len(responses))
     return responses
 
 
@@ -490,7 +464,7 @@ def update_library(
         DocumentLibraryInvalidDataException: If validation fails (400)
         DocumentLibraryStorageException: If storage operation fails (500)
     """
-    logger.info(msg=f"Updating library: {library_id}")
+    logger.info("Updating library: %s", library_id)
 
     # Convert DTO to update dict (exclude None values)
     update_dict = updates.model_dump(exclude_none=True)
@@ -509,7 +483,7 @@ def update_library(
     # Convert to response DTO
     response = DocumentLibraryMapper.domain_to_response(domain=updated_library)
 
-    logger.info(msg=f"Library updated successfully: {library_id}")
+    logger.info("Library updated successfully: %s", library_id)
     return response
 
 
@@ -569,12 +543,12 @@ def delete_library(
         DocumentLibraryInvalidDataException: If library_id is invalid (400)
         DocumentLibraryStorageException: If storage operation fails (500)
     """
-    logger.info(msg=f"Deleting library: {library_id}")
+    logger.info("Deleting library: %s", library_id)
 
     # Delete library via service
     service.delete_library(library_id=library_id)
 
-    logger.info(msg=f"Library deleted successfully: {library_id}")
+    logger.info("Library deleted successfully: %s", library_id)
 
 
 @document_libraries_router.put(
@@ -647,7 +621,7 @@ def add_document_sets(
     # Parse comma-separated IDs
     doc_set_ids = [id.strip() for id in document_sets_ids.split(",") if id.strip()]
 
-    logger.info(msg=f"Adding {len(doc_set_ids)} document sets to library {library_id}")
+    logger.info("Adding %s document sets to library %s", len(doc_set_ids), library_id)
 
     # Add document sets via service
     service.add_document_sets_bulk(
@@ -655,7 +629,7 @@ def add_document_sets(
         document_set_ids=doc_set_ids,
     )
 
-    logger.info(msg=f"Document sets added successfully to library: {library_id}")
+    logger.info("Document sets added successfully to library: %s", library_id)
     return Response(status_code=204)
 
 
@@ -729,7 +703,7 @@ def remove_document_sets(
     # Parse comma-separated IDs
     doc_set_ids = [id.strip() for id in document_sets_ids.split(",") if id.strip()]
 
-    logger.info(msg=f"Removing {len(doc_set_ids)} document sets from library {library_id}")
+    logger.info("Removing %s document sets from library %s", len(doc_set_ids), library_id)
 
     # Remove document sets via service
     service.remove_document_sets_bulk(
@@ -737,7 +711,7 @@ def remove_document_sets(
         document_set_ids=doc_set_ids,
     )
 
-    logger.info(msg=f"Document sets removed successfully from library: {library_id}")
+    logger.info("Document sets removed successfully from library: %s", library_id)
     return Response(status_code=204)
 
 
@@ -799,7 +773,7 @@ def list_document_sets(
         DocumentLibraryInvalidDataException: If library_id is invalid (400)
         DocumentLibraryStorageException: If storage operation fails (500)
     """
-    logger.info(msg=f"Listing document sets for library: {library_id}")
+    logger.info("Listing document sets for library: %s", library_id)
 
     # Get document set IDs via library service
     document_set_ids = library_service.get_document_sets(library_id=library_id)
@@ -829,5 +803,5 @@ def list_document_sets(
     # Convert to DocumentSetsRetrieved DTO using full metadata
     response = DocumentLibraryMapper.create_document_sets_retrieved_response(document_sets=document_sets_metadata)
 
-    logger.info(msg=f"Found {len(document_set_ids)} document sets in library: {library_id}")
+    logger.info("Found %s document sets in library: %s", len(document_set_ids), library_id)
     return response

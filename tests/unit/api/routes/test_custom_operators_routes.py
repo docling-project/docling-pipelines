@@ -3,7 +3,8 @@
 import io
 import uuid
 from datetime import UTC, datetime
-from typing import Generator
+from pathlib import Path
+from typing import Any, Generator
 from unittest.mock import MagicMock
 
 import pytest
@@ -219,3 +220,97 @@ class TestUpdateAndDeleteCustomOperatorEndpoints:
         data = response.json()
         assert data["success"] is True
         assert data["operator_id"] == op_id
+
+
+class TestOperatorFileValidation:
+    """Filename, extension and size limits on create and update, and temp-file handling on update."""
+
+    @pytest.mark.parametrize(
+        ("filename", "content", "status_code", "detail"),
+        [
+            ("a" * 253 + ".py", b"# code", 400, "Invalid operator filename"),
+            ("big_op.py", b"#" * (512 * 1024 + 1), 413, "maximum allowed size of 512 KB"),
+        ],
+        ids=["name-too-long", "too-large"],
+    )
+    def test_create_rejects_invalid_files(
+        self,
+        *,
+        client: TestClient,
+        mock_service: MagicMock,
+        filename: str,
+        content: bytes,
+        status_code: int,
+        detail: str,
+    ) -> None:
+        response = client.post(
+            "/custom_operators",
+            data={"name": "Op"},
+            files={"operator_file": (filename, io.BytesIO(content), "text/x-python")},
+        )
+
+        assert response.status_code == status_code
+        assert detail in response.text
+        mock_service.create_operator.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("filename", "content", "status_code", "detail"),
+        [
+            ("a" * 253 + ".py", b"# code", 400, "Invalid operator filename"),
+            ("op.txt", b"# code", 400, "must have a .py extension"),
+            ("big_op.py", b"#" * (512 * 1024 + 1), 413, "maximum allowed size of 512 KB"),
+        ],
+        ids=["name-too-long", "not-python", "too-large"],
+    )
+    def test_update_rejects_invalid_files(
+        self,
+        *,
+        client: TestClient,
+        mock_service: MagicMock,
+        filename: str,
+        content: bytes,
+        status_code: int,
+        detail: str,
+    ) -> None:
+        response = client.patch(
+            f"/custom_operators/{uuid.uuid4()}",
+            files={"operator_file": (filename, io.BytesIO(content), "text/x-python")},
+        )
+
+        assert response.status_code == status_code
+        assert detail in response.text
+        mock_service.update_operator.assert_not_called()
+
+    def test_update_with_file_passes_temp_copy_and_removes_it(
+        self, *, client: TestClient, mock_service: MagicMock
+    ) -> None:
+        op_id = str(uuid.uuid4())
+        seen: dict[str, Any] = {}
+
+        def _update(**kwargs: Any) -> CustomOperator:
+            path: Path = kwargs["operator_file_path"]
+            seen.update(kwargs, exists=path.exists(), content=path.read_bytes())
+            return CustomOperator(
+                id=op_id,
+                name="Op",
+                description="",
+                short_name="op",
+                status=CustomOperatorStatus.VALIDATED,
+                message="Updated",
+                operator_file="new_op.py",
+            )
+
+        mock_service.update_operator.side_effect = _update
+
+        response = client.patch(
+            f"/custom_operators/{op_id}",
+            files={"operator_file": ("new_op.py", io.BytesIO(b"class NewOp: ...\n"), "text/x-python")},
+        )
+
+        assert response.status_code == 200
+        assert (seen["exists"], seen["content"], seen["original_filename"]) == (
+            True,
+            b"class NewOp: ...\n",
+            "new_op.py",
+        )
+        assert not seen["operator_file_path"].exists()

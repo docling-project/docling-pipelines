@@ -14,6 +14,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_fa
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 
+from .archive import build_archive_uri, file_extension, is_archive_path, list_archive_entries, read_archive_uri
 from .config import FilesystemSourceConfig
 
 
@@ -63,6 +64,15 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
 
                     mimetype, _ = mimetypes.guess_type(str(root_path))
 
+                    if is_archive_path(root_path):
+                        for document in self._documents_from_archive(
+                            archive_path=root_path,
+                            config=config,
+                            relative_archive_path=None,
+                        ):
+                            yield document
+                        continue
+
                     # Create domain document with empty content (lazy loading)
                     # Binary content is fetched on-demand via fetch_binary_content()
                     document = Document(
@@ -78,6 +88,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                         metadata={
                             "absolute_path": str(root_path.absolute()),
                             "parent_directory": str(root_path.parent),
+                            "archive_depth": 0,
                         },
                     )
 
@@ -102,6 +113,15 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
 
                         mimetype, _ = mimetypes.guess_type(str(file_path))
 
+                        if is_archive_path(file_path):
+                            for document in self._documents_from_archive(
+                                archive_path=file_path,
+                                config=config,
+                                relative_archive_path=file_path.relative_to(root_path),
+                            ):
+                                yield document
+                            continue
+
                         # Create domain document with empty content (lazy loading)
                         document = Document(
                             id=str(file_path.absolute()),
@@ -117,6 +137,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                                 "relative_path": str(file_path.relative_to(root_path)),
                                 "absolute_path": str(file_path.absolute()),
                                 "parent_directory": str(file_path.parent),
+                                "archive_depth": 0,
                             },
                         )
 
@@ -233,6 +254,9 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
             bytes | None: Binary content of the file, or None if not found or error occurred
         """
         try:
+            if source_id.startswith("zip://"):
+                return read_archive_uri(source_id)
+
             parsed_source = urlparse(source_id)
             if parsed_source.scheme == "file":
                 file_path = Path(unquote(parsed_source.path))
@@ -268,6 +292,50 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
         except Exception as e:
             print(f"Unexpected error reading file {source_id}: {e}")
             return None
+
+    @staticmethod
+    def _documents_from_archive(
+        *,
+        archive_path: Path,
+        config: FilesystemSourceConfig,
+        relative_archive_path: Path | None,
+    ) -> Generator[Document, None, None]:
+        """Yield lazy document rows for regular entries in one top-level archive."""
+        archive_stat = archive_path.stat()
+        for entry in list_archive_entries(archive_path):
+            extension = file_extension(entry.name)
+            if config.file_extensions and extension not in config.file_extensions:
+                continue
+            if config.max_file_size_mb and entry.size is not None:
+                file_size_mb = entry.size / (1024 * 1024)
+                if file_size_mb > config.max_file_size_mb:
+                    continue
+
+            source_uri = build_archive_uri(archive_path=archive_path, entry_name=entry.name)
+            mimetype, _ = mimetypes.guess_type(entry.name)
+            metadata: dict[str, Any] = {
+                "absolute_path": str(archive_path.absolute()),
+                "parent_directory": str(archive_path.parent),
+                "archive_depth": 1,
+                "source_archive": str(archive_path.absolute()),
+                "archive_entry": entry.name,
+                "source_id": source_uri,
+            }
+            if relative_archive_path is not None:
+                metadata["relative_path"] = f"{relative_archive_path}#{entry.name}"
+
+            yield Document(
+                id=source_uri,
+                name=entry.name,
+                content=b"",
+                source_url=source_uri,
+                modified_time=datetime.fromtimestamp(archive_stat.st_mtime, tz=UTC),
+                created_time=datetime.fromtimestamp(archive_stat.st_ctime, tz=UTC),
+                mimetype=mimetype,
+                size=entry.size,
+                extension=extension,
+                metadata=metadata,
+            )
 
     def _iter_root_paths(self, config: FilesystemSourceConfig) -> Generator[Path, None, None]:
         """
@@ -328,7 +396,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
 
         # Check file extension filter
         if config.file_extensions:
-            if file_path.suffix.lower() not in config.file_extensions:
+            if file_extension(file_path) not in config.file_extensions:
                 return False
 
         return True
