@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 OperatorConstants with nested class organization.
 
@@ -323,6 +326,7 @@ class OperatorConstants:
         INCLUDE_CONFIDENCE: Final[str] = "include_confidence"
         INCLUDE_REASONING: Final[str] = "include_reasoning"
         MAX_CONTENT_LENGTH: Final[str] = "max_content_length"
+        STRICT_LABEL_MATCHING: Final[str] = "strict_label_matching"
 
         # Watsonx Configuration
         CONTAINER_KIND: Final[str] = "container_kind"
@@ -348,6 +352,9 @@ class OperatorConstants:
         DEFAULT_DOC_COLUMN: Final[str] = "content"  # References Columns.DOC_COLUMN_DEFAULT
         DEFAULT_REQUEST_TIMEOUT: Final[int] = 120
         DEFAULT_MAX_CONTENT_LENGTH: Final[int] = 2000
+        DEFAULT_TEMPERATURE: Final[float] = 0.0
+        DEFAULT_MAX_TOKENS: Final[int] = 500
+        DEFAULT_STRICT_LABEL_MATCHING: Final[bool] = False
 
         # Configuration Keys
         DOC_COLUMN_KEY: Final[str] = "doc_column"  # References Columns.DOC_COLUMN
@@ -560,6 +567,9 @@ class OperatorConstants:
         EXT_MP4: Final[str] = ".mp4"
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
+
+        # Archive formats (filesystem ingest only)
+        ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
 
         BASE_EXTENSIONS: Final[list[str]] = [
             EXT_PDF,
@@ -954,6 +964,16 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         TABLE_NAME: Final[str] = "table_name"
         TARGET_STORE: Final[str] = "target_store"
 
+        # Table storage backends shared by the storage operators
+        BACKEND_DUCKDB: Final[str] = "duckdb"
+        BACKEND_POSTGRES: Final[str] = "postgres"
+        DATA_BACKEND: Final[str] = "data_backend"
+        DATABASE_PATH: Final[str] = "database_path"
+        DEFAULT_DATA_BACKEND: Final[str] = "duckdb"
+        DEFAULT_DATABASE_PATH: Final[str] = ":memory:"
+        SCHEMA: Final[str] = "schema"
+        TABLE_PREFIX: Final[str] = "table_prefix"
+
         # Storage Types
         AWS_STORAGE_TYPE: Final[str] = "amazon_s3"
         COS_STORAGE_TYPE: Final[str] = "bmcos_object_storage"
@@ -1115,6 +1135,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Adapter Names
         ADAPTER_DUCKDB: Final[str] = "duckdb"
         ADAPTER_FILESYSTEM: Final[str] = "filesystem"
+        ADAPTER_POSTGRES: Final[str] = "postgres"
 
         # Configuration Keys
         DATABASE_PATH: Final[str] = "database_path"

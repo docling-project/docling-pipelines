@@ -316,21 +316,21 @@ DocumentSet has two storage concerns, each with its own factory:
 | **Domain model** | `Flow(Asset)` | `DocumentSet(Asset)` | `DocumentLibrary(Asset)` |
 | **Metadata port** | `AssetRepository[Flow]` | `AssetRepository[DocumentSet]` | `AssetRepository[DocumentLibrary]` |
 | **Data-plane port** | — | `DocumentSetStorage` | — |
-| **Generic adapter** | `DuckDBAssetRepository[Flow]` | `DuckDBAssetRepository[DocumentSet]` | `DuckDBAssetRepository[DocumentLibrary]` |
+| **Generic adapter** | `DuckDBAssetRepository[Flow]` | `DuckDBAssetRepository[DocumentSet]` or `PostgresAssetRepository[DocumentSet]` | `DuckDBAssetRepository[DocumentLibrary]` or `PostgresAssetRepository[DocumentLibrary]` |
 | **Data-plane adapter** | — | `DuckDBDocumentSetStorage` | — |
 | **Metadata factory** | `RepositoryFactory` | `MetadataRepositoryFactory` | `DocumentLibraryRepositoryFactory` |
 | **Data-plane factory** | — | `DataStoreFactory` | — |
 | **Service** | `FlowService(AssetService[Flow])` | `DocumentSetService(AssetService[DocumentSet])` | `DocumentLibraryService(AssetService[DocumentLibrary])` |
 | **DI provider** | `get_flow_service()` | `get_document_set_service()` | `get_document_library_service()` |
 | **Collection name** | `flows` | `document_sets` | `document_libraries` |
-| **Storage backend** | Local filesystem (JSON) | DuckDB (metadata) + DuckDB (data tables) | DuckDB |
+| **Storage backend** | Local filesystem (JSON) | DuckDB or PostgreSQL (metadata) + DuckDB (data tables) | DuckDB or PostgreSQL |
 
 ---
 
 ## Verification
 
 - 11 unit tests passing — `tests/unit/core/assets/document_sets/application/services/`
-- `DuckDBAssetRepository[T]` is the single shared implementation across all asset types
+- `DuckDBAssetRepository[T]` and `PostgresAssetRepository[T]` are the shared implementations across all asset types (selected with `assets_management.<asset>_repository.type`: `duckdb` or `postgres`)
 - No asset-specific repository subclass exists in the codebase
 - `DocumentSetService` and `DocumentLibraryService` both extend `AssetService[T]`
 - All dependencies injected via ports — services never import concrete adapter classes

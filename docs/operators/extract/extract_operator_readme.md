@@ -101,7 +101,7 @@ Enable VLM pipeline for enhanced extraction with vision-language models:
 
 **GPU Acceleration Configuration:**
 
-Enable GPU-accelerated standard pipeline processing for PDF and image documents. The adapter builds one `DocumentConverter` at initialization and reuses it across all documents — model weights are loaded onto the GPU once per adapter execution.
+Enable GPU-accelerated standard pipeline processing for PDF and image documents. The GPU `DocumentConverter` is taken from the process-wide converter pool (see [Converter Reuse and Pool Sizing](#converter-reuse-and-pool-sizing)), so model weights are loaded onto the GPU once per configuration and reused across documents and micro-batches.
 
 > **Note:** Cannot be combined with `vlm_pipeline`. Requires `max_workers: 1` and `use_processes: false`.
 
@@ -622,7 +622,7 @@ IBM WatsonX.ai LLM-based entity extraction for enterprise deployments.
 | `text_extraction.provider_config.asr_pipeline`        | object  | `null`              | ASR (Automatic Speech Recognition) pipeline configuration object. Provide empty dict `{}` to enable with defaults, or omit to disable. |
 | `text_extraction.provider_config.asr_pipeline.model_id` | string | `"whisper_turbo"` | ASR model name. Valid values: `whisper_tiny`, `whisper_small`, `whisper_medium`, `whisper_base`, `whisper_large`, `whisper_turbo`, and their `_mlx`/`_native` variants (e.g., `whisper_tiny_mlx`, `whisper_tiny_native`) |
 | `text_extraction.provider_config.standard_pipeline` | object | `null` | Standard pipeline acceleration block. Omit entirely to use default Docling behaviour. |
-| `text_extraction.provider_config.standard_pipeline.accelerator` | object | `null` | GPU accelerator options. When present, one `DocumentConverter` is built at init and reused. **Requires `max_workers: 1` and `use_processes: false`. Cannot be combined with `vlm_pipeline`.** |
+| `text_extraction.provider_config.standard_pipeline.accelerator` | object | `null` | GPU accelerator options. When present, the GPU `DocumentConverter` is pooled process-wide and reused across documents and micro-batches. **Requires `max_workers: 1` and `use_processes: false`. Cannot be combined with `vlm_pipeline`.** |
 | `text_extraction.provider_config.standard_pipeline.accelerator.device` | string | auto-detected | GPU device. Accepted: `mps`, `cuda`, `cuda:<index>` (e.g. `cuda:0`), `xpu`. When omitted, best available device is auto-detected via torch (CUDA → MPS → XPU). Validated at runtime via torch backends. |
 | `text_extraction.provider_config.standard_pipeline.accelerator.num_threads` | int | `4` | CPU-side pipeline thread count. Must be a positive integer (booleans rejected). |
 
@@ -729,35 +729,61 @@ RapidOCR is included in the default PyPI install, and `ocr.engine: "rapidocr"` i
 
 Only `"inline"` models (HuggingFace) are supported. API model types are not supported by Docling's `DocumentExtractor`; use `entity_extraction.provider: "litellm"` for API-based extraction instead.
 
-Example (all fields shown with their defaults; only `repo_id` is required):
+The adapter builds `VlmExtractionPipelineOptions` starting from its built-in defaults (pre-set for `numind/NuExtract-2.0-2B`) and then applies only the fields you supply in `inline_model` on top. This means **only `repo_id` is strictly required** when using a different model; all other fields fall back to the preset defaults. Any `inline_model` key that is not in the recognised field list below is dropped and a `WARNING`-level log entry is emitted listing the ignored keys.
+
+When `repo_id` differs from the preset (`numind/NuExtract-2.0-2B`), `revision` defaults to `"main"` instead of the preset's pinned commit hash (which only exists in the NuExtract repository). Set `revision` explicitly to pin a branch, tag or commit. `trust_remote_code` is `false` by default; enabling it executes code from the model repository and logs a `WARNING`, so enable it only for trusted sources.
+
+Example (all recognised fields shown; only `repo_id` is required):
 ```json
 {
   "model_type": "inline",
   "inline_model": {
     "repo_id": "numind/NuExtract-2.0-2B",
     "inference_framework": "transformers",
+    "transformers_model_type": "automodel-imagetexttotext",
+    "transformers_prompt_style": "chat",
     "scale": 2.0,
+    "max_size": 1920,
     "temperature": 0.0,
     "max_new_tokens": 4096,
     "load_in_8bit": true,
+    "llm_int8_threshold": 6.0,
+    "quantized": false,
+    "use_kv_cache": true,
     "torch_dtype": "bfloat16",
     "prompt": "",
-    "response_format": "markdown"
+    "response_format": "plaintext",
+    "stop_strings": ["<|endoftext|>", "<|im_end|>"],
+    "extra_generation_config": {"top_p": 0.95, "repetition_penalty": 1.05},
+    "extra_processor_kwargs": {"do_resize": true}
   }
 }
 ```
 
-| `inline_model` field      | Type    | Default        | Description                                                              |
-|---------------------------|---------|----------------|--------------------------------------------------------------------------|
-| `repo_id`                 | string  | required       | HuggingFace repository ID (e.g., `"numind/NuExtract-2.0-2B"`)           |
-| `inference_framework`     | string  | `"transformers"` | Inference backend: `"transformers"`, `"vllm"`, or `"mlx"`             |
-| `scale`                   | float   | `2.0`          | Image scale factor for rendering                                         |
-| `temperature`             | float   | `0.0`          | Sampling temperature                                                     |
-| `max_new_tokens`          | integer | `4096`         | Maximum tokens to generate                                               |
-| `load_in_8bit`            | boolean | `false`        | Load model in 8-bit quantization                                         |
-| `torch_dtype`             | string  | `"bfloat16"`   | Torch data type: `"bfloat16"`, `"float16"`, `"float32"`                 |
-| `prompt`                  | string  | `""`           | Custom prompt override (leave empty to use model default)                |
-| `response_format`         | string  | `"markdown"`   | Expected response format from the model                                  |
+| `inline_model` field        | Type    | Default              | Description                                                                          |
+|-----------------------------|---------|----------------------|--------------------------------------------------------------------------------------|
+| `repo_id`                   | string  | required             | HuggingFace repository ID (e.g., `"numind/NuExtract-2.0-2B"`)                       |
+| `inference_framework`       | string  | `"transformers"`     | Inference backend: `"transformers"`, `"vllm"`, or `"mlx"`                           |
+| `transformers_model_type`   | string  | preset default       | Transformers model class, e.g. `"automodel-imagetexttotext"`                         |
+| `transformers_prompt_style` | string  | preset default       | Prompt formatting style, e.g. `"chat"`                                               |
+| `scale`                     | float   | `2.0`                | Image scale factor for rendering                                                     |
+| `max_size`                  | integer | `1920`               | Maximum image dimension (pixels) before downscaling                                  |
+| `temperature`               | float   | `0.0`                | Sampling temperature                                                                 |
+| `max_new_tokens`            | integer | `4096`               | Maximum tokens to generate                                                           |
+| `load_in_8bit`              | boolean | `true`               | Load model in 8-bit quantization                                                     |
+| `llm_int8_threshold`        | float   | `6.0`                | Threshold for LLM.int8() quantization (only used when `load_in_8bit` is `true`)     |
+| `quantized`                 | boolean | `false`              | Use pre-quantized model weights                                                      |
+| `use_kv_cache`              | boolean | `true`               | Enable key-value cache for faster autoregressive generation                          |
+| `revision`                  | string  | `"main"` (other `repo_id`) / preset hash (default `repo_id`) | Git branch, tag or commit of the model repository |
+| `trust_remote_code`         | boolean | `false`              | Allow execution of custom code from the model repository (trusted sources only)     |
+| `torch_dtype`               | string  | `"bfloat16"`         | Torch data type: `"bfloat16"`, `"float16"`, `"float32"`                             |
+| `prompt`                    | string  | `""`                 | Custom prompt override (leave empty to use model default)                            |
+| `response_format`           | string  | `"plaintext"`        | Expected response format from the model: `"plaintext"` or `"markdown"`              |
+| `stop_strings`              | list    | preset default       | Token strings that halt generation, e.g. `["<\|endoftext\|>", "<\|im_end\|>"]`      |
+| `extra_generation_config`   | object  | `{}`                 | Additional generation kwargs forwarded to the model, e.g. `{"top_p": 0.95}`         |
+| `extra_processor_kwargs`    | object  | `{}`                 | Additional processor kwargs, e.g. `{"do_resize": true}`                             |
+
+> **Note:** Any key not listed in the table above is unrecognised and will be dropped. A `WARNING` log entry is emitted listing the ignored key names.
 
 ### LiteLLM Entity Extraction Parameters
 
@@ -1189,6 +1215,27 @@ curl http://localhost:5001/health
    - Set top-level `use_processes: true` for CPU-intensive tasks
    - Use `use_processes: false` (default) for I/O-bound tasks
 
+#### Converter Reuse and Pool Sizing
+
+The `docling_library` text provider and the `docling` entity provider lease Docling `DocumentConverter` / `DocumentExtractor` instances from a process-wide pool instead of building new ones per worker thread and micro-batch. Each instance keeps its initialised model pipelines (layout, TableFormer, OCR, VLM), so models are loaded once per configuration and reused by later batches and operator instances. An instance is only ever used by one worker at a time, and configurations that differ in any option value never share an instance.
+
+Because the pool is shared by every flow and job in the process (CLI, Python library and REST API alike), its limits are process-wide runtime settings, not flow or operator parameters. Set them in the `docling.converter_pool` section of the runtime config file `docling-pipelines-config.yaml` (path override: `DOCPIPE_CONFIG_PATH`) or with environment variables. An environment variable takes precedence over the config file, which takes precedence over the built-in default; an invalid value is ignored with a warning and the next source is used. Settings are read when the pool is first used, so changes take effect after a restart.
+
+```yaml
+docling:
+  converter_pool:
+    size: 8                 # default: min(2 x CPU count, 16)
+    idle_ttl_seconds: 600   # 0 = keep idle converters until the process exits
+```
+
+| Environment variable | Config file key | Default | Description |
+|----------------------|-----------------|---------|-------------|
+| `DOCPIPE_DOCLING_CONVERTER_POOL_SIZE` | `docling.converter_pool.size` | `min(2 x CPU count, 16)` | Maximum number of live converters/extractors in the process, across all configurations and concurrent micro-batches. When all are busy, workers wait for a free one instead of loading more models. Minimum `1`. |
+| `DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS` | `docling.converter_pool.idle_ttl_seconds` | `600` | Idle converters are released after this many seconds so a long-running API server frees model memory between jobs. `0` keeps them until the process exits. |
+
+- The default pool size equals the default text-extraction worker count, so a single batch at default settings never waits. If you set `max_workers` higher than the pool size, the extra workers wait for a converter; raise the pool size together with `max_workers` if you have the memory for more converters.
+- Each converter runs its models with Docling's own thread count (`AcceleratorOptions.num_threads`, default `4`, overridable with `DOCLING_NUM_THREADS` or `OMP_NUM_THREADS`). Up to `pool size x num_threads` inference threads can run at once (for example 16 x 4 = 64 on a 16-core host). If CPU usage is oversubscribed, lower `DOCLING_NUM_THREADS` or the pool size so that their product is close to the number of cores. These settings change throughput only, not the extracted content.
+
 ## Execution Metadata
 
 The operator provides the following metadata after execution:
@@ -1248,6 +1295,10 @@ Complete sample flows are available in [`sample_flows/`](../../../sample_flows/)
   - Linux: `sudo apt install ffmpeg` or `sudo dnf install ffmpeg`
 - Supported formats requiring ffmpeg: M4A, AAC, OGG, FLAC (audio), MP4, AVI, MOV (video)
 - WAV and MP3 audio files do not require ffmpeg
+
+**Issue: Extraction workers stall or memory stays high after a job**
+- Workers wait when every pooled converter is busy; the log shows `Docling converter pool is at capacity` once. Raise `DOCPIPE_DOCLING_CONVERTER_POOL_SIZE` or lower `max_workers`
+- Idle converters keep model memory until the idle TTL (`DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS` or `docling.converter_pool.idle_ttl_seconds`) elapses; lower it to free memory sooner (see [Converter Reuse and Pool Sizing](#converter-reuse-and-pool-sizing))
 
 **Issue: "ffmpeg not found" error during audio/video extraction**
 - Verify ffmpeg installation: `ffmpeg -version`
