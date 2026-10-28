@@ -60,6 +60,13 @@ class TestIngestSourceFilesystemExtensionValidation:
         assert operator.included_extensions is not None
         assert ".pdf" in operator.included_extensions
         assert ".docx" in operator.included_extensions
+        assert ".zip" in operator.included_extensions
+        assert ".tar.gz" in operator.included_extensions
+
+    def test_archive_extensions_are_accepted_for_filesystem(self, tmp_path):
+        operator = IngestSourceOperator(_filesystem_config(tmp_path, include_filter=".zip,.tar,.tar.gz,.tgz,.gz"))
+
+        assert operator.included_extensions == [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
 
 
 class TestIngestSourceExtensionValidation:

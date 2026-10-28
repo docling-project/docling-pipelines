@@ -245,7 +245,7 @@ This approach uses LiteLLM to access Ollama models for flexible, LLM-powered ent
 
 #### GPU-Accelerated Text Extraction
 
-For hardware-accelerated PDF and image extraction using a local GPU. The adapter builds one `DocumentConverter` at initialization and reuses it for every document — GPU model weights are loaded once per flow execution.
+For hardware-accelerated PDF and image extraction using a local GPU. The GPU `DocumentConverter` is taken from a process-wide converter pool and reused for every document and micro-batch, so GPU model weights are loaded once per configuration rather than once per batch.
 
 > Requires `max_workers: 1` and `use_processes: false`. Cannot be combined with `vlm_pipeline`.
 
