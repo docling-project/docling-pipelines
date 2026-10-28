@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JsonJobStatsStore - Filesystem-based storage adapter
 
@@ -104,7 +107,7 @@ class JsonJobStatsStore(JobStatsStore):
         digest = hashlib.sha256(job_run_id.encode("utf-8")).hexdigest()[:16]
         return f"{clean_prefix}_{digest}"
 
-    def _get_locks_dir(self, *, job_run_id: str | None = None) -> Path:
+    def _get_locks_dir(self) -> Path:
         """Get locks directory: /data/job_stats/.locks/"""
         locks_dir = self._base_dir / ".locks"
         locks_dir.mkdir(parents=True, exist_ok=True)
@@ -666,6 +669,13 @@ class JsonJobStatsStore(JobStatsStore):
                 job_run_id=job_run_id,
             ) from e
 
+        # Best-effort cleanup of lock files after releasing locks.
+        # Done outside the lock blocks so the lock files are not held (critical on Windows).
+        with contextlib.suppress(OSError):
+            job_lock_path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            node_lock_path.unlink(missing_ok=True)
+
     def get_all_job_run_ids(self) -> list[str]:
         """
         Get all job run IDs (useful for testing and debugging).
@@ -752,7 +762,7 @@ class JsonJobStatsStore(JobStatsStore):
         try:
             result: list[JobStats] = []
             for job_dir in self._base_dir.iterdir():
-                if not job_dir.is_dir() or job_dir.name.startswith("."):
+                if not job_dir.is_dir() or job_dir.name == ".locks":
                     continue
                 job_stats = self._read_job_stats_if_match(
                     job_dir=job_dir,
