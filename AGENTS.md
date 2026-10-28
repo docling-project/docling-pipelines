@@ -241,6 +241,8 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `DOCPIPE_LINEAGE_STRICT` | `false` (default) \| `true` — re-raise observer errors instead of logging a warning |
 | `OPENLINEAGE__TRANSPORT__*` | OpenLineage SDK transport settings (`console` default, `file`, `http`); read by the SDK, not by docpipe |
 | `CORS_ORIGINS` | Comma-separated allowed origins, default `http://localhost:3000` |
+| `DOCPIPE_DOCLING_CONVERTER_POOL_SIZE` | Max pooled Docling converters/extractors per process, default `min(2*cpu, 16)`; overrides `docling.converter_pool.size` in the config file |
+| `DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS` | Idle pooled converter lifetime, default `600`; `0` = keep until exit; overrides `docling.converter_pool.idle_ttl_seconds` |
 
 ## Commands
 

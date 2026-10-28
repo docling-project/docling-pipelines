@@ -264,7 +264,7 @@ For full details on the priority system, override behaviour, and registering cus
 | `text_extraction.provider_config.asr_pipeline`                | object |          No | `null`                  | `docling_library`               | ASR (Automatic Speech Recognition) pipeline configuration. When present, ASR processing is enabled. |
 | `text_extraction.provider_config.asr_pipeline.model_id`       | string |          No | `whisper_turbo`         | `docling_library`               | ASR model name. Valid values: `whisper_tiny`, `whisper_small`, `whisper_medium`, `whisper_base`, `whisper_large`, `whisper_turbo`, and their `_mlx`/`_native` variants (e.g., `whisper_tiny_mlx`, `whisper_tiny_native`) |
 | `text_extraction.provider_config.standard_pipeline`           | object |          No | `null`                  | `docling_library`               | Standard pipeline acceleration configuration. Omit entirely for default behaviour. |
-| `text_extraction.provider_config.standard_pipeline.accelerator` | object |         No | `null`                  | `docling_library`               | GPU accelerator options for PDF and image processing. When present, the adapter builds one `DocumentConverter` and reuses it across all documents. **Requires `max_workers: 1` and `use_processes: false`.** Cannot be combined with `vlm_pipeline`. |
+| `text_extraction.provider_config.standard_pipeline.accelerator` | object |         No | `null`                  | `docling_library`               | GPU accelerator options for PDF and image processing. When present, the GPU `DocumentConverter` is pooled process-wide and reused across documents and micro-batches. **Requires `max_workers: 1` and `use_processes: false`.** Cannot be combined with `vlm_pipeline`. |
 | `text_extraction.provider_config.standard_pipeline.accelerator.device` | string | No | auto-detected | `docling_library` | GPU device to use. Accepted values: `mps` (Apple Silicon), `cuda` (NVIDIA, any device), `cuda:<index>` (e.g. `cuda:0`), `xpu` (Intel). When omitted, the best available device is auto-detected via torch (CUDA → MPS → XPU). Device availability is checked at runtime via torch backends. |
 | `text_extraction.provider_config.standard_pipeline.accelerator.num_threads` | int | No | `4` | `docling_library` | Number of CPU-side threads for the Docling pipeline. Must be a positive integer. Booleans are rejected. |
 | `text_extraction.provider_config`                             | object |          No | `{}`                    | All                             | Provider-specific configuration                                               |
@@ -691,7 +691,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 
 #### DocumentClassifierOperator
 
-**Purpose:** Classifies documents into predefined types using LLM-based classification with confidence scoring and reasoning. Uses simplified service-based architecture with shared LLM infrastructure supporting multiple providers (LiteLLM, Watsonx).
+**Purpose:** Classifies documents into predefined types using LLM-based classification with confidence scoring and reasoning. Uses a port/adapter architecture (`ClassificationPort`) with shared LLM infrastructure supporting multiple providers (LiteLLM, Watsonx).
 
 **Category:** Quality
 
@@ -709,6 +709,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 | `include_confidence`       | boolean   | No       | `true`                         | Include confidence score in output                                                                                                                                              |
 | `include_reasoning`        | boolean   | No       | `false`                        | Include reasoning explanation in output                                                                                                                                         |
 | `max_content_length`       | integer   | No       | `2000`                         | Maximum content length to send to LLM                                                                                                                                           |
+| `strict_label_matching`    | boolean   | No       | `false`                        | Write the configured spelling of the matched document type and reject labels that match none (output `None`). When `false`, any label is accepted and normalised to lower-case with underscores |
 | `max_workers`              | integer   | No       | Auto                           | Number of parallel workers                                                                                                                                                      |
 | `use_processes`            | boolean   | No       | `false`                        | Use processes instead of threads                                                                                                                                                |
 
@@ -865,14 +866,15 @@ Detailed dictionary format (recommended):
 
 **Architecture**
 
-Uses simplified service-based architecture:
+Uses a hexagonal (ports and adapters) architecture:
 
-- **Operator Layer**: `DocumentClassifierOperator` handles PyArrow table processing and orchestration
-- **Service Layer**: `ClassificationService` contains business logic for document classification
+- **Operator Layer**: `DocumentClassifierOperator` handles PyArrow table processing and orchestration, and depends only on `ClassificationPort`
+- **Port**: `ClassificationPort` defines `classify_document()`; `ClassificationAdapterFactory` resolves the `provider` to a concrete adapter
+- **Adapter**: `StandardLLMClassificationAdapter` performs prompt building, the LLM call and response parsing. It also extracts text with Docling when only binary content is available, and reports it back for reuse by the Extract operator
 - **Domain Layer**: Pure domain models (`ClassificationRequest`, `ClassificationResponse`) and prompt building
 - **Infrastructure Layer**: Leverages shared `LLMAdapterFactory` for multi-provider LLM support (LiteLLM, Watsonx)
 
-This simplified design removes the port/adapter overhead while maintaining clean separation of concerns and provider flexibility through the shared LLM infrastructure.
+See the [Classification Operator Guide](../operators/quality/document_classifier_readme.md#architecture) for details.
 
 **Related Documentation**
 

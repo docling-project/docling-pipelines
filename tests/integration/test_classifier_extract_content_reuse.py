@@ -13,6 +13,7 @@ import pytest
 from docpipe.core.constants import DocpipeConstants, Metrics, OperatorConstants
 from docpipe.core.operators.extract import ExtractOperator
 from docpipe.core.operators.quality.classification.document_classifier import DocumentClassifierOperator
+from docpipe.core.operators.quality.classification.domain.models import ClassificationResponse
 
 PDF_FIXTURE_PATH = Path("tests/fixtures/invoices/TR-INV_001_3_2.1.pdf")
 CLASSIFIER_TEMP_COLUMN = DocpipeConstants.TEMP_CONTENT_COLUMN
@@ -122,24 +123,21 @@ def test_classifier_content_reextraction_with_docling_serve():
 
     with (
         patch.object(
-            classifier.classification_service,
+            classifier.adapter._service,
             "classify_document",
-            return_value=type(
-                "ClassificationResponse",
-                (),
-                {
-                    "success": True,
-                    "document_type": "invoice",
-                    "confidence": 9,
-                    "reasoning": "The document contains invoice-like content.",
-                },
-            )(),
+            return_value=ClassificationResponse(
+                success=True,
+                document_type="invoice",
+                confidence=9,
+                reasoning="The document contains invoice-like content.",
+            ),
         ),
         patch(
-            "docpipe.core.operators.quality.classification.document_classifier.OperatorUtils.extract_content",
+            "docpipe.core.operators.quality.classification.adapters.outbound.standard_llm_adapter.OperatorUtils.extract_content",
             side_effect=lambda *args, **kwargs: {
                 OperatorConstants.Extraction.SUCCESS: True,
                 OperatorConstants.Columns.DOC_COLUMN_DEFAULT: REUSED_CONTENT,
+                OperatorConstants.Metadata.METADATA: {"page_count": 1},
             },
         ) as mock_extract_content,
         patch(

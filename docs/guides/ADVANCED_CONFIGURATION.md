@@ -5,10 +5,11 @@ This guide covers advanced configuration topics for production deployments, dist
 ## Table of Contents
 
 1. [Job Stats Storage Configuration](#job-stats-storage-configuration)
-2. [Asset Metadata Storage Configuration](#asset-metadata-storage-configuration)
-3. [Incremental Metadata Configuration](#incremental-metadata-configuration)
-4. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
-5. [Execution Models](#execution-models)
+2. [Incremental Metadata Configuration](#incremental-metadata-configuration)
+3. [Docling Converter Pool Configuration](#docling-converter-pool-configuration)
+4. [Asset Metadata Storage Configuration](#asset-metadata-storage-configuration)
+5. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
+6. [Execution Models](#execution-models)
 
 ---
 
@@ -353,6 +354,23 @@ every worker must see the same shared filesystem path and support reliable file 
 pod-local directory does not coordinate admissions between pods; use PostgreSQL when workers cannot share a reliable
 filesystem. See [Global Configuration](../reference/GLOBAL_CONFIG.md#ededup-registry-storage) and the
 [operator reference](../reference/OPERATORS.md#ededupoperator) for precedence and path details.
+
+---
+
+## Docling Converter Pool Configuration
+
+The `extract_operator` reuses Docling converters through a pool that is shared by every flow and job in the process, so its limits are process-wide settings in `docling-pipelines-config.yaml` rather than flow or operator parameters:
+
+```yaml
+docling:
+  converter_pool:
+    size: 8                 # default: min(2 x CPU count, 16)
+    idle_ttl_seconds: 600   # 0 = keep idle converters until the process exits
+```
+
+The environment variables `DOCPIPE_DOCLING_CONVERTER_POOL_SIZE` and `DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS` take precedence over the file. See [Converter Reuse and Pool Sizing](../operators/extract/extract_operator_readme.md#converter-reuse-and-pool-sizing) for sizing guidance.
+
+---
 
 ## Execution Models
 
