@@ -136,18 +136,20 @@ def test_allowed_vlm_fields_content():
         "quantized",
         "repo_id",
         "response_format",
+        "revision",
         "scale",
         "stop_strings",
         "temperature",
         "torch_dtype",
         "transformers_model_type",
         "transformers_prompt_style",
+        "trust_remote_code",
         "use_kv_cache",
     }
     assert allowed == expected_allowed
     # Explicitly ensure skipped options are excluded
-    assert "revision" not in allowed
-    assert "trust_remote_code" not in allowed
+    assert "revision" in allowed
+    assert "trust_remote_code" in allowed
     assert "custom_stopping_criteria" not in allowed
     assert "supported_devices" not in allowed
 
@@ -381,7 +383,7 @@ def test_build_vlm_extraction_options_inline_returns_dict():
     mock_extractor_cls = MagicMock(return_value=mock_extraction_option)
 
     mocks = {
-        "docling.backend.docling_parse_backend": MagicMock(DoclingParseDocumentBackend=MagicMock()),
+        "docling.backend.image_backend": MagicMock(ImageDocumentBackend=MagicMock()),
         "docling.backend.pypdfium2_backend": MagicMock(PyPdfiumDocumentBackend=MagicMock()),
         "docling.datamodel.base_models": MagicMock(InputFormat=mock_input_format),
         "docling.datamodel.pipeline_options": MagicMock(VlmExtractionPipelineOptions=MagicMock()),
@@ -402,7 +404,7 @@ def test_build_vlm_extraction_options_inline_returns_dict():
 
 @pytest.mark.unit
 def test_build_vlm_extraction_options_filters_disallowed_fields(caplog):
-    """Fields not in _ALLOWED_VLM_FIELDS (such as revision, trust_remote_code) are omitted."""
+    """Fields not in _ALLOWED_VLM_FIELDS (such as custom_stopping_criteria) are omitted."""
     mock_input_format = MagicMock()
     mock_input_format.PDF = "pdf"
     mock_input_format.IMAGE = "image"
@@ -414,7 +416,7 @@ def test_build_vlm_extraction_options_filters_disallowed_fields(caplog):
     mock_pipeline_options_cls = MagicMock(return_value=mock_base_pipeline_opts)
 
     mocks = {
-        "docling.backend.docling_parse_backend": MagicMock(DoclingParseDocumentBackend=MagicMock()),
+        "docling.backend.image_backend": MagicMock(ImageDocumentBackend=MagicMock()),
         "docling.backend.pypdfium2_backend": MagicMock(PyPdfiumDocumentBackend=MagicMock()),
         "docling.datamodel.base_models": MagicMock(InputFormat=mock_input_format),
         "docling.datamodel.pipeline_options": MagicMock(VlmExtractionPipelineOptions=mock_pipeline_options_cls),
@@ -429,25 +431,26 @@ def test_build_vlm_extraction_options_filters_disallowed_fields(caplog):
                 "inline_model": {
                     "repo_id": "some/model",
                     "temperature": 0.5,
-                    "revision": "v1.0",
-                    "trust_remote_code": True,
                     "custom_stopping_criteria": [],
+                    "supported_devices": [],
                 },
             }
         )
 
-    # model_copy should only have been called with repo_id and temperature
-    mock_vlm_opts.model_copy.assert_called_once_with(update={"repo_id": "some/model", "temperature": 0.5})
+    # repo_id differs from the preset, so revision falls back to "main"
+    mock_vlm_opts.model_copy.assert_called_once_with(
+        update={"repo_id": "some/model", "temperature": 0.5, "revision": "main"}
+    )
     assert "Ignoring unrecognised inline_model keys" in caplog.text
-    assert "revision" in caplog.text
-    assert "trust_remote_code" in caplog.text
+    assert "custom_stopping_criteria" in caplog.text
+    assert "supported_devices" in caplog.text
 
 
 @pytest.mark.unit
 def test_build_vlm_extraction_options_raises_on_general_exception():
     """A non-ImportError from inside the build path is re-raised as ValueError."""
     mocks = {
-        "docling.backend.docling_parse_backend": MagicMock(DoclingParseDocumentBackend=MagicMock()),
+        "docling.backend.image_backend": MagicMock(ImageDocumentBackend=MagicMock()),
         "docling.backend.pypdfium2_backend": MagicMock(PyPdfiumDocumentBackend=MagicMock()),
         "docling.datamodel.base_models": MagicMock(InputFormat=MagicMock()),
         "docling.datamodel.pipeline_options": MagicMock(
@@ -663,7 +666,7 @@ def test_transform_delegates_to_service(adapter):
 
 @pytest.mark.unit
 def test_adapter_load_schema_templates(adapter):
-    """_load_schema_templates populates schema_templates via the document_class_provider."""
+    """_load_schema_templates populates schema_templates via DocumentClassUtils."""
     with patch(
         "docpipe.utils.document_class_utils.DocumentClassUtils.generate_docling_templates_for_types",
         return_value={"invoice": {"fields": []}},
@@ -745,7 +748,7 @@ def test_service_prepare_document_tasks_merges_document_type(adapter):
 
 @pytest.mark.unit
 def test_service_load_schema_templates(adapter):
-    """Service._load_schema_templates delegates via the document_class_provider."""
+    """Service._load_schema_templates delegates to DocumentClassUtils."""
     from docpipe.core.operators.extract.adapters.outbound.entity_extraction.docling_entity_adapter import (
         DoclingEntityExtractionService,
     )
@@ -763,3 +766,77 @@ def test_service_load_schema_templates(adapter):
         service._load_schema_templates(document_types=["invoice"], schema_templates=schema_templates)
 
     assert "invoice" in schema_templates
+
+
+@pytest.mark.unit
+def test_docling_adapter_declares_binary_requirement_and_pdf_image_extensions():
+    """DocumentExtractor only supports PDF and image formats, so the adapter restricts extensions."""
+    from docpipe.core.constants import OperatorConstants
+
+    assert DoclingEntityAdapter.requires_binary_content is True
+    assert DoclingEntityAdapter.supported_extensions == frozenset(
+        OperatorConstants.FileExtensions.DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY
+    )
+    assert ".pdf" in DoclingEntityAdapter.supported_extensions
+    assert ".docx" not in DoclingEntityAdapter.supported_extensions
+
+
+def _extract_with_raw_text(adapter, *, raw_text, errors=None):
+    """Run extract_entities_single with a single page whose extracted_data is None."""
+    mock_page = MagicMock(
+        page_no=1, extracted_data=None, raw_text=raw_text, errors=errors if errors is not None else []
+    )
+    mock_extractor_instance = MagicMock()
+    mock_extractor_instance.extract.return_value = MagicMock(pages=[mock_page])
+    mock_extractor_instance.extraction_format_to_options = {}
+    mocks = {
+        "docling.document_extractor": MagicMock(DocumentExtractor=MagicMock(return_value=mock_extractor_instance)),
+        "docling.datamodel.base_models": MagicMock(InputFormat=MagicMock()),
+        "docling_core.types.io": MagicMock(DocumentStream=MagicMock()),
+    }
+    with patch.dict(sys.modules, mocks):
+        return adapter.extract_entities_single(doc_id="doc1", doc_name="test.pdf", content=b"bytes")
+
+
+@pytest.mark.unit
+def test_extract_entities_single_tolerates_trailing_characters_in_raw_text(adapter):
+    """Valid JSON followed by a stray closing brace (strict json.loads fails) is still parsed."""
+    result = _extract_with_raw_text(adapter, raw_text='{"a": 1, "items": {"x": 2}}}')
+
+    page = result["entities"][0]
+    assert result["success"] is True
+    assert page["extracted_data"] == {"a": 1, "items": {"x": 2}}
+    assert page["errors"] == []
+
+
+@pytest.mark.unit
+def test_extract_entities_single_reports_unparseable_raw_text(adapter, caplog):
+    """Non-JSON output keeps extracted_data=None but records an error and logs a warning."""
+    with caplog.at_level("WARNING"):
+        result = _extract_with_raw_text(adapter, raw_text="Sorry, I cannot read this document.", errors=["prior"])
+
+    page = result["entities"][0]
+    assert result["success"] is True
+    assert page["extracted_data"] is None
+    assert page["errors"] == ["prior", DoclingEntityAdapter.INVALID_JSON_ERROR]
+    assert "not valid JSON" in caplog.text
+
+
+@pytest.mark.unit
+def test_extract_entities_single_empty_raw_text_adds_no_error(adapter):
+    """No raw_text means nothing to parse, so no JSON error is added."""
+    result = _extract_with_raw_text(adapter, raw_text="")
+
+    page = result["entities"][0]
+    assert page["extracted_data"] is None
+    assert page["errors"] == []
+
+
+@pytest.mark.unit
+def test_parse_raw_text_cases():
+    """_parse_raw_text handles whitespace, trailing data and invalid input."""
+    parse = DoclingEntityAdapter._parse_raw_text
+    assert parse(raw_text='  {"a": 1}\n') == {"a": 1}
+    assert parse(raw_text='{"a": 1}}') == {"a": 1}
+    assert parse(raw_text="not json") is None
+    assert parse(raw_text='{"a": ') is None

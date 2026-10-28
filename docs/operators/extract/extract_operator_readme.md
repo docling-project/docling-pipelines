@@ -729,7 +729,9 @@ RapidOCR is included in the default PyPI install, and `ocr.engine: "rapidocr"` i
 
 Only `"inline"` models (HuggingFace) are supported. API model types are not supported by Docling's `DocumentExtractor`; use `entity_extraction.provider: "litellm"` for API-based extraction instead.
 
-The adapter builds `VlmExtractionPipelineOptions` starting from its built-in defaults (pre-set for `numind/NuExtract-2.0-2B`) and then applies only the fields you supply in `inline_model` on top. This means **only `repo_id` is strictly required** when using a different model; all other fields fall back to the preset defaults. Any `inline_model` key that is not in the recognised field list below is silently dropped and a `WARNING`-level log entry is emitted listing the ignored keys.
+The adapter builds `VlmExtractionPipelineOptions` starting from its built-in defaults (pre-set for `numind/NuExtract-2.0-2B`) and then applies only the fields you supply in `inline_model` on top. This means **only `repo_id` is strictly required** when using a different model; all other fields fall back to the preset defaults. Any `inline_model` key that is not in the recognised field list below is dropped and a `WARNING`-level log entry is emitted listing the ignored keys.
+
+When `repo_id` differs from the preset (`numind/NuExtract-2.0-2B`), `revision` defaults to `"main"` instead of the preset's pinned commit hash (which only exists in the NuExtract repository). Set `revision` explicitly to pin a branch, tag or commit. `trust_remote_code` is `false` by default; enabling it executes code from the model repository and logs a `WARNING`, so enable it only for trusted sources.
 
 Example (all recognised fields shown; only `repo_id` is required):
 ```json
@@ -772,6 +774,8 @@ Example (all recognised fields shown; only `repo_id` is required):
 | `llm_int8_threshold`        | float   | `6.0`                | Threshold for LLM.int8() quantization (only used when `load_in_8bit` is `true`)     |
 | `quantized`                 | boolean | `false`              | Use pre-quantized model weights                                                      |
 | `use_kv_cache`              | boolean | `true`               | Enable key-value cache for faster autoregressive generation                          |
+| `revision`                  | string  | `"main"` (other `repo_id`) / preset hash (default `repo_id`) | Git branch, tag or commit of the model repository |
+| `trust_remote_code`         | boolean | `false`              | Allow execution of custom code from the model repository (trusted sources only)     |
 | `torch_dtype`               | string  | `"bfloat16"`         | Torch data type: `"bfloat16"`, `"float16"`, `"float32"`                             |
 | `prompt`                    | string  | `""`                 | Custom prompt override (leave empty to use model default)                            |
 | `response_format`           | string  | `"plaintext"`        | Expected response format from the model: `"plaintext"` or `"markdown"`              |
@@ -1321,7 +1325,6 @@ ExtractOperator (Orchestrator)
 │ Port Layer (Interfaces)                                      │
 │  - TextExtractionPort                                        │
 │  - EntityExtractionPort                                      │
-│  - DocumentClassProvider (document type / schema resolver)   │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -1332,8 +1335,6 @@ ExtractOperator (Orchestrator)
 │  Entity Extraction:                                          │
 │   - LLMEntityAdapter (litellm and watsonx providers - unified)   │
 │   - DoclingEntityAdapter (docling provider)                      │
-│  Document Class (default):                                   │
-│   - StaticDocumentClassProvider (local JSON files)               │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -1355,7 +1356,6 @@ ExtractOperator (Orchestrator)
 - Clear separation between business logic, interfaces, and implementations
 - Testability through dependency injection and mocking
 - Unified LLM support: Both `litellm` and `watsonx` use the same `LLMEntityAdapter`
-- Pluggable document-class metadata: inject a custom `DocumentClassProvider` to supply document types and schemas from an external source instead of local JSON files
 
 ### Execution Flow
 

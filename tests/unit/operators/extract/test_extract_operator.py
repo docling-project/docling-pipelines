@@ -5,11 +5,8 @@ Tests the operator with sample PDF files from the fixtures directory.
 """
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
-
-if TYPE_CHECKING:
-    from docpipe.core.operators.extract.extract_operator import ExtractOperator
 
 import pytest
 
@@ -3120,96 +3117,95 @@ def test_extract_operator_valid_max_workers_passed_through() -> None:
         assert mock_create.call_args.kwargs["max_workers"] == 8
 
 
-# ── DocumentClassProvider injection ──────────────────────────────────────────
+# ── requires_binary_content branch of the streaming pipeline ─────────────────
 
 
-def _make_operator_with_entity_extraction(
-    *,
-    document_class_provider=None,
-) -> "tuple[ExtractOperator, MagicMock]":
-    """Build an ExtractOperator with entity extraction enabled, mocking both factories.
+def _run_streaming_with_binary_adapter(*, names: list[str], binary: list[bytes | None], supported):
+    """Run the streaming pipeline with an entity adapter that requires raw bytes."""
+    import pyarrow as pa
 
-    Returns a tuple of (operator, mock_create_adapter) so callers can inspect the
-    factory call arguments.
-    """
-    from docpipe.core.operators.extract.extract_operator import ExtractOperator
-
-    config = {
-        "text_extraction": {"provider": "docling_library", "doc_column": "doc_content"},
-        "entity_extraction": {"provider": "litellm", "provider_config": {"model_id": "test"}},
-    }
-
-    mock_text_adapter = MagicMock()
-    mock_text_adapter.max_workers = 4
-    mock_text_adapter.additional_formats = []
-    mock_text_adapter.global_config = {}
-
-    mock_entity_adapter = MagicMock()
-    mock_entity_adapter.ADAPTER_DISPLAY_NAME = "LiteLLM"
-
-    with (
-        patch(
-            "docpipe.core.operators.extract.extract_operator.TextExtractionAdapterFactory.create_adapter",
-            return_value=mock_text_adapter,
+    operator = _make_operator_with_mocks()
+    operator.entity_adapter.requires_binary_content = True
+    operator.entity_adapter.supported_extensions = supported
+    operator.entity_adapter.extract_entities_single = MagicMock(return_value=_fake_entity_result())
+    operator.text_adapter.extract_single_document = MagicMock(
+        side_effect=lambda *, file_path, binary_content, **kw: _fake_text_result(content=f"text for {file_path}")
+    )
+    table = pa.table(
+        {
+            "id": [f"doc_{i}" for i in range(len(names))],
+            "name": names,
+            "path": [f"/tmp/{n}" for n in names],
+            "binary_content": binary,
+        },
+        schema=pa.schema(
+            [("id", pa.string()), ("name", pa.string()), ("path", pa.string()), ("binary_content", pa.binary())]
         ),
-        patch(
-            "docpipe.core.operators.extract.extract_operator.EntityExtractionAdapterFactory.create_adapter",
-            return_value=mock_entity_adapter,
-        ) as mock_create,
-    ):
-        op = ExtractOperator(config=config, document_class_provider=document_class_provider)
-        return op, mock_create
+    )
+    metadata = operator.create_base_metadata(total_docs_count=table.num_rows)
+    result_tables, result_meta = operator._run_streaming_pipeline(table=table, metadata=metadata)
+    return operator, result_tables, result_meta
 
 
 @pytest.mark.unit
-def test_extract_operator_defaults_to_static_provider() -> None:
-    """ExtractOperator uses StaticDocumentClassProvider when no provider is injected."""
-    from docpipe.core.ports.document_class_provider import StaticDocumentClassProvider
+def test_streaming_pipeline_binary_adapter_receives_bytes():
+    """Adapters with requires_binary_content=True get the original file bytes, not extracted text."""
+    operator, _, _ = _run_streaming_with_binary_adapter(
+        names=["a.pdf"], binary=[b"%PDF-raw-bytes"], supported=frozenset({".pdf"})
+    )
 
-    op = _make_operator({"text_extraction": {"provider": "docling_library"}})
-
-    assert isinstance(op._document_class_provider, StaticDocumentClassProvider)
-
-
-@pytest.mark.unit
-def test_extract_operator_stores_injected_provider() -> None:
-    """An injected document_class_provider is stored as _document_class_provider."""
-    from docpipe.core.ports.document_class_provider import DocumentClassProvider
-
-    custom_provider = MagicMock(spec=DocumentClassProvider)
-    op, _ = _make_operator_with_entity_extraction(document_class_provider=custom_provider)
-
-    assert op._document_class_provider is custom_provider
+    call = operator.entity_adapter.extract_entities_single.call_args
+    assert call.kwargs["content"] == b"%PDF-raw-bytes"
 
 
 @pytest.mark.unit
-def test_extract_operator_propagates_provider_to_entity_adapter() -> None:
-    """The provider is passed to EntityExtractionAdapterFactory.create_adapter at construction time."""
-    from docpipe.core.ports.document_class_provider import DocumentClassProvider
+def test_streaming_pipeline_text_adapter_receives_extracted_text():
+    """Adapters with requires_binary_content=False still get the extracted text."""
+    operator = _make_operator_with_mocks()
+    operator.entity_adapter.requires_binary_content = False
+    operator.entity_adapter.extract_entities_single = MagicMock(return_value=_fake_entity_result())
+    operator.text_adapter.extract_single_document = MagicMock(
+        side_effect=lambda *, file_path, binary_content, **kw: _fake_text_result(content="extracted text")
+    )
+    table = _make_table(n=1)
+    metadata = operator.create_base_metadata(total_docs_count=1)
 
-    custom_provider = MagicMock(spec=DocumentClassProvider)
-    op, mock_create = _make_operator_with_entity_extraction(document_class_provider=custom_provider)
+    operator._run_streaming_pipeline(table=table, metadata=metadata)
 
-    assert op.entity_adapter is not None
-    assert mock_create.call_args.kwargs["document_class_provider"] is custom_provider
-
-
-@pytest.mark.unit
-def test_extract_operator_default_provider_propagated_to_entity_adapter() -> None:
-    """When no provider is given, StaticDocumentClassProvider is passed to the factory."""
-    from docpipe.core.ports.document_class_provider import StaticDocumentClassProvider
-
-    _, mock_create = _make_operator_with_entity_extraction()
-
-    assert isinstance(mock_create.call_args.kwargs["document_class_provider"], StaticDocumentClassProvider)
+    assert operator.entity_adapter.extract_entities_single.call_args.kwargs["content"] == "extracted text"
 
 
 @pytest.mark.unit
-def test_extract_operator_provider_not_set_when_no_entity_adapter() -> None:
-    """Text-only operator still stores _document_class_provider; entity_adapter is None."""
-    from docpipe.core.ports.document_class_provider import StaticDocumentClassProvider
+def test_streaming_pipeline_binary_adapter_skips_unsupported_extension():
+    """Unsupported extensions are skipped (no entity call) while supported docs still run."""
+    from docpipe.core.constants.constants import Metrics
 
-    op = _make_operator({"text_extraction": {"provider": "docling_library"}})
+    operator, result_tables, result_meta = _run_streaming_with_binary_adapter(
+        names=["a.pdf", "b.docx"], binary=[b"pdf", b"docx"], supported=frozenset({".pdf"})
+    )
 
-    assert isinstance(op._document_class_provider, StaticDocumentClassProvider)
-    assert op.entity_adapter is None
+    assert operator.entity_adapter.extract_entities_single.call_count == 1
+    assert operator.entity_adapter.extract_entities_single.call_args.kwargs["doc_name"] == "a.pdf"
+    assert result_meta[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+    assert result_tables[0].num_rows == 2
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_binary_adapter_skips_missing_binary_content():
+    """Missing/empty bytes produce a skip and no entity call."""
+    from docpipe.core.constants.constants import Metrics
+
+    operator, _, result_meta = _run_streaming_with_binary_adapter(
+        names=["a.pdf"], binary=[b""], supported=frozenset({".pdf"})
+    )
+
+    operator.entity_adapter.extract_entities_single.assert_not_called()
+    assert result_meta[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_binary_adapter_no_extension_restriction():
+    """supported_extensions=None disables the extension check."""
+    operator, _, _ = _run_streaming_with_binary_adapter(names=["a.docx"], binary=[b"docx"], supported=None)
+
+    assert operator.entity_adapter.extract_entities_single.call_count == 1

@@ -275,8 +275,8 @@ class TestDoclingEntityAdapterVLMOptions:
         assert vlm_opts.extra_processor_kwargs == {"do_resize": True}
         assert vlm_opts.use_kv_cache is False
 
-    def test_build_vlm_options_ignores_unknown_and_skipped_fields(self, caplog):
-        """Verify that revision, trust_remote_code, and unrecognised keys are ignored and logged."""
+    def test_build_vlm_options_ignores_unknown_fields(self, caplog):
+        """Verify that unrecognised keys are ignored and logged."""
         from docling.datamodel.base_models import InputFormat
 
         config = {
@@ -284,8 +284,6 @@ class TestDoclingEntityAdapterVLMOptions:
                 "model_type": "inline",
                 "inline_model": {
                     "repo_id": "test/model",
-                    "revision": "custom-branch",
-                    "trust_remote_code": True,
                     "malicious_field": "should-be-ignored",
                     "accelerator_options": "should-be-ignored",
                 },
@@ -296,19 +294,52 @@ class TestDoclingEntityAdapterVLMOptions:
             options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
 
         assert options is not None
-        pdf_option = options[InputFormat.PDF]
-        vlm_opts = pdf_option.pipeline_options.vlm_options
+        vlm_opts = options[InputFormat.PDF].pipeline_options.vlm_options
         assert vlm_opts.repo_id == "test/model"
-        # revision and trust_remote_code should not be overridden from inline_model
-        assert vlm_opts.trust_remote_code is False
-        assert vlm_opts.revision != "custom-branch"
-
-        # Verify warning was logged for ignored fields
         assert "Ignoring unrecognised inline_model keys" in caplog.text
-        assert "revision" in caplog.text
-        assert "trust_remote_code" in caplog.text
         assert "accelerator_options" in caplog.text
         assert "malicious_field" in caplog.text
+
+    def test_build_vlm_options_resets_revision_for_other_repo(self):
+        """A different repo_id must not inherit the NuExtract preset commit hash."""
+        from docling.datamodel.base_models import InputFormat
+
+        config = {"vlm_pipeline": {"model_type": "inline", "inline_model": {"repo_id": "test/model"}}}
+        adapter = DoclingEntityAdapter(config=config)
+        options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+
+        assert options[InputFormat.PDF].pipeline_options.vlm_options.revision == "main"
+
+    def test_build_vlm_options_keeps_preset_revision_for_default_repo(self):
+        """Without a repo_id override the preset revision is untouched."""
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import VlmExtractionPipelineOptions
+
+        preset = VlmExtractionPipelineOptions().vlm_options
+        config = {"vlm_pipeline": {"model_type": "inline", "inline_model": {"repo_id": preset.repo_id}}}
+        adapter = DoclingEntityAdapter(config=config)
+        options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+
+        assert options[InputFormat.PDF].pipeline_options.vlm_options.revision == preset.revision
+
+    def test_build_vlm_options_honors_revision_and_trust_remote_code(self, caplog):
+        """revision and trust_remote_code are user-overridable; trust_remote_code logs a warning."""
+        from docling.datamodel.base_models import InputFormat
+
+        config = {
+            "vlm_pipeline": {
+                "model_type": "inline",
+                "inline_model": {"repo_id": "test/model", "revision": "v1.0", "trust_remote_code": True},
+            }
+        }
+        with caplog.at_level("WARNING"):
+            adapter = DoclingEntityAdapter(config=config)
+            options = adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+
+        vlm_opts = options[InputFormat.PDF].pipeline_options.vlm_options
+        assert vlm_opts.revision == "v1.0"
+        assert vlm_opts.trust_remote_code is True
+        assert "trust_remote_code is enabled" in caplog.text
 
 
 class TestDoclingEntityAdapterExtraction:
@@ -445,3 +476,41 @@ class TestDoclingEntityAdapterAdapterInfo:
     def test_adapter_display_name(self):
         """Test adapter display name constant."""
         assert DoclingEntityAdapter.ADAPTER_DISPLAY_NAME == "Docling"
+
+
+class TestDoclingEntityAdapterBackends:
+    """The backend registered for each format must be able to open that format."""
+
+    @staticmethod
+    def _options() -> dict:
+        config = {"vlm_pipeline": {"model_type": "inline", "inline_model": {"repo_id": "test/model"}}}
+        adapter = DoclingEntityAdapter(config=config)
+        return adapter._build_vlm_extraction_options(vlm_pipeline=adapter.vlm_pipeline)
+
+    def test_image_format_uses_image_backend(self):
+        """Regression: IMAGE was mapped to a PDF-only backend, so every PNG/JPG failed to open."""
+        from docling.backend.image_backend import ImageDocumentBackend
+        from docling.datamodel.base_models import InputFormat
+
+        assert self._options()[InputFormat.IMAGE].backend is ImageDocumentBackend
+
+    def test_png_bytes_open_with_registered_image_backend(self):
+        """A real PNG stream must produce a valid InputDocument with the registered backend."""
+        import io
+
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.document import InputDocument
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 64), "white").save(buf, "PNG")
+        backend = self._options()[InputFormat.IMAGE].backend
+
+        in_doc = InputDocument(
+            path_or_stream=io.BytesIO(buf.getvalue()),
+            format=InputFormat.IMAGE,
+            backend=backend,
+            filename="page.png",
+        )
+
+        assert in_doc.valid is True

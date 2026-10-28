@@ -21,8 +21,8 @@ from docpipe.core.operators.extract.adapters.outbound.factories.entity_extractio
 from docpipe.core.operators.extract.ports.outbound.entity_extraction import EntityExtractionPort
 from docpipe.core.operators.extract.services.entity_extraction_service import EntityExtractionService
 from docpipe.core.operators.operator_utils import OperatorUtils
-from docpipe.core.ports.document_class_provider import DocumentClassProvider, get_default_document_class_provider
 from docpipe.integrations.docling.converter_pool import get_docling_pool, options_fingerprint
+from docpipe.utils.document_class_utils import DocumentClassUtils
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -32,7 +32,10 @@ _EXTRACTOR_POOL_KEY_PREFIX = "DocumentExtractor:"
 # Explicit allowlist of InlineVlmOptions fields that users may override from
 # the flow JSON's inline_model block. Using an explicit set (rather than an
 # open hasattr() check against the Pydantic model) prevents flow-injection
-# of arbitrary internal pipeline fields and catches type mismatches early.
+# of arbitrary internal pipeline fields.
+# ``revision`` and ``trust_remote_code`` are allowed so that models other than
+# the NuExtract preset can be pinned and loaded; ``trust_remote_code`` executes
+# code from the model repository and is logged as a warning when enabled.
 _ALLOWED_VLM_FIELDS = frozenset(
     {
         "extra_generation_config",
@@ -46,41 +49,17 @@ _ALLOWED_VLM_FIELDS = frozenset(
         "quantized",
         "repo_id",
         "response_format",
+        "revision",
         "scale",
         "stop_strings",
         "temperature",
         "torch_dtype",
         "transformers_model_type",
         "transformers_prompt_style",
+        "trust_remote_code",
         "use_kv_cache",
     }
 )
-
-
-def generate_docling_templates_for_types(
-    *,
-    document_types: list[str],
-    include_nested: bool = True,
-) -> dict[str, dict[str, Any]]:
-    """Return Docling extraction templates for the requested document types.
-
-    Delegates to
-    :meth:`~docpipe.utils.document_class_utils.DocumentClassUtils.generate_docling_templates_for_types`,
-    keeping Docling-format knowledge within this adapter module.
-
-    Args:
-        document_types: List of document type names to generate templates for.
-        include_nested: Whether to include nested fields in the templates.
-
-    Returns:
-        Dict mapping document type to its Docling template dict.
-    """
-    from docpipe.utils.document_class_utils import DocumentClassUtils
-
-    return DocumentClassUtils.generate_docling_templates_for_types(
-        document_types,
-        include_nested=include_nested,
-    )
 
 
 @register_entity_extraction_adapter
@@ -102,26 +81,21 @@ class DoclingEntityAdapter(EntityExtractionPort):
     ADAPTER_NAME = OperatorConstants.ExtractionModes.ENTITY_MODE_DOCLING
     ADAPTER_DISPLAY_NAME = "Docling"
     requires_binary_content: bool = True
+    # docling's DocumentExtractor only registers extraction backends for
+    # InputFormat.PDF and InputFormat.IMAGE (docling.document_extractor
+    # _get_default_extraction_option); other formats raise at extraction time.
+    supported_extensions: frozenset[str] | None = frozenset(
+        OperatorConstants.FileExtensions.DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY
+    )
     _ALLOWED_VLM_FIELDS = _ALLOWED_VLM_FIELDS
 
-    def __init__(
-        self,
-        *,
-        config: dict[str, Any],
-        document_class_provider: DocumentClassProvider | None = None,
-    ) -> None:
+    def __init__(self, *, config: dict[str, Any]) -> None:
         """Initialize the adapter with configuration.
 
         Args:
             config: Configuration dictionary
-            document_class_provider: Provider for resolving document class
-                schemas and Docling templates.  Defaults to
-                ``StaticDocumentClassProvider`` (local JSON files).
         """
         super().__init__(config=config)
-        self.document_class_provider: DocumentClassProvider = (
-            document_class_provider if document_class_provider is not None else get_default_document_class_provider()
-        )
 
     def validate(self, *, config: dict[str, Any]) -> None:
         """Validate adapter configuration.
@@ -270,7 +244,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
             return None
 
         try:
-            from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
+            from docling.backend.image_backend import ImageDocumentBackend
             from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
             from docling.datamodel.base_models import InputFormat
             from docling.datamodel.pipeline_options import VlmExtractionPipelineOptions
@@ -292,10 +266,22 @@ class DoclingEntityAdapter(EntityExtractionPort):
             if ignored:
                 logger.warning("Ignoring unrecognised inline_model keys: %s", ", ".join(sorted(ignored)))
             base_vlm_options = VlmExtractionPipelineOptions().vlm_options
+            # The preset pins ``revision`` to a commit of its own repo. Reusing that hash
+            # with a different repo_id would fail to resolve, so fall back to the default
+            # branch unless the user supplies a revision explicitly.
+            if "repo_id" in user_fields and user_fields["repo_id"] != base_vlm_options.repo_id:
+                user_fields.setdefault("revision", "main")
+            if user_fields.get("trust_remote_code"):
+                logger.warning(
+                    "inline_model.trust_remote_code is enabled for '%s'; code from the model repository will be executed",
+                    user_fields.get("repo_id", base_vlm_options.repo_id),
+                )
             vlm_options = base_vlm_options.model_copy(update=user_fields)
             pipeline_options = VlmExtractionPipelineOptions(vlm_options=vlm_options)
 
-            # Build extraction format options for both PDF and IMAGE formats
+            # Build extraction format options for both PDF and IMAGE formats.
+            # IMAGE must use ImageDocumentBackend: the PDF backends (pypdfium2,
+            # docling-parse) reject InputFormat.IMAGE and the document fails to open.
             return {
                 InputFormat.PDF: ExtractionFormatOption(
                     pipeline_cls=ExtractionVlmPipeline,
@@ -305,7 +291,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
                 InputFormat.IMAGE: ExtractionFormatOption(
                     pipeline_cls=ExtractionVlmPipeline,
                     pipeline_options=pipeline_options,
-                    backend=DoclingParseDocumentBackend,
+                    backend=ImageDocumentBackend,
                 ),
             }
 
@@ -353,11 +339,25 @@ class DoclingEntityAdapter(EntityExtractionPort):
             node_name=self.node_name,
             batch_id=self.batch_id,
             global_config=self.global_config,
-            document_class_provider=self.document_class_provider,
         )
 
         # Delegate to service for orchestration
         return service.transform(table=table, metadata=metadata)
+
+    INVALID_JSON_ERROR = "Extracted text is not valid JSON"
+
+    @staticmethod
+    def _parse_raw_text(*, raw_text: str) -> Any | None:
+        """Parse the first JSON value in raw_text, ignoring trailing characters.
+
+        Returns:
+            The parsed value, or None if raw_text does not start with valid JSON.
+        """
+        try:
+            value, _ = json.JSONDecoder().raw_decode(raw_text.strip())
+        except json.JSONDecodeError:
+            return None
+        return value
 
     def extract_entities_single(
         self, *, doc_id: str, doc_name: str, content: str | bytes, schema: dict[str, Any] | None = None
@@ -424,19 +424,24 @@ class DoclingEntityAdapter(EntityExtractionPort):
             pages_data = []
             for page in result.pages:
                 extracted_data = page.extracted_data
+                page_errors = list(page.errors or [])
 
-                # If extracted_data is None but raw_text contains JSON, parse it
+                # Docling leaves extracted_data=None without an error when its strict
+                # json.loads fails (e.g. trailing characters). Retry leniently on raw_text.
                 if extracted_data is None and page.raw_text:
-                    try:
-                        extracted_data = json.loads(page.raw_text)
-                    except json.JSONDecodeError:
-                        # If not valid JSON, keep as None
-                        pass
+                    extracted_data = self._parse_raw_text(raw_text=page.raw_text)
+                    if extracted_data is None:
+                        logger.warning(
+                            "Extracted text for %s page %s is not valid JSON; no entities extracted",
+                            doc_name,
+                            page.page_no,
+                        )
+                        page_errors.append(self.INVALID_JSON_ERROR)
 
                 page_dict = {
                     OperatorConstants.Extraction.PAGE_NO: page.page_no,
                     OperatorConstants.Columns.EXTRACTED_DATA: extracted_data,
-                    OperatorConstants.Extraction.ERRORS: page.errors,
+                    OperatorConstants.Extraction.ERRORS: page_errors,
                 }
                 pages_data.append(page_dict)
             logger.info("Saved structured results for %s", doc_name)
@@ -486,7 +491,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
             document_types: List of document types to load schemas for
             schema_templates: Dictionary to populate with loaded schemas
         """
-        loaded_schemas = generate_docling_templates_for_types(document_types=document_types)
+        loaded_schemas = DocumentClassUtils.generate_docling_templates_for_types(document_types)
         schema_templates.update(loaded_schemas)
 
 
@@ -508,7 +513,6 @@ class DoclingEntityExtractionService(EntityExtractionService):
         node_name: str | None = None,
         batch_id: str | None = None,
         global_config: dict[str, Any] | None = None,
-        document_class_provider: DocumentClassProvider | None = None,
     ) -> None:
         """Initialize the Docling entity extraction service.
 
@@ -521,9 +525,6 @@ class DoclingEntityExtractionService(EntityExtractionService):
             node_name: Node name for progress tracking (optional)
             batch_id: Batch identifier for progress tracking (optional)
             global_config: Global configuration for on-demand binary fetching (optional)
-            document_class_provider: Provider for resolving document class
-                schemas and Docling templates.  Defaults to
-                ``StaticDocumentClassProvider`` (local JSON files).
         """
         super().__init__(
             adapter=adapter,
@@ -533,7 +534,6 @@ class DoclingEntityExtractionService(EntityExtractionService):
             node_id=node_id,
             node_name=node_name,
             batch_id=batch_id,
-            document_class_provider=document_class_provider,
         )
         self.global_config = global_config or {}
 
@@ -571,5 +571,5 @@ class DoclingEntityExtractionService(EntityExtractionService):
             document_types: List of document types to load schemas for
             schema_templates: Dictionary to populate with loaded schemas
         """
-        loaded_schemas = generate_docling_templates_for_types(document_types=document_types)
+        loaded_schemas = DocumentClassUtils.generate_docling_templates_for_types(document_types)
         schema_templates.update(loaded_schemas)

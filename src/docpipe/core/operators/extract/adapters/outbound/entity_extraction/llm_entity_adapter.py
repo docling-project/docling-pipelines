@@ -17,7 +17,6 @@ from docpipe.core.adapters.llm_adapter_factory import LLMAdapterFactory
 from docpipe.core.constants import OperatorConstants
 from docpipe.core.operators.extract.ports.outbound.entity_extraction import EntityExtractionPort
 from docpipe.core.operators.extract.services.entity_extraction_service import EntityExtractionService
-from docpipe.core.ports.document_class_provider import DocumentClassProvider, get_default_document_class_provider
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
 from docpipe.utils.document_class_utils import DocumentClassUtils
 from docpipe.utils.infrastructure.logging import get_logger
@@ -47,24 +46,13 @@ class LLMEntityAdapter(EntityExtractionPort):
         llm_adapter: LLMInferencePort instance for LLM communication
     """
 
-    def __init__(
-        self,
-        *,
-        config: dict[str, Any],
-        document_class_provider: DocumentClassProvider | None = None,
-    ) -> None:
+    def __init__(self, *, config: dict[str, Any]) -> None:
         """Initialize the adapter with configuration.
 
         Args:
             config: Configuration dictionary
-            document_class_provider: Provider for resolving document class
-                schemas and Docling templates.  Defaults to
-                ``StaticDocumentClassProvider`` (local JSON files).
         """
         super().__init__(config=config)
-        self.document_class_provider: DocumentClassProvider = (
-            document_class_provider if document_class_provider is not None else get_default_document_class_provider()
-        )
 
     def validate(self, *, config: dict[str, Any]) -> None:
         """Validate LLM-specific configuration.
@@ -259,7 +247,6 @@ class LLMEntityAdapter(EntityExtractionPort):
             node_id=self.node_id,
             node_name=self.node_name,
             batch_id=self.batch_id,
-            document_class_provider=self.document_class_provider,
         )
 
         # Delegate to service for orchestration

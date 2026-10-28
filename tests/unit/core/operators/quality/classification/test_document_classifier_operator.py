@@ -176,10 +176,14 @@ class TestValidateProviderMessages:
 class TestCustomAdapterSelectedByProvider:
     """A registered adapter is selectable via ``provider: "<ADAPTER_NAME>"`` through the real factory."""
 
-    def test_classification_operator_picks_right_adapter(self) -> None:
+    def test_classification_operator_picks_right_adapter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """For each provider in ['litellm', 'watsonx', 'standard', 'custom'], verify the
         operator picks the expected adapter, where 'standard' and 'custom' are random adapters.
         """
+        # WatsonXClient reads credentials from the environment; set dummy values so the
+        # test does not depend on the developer's / CI runner's environment.
+        monkeypatch.setenv("WATSONX_API_KEY", "test-api-key")  # pragma: allowlist secret
+        monkeypatch.setenv("WATSONX_CONTAINER_ID", "test-project-id")
 
         class _RandomStandardAdapter(ClassificationPort):
             ADAPTER_NAME = "standard"

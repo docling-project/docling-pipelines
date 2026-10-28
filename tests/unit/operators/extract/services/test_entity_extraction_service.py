@@ -10,7 +10,7 @@ Covers:
 - _set_execution_status: completed / with-errors / with-warnings
 - expand_entities_columns: happy path, empty entities list, non-dict entries
 - validate_loaded_schemas: missing-schema warning, success log
-- _load_schema_templates: delegates to document_class_provider
+- _load_schema_templates: delegates to DocumentClassUtils
 - _process_documents_parallel (mocked executor): progress tracking, final update
 - _submit_extraction_task: custom_schema used, schema_template used, fallback
 - transform: end-to-end with mocked adapter
@@ -76,7 +76,6 @@ def _make_service(
     adapter=None,
     config: dict | None = None,
     max_workers: int = 2,
-    document_class_provider=None,
     job_run_id: str | None = None,
     node_id: str | None = None,
     node_name: str | None = None,
@@ -90,7 +89,6 @@ def _make_service(
         adapter=adapter,
         config=config,
         max_workers=max_workers,
-        document_class_provider=document_class_provider,
         job_run_id=job_run_id,
         node_id=node_id,
         node_name=node_name,
@@ -139,25 +137,6 @@ def test_init_custom_config():
     assert service.batch_id == "b-1"
 
 
-@pytest.mark.unit
-def test_init_default_document_class_provider():
-    """When no provider is injected, StaticDocumentClassProvider is used."""
-    from docpipe.core.ports.document_class_provider import StaticDocumentClassProvider
-
-    service = _make_service()
-    assert isinstance(service.document_class_provider, StaticDocumentClassProvider)
-
-
-@pytest.mark.unit
-def test_init_custom_document_class_provider():
-    """An injected provider is stored as-is."""
-    from docpipe.core.ports.document_class_provider import DocumentClassProvider
-
-    provider = MagicMock(spec=DocumentClassProvider)
-    service = _make_service(document_class_provider=provider)
-    assert service.document_class_provider is provider
-
-
 # ---------------------------------------------------------------------------
 # prepare_schemas
 # ---------------------------------------------------------------------------
@@ -177,19 +156,18 @@ def test_prepare_schemas_with_custom_schema_only():
 
 @pytest.mark.unit
 def test_prepare_schemas_with_document_type_column():
-    """When document_type column exists, delegates to provider and validates."""
-    from docpipe.core.ports.document_class_provider import DocumentClassProvider
-
-    provider = MagicMock(spec=DocumentClassProvider)
-    provider.get_schema_templates.return_value = {"type_0": {"field": "string"}}
-
-    service = _make_service(config={}, document_class_provider=provider)
+    """When document_type column exists, loads schemas via DocumentClassUtils and validates."""
+    service = _make_service(config={})
     table = _make_table(n=2, with_document_type=True)
 
-    doc_types, templates = service.prepare_schemas(table=table)
+    with patch(
+        "docpipe.utils.document_class_utils.DocumentClassUtils.get_schema_templates",
+        return_value={"type_0": {"field": "string"}},
+    ) as mock_get:
+        doc_types, templates = service.prepare_schemas(table=table)
 
     assert len(doc_types) == 2
-    provider.get_schema_templates.assert_called_once()
+    mock_get.assert_called_once()
     assert "type_0" in templates
 
 
@@ -623,18 +601,17 @@ def test_validate_loaded_schemas_logs_success(caplog):
 
 
 @pytest.mark.unit
-def test_load_schema_templates_delegates_to_provider():
-    """_load_schema_templates populates schema_templates via the provider."""
-    from docpipe.core.ports.document_class_provider import DocumentClassProvider
-
-    provider = MagicMock(spec=DocumentClassProvider)
-    provider.get_schema_templates.return_value = {"invoice": {"amount": "number"}}
-
-    service = _make_service(document_class_provider=provider)
+def test_load_schema_templates_delegates_to_document_class_utils():
+    """_load_schema_templates populates schema_templates via DocumentClassUtils."""
+    service = _make_service()
     templates: dict[str, dict] = {}
-    service._load_schema_templates(document_types=["invoice"], schema_templates=templates)
+    with patch(
+        "docpipe.utils.document_class_utils.DocumentClassUtils.get_schema_templates",
+        return_value={"invoice": {"amount": "number"}},
+    ) as mock_get:
+        service._load_schema_templates(document_types=["invoice"], schema_templates=templates)
 
-    provider.get_schema_templates.assert_called_once_with(document_types=["invoice"])
+    mock_get.assert_called_once_with(["invoice"])
     assert "invoice" in templates
 
 
@@ -786,18 +763,17 @@ def test_transform_skipped_docs_produce_warnings_status():
 @pytest.mark.unit
 def test_transform_with_document_type_column():
     """transform() works end-to-end when table has a document_type column."""
-    from docpipe.core.ports.document_class_provider import DocumentClassProvider
-
-    provider = MagicMock(spec=DocumentClassProvider)
-    provider.get_schema_templates.return_value = {"type_0": {"field": "string"}, "type_1": {"field": "string"}}
-
     adapter = _make_adapter(success=True)
-    service = _make_service(adapter=adapter, config={}, document_class_provider=provider)
+    service = _make_service(adapter=adapter, config={})
 
     table = _make_table(n=2, with_document_type=True)
     metadata = _make_metadata(n=2)
 
-    result_tables, result_meta = service.transform(table=table, metadata=metadata)
+    with patch(
+        "docpipe.utils.document_class_utils.DocumentClassUtils.get_schema_templates",
+        return_value={"type_0": {"field": "string"}, "type_1": {"field": "string"}},
+    ):
+        result_tables, result_meta = service.transform(table=table, metadata=metadata)
 
     assert len(result_tables) == 1
     assert result_meta[Metrics.External.PROCESSED_DOCS] == 2
