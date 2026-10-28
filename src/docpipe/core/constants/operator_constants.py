@@ -234,6 +234,7 @@ class OperatorConstants:
 
         # Extraction Configuration (nested objects)
         TEXT_EXTRACTION: Final[str] = "text_extraction"  # Nested config for text extraction
+        DOCUMENT_PASSWORDS: Final[str] = "document_passwords"  # Candidate passwords for encrypted documents
         ENTITY_EXTRACTION: Final[str] = "entity_extraction"  # Nested config for entity extraction
         VLM_PIPELINE: Final[str] = "vlm_pipeline"  # Nested config for VLM pipeline
         ASR_PIPELINE: Final[str] = "asr_pipeline"  # Nested config for ASR pipeline
@@ -722,6 +723,16 @@ class OperatorConstants:
         DEVICE_MPS: Final[str] = "mps"
         DEVICE_CUDA: Final[str] = "cuda"
         DEVICE_XPU: Final[str] = "xpu"
+
+        # Encrypted document handling
+        FAILURE_REASON: Final[str] = "failure_reason"
+        PASSWORD_REQUIRED: Final[str] = "password_required"
+        PASSWORD_INCORRECT: Final[str] = "password_incorrect"
+        DECRYPTION_UNAVAILABLE: Final[str] = "decryption_unavailable"
+        # Failure reasons that a configuration change can fix, so they are retried on the next run
+        RECOVERABLE_FAILURE_REASONS: Final[frozenset[str]] = frozenset(
+            {PASSWORD_REQUIRED, PASSWORD_INCORRECT, DECRYPTION_UNAVAILABLE}
+        )
 
     class ExtractionModes:
         """Extraction mode constants for ExtractOperator."""

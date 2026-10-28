@@ -66,6 +66,7 @@ Core operators are available in slim. Optional operator support requires install
 |----------|---------|-----------------|
 | `ingest_source` | ✓ | — |
 | `extract_operator` | ✗ | `extract` |
+| `extract_operator` decryption of password-protected PDF and Office documents | ✗ | `extract` |
 | `chunker` (fixed-size / sentence modes) | ✓ | — |
 | `chunker` (hybrid / docling-split modes) | ✗ | `extract` |
 | `embeddings` (litellm, watsonx, ollama providers) | ✓ | — |
