@@ -183,18 +183,21 @@ flow with no reported failure SHALL complete as a no-op.
 
 ### Requirement: Fresh attempt state and cleanup
 
-Each attempt SHALL use fresh operator instances and isolated mutable configuration and session state. All constructed
-operators SHALL release resources, calling supported cleanup hooks on success and failure. Cleanup errors SHALL be
-logged without replacing the primary processing outcome or preventing other cleanup.
+Each attempt SHALL use fresh operators and isolated configuration and session state. On success and failure,
+unconditional cleanup SHALL call supported hooks for all constructed operators and release attempt-owned table,
+route-state, and operator references before return or raise and before any retry or later event. Cleanup errors SHALL
+be logged without replacing the processing outcome or preventing other cleanup.
 
 #### Scenario: Retry and later event have fresh state
 - **WHEN** an event retries or a later event uses the same saved flow
 - **THEN** operator mutations and in-memory deduplication state from the earlier attempt are absent
 
-#### Scenario: Processing or cleanup fails
-- **WHEN** a constructed operator fails during execution or its cleanup hook raises
+#### Scenario: Attempt ends on success or failure
+- **WHEN** an attempt succeeds or fails, including when an operator cleanup hook raises
 - **THEN** resources for all constructed operators are released as far as supported and the processing outcome
   is retained
+- **AND** attempt-owned intermediate table, route-state, and operator references are released before the attempt
+  returns or raises and before any retry or subsequent event starts
 
 ### Requirement: In-memory intermediates and job-independent context
 
