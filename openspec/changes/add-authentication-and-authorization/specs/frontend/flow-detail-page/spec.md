@@ -3,11 +3,19 @@
 ## ADDED Requirements
 
 ### Requirement: Permission-gated run and edit actions
-Cancelling a run, deleting a run and editing flow details SHALL be disabled with an explanatory tooltip when the user lacks `editor`. Editing flow details SHALL also be disabled for a flow owned by another user unless the user is `admin`.
+Cancelling a run and deleting a run SHALL be disabled with an explanatory tooltip when the user lacks `editor` or when the run was created by another user (`user_id`) and the user is not `admin`. Editing flow details SHALL be disabled with an explanatory tooltip when the user lacks `editor` or when the flow is owned by another user (`created_by`) and the user is not `admin`.
 
-#### Scenario: Viewer cannot cancel a run
-- **WHEN** a viewer opens a flow with an in-progress run
-- **THEN** the cancel action is disabled with a tooltip
+#### Scenario: Viewer cannot cancel or delete a run
+- **WHEN** a viewer opens a flow with job runs
+- **THEN** the cancel and delete actions are disabled with a tooltip
+
+#### Scenario: Editor cannot cancel or delete another user's run
+- **WHEN** an editor opens a flow containing a job run created by another user
+- **THEN** the cancel and delete actions for that run are disabled with a tooltip
+
+#### Scenario: Run owner or admin can cancel and delete
+- **WHEN** the editor who created a run (or an admin) opens the flow detail page
+- **THEN** the cancel and delete actions for that run are enabled
 
 #### Scenario: Editor edits own flow details
 - **WHEN** an editor opens a flow they created

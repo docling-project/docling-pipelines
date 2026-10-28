@@ -3,12 +3,16 @@
 ## ADDED Requirements
 
 ### Requirement: Permission-gated run controls on read-only canvas
-The "Stop" and "Run Again" actions on `RunStatusTopPanel` inside `ReadOnlyCanvas` (both in Canvas run mode and on the `RunDetails` page) SHALL be disabled or hidden with an explanatory tooltip when the user lacks `editor`. Viewing node execution status and logs SHALL remain available to all authenticated users.
+On `RunStatusTopPanel` inside `ReadOnlyCanvas` (both in Canvas run mode and on the `RunDetails` page), the "Run Again" action SHALL be disabled with an explanatory tooltip when the user lacks `editor`, and the "Stop" (cancel) action SHALL be disabled with an explanatory tooltip when the user cannot modify the job run (`!canModifyAsset(jobStats.user_id)`, i.e. the user lacks `editor` or the run was created by another user and the user is not `admin`). Viewing node execution status and logs SHALL remain available to all authenticated users.
 
 #### Scenario: Viewer inspects a job run
 - **WHEN** a viewer opens a job run in `ReadOnlyCanvas`
-- **THEN** the "Stop" and "Run Again" buttons are disabled or hidden, while node status decorations and the logs panel remain usable
+- **THEN** the "Stop" and "Run Again" buttons are disabled, while node status decorations and the logs panel remain usable
 
-#### Scenario: Editor inspects a job run
-- **WHEN** an editor or admin opens a job run in `ReadOnlyCanvas`
+#### Scenario: Non-owner editor inspects another user's running job
+- **WHEN** an editor opens an in-progress job run created by another user in `ReadOnlyCanvas`
+- **THEN** "Stop" is disabled, while "Run Again" remains available once the run completes
+
+#### Scenario: Run owner or admin inspects a job run
+- **WHEN** the editor who started the job run (or an admin) opens it in `ReadOnlyCanvas`
 - **THEN** "Stop" (while stoppable) and "Run Again" are enabled
