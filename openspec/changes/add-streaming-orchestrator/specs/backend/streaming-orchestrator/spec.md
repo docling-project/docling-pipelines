@@ -114,9 +114,11 @@ Operator inputs and outputs SHALL retain the existing Arrow table schemas requir
 operators. Each transform SHALL yield a list of Arrow tables and a metadata dictionary. Processing SHALL preserve
 required document identifiers, branch metadata, and document outcome metadata; malformed results SHALL fail explicitly.
 
-#### Scenario: Extraction produces multiple chunks
-- **WHEN** one source document produces several downstream rows or chunks
-- **THEN** all applicable rows reach subsequent operators with their identifiers and configured column types intact
+#### Scenario: Chunking preserves one document row
+- **WHEN** the chunker successfully splits one document into several chunks
+- **THEN** downstream operators receive one document row with its chunks stored as a list in `chunked_content`
+- **AND** the document ID and other retained columns keep their configured types, subject to `retain_original_content`
+  and configured output feature drops and renames
 
 #### Scenario: Malformed transform result
 - **WHEN** an operator returns a non-table output or invalid metadata instead of the transform contract
