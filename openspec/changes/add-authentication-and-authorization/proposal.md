@@ -13,7 +13,7 @@ Layers affected: **full-stack** (FastAPI backend, Express BFF, React/Carbon fron
 - New public `GET /auth/config` and `POST /auth/logout`; `GET /auth/me` returns roles; `POST /auth/login` sets the cookie and returns both `access_token` (for API/script clients) and `user` with roles (while the UI `authSlice` stores only `user`). `POST /auth/login` goes through an `AuthenticatorPort` (LDAP adapter, plus an env-only `BootstrapAdminAuthenticator` so a stock Docker Compose deployment with no LDAP or OIDC can still log in).
 - Fix the OIDC `authorize` and `callback` routes to accept `return_to` (aliasing legacy `redirect_after`), set the cookie, and redirect to a validated same-origin `return_to` path (normalizing UI paths under `/ui` and defaulting to `/ui/projects`) instead of putting the token in the URL fragment. Reverse the existing unit test that asserts cookies are not accepted.
 - Three roles: `viewer` (read), `editor` (create, update, delete, run) and `admin` (custom operators, modify any asset), mapped from OIDC `groups`/`roles` claims and LDAP `memberOf` through a configurable mapping. Unmapped users get `viewer`.
-- Ownership: `created_by` is set from the session, and `modified_by` is updated on writes. Editors modify only their own flows and projects; admins modify any; assets with no owner stay editable by any editor. Checks live in `FlowService` and `ProjectService` through a domain `ActorContext`, not in routes. Deleting a project verifies project ownership before cascading (and refuses with 403 before deleting anything if any child flow is owned by another user and the caller is not `admin`). Denials and writes are written to the audit log.
+- Ownership: `created_by` is set from the session on flows and projects, `user_id` is set from the session on job runs, and `modified_by` is updated on writes. Editors modify only their own flows and projects and cancel/delete only their own job runs; admins modify/cancel/delete any; assets or job runs with no owner stay editable by any editor. Checks live in `FlowService`, `ProjectService`, and `JobManagementService` through a domain `ActorContext`, not in routes. Deleting a project verifies project ownership before cascading (and refuses with 403 before deleting anything if any child flow is owned by another user and the caller is not `admin`). Denials and writes are written to the audit log.
 - Harden the existing in-memory rate limiter: count failed attempts, add per-username lockout, a `Retry-After` header and bounded state.
 - Internal event dispatch (`EventDispatchService`) authenticates its own calls to `/api/v1/job_runs`.
 - Startup fails when auth is enabled without a strong `JWT_SECRET_KEY`. `CORSMiddleware` enables `allow_credentials=True` when `CORS_ORIGINS` does not contain `*`.
@@ -34,6 +34,7 @@ Layers affected: **full-stack** (FastAPI backend, Express BFF, React/Carbon fron
 ### Modified Capabilities
 - `backend/flows-api`: ownership on create, update, delete and bulk delete.
 - `backend/projects-api`: ownership on create, update and delete (including pre-cascade ownership check on project and child flows).
+- `backend/job-runs-api`: `user_id` attribution on create, `user_id` in list projection, and ownership enforcement on cancel and delete.
 - `backend/custom-operators-api`: create, update and delete require `admin`.
 - `backend/documents-api`: session cookie or Bearer token accepted; honors `DOCPIPE_AUTH_ENABLED`.
 - `frontend/api-client`: credentialed requests, single-redirect 401, 403 toast.
@@ -52,7 +53,7 @@ Layers affected: **full-stack** (FastAPI backend, Express BFF, React/Carbon fron
 
 ## Impact
 
-- Backend: `src/docpipe/api/auth/` (`dependencies.py`, `jwt_handler.py`, `models.py`, `oauth2_routes.py`, `ldap_auth.py`, `oauth2_provider.py`, new `ports.py`, `config.py`, `roles.py`, `bootstrap_auth.py`), `api/main.py`, `api/api_router.py`, `api/routes/custom_operators.py`, `api/middleware/rate_limit.py` and `error_handler.py`, `core/models/actor_context.py` (new), `FlowService`, `ProjectService`, `core/event_streaming/dispatch_service.py`, `core/constants/constants.py`, `exceptions/`.
+- Backend: `src/docpipe/api/auth/` (`dependencies.py`, `jwt_handler.py`, `models.py`, `oauth2_routes.py`, `ldap_auth.py`, `oauth2_provider.py`, new `ports.py`, `config.py`, `roles.py`, `bootstrap_auth.py`), `api/main.py`, `api/api_router.py`, `api/routes/custom_operators.py`, `api/routes/job_runs.py`, `api/middleware/rate_limit.py` and `error_handler.py`, `core/models/actor_context.py` (new), `FlowService`, `ProjectService`, `JobManagementService`, `core/event_streaming/dispatch_service.py`, `core/constants/constants.py`, `exceptions/`.
 - Frontend BFF: `frontend/server/server.ts`, `server/controllers/*`, new `auth-controller.ts`.
 - Frontend UI: `slices/authSlice.ts`, `store/index.ts`, `hooks/useAuth.ts`, `components/common/ProtectedRoute`, new `pages/Login`, `config/routes.config.ts`, `App.tsx`, `services/api/client.ts` and action modules, page components listed above.
 - Routing under `/ui` gains `/login`; BFF proxy gains `/api/auth/*`; Redux gains the `auth` slice.

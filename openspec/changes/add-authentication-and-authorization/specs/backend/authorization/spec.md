@@ -66,19 +66,19 @@ Uploading, updating and deleting custom operators SHALL require `admin`, because
 - **THEN** the response is 201
 
 ### Requirement: Asset ownership
-When a flow or project is created by an authenticated caller, its `created_by` SHALL be set to that caller's username. When it is updated by an authenticated caller, its `modified_by` SHALL be set to that caller's username. Updating or deleting it SHALL be allowed to its creator and to any `admin`, and refused with 403 to other `editor`s. An asset with no `created_by` SHALL be modifiable by any `editor`. Deleting a project SHALL also verify that every child flow in the project may be deleted by the caller before deleting any flow or the project.
+When a flow or project is created by an authenticated caller, its `created_by` SHALL be set to that caller's username; when a job run is created by an authenticated caller, its `user_id` SHALL be set to that caller's username. When a flow or project is updated by an authenticated caller, its `modified_by` SHALL be set to that caller's username. Updating or deleting a flow or project, or cancelling or deleting a job run, SHALL be allowed to its creator (`created_by` / `user_id`) and to any `admin`, and refused with 403 to other `editor`s. An asset or job run with no owner (`created_by` / `user_id` empty) SHALL be modifiable by any `editor`. Deleting a project SHALL also verify that every child flow in the project may be deleted by the caller before deleting any flow or the project.
 
 #### Scenario: Owner edits
 - **WHEN** an editor updates a flow they created
 - **THEN** the update succeeds
 
 #### Scenario: Other editor refused
-- **WHEN** an editor deletes a flow created by another user
-- **THEN** the response is 403 and the flow remains
+- **WHEN** an editor deletes a flow or cancels/deletes a job run created by another user
+- **THEN** the response is 403 and the resource remains
 
 #### Scenario: Admin overrides
-- **WHEN** an admin deletes any flow
-- **THEN** the delete succeeds
+- **WHEN** an admin deletes any flow or cancels/deletes any job run
+- **THEN** the operation succeeds
 
 #### Scenario: Ownerless asset
 - **WHEN** an editor updates a flow whose `created_by` is empty
