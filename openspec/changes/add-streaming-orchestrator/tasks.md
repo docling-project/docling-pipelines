@@ -86,6 +86,8 @@ Record new unplanned work there; report blockers instead of expanding tasks or w
   extend factory tests to verify repository selection and absence of job-manager/statistics construction by this wiring.
 - [ ] 4.3 [backend] Add event/stage/flow/operator correlation to in-process outcomes and listener diagnostics (60 min);
   test failures before mapping, after preparation, and inside operators without inventing missing identifiers.
+  Verify source-filter skips log event/flow correlation and available reasons as no-op completions while dispatch
+  returns `None` and the listener attempts the offset commit without processing retries or external notifications.
 - [ ] 4.4 [backend] Remove the dispatch API URL dependency and obsolete event-sample references (45 min); search all
   usages before removal and verify unrelated consumers retain any settings they still require.
 - [ ] 4.5 [backend] Update guide and Docker README sections that describe asynchronous jobs and job-run IDs (60 min);
