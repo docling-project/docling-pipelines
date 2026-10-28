@@ -230,7 +230,7 @@ class DocumentSetOperator(AbstractOperator):
 
         # Create attachment repository using same config as metadata repo
         attachment_repo = AttachmentRepositoryFactory.create(
-            adapter_name=repo_type_str,
+            adapter_name=repo_type_str.lower(),
             config=attachment_repo_config,
         )
 

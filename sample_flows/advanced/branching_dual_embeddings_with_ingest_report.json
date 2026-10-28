@@ -138,7 +138,6 @@
       "config": {
         "provider": "opensearch",
         "doc_id_column": "doc_id_hash",
-        "create_index": true,
         "provider_config": {
           "index_name": "dual-embeddings-index",
           "host": "localhost",

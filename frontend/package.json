@@ -29,7 +29,7 @@
     "@carbon/icons-react": "^11.52.0",
     "@carbon/react": "^1.68.2",
     "@carbon/styles": "^1.109.0",
-    "@elyra/canvas": "^13.47.0",
+    "@elyra/canvas": "^13.51.1",
     "@reduxjs/toolkit": "^2.5.0",
     "axios": "^1.18.0",
     "concurrently": "^8.2.2",
@@ -78,7 +78,7 @@
     "linkify-it": "^5.0.2",
     "immutable": ">=5.1.8",
     "dompurify": ">=3.4.13",
-    "qs": ">=6.16.0",
+    "qs": ">=6.17.0",
     "handlebars": "^4.7.10"
   },
   "lint-staged": {

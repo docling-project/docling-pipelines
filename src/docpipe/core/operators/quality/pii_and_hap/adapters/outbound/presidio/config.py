@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2026
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Pydantic config model and entity mapping for the Presidio PII detection adapter."""
 

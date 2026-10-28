@@ -52,6 +52,14 @@ class ClassificationAdapterFactory:
         "watsonx": "standard",
     }
 
+    # Deprecated providers: provider string → migration message shown to the user.
+    _DEPRECATED: ClassVar[dict[str, str]] = {
+        "ollama": (
+            "Ollama provider is no longer supported for classification. "
+            "Use 'litellm' with Ollama's OpenAI-compatible API instead. "
+            "Example: provider='litellm', provider_config={'api_base': 'http://localhost:11434/v1', 'api_key': 'ollama'}"  # pragma: allowlist secret
+        ),
+    }
     @classmethod
     def register(cls, adapter_class: type[ClassificationPort]) -> None:
         """Register *adapter_class* under its ``ADAPTER_NAME``.

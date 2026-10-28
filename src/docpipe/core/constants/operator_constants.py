@@ -406,7 +406,6 @@ class OperatorConstants:
         COLLECTION_NAME: Final[str] = "collection_name"
 
         # Index / collection configuration
-        CREATE_INDEX: Final[str] = "create_index"
         INDEX_MAPPINGS: Final[str] = "index_mappings"
         INDEX_SETTINGS: Final[str] = "index_settings"
         INDEX_TYPE: Final[str] = "index_type"
@@ -472,7 +471,6 @@ class OperatorConstants:
         OPENSEARCH_AWS_REGION: Final[str] = "OPENSEARCH_AWS_REGION"
         OPENSEARCH_JWT_TOKEN: Final[str] = "OPENSEARCH_JWT_TOKEN"
         OPENSEARCH_VECTOR_DIMENSION: Final[str] = "OPENSEARCH_VECTOR_DIMENSION"
-        OPENSEARCH_CREATE_INDEX: Final[str] = "OPENSEARCH_CREATE_INDEX"
         OPENSEARCH_INDEX_NAME: Final[str] = "OPENSEARCH_INDEX_NAME"
         OPENSEARCH_DOC_ID_COLUMN: Final[str] = "OPENSEARCH_DOC_ID_COLUMN"
         OPENSEARCH_EMBEDDINGS_COLUMN: Final[str] = "OPENSEARCH_EMBEDDINGS_COLUMN"
@@ -492,7 +490,6 @@ class OperatorConstants:
         MILVUS_SSL_CERTIFICATE: Final[str] = "MILVUS_SSL_CERTIFICATE"
         MILVUS_AUTH_TYPE: Final[str] = "MILVUS_AUTH_TYPE"
         MILVUS_VECTOR_DIMENSION: Final[str] = "MILVUS_VECTOR_DIMENSION"
-        MILVUS_CREATE_INDEX: Final[str] = "MILVUS_CREATE_INDEX"
         MILVUS_COLLECTION_NAME: Final[str] = "MILVUS_COLLECTION_NAME"
         MILVUS_DOC_ID_COLUMN: Final[str] = "MILVUS_DOC_ID_COLUMN"
         MILVUS_EMBEDDINGS_COLUMN: Final[str] = "MILVUS_EMBEDDINGS_COLUMN"
@@ -1122,6 +1119,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Adapter Names
         ADAPTER_DUCKDB: Final[str] = "duckdb"
         ADAPTER_FILESYSTEM: Final[str] = "filesystem"
+        ADAPTER_POSTGRES: Final[str] = "postgres"
 
         # Configuration Keys
         DATABASE_PATH: Final[str] = "database_path"

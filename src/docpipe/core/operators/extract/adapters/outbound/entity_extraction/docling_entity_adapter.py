@@ -22,9 +22,12 @@ from docpipe.core.operators.extract.ports.outbound.entity_extraction import Enti
 from docpipe.core.operators.extract.services.entity_extraction_service import EntityExtractionService
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.ports.document_class_provider import DocumentClassProvider, get_default_document_class_provider
+from docpipe.integrations.docling.converter_pool import get_docling_pool, options_fingerprint
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
+
+_EXTRACTOR_POOL_KEY_PREFIX = "DocumentExtractor:"
 
 # Explicit allowlist of InlineVlmOptions fields that users may override from
 # the flow JSON's inline_model block. Using an explicit set (rather than an
@@ -385,7 +388,6 @@ class DoclingEntityAdapter(EntityExtractionPort):
 
         try:
             from docling.datamodel.base_models import InputFormat
-            from docling.document_extractor import DocumentExtractor
             from docling_core.types.io import DocumentStream
 
             content_bytes = content if isinstance(content, bytes) else content.encode("utf-8")
@@ -393,20 +395,30 @@ class DoclingEntityAdapter(EntityExtractionPort):
             # Create DocumentStream from binary content (no temporary file needed)
             doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(content_bytes))
 
-            # Use VLM extraction options built once during initialization
-            # Initialize extractor with custom model options if configured
-            if self.extraction_format_options:
-                extractor = DocumentExtractor(
-                    allowed_formats=[InputFormat.IMAGE, InputFormat.PDF],
-                    extraction_format_options=self.extraction_format_options,
-                )
+            # Lease a DocumentExtractor for the VLM extraction options built once during
+            # initialization. Extractors are pooled process-wide and keyed by the option
+            # values, so the extraction pipeline (and its VLM weights) is initialised once
+            # per configuration instead of once per document, and an extractor is never
+            # used by two threads at the same time.
+            format_options = self.extraction_format_options
+            if format_options:
                 logger.debug("Using custom VLM model for extraction: %s", doc_name)
             else:
-                extractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
                 logger.debug("Using default model for extraction: %s", doc_name)
 
-            # Extract directly from stream
-            result = extractor.extract(source=doc_stream, template=schema or {})
+            pool_key = _EXTRACTOR_POOL_KEY_PREFIX + (
+                options_fingerprint(format_options) if format_options else "default"
+            )
+            with get_docling_pool().lease(
+                key=pool_key,
+                factory=lambda: self._build_document_extractor(
+                    allowed_formats=[InputFormat.IMAGE, InputFormat.PDF],
+                    extraction_format_options=format_options,
+                ),
+            ) as extractor:
+                # Extract directly from stream
+                result = extractor.extract(source=doc_stream, template=schema or {})
+                extraction_format_to_options = extractor.extraction_format_to_options
 
             # Convert pages to proper dict format
             pages_data = []
@@ -428,7 +440,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
                 }
                 pages_data.append(page_dict)
             logger.info("Saved structured results for %s", doc_name)
-            logger.debug("Extraction Format Options used: %s", extractor.extraction_format_to_options)
+            logger.debug("Extraction Format Options used: %s", extraction_format_to_options)
             logger.debug("Extracted Pages: %s", pages_data)
             return {
                 OperatorConstants.Extraction.SUCCESS: True,
@@ -445,6 +457,27 @@ class DoclingEntityAdapter(EntityExtractionPort):
         except Exception as e:
             logger.error("Error extracting with template: %s", e)
             return {OperatorConstants.Extraction.SUCCESS: False, OperatorConstants.Extraction.ERROR: str(e)}
+
+    @staticmethod
+    def _build_document_extractor(
+        *, allowed_formats: list[Any], extraction_format_options: dict[Any, Any] | None
+    ) -> Any:
+        """Construct a DocumentExtractor, passing custom format options only when configured.
+
+        Raises:
+            RuntimeError: If Docling's DocumentExtractor is not installed.
+        """
+        try:
+            from docling.document_extractor import DocumentExtractor
+        except ImportError as e:
+            msg = "DocumentExtractor is not available. Install with: pip install 'docling[vlm]'"
+            raise RuntimeError(msg) from e
+
+        if extraction_format_options:
+            return DocumentExtractor(
+                allowed_formats=allowed_formats, extraction_format_options=extraction_format_options
+            )
+        return DocumentExtractor(allowed_formats=allowed_formats)
 
     def _load_schema_templates(self, *, document_types: list[str], schema_templates: dict[str, dict]) -> None:
         """Load schema templates for given document types.

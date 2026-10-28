@@ -18,6 +18,7 @@
  */
 
 import React, { useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useThemeElement } from '@/contexts';
 import {
   Button,
@@ -39,6 +40,7 @@ import {
   LOGICAL,
 } from './conditionTypes';
 import { ConditionBuilder } from './ConditionBuilder';
+import { messages } from './ConditionBuilderTearsheet.messages';
 import styles from './ConditionBuilderTearsheet.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -127,9 +129,10 @@ export function ConditionBuilderTearsheet({
   initialAdvancedExpression,
   features,
   featuresLoading = false,
-  title = 'Criteria',
-  description = 'Add list of SQL queries (not including the where clause). Examples: pii_bank_account >= 1, lang_score > 0.3',
+  title,
+  description,
 }: ConditionBuilderTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
   const portalTarget = useThemeElement();
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>(
     initialAdvancedExpression ? 'advanced' : 'simple'
@@ -195,14 +198,14 @@ export function ConditionBuilderTearsheet({
     <Tearsheet
       open={open}
       onClose={onClose}
-      title={title}
-      description={description}
+      title={title ?? intl.formatMessage(messages.title)}
+      description={description ?? intl.formatMessage(messages.description)}
       hasCloseIcon
-      closeIconDescription="Close"
+      closeIconDescription={intl.formatMessage(messages.close)}
       portalTarget={portalTarget}
       actions={[
-        { label: 'Cancel', kind: 'secondary' as const, onClick: onClose },
-        { label: 'Save', kind: 'primary' as const, onClick: handleSave },
+        { label: intl.formatMessage(messages.cancel), kind: 'secondary' as const, onClick: onClose },
+        { label: intl.formatMessage(messages.save), kind: 'primary' as const, onClick: handleSave },
       ]}
     >
       <div className={styles.tearsheetBody}>
@@ -211,9 +214,9 @@ export function ConditionBuilderTearsheet({
           selectedIndex={activeTab === 'simple' ? 0 : 1}
           onChange={handleTabChange}
         >
-          <TabList aria-label="Criteria mode">
-            <Tab>Simple</Tab>
-            <Tab>Advanced</Tab>
+          <TabList aria-label={intl.formatMessage(messages.criteriaMode)}>
+            <Tab>{intl.formatMessage(messages.simple)}</Tab>
+            <Tab>{intl.formatMessage(messages.advanced)}</Tab>
           </TabList>
           <TabPanels>
 
@@ -237,7 +240,7 @@ export function ConditionBuilderTearsheet({
                 <TextArea
                   id="advanced-expression"
                   labelText=""
-                  placeholder="Enter SQL expression (e.g. pii_bank_account >= 1 AND lang_score > 0.3)"
+                  placeholder={intl.formatMessage(messages.advancedPlaceholder)}
                   value={advancedExpression}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                     setAdvancedExpression(e.target.value);
@@ -257,18 +260,20 @@ export function ConditionBuilderTearsheet({
           <ComposedModal open={showConfirmModal} onClose={cancelSwitch}>
             <ModalHeader
               title={
-                pendingTab === 'advanced'
-                  ? 'Switching to Advanced will overwrite the previously saved Simple condition. Do you want to continue?'
-                  : 'Switching to Simple will overwrite the Advanced expression. Do you want to continue?'
+                intl.formatMessage(
+                  pendingTab === 'advanced'
+                    ? messages.switchToAdvancedConfirm
+                    : messages.switchToSimpleConfirm
+                )
               }
               closeModal={cancelSwitch}
             />
             <ModalFooter>
               <Button kind="secondary" onClick={cancelSwitch}>
-                Cancel
+                {intl.formatMessage(messages.cancel)}
               </Button>
               <Button kind="primary" onClick={confirmSwitch}>
-                Continue
+                {intl.formatMessage(messages.continue)}
               </Button>
             </ModalFooter>
           </ComposedModal>
