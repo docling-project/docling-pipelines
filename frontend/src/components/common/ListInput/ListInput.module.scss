@@ -1,0 +1,47 @@
+@use '@carbon/react/scss/spacing' as *;
+@use '@carbon/react/scss/type' as *;
+@use '@carbon/react/scss/theme' as *;
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+// Input and Add button share a row; helper/error text stays under the input.
+// align-items: flex-start keeps the button level with the input box (not the
+// helper text beneath it).
+.inputRow {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-03;
+}
+
+.inputCell {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.addButton {
+  flex: 0 0 auto;
+}
+
+.tableWrapper {
+  margin-top: $spacing-05;
+
+  // Rows use the same background as the Paths TextInput ($field token) so they
+  // match it in every theme; the header keeps Carbon's darker grey.
+  :global(.cds--data-table) tbody tr,
+  :global(.cds--data-table) tbody td,
+  :global(.cds--pagination) {
+    background-color: $field;
+  }
+}
+
+.valueCell {
+  word-break: break-all;
+}
+
+.removeCell {
+  width: 3rem;
+  text-align: right;
+}

@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 
 import asyncio
+import gzip
+import io
 import os
+import tarfile
+import zipfile
+from typing import Literal
 from unittest.mock import patch
 
 import pytest
@@ -17,6 +22,20 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.config i
 
 async def collect_async(async_gen):
     return [item async for item in async_gen]
+
+
+def _write_zip(path, *, entries: dict[str, bytes]) -> None:
+    with zipfile.ZipFile(path, mode="w") as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_tar(path, *, entries: dict[str, bytes], mode: Literal["w", "w:gz"]) -> None:
+    with tarfile.open(path, mode=mode) as archive:
+        for name, content in entries.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
 
 
 class TestFilesystemSourceConfig:
@@ -239,6 +258,117 @@ class TestFilesystemSourceAdapter:
         assert doc.content == b""  # lazy loading: content empty until fetch_binary_content() called
         assert doc.extension == ".txt"
         assert doc.metadata["relative_path"] == "doc.txt"
+        assert doc.metadata["archive_depth"] == 0
+
+    def test_fetch_documents_expands_zip_lazily_and_preserves_nested_archive(self, tmp_path, monkeypatch):
+        inner_bytes = io.BytesIO()
+        with zipfile.ZipFile(inner_bytes, mode="w") as nested:
+            nested.writestr("inside.txt", b"nested")
+
+        archive_path = tmp_path / "bundle #1.zip"
+        _write_zip(
+            archive_path,
+            entries={
+                "folder/report.txt": b"report",
+                "nested.zip": inner_bytes.getvalue(),
+            },
+        )
+        config = FilesystemSourceConfig(
+            paths=[str(tmp_path)],
+            recursive=False,
+            file_extensions=[".txt", ".zip"],
+            max_file_size_mb=None,
+            follow_symlinks=False,
+        )
+
+        adapter = FilesystemSourceAdapter()
+        docs = asyncio.run(collect_async(adapter.fetch_documents(config)))
+
+        assert [doc.name for doc in docs] == ["folder/report.txt", "nested.zip"]
+        assert all(doc.content == b"" for doc in docs)
+        assert all(doc.metadata["archive_depth"] == 1 for doc in docs)
+        assert all(doc.metadata["source_archive"] == str(archive_path.absolute()) for doc in docs)
+        assert docs[0].metadata["archive_entry"] == "folder/report.txt"
+        assert docs[0].source_url == docs[0].metadata["source_id"]
+        assert "%23" in docs[0].source_url
+
+        def fail_if_archive_is_materialized(_path):
+            raise AssertionError("ZIP archives must not be loaded into memory in full")
+
+        monkeypatch.setattr(type(archive_path), "read_bytes", fail_if_archive_is_materialized)
+        assert adapter.fetch_binary_content(source_id=docs[0].source_url, provider_config={}) == b"report"
+        assert adapter.fetch_binary_content(source_id=docs[1].source_url, provider_config={}) == inner_bytes.getvalue()
+
+    def test_archive_entry_is_read_without_extracting_its_path(self, tmp_path):
+        outside_path = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+        archive_path = tmp_path / "bundle.zip"
+        _write_zip(archive_path, entries={f"../{outside_path.name}": b"content"})
+        config = FilesystemSourceConfig(
+            paths=[str(archive_path)],
+            recursive=False,
+            file_extensions=[".txt"],
+            max_file_size_mb=None,
+            follow_symlinks=False,
+        )
+
+        adapter = FilesystemSourceAdapter()
+        docs = asyncio.run(collect_async(adapter.fetch_documents(config)))
+
+        assert len(docs) == 1
+        assert adapter.fetch_binary_content(source_id=docs[0].source_url, provider_config={}) == b"content"
+        assert not outside_path.exists()
+
+    @pytest.mark.parametrize(
+        ("suffix", "mode"),
+        [(".tar", "w"), (".tar.gz", "w:gz"), (".tgz", "w:gz")],
+    )
+    def test_fetch_documents_expands_tar_formats(self, tmp_path, monkeypatch, suffix, mode):
+        archive_path = tmp_path / f"bundle{suffix}"
+        _write_tar(archive_path, entries={"folder/report.txt": b"report"}, mode=mode)
+        config = FilesystemSourceConfig(
+            paths=[str(archive_path)],
+            recursive=False,
+            file_extensions=[".txt"],
+            max_file_size_mb=None,
+            follow_symlinks=False,
+        )
+
+        adapter = FilesystemSourceAdapter()
+        docs = asyncio.run(collect_async(adapter.fetch_documents(config)))
+
+        assert len(docs) == 1
+        assert docs[0].extension == ".txt"
+
+        def fail_if_archive_is_materialized(_path):
+            raise AssertionError("TAR archives must not be loaded into memory in full")
+
+        monkeypatch.setattr(type(archive_path), "read_bytes", fail_if_archive_is_materialized)
+        assert adapter.fetch_binary_content(source_id=docs[0].source_url, provider_config={}) == b"report"
+
+    def test_fetch_documents_expands_single_stream_gzip(self, tmp_path, monkeypatch):
+        archive_path = tmp_path / "notes.txt.gz"
+        with gzip.open(archive_path, mode="wb") as archive:
+            archive.write(b"notes")
+        config = FilesystemSourceConfig(
+            paths=[str(archive_path)],
+            recursive=False,
+            file_extensions=[".txt"],
+            max_file_size_mb=None,
+            follow_symlinks=False,
+        )
+
+        adapter = FilesystemSourceAdapter()
+        docs = asyncio.run(collect_async(adapter.fetch_documents(config)))
+
+        assert len(docs) == 1
+        assert docs[0].name == "notes.txt"
+        assert docs[0].size is None
+
+        def fail_if_archive_is_materialized(_path):
+            raise AssertionError("GZIP archives must not be loaded into memory in full")
+
+        monkeypatch.setattr(type(archive_path), "read_bytes", fail_if_archive_is_materialized)
+        assert adapter.fetch_binary_content(source_id=docs[0].source_url, provider_config={}) == b"notes"
 
     def test_fetch_binary_content_reads_file_uri(self, tmp_path):
         file_path = tmp_path / "doc with spaces.txt"

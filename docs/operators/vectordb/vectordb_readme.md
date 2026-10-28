@@ -20,7 +20,7 @@ Supported providers: OpenSearch, Milvus.
 ## Key Features
 
 - Multi-provider support via adapter pattern (OpenSearch, Milvus)
-- Automatic index/collection creation on first run (`create_index: true`)
+- Automatic index/collection creation on first run, with schema validation on later runs
 - Provider-specific resource name declared inside `provider_config`
 - Configurable KNN engine and algorithm (NMSLIB, Faiss, Lucene for OpenSearch)
 - Hybrid search support (dense + sparse embeddings)
@@ -37,7 +37,6 @@ Supported providers: OpenSearch, Milvus.
   "name": "index_documents",
   "config": {
     "provider": "opensearch",
-    "create_index": true,
     "vector_dimension": 384,
     "provider_config": {
       "index_name": "my_documents",
@@ -66,7 +65,6 @@ Supported providers: OpenSearch, Milvus.
 | `doc_id_column` | string | No | `"doc_id_hash"` | Column used as primary key |
 | `embeddings_column` | string | No | `"embeddings"` | Column containing dense embeddings |
 | `sparse_embeddings_column` | string | No | — | Column containing sparse embeddings for hybrid search |
-| `create_index` | boolean | No | `true` | Create index/collection if it does not exist |
 | `vector_dimension` | integer | No | auto | Embedding dimension (auto-detected from data if omitted) |
 | `provider_config` | object | **Yes** | — | Provider-specific settings including the resource name (see below) |
 
@@ -236,7 +234,6 @@ chaining with downstream operators.
   "name": "index_documents",
   "config": {
     "provider": "milvus",
-    "create_index": true,
     "provider_config": {
       "collection_name": "local_docs",
       "auth_type": "lite",
@@ -250,7 +247,7 @@ chaining with downstream operators.
 }
 ```
 
-> Set `enable_micro_batching: false` in `global_config` — Milvus Lite holds a single-process file lock. See [`sample_flows/vectordb/milvus_lite_integration.json`](../../sample_flows/vectordb/milvus_lite_integration.json) for a complete working flow.
+> Set `enable_micro_batching: false` in `global_config` — Milvus Lite holds a single-process file lock. See [`sample_flows/quickstart/milvus_lite_integration.json`](../../../sample_flows/quickstart/milvus_lite_integration.json) for a complete working flow.
 
 ### Example 6 — Milvus (standalone)
 
@@ -260,7 +257,6 @@ chaining with downstream operators.
   "name": "index_documents",
   "config": {
     "provider": "milvus",
-    "create_index": true,
     "provider_config": {
       "collection_name": "my_collection",
       "auth_type": "standalone",
@@ -287,7 +283,7 @@ chaining with downstream operators.
 | `DocpipeException: index_name is required` | `index_name` missing from OpenSearch `provider_config` | Add `"index_name": "<your-index>"` inside `provider_config` |
 | `DocpipeException: collection_name is required` | `collection_name` missing from Milvus `provider_config` | Add `"collection_name": "<your-collection>"` inside `provider_config` |
 | `ConnectionError` to OpenSearch | Service not running or wrong host/port | Start OpenSearch; verify `host` and `port` in `provider_config` |
-| `Index already exists` on re-run | `create_index: true` but index was already created | This is safe — the operator skips creation if the index exists |
+| `Index already exists` on re-run | Index was already created by a previous run | This is safe — the operator skips creation if the index exists and validates its schema |
 | `KeyError: doc_id_hash` | Input table missing the ID column | Ensure `DocIdHashOperator` runs before `VectorDBOperator` |
 | `KeyError: embeddings` | Input table missing the embeddings column | Ensure `EmbeddingsOperator` runs before `VectorDBOperator` |
 | Vector dimension mismatch | `vector_dimension` does not match embedding model output | Omit it for auto-detection, or set it to match your model (e.g. 384, 768, 1536) |

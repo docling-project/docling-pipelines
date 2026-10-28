@@ -9,11 +9,13 @@ import importlib.metadata
 import sys
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from docpipe.core.orchestration.operator_loader.adapters.package_adapter import PackageAdapter
+from docpipe.core.orchestration.operator_loader.loader_service import CustomOperatorLoader
 from docpipe.core.orchestration.operator_loader.ports.operator_source import OperatorInfo
 
 _OPERATOR = '''
@@ -82,6 +84,38 @@ def installed(tmp_path: Path, monkeypatch) -> Iterator[str]:
         del sys.modules[name]
 
 
+@pytest.fixture
+def installed_without_entry_points(tmp_path: Path, monkeypatch) -> Iterator[str]:
+    """Install an operator package whose distribution declares no entry points."""
+    package = f"acme_ops_{uuid.uuid4().hex[:8]}"
+    _install(tmp_path, package, entry_points="")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    yield package
+    for name in [m for m in sys.modules if m == package or m.startswith(f"{package}.")]:
+        del sys.modules[name]
+
+
+@pytest.fixture
+def installed_with_aliased_entry_point(tmp_path: Path, monkeypatch) -> Iterator[str]:
+    """Install a package whose entry point exports a locally defined class by alias."""
+    package = f"acme_ops_{uuid.uuid4().hex[:8]}"
+    _install(
+        tmp_path,
+        package,
+        entry_points="[docpipe.operators]\nalias = {package}.operators:AliasOp\n",
+        with_operators_module=False,
+    )
+    (tmp_path / package / "operators.py").write_text(
+        _HEADER + _OPERATOR.format(name="ActualOp", short_name="actual_op") + "\nAliasOp = ActualOp\ndel ActualOp\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    yield package
+    for name in [m for m in sys.modules if m == package or m.startswith(f"{package}.")]:
+        del sys.modules[name]
+
+
 class TestDiscovery:
     """Entry points first, then module inspection, de-duplicated by short_name."""
 
@@ -122,6 +156,60 @@ class TestDiscovery:
 class TestLoading:
     """load_operator, its cache and clear_cache."""
 
+    def test_loads_module_inspected_operator_without_entry_points(self, installed_without_entry_points: str) -> None:
+        adapter = PackageAdapter(package_name=installed_without_entry_points)
+        info = next(op for op in adapter.list_operators() if op.short_name == "module_op")
+
+        assert info.module_path == f"{installed_without_entry_points}.operators:ModuleOp"
+        assert adapter.load_operator(operator_info=info).__name__ == f"{installed_without_entry_points}.operators"
+
+    def test_resolves_each_discovered_class_from_real_package(self, installed_without_entry_points: str) -> None:
+        adapter = PackageAdapter(package_name=installed_without_entry_points)
+
+        loaded = CustomOperatorLoader(sources=[adapter]).validate_and_load(builtin_operators={})
+        module = importlib.import_module(f"{installed_without_entry_points}.operators")
+
+        assert loaded["module_op"] is module.ModuleOp
+        assert loaded["shared_op"] is module.SharedOp
+
+    def test_entry_point_selects_named_class_in_multi_operator_module(self, installed: str) -> None:
+        adapter = PackageAdapter(package_name=installed)
+        info = next(op for op in adapter.list_operators() if op.short_name == "shared_op")
+
+        loaded = CustomOperatorLoader(sources=[adapter]).load_and_validate_operator(info, adapter)
+
+        assert loaded is not None
+        assert loaded is importlib.import_module(f"{installed}.operators").SharedOp
+
+    def test_entry_point_alias_remains_loadable(self, installed_with_aliased_entry_point: str) -> None:
+        adapter = PackageAdapter(package_name=installed_with_aliased_entry_point)
+        info = next(op for op in adapter.list_operators() if op.short_name == "actual_op")
+
+        loaded = CustomOperatorLoader(sources=[adapter]).load_and_validate_operator(info, adapter)
+
+        assert info.name == "ActualOp"
+        assert loaded is not None
+        assert loaded.__name__ == "ActualOp"
+
+    def test_module_inspection_uses_loadable_alias(self, installed_with_aliased_entry_point: str) -> None:
+        adapter = PackageAdapter(package_name=installed_with_aliased_entry_point)
+        info = next(op for op in adapter._discover_via_module_inspection() if op.short_name == "actual_op")
+
+        assert info.module_path == f"{installed_with_aliased_entry_point}.operators:AliasOp"
+        assert CustomOperatorLoader(sources=[adapter]).load_and_validate_operator(info, adapter).__name__ == "ActualOp"
+
+    def test_stale_named_metadata_is_reported_without_loading_another_class(
+        self, installed_without_entry_points: str, caplog
+    ) -> None:
+        adapter = PackageAdapter(package_name=installed_without_entry_points)
+        info = next(op for op in adapter.list_operators() if op.short_name == "module_op")
+        stale = replace(info, name="MissingOp")
+        loader = CustomOperatorLoader(sources=[adapter])
+
+        assert loader.load_and_validate_operator(stale, adapter) is None
+        assert "Operator class 'MissingOp'" in caplog.text
+        assert loader.load_and_validate_operator(info, adapter).__name__ == "ModuleOp"
+
     def test_loads_entry_point_module_and_caches_it(self, installed: str) -> None:
         adapter = PackageAdapter(package_name=installed)
         info = next(op for op in adapter.list_operators() if op.short_name == "extra_op")
@@ -135,6 +223,25 @@ class TestLoading:
         )
         assert adapter.validate_operator(module=module, operator_info=info).valid
 
+    def test_named_module_path_hits_cache(self, installed: str, monkeypatch) -> None:
+        adapter = PackageAdapter(package_name=installed)
+        info = next(op for op in adapter.list_operators() if op.short_name == "extra_op")
+        imported = []
+        original = importlib.import_module
+
+        def import_module(name, *args, **kwargs):
+            imported.append(name)
+            return original(name, *args, **kwargs)
+
+        monkeypatch.setattr(importlib, "import_module", import_module)
+
+        first = adapter.load_operator(operator_info=info)
+        second = adapter.load_operator(operator_info=info)
+
+        assert second is first
+        assert imported == [f"{installed}.extra"]
+        assert adapter._loaded_modules == {f"{installed}.extra": first}
+
     def test_loads_plain_module_path(self, installed: str) -> None:
         adapter = PackageAdapter(package_name=installed)
         info = OperatorInfo(
@@ -142,6 +249,7 @@ class TestLoading:
         )
 
         assert adapter.load_operator(operator_info=info).__name__ == f"{installed}.extra"
+        assert CustomOperatorLoader(sources=[adapter]).load_and_validate_operator(info, adapter).__name__ == "ExtraOp"
 
     def test_unknown_module_raises_import_error(self, installed: str) -> None:
         adapter = PackageAdapter(package_name=installed)

@@ -71,7 +71,7 @@ describe('ProviderFieldsForm', () => {
     expect(document.getElementById('provider-field-secret_key')).not.toBeNull();
   });
 
-  it('renders list field as TagInput', () => {
+  it('renders list field as ListInput', () => {
     const { container } = renderWithProviders(
       <ProviderFieldsForm
         properties={{ paths: { type: 'list', label: 'Paths', description: 'List of paths' } as any }}

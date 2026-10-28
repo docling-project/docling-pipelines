@@ -76,10 +76,10 @@ class TestJWTAuthentication:
         """Test token without username claim is rejected."""
         from datetime import datetime, timedelta
 
-        from jose import jwt
+        import jwt
 
         # Create token without username
-        data = {"email": "test@example.com"}
+        data: dict[str, object] = {"email": "test@example.com"}
         expire = datetime.now(UTC) + timedelta(minutes=30)
         data.update({"exp": expire})
 
@@ -93,10 +93,10 @@ class TestJWTAuthentication:
         """Test expired token is rejected."""
         from datetime import datetime, timedelta
 
-        from jose import jwt
+        import jwt
 
         # Create expired token
-        data = {"username": "testuser"}
+        data: dict[str, object] = {"username": "testuser"}
         expire = datetime.now(UTC) - timedelta(minutes=1)
         data.update({"exp": expire})
 

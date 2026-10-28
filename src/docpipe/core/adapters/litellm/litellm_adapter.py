@@ -10,7 +10,7 @@ Supports 100+ providers including OpenAI, Anthropic, Cohere, and Ollama.
 
 from typing import Any
 
-from docpipe.core.constants.constants import LLMConstants
+from docpipe.core.constants.constants import LLMConstants, ServiceConstants
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
 from docpipe.integrations.litellm.client import LiteLLMLLMClient
@@ -42,6 +42,8 @@ class LiteLLMAdapter(LLMInferencePort, LLMEmbeddingPort):
         model_name: str,
         api_key: str | None = None,
         api_base: str | None = None,
+        batch_size: int = ServiceConstants.DEFAULT_EMBEDDINGS_BATCH_SIZE,
+        max_concurrent_requests: int = ServiceConstants.DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS,
         **kwargs: Any,
     ):
         """Initialize unified LiteLLM adapter.
@@ -53,6 +55,9 @@ class LiteLLMAdapter(LLMInferencePort, LLMEmbeddingPort):
                 - HuggingFace: "huggingface/sentence-transformers/all-MiniLM-L6-v2"
             api_key: API key for the provider (use "ollama" for Ollama)
             api_base: API base URL (e.g., "http://localhost:11434/v1" for Ollama)
+            batch_size: Maximum number of texts per embedding request (default: 32)
+            max_concurrent_requests: Maximum number of embedding requests a caller may keep
+                in flight at once against this adapter (default: 4)
             **kwargs: Additional LiteLLM client parameters
 
         Examples:
@@ -79,9 +84,11 @@ class LiteLLMAdapter(LLMInferencePort, LLMEmbeddingPort):
             model_name=model_name,
             api_key=api_key,
             api_base=api_base,
+            batch_size=batch_size,
             **kwargs,
         )
         self.model_name = model_name
+        self._max_concurrent_requests = max_concurrent_requests
         self._dimension: int | None = None
 
     # ==================== Inference Methods ====================
@@ -248,6 +255,14 @@ class LiteLLMAdapter(LLMInferencePort, LLMEmbeddingPort):
             self.client.model_name = effective_model
 
         return self.client.generate_embeddings_batch(texts=texts)
+
+    def get_embedding_batch_size(self) -> int:
+        """Return the number of texts the LiteLLM client sends per embedding request."""
+        return self.client.batch_size
+
+    def get_max_concurrent_requests(self) -> int:
+        """Return how many embedding requests callers may keep in flight concurrently."""
+        return self._max_concurrent_requests
 
     def get_embedding_dimension(self, *, model_name: str | None = None) -> int:
         """Get embedding dimension for LiteLLM model.

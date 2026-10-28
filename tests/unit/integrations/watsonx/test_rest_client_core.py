@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
 Unit tests for WatsonxRestEmbeddingClient core functionality.
@@ -174,6 +174,22 @@ class TestInit:
             model_name="ibm/slate-30m-english-rtrvr",
         )
         assert c.rate_limit_name == WATSONX_RATE_LIMIT_NAME
+
+    def test_cached_instance_uses_requested_batch_size(self, mock_iam, mock_rest_cls):
+        """A cache hit shares the connection but keeps the caller's batch_size."""
+        params = {
+            "api_key": "k",  # pragma: allowlist secret
+            "url": "https://us-south.ml.cloud.ibm.com",
+            "container_kind": "project",
+            "container_id": "id",
+            "model_name": "ibm/slate-30m-english-rtrvr",
+        }
+        c1 = WatsonxRestEmbeddingClient(**params)
+        c2 = WatsonxRestEmbeddingClient(**params, batch_size=50)
+
+        assert c1.batch_size == 800
+        assert c2.batch_size == 50
+        assert c2.rest_client is c1.rest_client
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ def _make_lib_adapter(ocr_block: dict[str, Any] | None = None) -> DoclingAdapter
     }
     if ocr_block is not None:
         cfg[OperatorConstants.Config.OCR_BLOCK] = ocr_block
-    with patch.object(DoclingAdapter, "_build_gpu_converter", return_value=None):
+    with patch.object(DoclingAdapter, "_build_gpu_converter_config", return_value=None):
         return DoclingAdapter(config=cfg)
 
 

@@ -61,7 +61,9 @@ def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> s
         EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD
     )
     if not password:
-        logger.warning(f"PostgreSQL password not configured (YAML or {EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD})")
+        logger.warning(
+            "PostgreSQL password not configured (YAML or %s)", EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD
+        )
         return None
 
     # Get other connection parameters with fallback chain: config -> env -> default
@@ -77,7 +79,7 @@ def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> s
     )
 
     connection_string = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-    logger.info(f"PostgreSQL connection string built: {user}@{host}:{port}/{database}")
+    logger.info("PostgreSQL connection string built: %s@%s:%s/%s", user, host, port, database)
 
     return connection_string
 
@@ -121,12 +123,14 @@ def create_postgres_engine(*, connection_string: str, config: dict[str, Any] | N
             conn.execute(text("SELECT 1"))
 
         logger.info(
-            f"PostgreSQL engine created: pool_size={pool_size}, "
-            f"max_overflow={max_overflow}, pool_timeout={pool_timeout}"
+            "PostgreSQL engine created: pool_size=%s, max_overflow=%s, pool_timeout=%s",
+            pool_size,
+            max_overflow,
+            pool_timeout,
         )
         return engine
     except Exception as e:
-        logger.error(f"Failed to create PostgreSQL engine: {e}")
+        logger.error("Failed to create PostgreSQL engine: %s", e)
         raise PostgresConnectionException(
             message=f"PostgreSQL engine creation failed: {e}",
             host=postgres_config.get(DocpipeConfigKeys.HOST, "unknown"),
@@ -199,8 +203,6 @@ def run_migrations(*, connection_string: str, config: dict[str, Any] | None = No
 
         logger.info("Database migrations completed successfully")
 
-    except DatabaseMigrationException:
-        raise
     except SystemExit as e:
         logger.error("Alembic terminated startup with SystemExit: code=%s", e.code)
         raise DatabaseMigrationException(

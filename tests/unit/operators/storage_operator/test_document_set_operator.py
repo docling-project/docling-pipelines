@@ -9,14 +9,18 @@ Tests cover:
 - Pass-through behavior
 """
 
+import os
+
 import pyarrow as pa
 import pytest
 
+from docpipe.core.assets.document_sets.application.services.document_set_service import DocumentSetService
 from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import OperatorCategory
 from docpipe.core.operators.document_sets.document_set_operator import DocumentSetOperator
 from docpipe.exceptions.docpipe_exceptions import (
+    FlowExecutionFailedException,
     FlowValidationException,
 )
 
@@ -475,3 +479,46 @@ class TestOperatorMultipleTransforms:
         # Should still have only 1 document (updated)
         assert metadata2["stored_documents"] == 1
         assert metadata2["total_size_bytes"] == 200
+
+
+class TestOperatorFailures:
+    """Invalid database paths and failures while storing, against a DuckDB file in tmp_path."""
+
+    @staticmethod
+    def _config(database_path) -> dict:
+        return {"document_set_name": "Failure Set", "database_path": str(database_path)}
+
+    def test_path_traversal_is_rejected(self):
+        with pytest.raises(FlowValidationException, match="Invalid database path"):
+            DocumentSetOperator({"document_set_name": "Failure Set", "database_path": "../outside/sets.duckdb"})
+
+    @pytest.mark.skipif(
+        os.name == "nt" or getattr(os, "geteuid", lambda: 0)() == 0,
+        reason="needs POSIX permissions that apply to the current user (not root)",
+    )
+    def test_unreadable_database_directory_is_a_validation_error(self, tmp_path):
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        locked.chmod(0)
+        try:
+            with pytest.raises(FlowValidationException, match="Failed to initialize DocumentSetOperator"):
+                DocumentSetOperator(self._config(locked / "sub" / "sets.duckdb"))
+        finally:
+            locked.chmod(0o700)
+
+    def test_storage_error_fails_the_node(self, tmp_path, sample_table):
+        config = self._config(tmp_path / "sets.duckdb")
+        DocumentSetOperator(config).transform(sample_table)
+        incompatible = pa.table({"id": ["doc4"], "size": ["not a number"]})
+
+        with pytest.raises(FlowExecutionFailedException, match="Document set operation failed: Failed to upsert"):
+            DocumentSetOperator(config).transform(incompatible)
+
+    def test_unexpected_error_fails_the_node(self, tmp_path, sample_table, monkeypatch):
+        def _store_data(self, *, document_set_id, data):
+            raise RuntimeError("process killed")
+
+        monkeypatch.setattr(DocumentSetService, "store_data", _store_data)
+
+        with pytest.raises(FlowExecutionFailedException, match="Unexpected error in document set operator: process"):
+            DocumentSetOperator(self._config(tmp_path / "sets.duckdb")).transform(sample_table)

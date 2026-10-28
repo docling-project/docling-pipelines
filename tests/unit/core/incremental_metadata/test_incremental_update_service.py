@@ -269,6 +269,103 @@ class TestIncrementalUpdateService:
         }
 
 
+class TestSaveMetadataWithFailedAndNonRecoverableDocs:
+    """Verify how save_metadata_for_incremental_update treats failed and non-recoverable documents."""
+
+    def test_all_docs_failed_recoverably_leaves_existing_metadata_untouched(self, *, service):
+        """When every document of the run failed recoverably, nothing is written and earlier records survive."""
+        previous = _build_table(ids=["doc-1"], names=["a"], modified_times=[1])
+        service.save_metadata_for_incremental_update(job_id="job-1", job_run_id="run-1", tables=[previous])
+        current = _build_table(ids=["doc-1", "doc-2"], names=["a", "b"], modified_times=[10, 20])
+
+        service.save_metadata_for_incremental_update(
+            job_id="job-1", job_run_id="run-2", tables=[current], failed_doc_ids=["doc-1", "doc-2"]
+        )
+
+        assert service.get_all_processed_docs(job_id="job-1") == {
+            "doc-1": {"modified_time": 1, "job_run_id": "run-1"},
+        }
+
+    def test_non_recoverable_docs_are_saved_alongside_successful_docs(self, *, service):
+        """Non-recoverable docs are persisted even though they failed; recoverable failures are dropped."""
+        successful = _build_table(ids=["doc-1", "doc-3"], names=["a", "c"], modified_times=[1, 3])
+        non_recoverable = pa.Table.from_pydict(
+            {
+                OperatorConstants.Misc.ID: ["doc-2"],
+                OperatorConstants.Misc.NAME: ["b"],
+                OperatorConstants.Metadata.MODIFIED_TIME: [2],
+                "error": ["PDFium: Incorrect password error"],
+            }
+        )
+
+        service.save_metadata_for_incremental_update(
+            job_id="job-1",
+            job_run_id="run-1",
+            tables=[successful],
+            failed_doc_ids=["doc-2", "doc-3"],
+            non_recoverable_docs_table=non_recoverable,
+        )
+
+        assert service.get_all_processed_docs(job_id="job-1") == {
+            "doc-1": {"modified_time": 1, "job_run_id": "run-1"},
+            "doc-2": {"modified_time": 2, "job_run_id": "run-1"},
+        }
+
+    def test_successful_doc_takes_precedence_over_non_recoverable_duplicate(self, *, service):
+        """If a doc id appears in both inputs, the successful row's modified_time is stored."""
+        successful = _build_table(ids=["doc-1"], names=["a"], modified_times=[100])
+        non_recoverable = _build_table(ids=["doc-1", "doc-2"], names=["a", "b"], modified_times=[1, 2])
+
+        service.save_metadata_for_incremental_update(
+            job_id="job-1", job_run_id="run-1", tables=[successful], non_recoverable_docs_table=non_recoverable
+        )
+
+        assert service.get_all_processed_docs(job_id="job-1") == {
+            "doc-1": {"modified_time": 100, "job_run_id": "run-1"},
+            "doc-2": {"modified_time": 2, "job_run_id": "run-1"},
+        }
+
+    @pytest.mark.parametrize(
+        "tables",
+        [
+            pytest.param([], id="no-tables"),
+            pytest.param([_build_table(ids=[], names=[], modified_times=[])], id="only-empty-tables"),
+        ],
+    )
+    def test_non_recoverable_docs_are_saved_when_run_has_no_successful_docs(self, *, service, tables):
+        """A run without successful docs still records its non-recoverable docs as processed."""
+        non_recoverable = _build_table(ids=["doc-9"], names=["broken.pdf"], modified_times=[9])
+
+        service.save_metadata_for_incremental_update(
+            job_id="job-1",
+            job_run_id="run-1",
+            tables=tables,
+            failed_doc_ids=["doc-9"],
+            non_recoverable_docs_table=non_recoverable,
+        )
+
+        assert service.get_all_processed_docs(job_id="job-1") == {
+            "doc-9": {"modified_time": 9, "job_run_id": "run-1"},
+        }
+
+    def test_empty_non_recoverable_table_does_not_protect_failed_docs(self, *, service):
+        """An empty non-recoverable table is ignored, so every failed doc is treated as recoverable."""
+        successful = _build_table(ids=["doc-1", "doc-2"], names=["a", "b"], modified_times=[1, 2])
+        empty_non_recoverable = _build_table(ids=[], names=[], modified_times=[])
+
+        service.save_metadata_for_incremental_update(
+            job_id="job-1",
+            job_run_id="run-1",
+            tables=[successful],
+            failed_doc_ids=["doc-2"],
+            non_recoverable_docs_table=empty_non_recoverable,
+        )
+
+        assert service.get_all_processed_docs(job_id="job-1") == {
+            "doc-1": {"modified_time": 1, "job_run_id": "run-1"},
+        }
+
+
 class TestIncrementalUpdateServiceStaticMethods:
     """Verify incremental metadata helpers are static and callable without an instance."""
 

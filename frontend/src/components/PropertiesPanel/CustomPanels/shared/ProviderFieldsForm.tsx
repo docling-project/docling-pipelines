@@ -12,7 +12,7 @@
  *   int64 / double (nullable)  → NullableNumberInput (toggle + number input)
  *   int64 / double (required)  → NumberInput
  *   boolean → Toggle
- *   list → TagInput  (comma-separated string[] stored as array)
+ *   list → ListInput  (Add button + table; string[] stored as array)
  *   json → JsonTextArea  (raw JSON object)
  *
  * Sensitivity is determined by `keyInfo.sensitive === true` from operator metadata.
@@ -30,11 +30,11 @@ import {
   Toggle,
 } from '@carbon/react';
 import { DefinitionTooltip } from '@carbon/react';
-import { TagInput } from '@/components/common/TagInput/TagInput';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { VaultInput } from '@/components/common';
+import { useIntl, type IntlShape } from 'react-intl';
+import { JsonTextArea, ListInput, VaultInput } from '@/components/common';
 import type { OperatorFeature } from '@/types';
 import common from '../../CommonPropertiesPanel.module.scss';
+import { messages } from './ProviderFieldsForm.messages';
 
 // ── Hidden fields ─────────────────────────────────────────────────────────────
 // Fields that are intentionally suppressed from the provider form because they
@@ -83,12 +83,12 @@ function asStringArray(v: unknown): string[] {
   return [];
 }
 
-function buildRangeText(minValue?: number, maxValue?: number): string | undefined {
+function buildRangeText(intl: IntlShape, minValue?: number, maxValue?: number): string | undefined {
   if (minValue !== undefined && maxValue !== undefined) {
-    return `Range allowed: ${minValue}–${maxValue}`;
+    return intl.formatMessage(messages.rangeAllowed, { min: minValue, max: maxValue });
   }
-  if (minValue !== undefined) {return `Minimum value allowed: ${minValue}`;}
-  if (maxValue !== undefined) {return `Maximum value allowed: ${maxValue}`;}
+  if (minValue !== undefined) {return intl.formatMessage(messages.minimumAllowed, { min: minValue });}
+  if (maxValue !== undefined) {return intl.formatMessage(messages.maximumAllowed, { max: maxValue });}
   return undefined;
 }
 
@@ -122,6 +122,7 @@ function NullableNumberInput({
   maxValue,
   onChange,
 }: NullableNumberInputProps): React.JSX.Element {
+  const intl = useIntl();
   const isEnabled = value !== null && value !== undefined;
   const [draft, setDraft] = useState<number | string>(isEnabled ? value : '');
 
@@ -131,7 +132,7 @@ function NullableNumberInput({
 
   const outOfRange = isOutOfRange(draft, minValue, maxValue);
 
-  const rangeText = buildRangeText(minValue, maxValue);
+  const rangeText = buildRangeText(intl, minValue, maxValue);
 
   function handleToggle(checked: boolean): void {
     if (checked) {
@@ -160,8 +161,8 @@ function NullableNumberInput({
     <div className={common.nullableNumberInputWrapper}>
       <Toggle
         id={`${id}-toggle`}
-        labelA="No limit"
-        labelB="Set limit"
+        labelA={intl.formatMessage(messages.noLimit)}
+        labelB={intl.formatMessage(messages.setLimit)}
         toggled={isEnabled}
         onToggle={handleToggle}
       />
@@ -194,6 +195,7 @@ export function ProviderFieldsForm({
   values,
   onChange,
 }: ProviderFieldsFormProps): React.JSX.Element {
+  const intl = useIntl();
   return (
     <>
       {Object.entries(properties).map(([fieldKey, keyInfo]: [string, OperatorFeature]) => {
@@ -201,7 +203,7 @@ export function ProviderFieldsForm({
         const label = keyInfo.name ?? fieldKey;
         const description = keyInfo.description ?? '';
         const isRequired = keyInfo.required === true;
-        const labelText = isRequired ? `${label} (required)` : label;
+        const labelText = isRequired ? intl.formatMessage(messages.requiredLabel, { name: label }) : label;
         const inputId = `provider-field-${fieldKey}`;
 
         // VaultInput owns its own header row.
@@ -233,7 +235,7 @@ export function ProviderFieldsForm({
         const isNullable = isNumeric && keyInfo.default === null;
         const currentNum = asNumber(values[fieldKey]);
         const numOutOfRange = currentNum !== '' && isOutOfRange(currentNum, keyInfo.min_value, keyInfo.max_value);
-        const numRangeText = buildRangeText(keyInfo.min_value, keyInfo.max_value);
+        const numRangeText = buildRangeText(intl, keyInfo.min_value, keyInfo.max_value);
 
         return (
           <div key={fieldKey} className={common.formField}>
@@ -253,8 +255,8 @@ export function ProviderFieldsForm({
                 id={inputId}
                 labelText={label}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={asBoolean(values[fieldKey], keyInfo.default as boolean | undefined ?? false)}
                 onToggle={(checked: boolean) => {onChange(fieldKey, checked);}}
               />
@@ -290,15 +292,15 @@ export function ProviderFieldsForm({
               />
             )}
 
-            {/* list → TagInput */}
+            {/* list → ListInput (explicit Add button; never commits on blur) */}
             {keyInfo.type === 'list' && (
-              <TagInput
+              <ListInput
                 id={inputId}
                 labelText={label}
-                hideLabel
-                tags={asStringArray(values[fieldKey])}
-                placeholder={`Add ${label.toLowerCase()}`}
-                helperText={`Press Enter or comma to add ${label.toLowerCase()}.`}
+                tableTitle={`Added ${label.toLowerCase()}`}
+                items={asStringArray(values[fieldKey])}
+                placeholder={`Enter ${label.toLowerCase()}`}
+                helperText="Type a value and press Enter, comma, or click Add to add it."
                 onChange={(items: string[]) => {onChange(fieldKey, items);}}
               />
             )}

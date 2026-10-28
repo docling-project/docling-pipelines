@@ -105,8 +105,6 @@ class DocumentSetOperator(AbstractOperator):
             )
         except FlowValidationException:
             raise
-        except DocpipeException as e:
-            raise FlowValidationException(f"Invalid operator configuration: {e}") from e
         except Exception as e:
             raise FlowValidationException(f"Failed to initialize DocumentSetOperator: {e}") from e
 
@@ -232,7 +230,7 @@ class DocumentSetOperator(AbstractOperator):
 
         # Create attachment repository using same config as metadata repo
         attachment_repo = AttachmentRepositoryFactory.create(
-            adapter_name=repo_type_str,
+            adapter_name=repo_type_str.lower(),
             config=attachment_repo_config,
         )
 
@@ -353,6 +351,3 @@ class DocumentSetOperator(AbstractOperator):
         except ValueError as exc:
             logger.warning("Database path validation failed: %s", exc, extra=self.common_log_arguments)
             raise FlowValidationException(f"Invalid database path: {exc}") from exc
-        except Exception as exc:
-            logger.warning("Database path validation failed: %s", exc, extra=self.common_log_arguments)
-            raise FlowValidationException(f"Failed to validate database path: {exc}") from exc

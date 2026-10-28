@@ -7,7 +7,7 @@ pluggable embedding providers across the docpipe framework.
 from abc import ABC, abstractmethod
 from typing import Any
 
-from docpipe.core.constants.constants import LLMConstants
+from docpipe.core.constants.constants import LLMConstants, ServiceConstants
 
 
 class LLMEmbeddingPort(ABC):
@@ -58,6 +58,32 @@ class LLMEmbeddingPort(ABC):
             Exception: Provider-specific errors
         """
         ...
+
+    def get_embedding_batch_size(self) -> int:
+        """Maximum number of texts the adapter sends to the provider in one request.
+
+        Callers that do their own batching (for example the EmbeddingsOperator, which
+        batches texts across documents) hand ``generate_embeddings_batch`` at most this
+        many texts per call, so every call maps to exactly one provider request and the
+        adapter's retry logic re-sends only that request.
+
+        Adapters override this to report their configured batch size.
+
+        Returns:
+            Positive number of texts per request
+        """
+        return ServiceConstants.DEFAULT_EMBEDDINGS_BATCH_SIZE
+
+    def get_max_concurrent_requests(self) -> int:
+        """Maximum number of ``generate_embeddings_batch`` calls a caller may run concurrently.
+
+        The default of 1 is safe for adapters that are not thread-safe or that run local
+        inference. HTTP-based adapters override this with their configured value.
+
+        Returns:
+            Positive number of concurrent calls
+        """
+        return 1
 
     def validate(self) -> dict[str, Any]:
         """Template method for validation.

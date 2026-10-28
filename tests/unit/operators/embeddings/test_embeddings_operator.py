@@ -98,6 +98,8 @@ def mock_llm_adapter():
     adapter = Mock()
     adapter.generate_embeddings_batch.return_value = [[0.1] * 384, [0.2] * 384, [0.3] * 384]
     adapter.get_embedding_dimension.return_value = 384
+    adapter.get_embedding_batch_size.return_value = 32
+    adapter.get_max_concurrent_requests.return_value = 1
     adapter.validate.return_value = {"valid": True, "errors": [], "warnings": []}
     return adapter
 
@@ -814,6 +816,8 @@ class TestEmbeddingsErrorHandling:
     ):
         """Test per-document error tracking."""
         # Make second document fail
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -842,6 +846,8 @@ class TestEmbeddingsErrorHandling:
     ):
         """Test that processing continues after individual document failures."""
         # Make first document fail, others succeed
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -898,6 +904,8 @@ class TestEmbeddingsMetadataValidation:
     ):
         """Test metadata includes failed_docs count."""
         # Make one document fail
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -1005,6 +1013,8 @@ class TestEmbeddingsOperatorIntegration:
     def test_mixed_success_and_failure_documents(self, mock_factory, litellm_config, mock_llm_adapter):
         """Test processing with mix of successful and failed documents."""
         # Make every other document fail
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -1115,11 +1125,11 @@ class TestEmbeddingsOperatorDimAndCaching:
 
     @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
     def test_zero_vector_uses_model_dimension_not_hardcoded_384(self, mock_factory, litellm_config, mock_llm_adapter):
-        """Empty-text zero-vector inside _create_embeddings must use the model's actual output dimension.
+        """Empty-text zero-vector inside _embed_documents must use the model's actual output dimension.
 
         The zero-vector path is reached when a text entry is empty/whitespace inside the
-        text list passed to _create_embeddings (not at the document level).  We test
-        _create_embeddings directly so we can control which slot is empty.
+        text list passed to _embed_documents (not at the document level).  We test
+        _embed_documents directly so we can control which slot is empty.
         """
         mock_factory.return_value = mock_llm_adapter
 
@@ -1133,11 +1143,7 @@ class TestEmbeddingsOperatorDimAndCaching:
         operator._embedding_dim = model_dim
 
         # Pass two texts: one real, one whitespace-only (triggers the zero-vector branch)
-        result = operator._create_embeddings(
-            text=["Real content", "   "],
-            model_name=operator.model_id,
-            overlap_ratio=operator.overlap_ratio,
-        )
+        result = operator._embed_documents(texts_per_doc=[["Real content", "   "]])[0]
 
         assert len(result) == 2
         zero_vec = result[1]
@@ -1159,11 +1165,7 @@ class TestEmbeddingsOperatorDimAndCaching:
         assert operator._embedding_dim is None
 
         # All-whitespace list: every entry hits the zero-vector branch, nothing seeds _embedding_dim
-        result = operator._create_embeddings(
-            text=["   "],
-            model_name=operator.model_id,
-            overlap_ratio=operator.overlap_ratio,
-        )
+        result = operator._embed_documents(texts_per_doc=[["   "]])[0]
 
         assert len(result) == 1
         assert len(result[0]) == 384, "Should fall back to 384 when no model dimension is known yet"
@@ -1186,6 +1188,64 @@ class TestEmbeddingsProviderSchemas:
         schemas = EmbeddingsOperator._get_embeddings_provider_schemas()
         for name, schema in schemas.items():
             assert "properties" in schema, f"Schema for {name} missing 'properties'"
+
+    @pytest.mark.parametrize(
+        ("provider", "batch_size", "max_concurrent_requests"),
+        [("litellm", 32, 4), ("watsonx", 800, 1)],
+    )
+    def test_metadata_exposes_request_shaping_options(self, provider, batch_size, max_concurrent_requests):
+        providers = EmbeddingsOperator.get_metadata()["attributes"]["provider_config"]["providers"]
+        properties = providers[provider]["properties"]
+
+        assert properties["batch_size"]["default"] == batch_size
+        assert properties["batch_size"]["min_value"] == 1
+        assert properties["batch_size"]["type"] == "int64"
+        assert properties["max_concurrent_requests"]["default"] == max_concurrent_requests
+        assert properties["max_concurrent_requests"]["min_value"] == 1
+        assert properties["max_concurrent_requests"]["type"] == "int64"
+        assert "model_id" in properties
+
+    @pytest.mark.parametrize(
+        ("provider", "batch_size", "max_concurrent_requests"),
+        [("litellm", 32, 4), ("watsonx", 800, 1)],
+    )
+    def test_schema_defaults_match_factory_defaults(self, provider, batch_size, max_concurrent_requests):
+        from docpipe.core.adapters.llm_adapter_factory import LLMAdapterFactory
+
+        with (
+            patch("docpipe.core.adapters.litellm.litellm_adapter.LiteLLMLLMClient") as litellm_client,
+            patch("docpipe.core.adapters.watsonx.watsonx_adapter.WatsonXClient"),
+        ):
+            litellm_client.return_value.batch_size = 32
+            adapter = LLMAdapterFactory.create_embedding_adapter(
+                provider=provider, model_id="m", provider_config={"api_key": "k"}
+            )
+
+        assert adapter.get_embedding_batch_size() == batch_size
+        assert adapter.get_max_concurrent_requests() == max_concurrent_requests
+
+    def test_shared_inference_schemas_do_not_offer_embedding_options(self):
+        from docpipe.core.operators.shared.llm_provider_config import LLMProviderConfig, WatsonxProviderConfig
+
+        for config_cls in (LLMProviderConfig, WatsonxProviderConfig):
+            properties = config_cls.model_json_schema()["properties"]
+            assert "batch_size" not in properties
+            assert "max_concurrent_requests" not in properties
+
+    @pytest.mark.parametrize("bad_value", [0, -1])
+    def test_embedding_schemas_reject_non_positive_values(self, bad_value):
+        from pydantic import ValidationError
+
+        from docpipe.core.operators.shared.llm_provider_config import (
+            LLMEmbeddingProviderConfig,
+            WatsonxEmbeddingProviderConfig,
+        )
+
+        for config_cls in (LLMEmbeddingProviderConfig, WatsonxEmbeddingProviderConfig):
+            with pytest.raises(ValidationError):
+                config_cls(batch_size=bad_value)
+            with pytest.raises(ValidationError):
+                config_cls(max_concurrent_requests=bad_value)
 
 
 class TestEmbeddingsParseChunkedContent:
