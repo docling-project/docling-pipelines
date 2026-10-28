@@ -48,7 +48,8 @@ Record new unplanned work there; report blockers instead of expanding tasks or w
 - [ ] 2.4 [backend] Scope and restore `SessionInfo` with event transaction/flow correlation and no job/run identifiers
   (60 min); test success, failure, stale config IDs, and restoration of a pre-existing batch session.
 - [ ] 2.5 [backend] Implement direct Arrow transform invocation and result-contract checks (90 min); test ingest input,
-  typed table outputs, metadata dictionaries, multi-row/chunk outputs, and invalid transform results.
+  typed table outputs, metadata dictionaries, invalid results, and ordinary multi-row outputs. Verify chunking keeps
+  one document row with list-valued `chunked_content`, document IDs, and retained column types.
 - [ ] 2.6 [backend] Apply existing output drop/rename utilities to every output table (60 min); port relevant assertions
   from `test_python_operator_executor_features.py` and verify metadata/table consistency downstream.
 - [ ] 2.7 [backend] Preserve empty-content/zero-byte filtering and skipped metadata through a pure table helper
