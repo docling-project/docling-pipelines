@@ -73,6 +73,9 @@ diagnostics without job statistics. Failure notification means raising the in-pr
 notifications and Kafka publications remain deferred. Dispatch emits correlated completion diagnostics with the selected
 flow ID before returning; listener diagnostics add attempt count and Kafka record context.
 
+The streaming runtime logs source-filter skips as no-op completions with event/flow correlation and the available reason
+before normal return. The listener keeps its completion/commit policy; `execute()` and `dispatch()` return `None`.
+
 Alternative: reuse `JobManagementService`, `FlowExecutor`, or `PythonOrchestrator`. Rejected because each couples
 execution to jobs, batch data access, or finalization. An executor pool is unnecessary for one synchronous active event.
 

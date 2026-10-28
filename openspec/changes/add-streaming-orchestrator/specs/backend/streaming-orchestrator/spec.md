@@ -81,6 +81,7 @@ retries or events.
 Each event SHALL bind its existing file reference to the ingest provider's single-file binding contract and force
 reprocessing for both create and update operations. Source credentials, include/exclude filters, and provider-native
 reference meanings SHALL be preserved. The event SHALL NOT expand processing to other configured source documents.
+The runtime SHALL log source-filter skips with event ID, flow ID, and the available reason before completing as a no-op.
 
 #### Scenario: Create and update bypass incremental exclusion
 - **WHEN** create and update events reference a document that was processed previously
@@ -88,7 +89,8 @@ reference meanings SHALL be preserved. The event SHALL NOT expand processing to 
 
 #### Scenario: Source filters exclude the document
 - **WHEN** the referenced document is excluded by the saved flow's source filters
-- **THEN** ingestion reports a skip, downstream routes receive no rows, and the attempt completes without a failure
+- **THEN** the runtime logs the source-filter skip with event ID, flow ID, and the available reason
+- **AND** downstream routes receive no rows and the attempt completes as a no-op without a failure or sink writes
 
 #### Scenario: Provider cannot bind the reference
 - **WHEN** the configured provider rejects or does not support the file-reference binding

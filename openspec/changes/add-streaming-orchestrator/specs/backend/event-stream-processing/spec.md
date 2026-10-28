@@ -112,6 +112,11 @@ or durable job record; credentials and document content SHALL NOT be logged.
 - **WHEN** routing fails before a flow or operator is known
 - **THEN** failure diagnostics include the event and routing stage without inventing a flow or operator identifier
 
+#### Scenario: Source filters skip a document
+- **WHEN** ingestion intentionally excludes the referenced document and reports no failed document
+- **THEN** runtime diagnostics identify the event, selected flow, skip, and available reason before dispatch completes
+- **AND** the listener treats the no-op as completed and attempts its offset commit without processing retries
+
 ### Requirement: Retry configuration
 
 Event streaming SHALL expose an environment setting for the maximum retry count. Invalid or negative retry counts
