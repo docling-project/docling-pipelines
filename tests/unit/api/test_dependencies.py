@@ -262,7 +262,7 @@ class TestGetDocumentSetAttachmentRepository:
 
         with (
             patch(
-                "docpipe.api.dependencies.RepositoryFactory.get_repository_config",
+                "docpipe.api.dependencies.AssetRepositoryFactory.get_repository_config",
                 return_value=("Postgres", repo_config),
             ),
             patch("docpipe.api.dependencies.AttachmentRepositoryFactory.create", return_value=mock_repo) as mock_create,
