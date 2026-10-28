@@ -255,7 +255,7 @@ of `file_reference`. Event ingestion forces reprocessing even when the file has 
 The flow's include and exclude filters still apply, and downstream storage behavior follows the saved flow's
 configuration.
 
-File events currently support the filesystem, `box_driver`, `dropbox`, and `sharepoint` providers. For the
+File events currently support the filesystem, `box_driver`, `dropbox`, `sharepoint` and `google_drive` providers. For the
 filesystem provider, the referenced path must be a readable regular file in the environment where the flow runs; for
 the Docker sample, `/documents` is the mounted invoice directory. For `box_driver`, `file_reference` is the Box file
 ID (for example `"702199884861"`). For `dropbox`, `file_reference` is a Dropbox path (for example `/Reports/q1.pdf`)

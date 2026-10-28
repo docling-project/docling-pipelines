@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 OperatorConstants with nested class organization.
 
@@ -565,6 +568,9 @@ class OperatorConstants:
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
 
+        # Archive formats (filesystem ingest only)
+        ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
+
         BASE_EXTENSIONS: Final[list[str]] = [
             EXT_PDF,
             EXT_DOCX,
@@ -957,6 +963,16 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         STORAGE: Final[str] = "storage"
         TABLE_NAME: Final[str] = "table_name"
         TARGET_STORE: Final[str] = "target_store"
+
+        # Table storage backends shared by the storage operators
+        BACKEND_DUCKDB: Final[str] = "duckdb"
+        BACKEND_POSTGRES: Final[str] = "postgres"
+        DATA_BACKEND: Final[str] = "data_backend"
+        DATABASE_PATH: Final[str] = "database_path"
+        DEFAULT_DATA_BACKEND: Final[str] = "duckdb"
+        DEFAULT_DATABASE_PATH: Final[str] = ":memory:"
+        SCHEMA: Final[str] = "schema"
+        TABLE_PREFIX: Final[str] = "table_prefix"
 
         # Storage Types
         AWS_STORAGE_TYPE: Final[str] = "amazon_s3"

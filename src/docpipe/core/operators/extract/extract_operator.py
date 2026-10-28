@@ -109,6 +109,8 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+import docpipe.core.operators.extract.adapters.outbound.entity_extraction
+import docpipe.core.operators.extract.adapters.outbound.text_extraction  # noqa: F401
 from docpipe.core.constants.constants import (
     AttributeDataTypes,
     DocpipeConstants,
@@ -195,7 +197,11 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
     category = OperatorCategory.Extract
     owner = DocpipeConstants.OWNER_DOCPIPE
 
-    def __init__(self, *, config: dict[str, Any]):
+    def __init__(
+        self,
+        *,
+        config: dict[str, Any],
+    ):
         """Initialize the unified extract operator.
 
         Parses the extraction mode, builds adapter-specific configuration,
@@ -1054,14 +1060,39 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                             reason=f"Column '{self.doc_column}' is empty after text extraction.",
                         )
                     else:
-                        entity_future = entity_executor.submit(
-                            self.entity_adapter.extract_entities_single,
-                            doc_id=str(task["doc_id"]),
-                            doc_name=task["doc_name"],
-                            content=extracted_content,
-                            schema=schema_to_use,
-                        )
-                        entity_future_to_info[entity_future] = (idx, str(task["doc_id"]), task["doc_name"])
+                        # Adapters that need the original file bytes (e.g. Docling VLM)
+                        # declare requires_binary_content = True on the port.
+                        # LLM-based adapters always receive extracted text.
+                        entity_content: str | bytes = extracted_content
+                        skip_reason: str | None = None
+                        if self.entity_adapter.requires_binary_content:
+                            supported = self.entity_adapter.supported_extensions
+                            if supported is not None and Path(task["doc_name"]).suffix.lower() not in supported:
+                                skip_reason = (
+                                    f"Unsupported file extension for {self.entity_adapter.ADAPTER_DISPLAY_NAME} "
+                                    f"entity extraction: {Path(task['doc_name']).suffix.lower() or '(none)'}"
+                                )
+                            elif not task.get("binary_content"):
+                                skip_reason = "Binary content unavailable for VLM extraction."
+                            else:
+                                entity_content = task["binary_content"]
+
+                        if skip_reason:
+                            AbstractOperator.record_skipped_document(
+                                metadata=metadata,
+                                doc_id=str(task["doc_id"]),
+                                doc_name=task["doc_name"],
+                                reason=skip_reason,
+                            )
+                        else:
+                            entity_future = entity_executor.submit(
+                                self.entity_adapter.extract_entities_single,
+                                doc_id=str(task["doc_id"]),
+                                doc_name=task["doc_name"],
+                                content=entity_content,
+                                schema=schema_to_use,
+                            )
+                            entity_future_to_info[entity_future] = (idx, str(task["doc_id"]), task["doc_name"])
 
                 else:
                     # ---- Text extraction failed ----
@@ -1513,7 +1544,6 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         ``@register_text_extraction_adapter``.
         """
         # Import the adapter modules so their @register_text_extraction_adapter decorators fire.
-        import docpipe.core.operators.extract.adapters.outbound.text_extraction  # noqa: F401
         from docpipe.core.operators.extract.adapters.outbound.factories.text_extraction_adapter_factory import (
             TextExtractionAdapterFactory,
         )

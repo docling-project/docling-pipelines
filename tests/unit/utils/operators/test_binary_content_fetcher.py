@@ -1,5 +1,6 @@
 """Unit tests for binary_content_fetcher utility."""
 
+import zipfile
 from unittest.mock import MagicMock, patch
 
 
@@ -58,6 +59,19 @@ class TestGetBinaryContentLocalFile:
                 doc_metadata={"path": str(tmp_path)},
                 global_config={},
             )
+
+    def test_reads_archive_entry_via_zip_uri(self, tmp_path):
+        from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.archive import build_archive_uri
+        from docpipe.utils.operators.binary_content_fetcher import get_binary_content
+
+        archive_path = tmp_path / "documents.zip"
+        with zipfile.ZipFile(archive_path, mode="w") as archive:
+            archive.writestr("folder/doc.txt", b"archived content")
+        source_id = build_archive_uri(archive_path=archive_path, entry_name="folder/doc.txt")
+
+        result = get_binary_content(doc_metadata={"source_id": source_id}, global_config={})
+
+        assert result == b"archived content"
 
 
 class TestGetBinaryContentCloudSource:
