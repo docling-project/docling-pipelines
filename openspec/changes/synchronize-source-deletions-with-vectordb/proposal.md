@@ -24,13 +24,13 @@ the limit on documents processed per run, including forced re-ingestion and micr
 
 ### New Capabilities
 
-- `backend/source-deletion-synchronization`: Conditional full source discovery, limited processing selection,
-  incremental deletion lifecycle, and source-document cleanup in VectorDB.
+- `backend/incremental-update`: Incremental processing and bounded selection, conditional full source discovery,
+  forced reprocessing, source-deletion tracking, VectorDB cleanup scheduling, and retry-safe acknowledgment.
 
 ### Modified Capabilities
 
-- `backend/flow-execution-engine`: Schedule source-deletion cleanup independently of processing batches and empty
-  ingest output, and use a consistent incremental tracking scope throughout execution.
+None. Incremental-update behavior is owned by the new capability, including its ingestion, orchestration,
+and VectorDB integration. Existing engine and VectorDB specs remain baseline contracts.
 
 ## Impact
 

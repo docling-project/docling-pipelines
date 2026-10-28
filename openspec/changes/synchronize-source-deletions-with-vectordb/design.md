@@ -2,6 +2,10 @@
 
 ## Context
 
+The [incremental-update specification](specs/backend/incremental-update/spec.md) owns this behavior end to end,
+including ingestion, tracking, cleanup scheduling, and VectorDB deletion. Existing engine and VectorDB specs remain
+reference contracts; this change does not introduce separate deltas for those capabilities.
+
 See [proposal.md](proposal.md) for motivation and scope. Ingestion currently loads processing history through
 `get_all_processed_docs()`, yields at most `max_files` accepted rows, and never supplies the inventory expected by
 the orchestrator. Reconciliation defaults that inventory to an empty list, clears history on forced ingestion,

@@ -1,6 +1,8 @@
 # Tasks
 
 Each task is sized for at most two hours. Activate `.venv` before Python validation commands.
+All work below implements the [incremental-update capability](specs/backend/incremental-update/spec.md),
+including its source, orchestration, and VectorDB integration.
 
 ## 1. Source discovery contracts and adapters
 
