@@ -58,6 +58,8 @@ Record new unplanned work there; report blockers instead of expanding tasks or w
   (60 min); test ingest's normal-return failure path, partial failures, sink errors, and intentional skips as success.
 - [ ] 2.9 [backend] Release all constructed operators in unconditional cleanup and restore attempt state (90 min);
   test success, transform failure, cleanup failure, idempotent release, and fresh local deduplication on retry.
+  Verify intermediate table, route-state, and operator references are cleared before the attempt returns or raises
+  and before any retry or later event starts, even when cleanup hooks fail.
 
 ## 3. Sequential DAG execution and route behavior
 
