@@ -2484,7 +2484,7 @@ graph TB
 
 ### 8. DocumentClassifier Pattern
 
-The DocumentClassifier operator classifies documents into predefined categories using Large Language Models. It uses a simplified service-based architecture that leverages the shared LLM adapter infrastructure for multi-provider support.
+The DocumentClassifier operator classifies documents into predefined categories using Large Language Models. It uses a port/adapter architecture (`ClassificationPort`) that leverages the shared LLM adapter infrastructure for multi-provider support.
 
 **Typical Workflow Position:**
 
@@ -2511,11 +2511,16 @@ graph LR
 │                   DocumentClassifierOperator                │
 │                     (Main Operator)                         │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+                         │ depends on
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  ClassificationService                      │
-│              (Business Logic Layer)                         │
+│                     ClassificationPort                      │
+│        (resolved by ClassificationAdapterFactory)           │
+└────────────────────────┬────────────────────────────────────┘
+                         │ implemented by
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              StandardLLMClassificationAdapter               │
 │  ┌─────────────────────────────────────────────────-─────┐  │
 │  │  Domain Models:                                       │  │
 │  │  - ClassificationRequest                              │  │
@@ -2542,7 +2547,7 @@ graph LR
 
 1. **LLM-Based Classification**: Uses Large Language Models for intelligent document classification
 2. **Multi-Provider Support**: LiteLLM (100+ providers) and IBM watsonx.ai via shared LLM infrastructure
-3. **Simplified Architecture**: Direct service-based design without port/adapter overhead
+3. **Port/Adapter Architecture**: Operator depends on `ClassificationPort`; adapters self-register with `ClassificationAdapterFactory`
 4. **Confidence Scoring**: 1-10 scale confidence scores for each classification
 5. **Reasoning Output**: Optional explanations for classification decisions
 6. **Shared Infrastructure**: Leverages common LLM adapter factory for consistency
@@ -3440,6 +3445,48 @@ assets_management:
 - **"duckdb"** (default): Metadata and attachment coordinates stored in DuckDB key-value tables alongside the data tables.
 
 **Note**: The `data_backend` parameter in the operator's flow config controls where PyArrow table data is stored, and is independent of the metadata/attachment backend in the YAML.
+
+### OpenLineage Hexagonal Architecture Pattern
+
+Optional data lineage lives in `src/docpipe/core/lineage/` and follows the same ports-and-adapters layout as job management. It is off unless `DOCPIPE_LINEAGE_ENABLED=true`, and it needs the `lineage` extra.
+
+```mermaid
+graph TB
+    subgraph "Docling-pipelines Layer"
+        ORCH[Orchestrator]
+        OBS[Execution Observer<br/>when to emit]
+        SVC[LineageService<br/>what to emit]
+    end
+
+    subgraph "Adapter Layer (Hexagonal)"
+        PORT[LineagePublisher Port<br/>Interface]
+        OLA[OpenLineage Adapter]
+        NOOP[NoOp Adapter<br/>fallback]
+    end
+
+    BE[Console / File / HTTP<br/>Marquez]
+
+    ORCH --> OBS
+    OBS --> SVC
+    SVC --> PORT
+    PORT --> OLA
+    PORT --> NOOP
+    OLA --> BE
+
+    style ORCH fill:#ffe1e1
+    style SVC fill:#fff4e1
+    style OLA fill:#e1ffe1
+    style BE fill:#e1f5ff
+```
+
+- **Wiring**: `OrchestratorFactory` calls `lineage_factory.create_lineage_observer()`, which returns `None` when lineage is disabled, so no observer is attached. If `openlineage-python` is missing or fails to initialise, the factory logs a warning and falls back to the no-op publisher.
+- **Modes**: `flow` emits one job per run. `operator` also emits a child run per DAG node, linked to the flow run through the `parent` run facet.
+- **Dataset identity**: `dataset_naming.get_dataset_info()` maps an adapter config to an OpenLineage `(namespace, name)`. Sources and sinks share the rules, and inter-operator tables use the `inmemory://` namespace, so a node's output matches the next node's input and the backend can draw the edge.
+- **Credential safety**: the service strips credential keys from flow definitions and operator metadata before building any facet.
+- **Failure isolation**: exceptions raised inside the observer are logged as warnings and the flow continues, unless `DOCPIPE_LINEAGE_STRICT=true`.
+- **Distributed runs**: Prefect batch subflows rebuild the observer from environment variables, so the `DOCPIPE_LINEAGE_*` and `OPENLINEAGE__*` variables must be set in the worker environment.
+
+See the [OpenLineage Integration Guide](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md) for configuration, emitted events, custom facets, and adding a custom publisher.
 
 ## Deployment Patterns
 

@@ -22,6 +22,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
@@ -42,12 +43,8 @@ import {
 import type { OperatorFeature, OperatorMetadata, DocumentClassItem } from '@/types';
 import { getDocumentClasses } from '@/services/api';
 import { NodeOperator } from '@/constants/operators';
-import {
-  DOCUMENT_CLASSIFIER_ATTRIBUTE as ATTR,
-  DOCUMENT_CLASSIFIER_LABELS as LABEL,
-  PROVIDER_CONFIG_DESCRIPTION,
-  CLASSIFICATION_CONFIG_DESCRIPTION,
-} from './constants';
+import { DOCUMENT_CLASSIFIER_ATTRIBUTE as ATTR } from './constants';
+import { messages } from './DocumentClassifier.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
 
@@ -71,6 +68,7 @@ interface DocumentClassifierPanelBodyProps {
 export function DocumentClassifierPanelBody({
   controller,
 }: DocumentClassifierPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Document classes fetched from API ────────────────────────────────
   const [documentClassItems, setDocumentClassItems] = useState<DocumentClassItem[]>([]);
@@ -90,7 +88,7 @@ export function DocumentClassifierPanelBody({
       })
       .catch(() => {
         if (!cancelled) {
-          setClassesError('Failed to load document types. You can type them manually below.');
+          setClassesError(intl.formatMessage(messages.loadDocumentTypesError));
         }
       })
       .finally(() => {
@@ -100,6 +98,8 @@ export function DocumentClassifierPanelBody({
       });
 
     return () => { cancelled = true; };
+    // Fetch once on mount; re-running on intl change would trigger a redundant request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Read operator attribute metadata from Redux (passed in via Canvas.tsx) ──
@@ -192,14 +192,14 @@ export function DocumentClassifierPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.PROVIDER]?.description ?? ''}
           >
-            {LABEL.PROVIDER}
+            {intl.formatMessage(messages.provider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="provider"
-          titleText={LABEL.PROVIDER}
+          titleText={intl.formatMessage(messages.provider)}
           hideLabel
-          label="Select provider"
+          label={intl.formatMessage(messages.selectProvider)}
           items={providerItems}
           selectedItem={provider}
           onChange={({ selectedItem }: { selectedItem: string | null }) => {
@@ -217,10 +217,12 @@ export function DocumentClassifierPanelBody({
       <Accordion align="start">
 
         {/* ── Provider configuration ──────────────────────────────────── */}
-        <AccordionItem title="Provider configuration">
+        <AccordionItem title={intl.formatMessage(messages.providerConfigAccordion)}>
           <div className={common.accordionContent}>
 
-            <p className={common.accordionDescription}>{PROVIDER_CONFIG_DESCRIPTION}</p>
+            <p className={common.accordionDescription}>
+              {intl.formatMessage(messages.providerConfigAccordionDescription)}
+            </p>
 
             {/* Structured fields when provider schema is available */}
             {provider && (
@@ -245,12 +247,12 @@ export function DocumentClassifierPanelBody({
                         nodeAttributes={nodeAttributes}
                         definition={nodeAttributes[ATTR.PROVIDER_CONFIG]?.description ?? ''}
                       >
-                        {LABEL.PROVIDER_CONFIG}
+                        {intl.formatMessage(messages.providerConfig)}
                       </RequiredParamTooltip>
                     </div>
                     <JsonTextArea
                       id="provider_config"
-                      labelText={LABEL.PROVIDER_CONFIG}
+                      labelText={intl.formatMessage(messages.providerConfig)}
                       placeholder='{"model": "ollama/mistral", "api_base": "http://localhost:11434"}'
                       storedValue={typeof providerConfigRaw === 'object' ? providerConfigRaw : null}
                       rows={3}
@@ -269,10 +271,12 @@ export function DocumentClassifierPanelBody({
         </AccordionItem>
 
         {/* ── Classification configuration ─────────────────────────────── */}
-        <AccordionItem title="Classification configuration">
+        <AccordionItem title={intl.formatMessage(messages.classificationConfigAccordion)}>
           <div className={common.accordionContent}>
 
-            <p className={common.accordionDescription}>{CLASSIFICATION_CONFIG_DESCRIPTION}</p>
+            <p className={common.accordionDescription}>
+              {intl.formatMessage(messages.classificationConfigDescription)}
+            </p>
 
             {/* Document types */}
             <div className={common.formField}>
@@ -282,12 +286,12 @@ export function DocumentClassifierPanelBody({
                   nodeAttributes={nodeAttributes}
                   definition={nodeAttributes[ATTR.DOCUMENT_TYPES]?.description ?? ''}
                 >
-                  {LABEL.DOCUMENT_TYPES}
+                  {intl.formatMessage(messages.documentTypes)}
                 </RequiredParamTooltip>
               </div>
 
               {classesLoading && (
-                <InlineLoading description="Loading document types..." />
+                <InlineLoading description={intl.formatMessage(messages.loadingDocumentTypes)} />
               )}
 
               {!classesLoading && classesError && (
@@ -301,9 +305,9 @@ export function DocumentClassifierPanelBody({
                   />
                   <TextArea
                     id="document_types_fallback"
-                    labelText={LABEL.DOCUMENT_TYPES}
+                    labelText={intl.formatMessage(messages.documentTypes)}
                     hideLabel
-                    placeholder="invoice, contract, report, email"
+                    placeholder={intl.formatMessage(messages.documentTypesFallbackPlaceholder)}
                     value={Array.isArray(documentTypesRaw) ? documentTypesRaw.join(', ') : (typeof documentTypesRaw === 'string' ? documentTypesRaw : '')}
                     rows={2}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -317,9 +321,9 @@ export function DocumentClassifierPanelBody({
               {!classesLoading && !classesError && (
                 <FilterableMultiSelect
                   id="document_types"
-                  titleText={LABEL.DOCUMENT_TYPES}
+                  titleText={intl.formatMessage(messages.documentTypes)}
                   hideLabel
-                  placeholder="Select document types"
+                  placeholder={intl.formatMessage(messages.documentTypesPlaceholder)}
                   items={documentClassItems}
                   itemToString={(item: DocumentClassItem | null) => item?.document_type ?? ''}
                   initialSelectedItems={initialSelectedItems}
@@ -341,12 +345,12 @@ export function DocumentClassifierPanelBody({
                   nodeAttributes={nodeAttributes}
                   definition={nodeAttributes[ATTR.CONFIDENCE_THRESHOLD]?.description ?? ''}
                 >
-                  {LABEL.CONFIDENCE_THRESHOLD}
+                  {intl.formatMessage(messages.confidenceThreshold)}
                 </RequiredParamTooltip>
               </div>
               <NumberInput
                 id="confidence_threshold"
-                label={LABEL.CONFIDENCE_THRESHOLD}
+                label={intl.formatMessage(messages.confidenceThreshold)}
                 hideLabel
                 value={confidenceThreshold}
                 min={1}
@@ -368,12 +372,12 @@ export function DocumentClassifierPanelBody({
                   nodeAttributes={nodeAttributes}
                   definition={nodeAttributes[ATTR.OUTPUT_COLUMN]?.description ?? ''}
                 >
-                  {LABEL.OUTPUT_COLUMN}
+                  {intl.formatMessage(messages.outputColumn)}
                 </RequiredParamTooltip>
               </div>
               <TextInput
                 id="output_column"
-                labelText={LABEL.OUTPUT_COLUMN}
+                labelText={intl.formatMessage(messages.outputColumn)}
                 hideLabel
                 value={outputColumn}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -392,15 +396,15 @@ export function DocumentClassifierPanelBody({
                   openOnHover
                   align="right"
                 >
-                  {LABEL.INCLUDE_CONFIDENCE}
+                  {intl.formatMessage(messages.includeConfidence)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="include_confidence"
-                labelText={LABEL.INCLUDE_CONFIDENCE}
+                labelText={intl.formatMessage(messages.includeConfidence)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={includeConfidence}
                 onToggle={(checked: boolean) => {
                   controller?.updatePropertyValue?.({ name: ATTR.INCLUDE_CONFIDENCE }, checked);
@@ -416,15 +420,15 @@ export function DocumentClassifierPanelBody({
                   openOnHover
                   align="right"
                 >
-                  {LABEL.INCLUDE_REASONING}
+                  {intl.formatMessage(messages.includeReasoning)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="include_reasoning"
-                labelText={LABEL.INCLUDE_REASONING}
+                labelText={intl.formatMessage(messages.includeReasoning)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={includeReasoning}
                 onToggle={(checked: boolean) => {
                   controller?.updatePropertyValue?.({ name: ATTR.INCLUDE_REASONING }, checked);
@@ -440,12 +444,12 @@ export function DocumentClassifierPanelBody({
                   nodeAttributes={nodeAttributes}
                   definition={nodeAttributes[ATTR.DOC_COLUMN]?.description ?? ''}
                 >
-                  {LABEL.DOC_COLUMN}
+                  {intl.formatMessage(messages.docColumn)}
                 </RequiredParamTooltip>
               </div>
               <TextInput
                 id="doc_column"
-                labelText={LABEL.DOC_COLUMN}
+                labelText={intl.formatMessage(messages.docColumn)}
                 hideLabel
                 value={docColumn}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {

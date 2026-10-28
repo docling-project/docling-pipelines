@@ -27,7 +27,7 @@ dependencies = [
     "duckdb==1.3.2",
     "fastapi==0.141.1",
     "fasttext-numpy2==0.10.4",
-    "filelock==4.1.1",
+    "filelock==4.2.1",
     "ftfy==6.3.1",
     "google-api-python-client==2.190.0",
     "google-auth-httplib2==0.3.0",
@@ -52,7 +52,7 @@ dependencies = [
     "milvus-lite==3.2.1",
     "mlx==0.32.3; sys_platform == 'darwin'",
     "msal==1.37.0",
-    "nltk==3.10.3",
+    "nltk==3.10.4",
     "numpy>=2.0.0,<3.0.0",
     "o365==2.1.9",
     "ollama==0.6.1",
@@ -61,9 +61,9 @@ dependencies = [
     "orjson==3.13.0",
     "pandas==2.3.3",
     "passlib[bcrypt]==1.7.4",
-    "pillow==12.3.0",
+    "pillow==13.0.0",
     "polars==1.32.3",
-    "prefect==3.8.3",
+    "prefect==3.8.4",
     "psycopg2-binary==2.9.12",
     "pyarrow==26.0.0",
     "pyasn1==0.6.4",
@@ -75,14 +75,14 @@ dependencies = [
     "pyjwt==2.15.1",
     "pymilvus==2.6.13",
     "pyopenssl==26.4.0",
-    "pypdf==6.20.0",
+    "pypdf==6.21.2",
     "pyphen==0.17.2",
     "python-dotenv==1.2.4",
     "python-ldap==3.4.5",
     "python-multipart==0.0.32",
     "pyyaml==6.0.3",
     "requests==2.34.2",
-    "setuptools==84.0.0",
+    "setuptools==84.1.0",
     "spacy>=3.7.4",
     "sqlalchemy==2.0.49",
     "sqlglot==27.13.2",
@@ -101,7 +101,7 @@ lineage = [
     "openlineage-python==1.52.0",
 ]
 dev = [
-    "black==26.3.1",
+    "black==26.10.1",
     "detect-secrets==1.5.0",
     "faker==40.8.0",
     "flake8==7.3.0",
@@ -124,39 +124,39 @@ notebooks = [
     # CVE-2026-102831, CVE-2026-102904, CVE-2026-102830: fixed in JupyterLab 4.6.4.
     "jupyterlab==4.6.4",
     "matplotlib==3.11.0",
-    "nbconvert==7.17.1",
+    "nbconvert==7.17.2",
     "nbformat==5.10.4",
     "seaborn==0.13.2",
 ]
 
 telemetry = [
-    "opentelemetry-api==1.41.1",
-    "opentelemetry-exporter-otlp-proto-grpc==1.41.1",
-    "opentelemetry-instrumentation-fastapi==0.62b1",
-    "opentelemetry-sdk==1.41.1",
+    "opentelemetry-api==1.45.1",
+    "opentelemetry-exporter-otlp-proto-grpc==1.45.1",
+    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-sdk==1.45.1",
 ]
 
 extract = [
     "accelerate==1.15.0",
-    "docling[rapidocr]==2.132.0",
+    "docling[rapidocr]==2.142.1",
     "sentence-transformers==6.1.0",
     "transformers>=5.17.0,<5.18.0",
 ]
 
 easyocr = [
-    "docling[easyocr]==2.132.0",
+    "docling[easyocr]==2.142.1",
 ]
 
 ocrmac = [
-    "docling[ocrmac]==2.132.0",
+    "docling[ocrmac]==2.142.1",
 ]
 
 tesserocr = [
-    "docling[tesserocr]==2.132.0",
+    "docling[tesserocr]==2.142.1",
 ]
 
 vlm_asr = [
-    "docling[vlm,asr]==2.132.0",
+    "docling[vlm,asr]==2.142.1",
 ]
 
 [project.urls]
@@ -212,6 +212,8 @@ override-dependencies = [
     "rapidocr==3.9.0",
     # CVE-2026-49476, CVE-2026-49477: Security fix for soupsieve vulnerability (transitive via beautifulsoup4).
     "soupsieve>=2.8.4",
+    # CVE-2026-85670: tokenizers <= 0.23.2 vulnerable (CVSS 6.5); fix is 0.23.3+ (transitive via sentence-transformers/transformers).
+    "tokenizers>=0.23.3",
 ]
 
 [tool.ruff]

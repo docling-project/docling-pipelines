@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
+import pyarrow as pa
 import pytest
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -244,3 +245,34 @@ class TestDeleteDocumentSet:
         client.delete(f"/document-sets/{_DS_ID}?delete_data=false")
 
         override_service.delete_document_set.assert_called_once_with(document_set_id=_DS_ID, delete_data=False)
+
+
+class TestPreviewDocumentSetData:
+    """GET /document-sets/{id}/preview."""
+
+    def test_returns_serialised_rows_with_pagination(self, client, override_service) -> None:
+        override_service.preview_data.return_value = pa.table(
+            {
+                "id": ["doc-1", "doc-2"],
+                "created_at": [datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)],
+                "payload": [b"raw", None],
+            }
+        )
+
+        response = client.get(f"/document-sets/{_DS_ID}/preview", params={"limit": 2, "offset": 4})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "columns": ["id", "created_at", "payload"],
+            "data": [
+                {"id": "doc-1", "created_at": "2024-01-01T00:00:00+00:00", "payload": "raw"},
+                {"id": "doc-2", "created_at": "2024-01-02T00:00:00+00:00", "payload": None},
+            ],
+            "total_rows": 2,
+        }
+        override_service.preview_data.assert_called_once_with(document_set_id=_DS_ID, limit=2, offset=4)
+
+    def test_unknown_document_set_returns_404(self, client, override_service) -> None:
+        override_service.preview_data.side_effect = AssetNotFoundException(f"DocumentSet not found: {_DS_ID}")
+
+        assert client.get(f"/document-sets/{_DS_ID}/preview").status_code == 404

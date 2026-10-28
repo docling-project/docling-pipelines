@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen, fireEvent } from '@testing-library/react';
 import { RedactionPanelBody } from '@/components/PropertiesPanel/CustomPanels/Redaction/Redaction';
 
 function makeController(overrides: Record<string, unknown> = {}) {
@@ -14,26 +15,26 @@ function makeController(overrides: Record<string, unknown> = {}) {
 describe('RedactionPanelBody', () => {
   it('renders redaction_regex input', () => {
     const controller = makeController();
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     expect(document.getElementById('redaction_regex')).not.toBeNull();
   });
 
   it('renders redaction_masking_character input', () => {
     const controller = makeController();
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     expect(document.getElementById('redaction_masking_character')).not.toBeNull();
   });
 
   it('defaults masking character to *', () => {
     const controller = makeController();
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     const input = document.getElementById('redaction_masking_character') as HTMLInputElement;
     expect(input.value).toBe('*');
   });
 
   it('defaults redaction_regex to empty string', () => {
     const controller = makeController();
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     const input = document.getElementById('redaction_regex') as HTMLInputElement;
     expect(input.value).toBe('');
   });
@@ -44,7 +45,7 @@ describe('RedactionPanelBody', () => {
         prop.name === 'redaction_regex' ? '\\bSSN\\b' : undefined
       ),
     });
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     const input = document.getElementById('redaction_regex') as HTMLInputElement;
     expect(input.value).toBe('\\bSSN\\b');
   });
@@ -52,7 +53,7 @@ describe('RedactionPanelBody', () => {
   it('calls updatePropertyValue for redaction_regex change', () => {
     const update = vi.fn();
     const controller = makeController({ updatePropertyValue: update });
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     const input = document.getElementById('redaction_regex') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'secret' } });
     expect(update).toHaveBeenCalledWith({ name: 'redaction_regex' }, 'secret');
@@ -61,7 +62,7 @@ describe('RedactionPanelBody', () => {
   it('calls updatePropertyValue for masking_character change', () => {
     const update = vi.fn();
     const controller = makeController({ updatePropertyValue: update });
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     const input = document.getElementById('redaction_masking_character') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '#' } });
     expect(update).toHaveBeenCalledWith({ name: 'redaction_masking_character' }, '#');
@@ -69,7 +70,7 @@ describe('RedactionPanelBody', () => {
 
   it('masking character input has maxLength of 1', () => {
     const controller = makeController();
-    render(<RedactionPanelBody controller={controller} />);
+    renderWithProviders(<RedactionPanelBody controller={controller} />);
     const input = document.getElementById('redaction_masking_character') as HTMLInputElement;
     expect(input.maxLength).toBe(1);
   });

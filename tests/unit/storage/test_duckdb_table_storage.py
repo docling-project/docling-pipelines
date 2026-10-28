@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for DuckDBTableStorage (PyArrow table storage)."""
 
 import pyarrow as pa
@@ -501,3 +504,28 @@ class TestDuckDBTableStorageTypeMapping:
         assert storage._pyarrow_to_duckdb_type(pa_type=pa.int64()) == (
             DuckDBTableStorage._pyarrow_to_duckdb_type(pa_type=pa.int64())
         )
+
+
+class TestSchemaWideningAndWrites:
+    """Integer columns widen for float values, and execute_query commits writes."""
+
+    def test_integer_column_is_widened_for_float_values(self, storage):
+        """Without widening, DuckDB would round 5.5 to 6."""
+        schema = pa.schema([("id", pa.string()), ("amount", pa.int64())])
+        storage.create_table(table_name="totals", schema=schema)
+        storage.upsert_data(table_name="totals", data=pa.table({"id": ["a"], "amount": [5]}, schema=schema))
+
+        storage.upsert_data(table_name="totals", data=pa.table({"id": ["b"], "amount": [5.5]}))
+
+        stored = storage.read_data(table_name="totals")
+        assert stored.schema.field("amount").type == pa.float64()
+        assert stored.column("amount").to_pylist() == [5.0, 5.5]
+
+    def test_execute_query_commits_writes_on_a_database_file(self, storage):
+        """Reads open the file read-only; writes open it read-write and are kept."""
+        schema = pa.schema([("id", pa.string()), ("amount", pa.float64())])
+        storage.create_table(table_name="totals", schema=schema)
+
+        storage.execute_query(query="INSERT INTO totals VALUES (?, ?)", params=["a", 1.5])
+
+        assert storage.execute_query(query="SELECT id, amount FROM totals").to_pylist() == [{"id": "a", "amount": 1.5}]

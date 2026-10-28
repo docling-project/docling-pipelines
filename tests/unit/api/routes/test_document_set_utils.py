@@ -198,3 +198,11 @@ class TestTableToPreviewResponse:
         result = table_to_preview_response(table=table)
         assert result.total_rows == 0
         assert result.data == []
+
+
+def test_make_json_serializable_falls_back_when_isoformat_needs_arguments() -> None:
+    """A value whose isoformat() cannot be called without arguments (here: the date class itself)
+    is not treated as a timestamp and is returned unchanged."""
+    from datetime import date
+
+    assert make_json_serializable(value=date) is date
