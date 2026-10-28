@@ -1,0 +1,69 @@
+# Tasks
+
+## 1. Backend foundations: roles, actor, ownership
+
+- [ ] 1.1 Add `Role` enum with ordering and a `roles` field on `User` and in the JWT claims in `src/docpipe/api/auth/`; verify `uv run pytest tests/unit/auth -v` covers role ordering and token round-trip with roles
+- [ ] 1.2 Add `AuthSettings` (`src/docpipe/api/auth/config.py`) read per request for `DOCPIPE_AUTH_ENABLED` (default `false` until task 8.1), role mapping, default role, cookie name, cookie `Secure` override (`DOCPIPE_AUTH_COOKIE_SECURE`), proxy trust (`DOCPIPE_TRUST_PROXY_HEADERS`) and bootstrap variables, with the new names in `core/constants/constants.py`; verify a test that changes the env var between two requests sees the new value
+- [ ] 1.3 Add `ActorContext` and pure `can_modify` under `src/docpipe/core/models/` and `PermissionDeniedException` under `src/docpipe/exceptions/`, mapped to 403 `forbidden` in `api/middleware/error_handler.py`; verify unit tests for viewer, editor owner, editor other, editor ownerless, admin and `actor=None`
+- [ ] 1.4 Pass keyword-only `actor` into `FlowService` create/update/delete/bulk-delete and `ProjectService` create/update/delete, set `created_by` on create and `modified_by` on update when an actor exists, check ownership per flow in bulk delete, and in `ProjectService.delete_project` verify ownership of both the project and all child flows before cascading with `actor=None`; verify service tests including the `actor=None` library path, mixed bulk delete, and project delete with a foreign-owned child flow
+- [ ] 1.5 Write audit log lines (`%s` style, no secrets) for denials and successful writes; verify with a log-capture test for one denial and one create
+
+## 2. Backend: session dependency and CSRF
+
+- [ ] 2.1 Switch to `HTTPBearer(auto_error=False)`; update `get_current_user` (and `require_session` which delegates to it) to read cookie then Bearer, set `request.state.auth_source`, and return a synthetic local administrator (`username="admin"`, `roles=[Role.ADMIN]`) when `DOCPIPE_AUTH_ENABLED=false`; remove the unused `/protected` route in `api/main.py`; verify the existing nine `dependency_overrides[get_current_user]` route test files still pass unchanged
+- [ ] 2.2 Replace `test_token_in_cookie_is_not_accepted` with tests that a cookie is accepted, Bearer is accepted, cookie wins when both are present, and expired, malformed and wrongly signed tokens return 401; verify `tests/unit/auth/test_dependencies.py` passes
+- [ ] 2.3 Enforce `X-Requested-With` on cookie-authenticated `POST/PUT/PATCH/DELETE` with Bearer exempt; verify tests for each scenario in the `auth-api` CSRF requirement
+- [ ] 2.4 Add `require_role` and apply `editor` and `admin` guards per the permission matrix in `backend/authorization`, including `admin` on custom operator create, update and delete and `viewer` on `documents/search` and `validation/*`; verify a parametrized matrix test over (role, method, route)
+- [ ] 2.5 Add autouse fixture in `tests/conftest.py` setting `DOCPIPE_AUTH_ENABLED=false` and an `auth_enabled` fixture for tests that assert 401/auth behavior (`tests/unit/api/test_authentication.py`, `tests/unit/auth/test_dependencies.py`, and the unauthenticated tests in `tests/integration/api/test_documents_api.py`); verify `uv run pytest` passes unchanged
+
+## 3. Backend: auth routes, login, throttling
+
+- [ ] 3.1 Add `AuthenticatorPort` and move the LDAP check in `POST /auth/login` behind it; add `memberOf` (configurable attribute) to the LDAP search and map groups to roles; verify `tests/unit/auth/test_ldap_auth.py` and new mapping tests pass
+- [ ] 3.2 Extract OIDC `groups`/`roles` claims per provider and map them; verify tests with Generic, Azure and no-claim providers
+- [ ] 3.3 Make `POST /auth/login` set the `HttpOnly`, `SameSite=Lax`, `Path=/` cookie (`Secure` when HTTPS, `X-Forwarded-Proto=https` with `DOCPIPE_TRUST_PROXY_HEADERS=true`, or `DOCPIPE_AUTH_COOKIE_SECURE=true`) and return both `access_token` and `user` with `roles`; add `POST /auth/logout`, public `GET /auth/config`, and `roles` on `GET /auth/me`; set `allow_credentials=True` on `CORSMiddleware` when `CORS_ORIGINS` is not `*`; verify route tests for each response and for the 401, 503 and no-secrets cases
+- [ ] 3.4 Update `oauth2_authorize` to accept `return_to` (aliasing `redirect_after`) and fix `oauth2_callback` to set the cookie and redirect to a validated same-origin `return_to` (prefixing `/ui` for non-`/ui` paths and defaulting to `/ui/projects`); update the fragment assertions in `tests/unit/auth/test_oauth2_routes.py`; verify the open-redirect scenario with absolute, `//host` and backslash values
+- [ ] 3.5 Harden `middleware/rate_limit.py`: lock, bounded entries, failed-only counting, per-username lockout, `Retry-After`, optional `X-Forwarded-For`; verify tests including time advance and 429 headers, and that the existing rate-limit tests still pass
+- [ ] 3.6 Add startup validation for `JWT_SECRET_KEY` (length, not placeholder) when enabled and a `CORS_ORIGINS=*` warning; verify tests that start the app with weak, strong and disabled configurations
+- [ ] 3.7 Make `EventDispatchService` send a short-lived system Bearer token; verify a unit test with auth enabled asserts the `Authorization` header and a 200 from a stubbed API
+- [ ] 3.8 Implement `BootstrapAdminAuthenticator` with direct `bcrypt.checkpw`, 72-byte pre-check, partial-config startup failure and `admin` role, sharing the throttle; verify tests for match, mismatch, oversized, malformed hash and one-variable-set
+- [ ] 3.9 Write backend docs: `docs/guides/` auth setup (variables, role mapping, bootstrap admin, logout limits, proxy trust) and update `docs/reference/` env var tables; verify every documented command and variable name matches the code with a grep and a manual run of `/auth/config`
+
+## 4. BFF forwarding and auth routes
+
+- [ ] 4.1 Add `buildForwardHeaders(req, base)` in `frontend/server/controllers/http-headers.ts` and use it in all six controllers; verify BFF unit tests assert `Cookie`, `Authorization`, `X-Requested-With`, `X-Transaction-ID`, `X-Forwarded-For` and `X-Forwarded-Proto` reach the upstream call
+- [ ] 4.2 Add `auth-controller.ts` and register `/api/auth/*` in `server.ts`, relaying every `Set-Cookie`, passing 3xx through unfollowed (`maxRedirects: 0`), and relaying 401 and 403 unchanged; verify tests for login cookie relay, two cookies, 302 and 403 body
+- [ ] 4.3 Bind the BFF to `127.0.0.1` by default with `BFF_HOST` override; verify a test or startup log assertion for default and override
+- [ ] 4.4 Fix `proxy_to_bff` in `api/main.py` to preserve repeated `Set-Cookie` using `multi_items()`; verify a unit test with two cookies from a stubbed BFF response
+- [ ] 4.5 Run `npm run lint` and the BFF tests in `frontend/`; verify no errors
+
+## 5. Frontend state and hook
+
+- [ ] 5.1 Add `types/` for user and auth config and `services/api/actions/auth-actions.ts` (config, me, login, logout) with `X-Requested-With`; verify action tests mock the client and assert paths and headers
+- [ ] 5.2 Add `slices/authSlice.ts` with the state shape (storing `user` only, never `access_token`), bootstrap, login and logout thunks, and register it in `store/index.ts`; verify slice tests for initial state, restored session, no session, auth disabled, login success and failure, and logout
+- [ ] 5.3 Replace the stub in `hooks/useAuth.ts` with slice-backed `user`, `authEnabled`, `isAuthenticated`, `isLoading`, `canEdit`, `canAdmin` and `canModifyAsset(createdBy)`; verify hook tests for viewer, editor (own, foreign, ownerless) and admin and for the loading status
+- [ ] 5.4 Run the bootstrap once at app start; verify an integration test that the first render shows the loading indicator and then resolves
+
+## 6. Frontend routing, login page, client
+
+- [ ] 6.1 Add `LOGIN` to `config/routes.config.ts` and a `pages/Login/` page using Carbon `Form`, `TextInput`, `PasswordInput`, `Button`, `InlineNotification` with an SCSS Module and Carbon tokens, credential form, provider buttons, validation, loading state and 429 message; verify component tests for each login-page scenario and an accessibility check for the alert role
+- [ ] 6.2 Add a shared `return_to` sanitizer used by the login page and `ProtectedRoute`; verify tests that accept `/flows/x?a=1` and reject `https://x`, `//x` and `\\x`
+- [ ] 6.3 Restructure `App.tsx` so `/login` renders outside the `AppHeader`/`Breadcrumb` shell chrome, update `ProtectedRoute` to redirect to `/login?return_to=<encoded path+query>` and wrap every shell route except login and error; add the header user menu with sign-out hidden when auth is disabled; verify the deep-link, shell-less login and menu scenarios in navigation tests
+- [ ] 6.4 Update `services/api/client.ts` with `withCredentials`, a single-redirect 401 latch that skips login and the initial `/auth/me` probe, and a 403 toast via `notificationsSlice`; verify tests with three concurrent 401s producing one navigation and a 403 keeping the session
+- [ ] 6.5 Add i18n strings for the new UI text following `frontend/i18n`; verify no hard-coded strings remain in new components via `npm run lint`
+
+## 7. Frontend gated actions
+
+- [ ] 7.1 Disable the sample project quick-start button on `Home` and the create-project actions on `ProjectsCard` with Carbon tooltips when `!canEdit`; verify component tests for viewer and editor
+- [ ] 7.2 Preserve `createdBy` on `ProjectRow` (`Projects.tsx::toProjectRow`) and disable create, edit and delete on the projects page with Carbon tooltips using `canEdit` and `canModifyAsset`; verify component tests for viewer, editor own, editor foreign, admin and ownerless
+- [ ] 7.3 Preserve `created_by` on `FlowRow` (`flow-mapper.ts::fromResponse` and `types/projects.ts`) and apply the same gating on the project detail page for flow create, edit and delete; verify the corresponding tests
+- [ ] 7.4 Gate cancel run, delete run and edit flow details (`FlowInfoPanel`) on the flow detail page while keeping run viewing available; verify the corresponding tests
+- [ ] 7.5 Gate `Canvas` actions (Save, editing toolbar/palette/node-save/properties-save/edit-details gated on flow modify permission; Run flow gated on `canEdit`) and `ReadOnlyCanvas` / `RunDetails` controls (`Stop` and `Run Again` in `RunStatusTopPanel` gated on `canEdit`); verify component tests for viewer, non-owner editor, owner editor and admin
+- [ ] 7.6 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings
+
+## 8. Enable by default and finalize
+
+- [ ] 8.1 Flip the `DOCPIPE_AUTH_ENABLED` default to `true`, add the opt-out and bootstrap variables to both Docker Compose files and `.env` examples; verify `docker compose config` renders and a manual login with the bootstrap admin succeeds
+- [ ] 8.2 Add the route-inventory test that walks `APIRoute` entries in `app.routes` (explicitly exempting FastAPI's non-`APIRoute` `/api/v1/{docs,redoc,openapi.json,docs/oauth2-redirect}` endpoints) and fails if any `/api/v1/*` `APIRoute` lacks a session dependency or lacks an entry in the permission matrix; verify it passes and fails when a test route is added without a guard
+- [ ] 8.3 Add an end-to-end enabled-mode suite covering unauthenticated 401, viewer 403, editor own versus foreign flow, admin operator upload, logout, and CSRF header; verify `uv run pytest -v --cov=src` passes at the coverage threshold
+- [ ] 8.4 Manual verification through the UI against a local LDAP (`examples/LDAP/docker-compose.yml`) or the bootstrap admin: deep link while signed out, expired session redirects once, no token in URL or storage; record results in the PR description
+- [ ] 8.5 Run `openspec validate add-authentication-and-authorization --strict`, `uv run ruff check`, `uv run ruff format --check`, `uv run mypy .` and `pre-commit run --from-ref origin/main --to-ref HEAD`; verify all pass
