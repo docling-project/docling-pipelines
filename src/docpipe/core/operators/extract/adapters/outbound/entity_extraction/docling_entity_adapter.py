@@ -357,7 +357,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
             value, _ = json.JSONDecoder().raw_decode(raw_text.strip())
         except json.JSONDecodeError:
             return None
-        return value
+        return value if isinstance(value, (dict, list)) else None
 
     def extract_entities_single(
         self, *, doc_id: str, doc_name: str, content: str | bytes, schema: dict[str, Any] | None = None
