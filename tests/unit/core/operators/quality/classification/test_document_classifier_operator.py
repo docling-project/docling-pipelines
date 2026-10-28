@@ -176,33 +176,86 @@ class TestValidateProviderMessages:
 class TestCustomAdapterSelectedByProvider:
     """A registered adapter is selectable via ``provider: "<ADAPTER_NAME>"`` through the real factory."""
 
-    @staticmethod
-    def _register_custom() -> type[ClassificationPort]:
-        class _CustomAdapter(ClassificationPort):
-            ADAPTER_NAME = "_operator_test_custom"
-            ADAPTER_DISPLAY_NAME = "Custom"
+    def test_classification_operator_picks_right_adapter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """For each provider in ['litellm', 'watsonx', 'standard', 'custom'], verify the
+        operator picks the expected adapter, where 'standard' and 'custom' are random adapters.
+        """
+        # WatsonXClient reads credentials from the environment; set dummy values so the
+        # test does not depend on the developer's / CI runner's environment.
+        monkeypatch.setenv("WATSONX_API_KEY", "test-api-key")  # pragma: allowlist secret
+        monkeypatch.setenv("WATSONX_CONTAINER_ID", "test-project-id")
+
+        class _RandomStandardAdapter(ClassificationPort):
+            ADAPTER_NAME = "standard"
+            ADAPTER_DISPLAY_NAME = "Random Standard Adapter"
 
             @classmethod
-            def from_config(cls, config: dict[str, Any]) -> "_CustomAdapter":
+            def from_config(cls, config: dict[str, Any]) -> "_RandomStandardAdapter":
                 return cls()
 
             def classify_document(self, *, doc_name, binary_content, existing_text, document_types):  # type: ignore[override]
                 return _GOOD_RESPONSE
 
-        ClassificationAdapterFactory.register(_CustomAdapter)
-        return _CustomAdapter
+        class _RandomCustomAdapter(ClassificationPort):
+            ADAPTER_NAME = "custom"
+            ADAPTER_DISPLAY_NAME = "Random Custom Adapter"
 
-    def test_custom_provider_passes_validate_and_constructs_via_factory(self) -> None:
-        adapter_class = self._register_custom()
+            @classmethod
+            def from_config(cls, config: dict[str, Any]) -> "_RandomCustomAdapter":
+                return cls()
+
+            def classify_document(self, *, doc_name, binary_content, existing_text, document_types):  # type: ignore[override]
+                return _GOOD_RESPONSE
+
+        ClassificationAdapterFactory.register(_RandomStandardAdapter)
+        ClassificationAdapterFactory.register(_RandomCustomAdapter)
         try:
-            op = DocumentClassifierOperator({"provider": "_operator_test_custom", "document_types": ["invoice"]})
-            errors: list[str] = []
-            op.validate(errors, [], ["content", "id", "name"])
-        finally:
-            ClassificationAdapterFactory._REGISTRY.pop("_operator_test_custom", None)
+            for provider in ["litellm", "watsonx", "standard", "custom"]:
+                if provider == "litellm":
+                    expected_adapter_type = StandardLLMClassificationAdapter
+                    config = {
+                        "provider": "litellm",
+                        "provider_config": {
+                            "model_id": "openai/test",
+                            "api_base": "http://localhost:11434/v1",
+                            "api_key": "x",  # pragma: allowlist secret
+                        },
+                        "document_types": ["invoice"],
+                    }
+                elif provider == "watsonx":
+                    expected_adapter_type = StandardLLMClassificationAdapter
+                    config = {
+                        "provider": "watsonx",
+                        "provider_config": {
+                            "model_id": "ibm/granite-13b-chat-v2",
+                            "api_base": "https://us-south.ml.cloud.ibm.com",
+                        },
+                        "document_types": ["invoice"],
+                    }
+                elif provider == "standard":
+                    expected_adapter_type = _RandomStandardAdapter
+                    config = {"provider": "standard", "document_types": ["invoice"]}
+                elif provider == "custom":
+                    expected_adapter_type = _RandomCustomAdapter
+                    config = {"provider": "custom", "document_types": ["invoice"]}
 
-        assert isinstance(op.adapter, adapter_class)
-        assert [e for e in errors if "provider" in e.lower()] == []
+                op = DocumentClassifierOperator(config)
+                assert isinstance(op.adapter, expected_adapter_type), (
+                    f"Provider '{provider}' picked {type(op.adapter).__name__}, "
+                    f"expected {expected_adapter_type.__name__}"
+                )
+
+                errors: list[str] = []
+                op.validate(errors, [], ["content", "id", "name"])
+                assert [e for e in errors if "provider" in e.lower()] == []
+        finally:
+            ClassificationAdapterFactory._REGISTRY.pop("custom", None)
+            ClassificationAdapterFactory._REGISTRY.pop("standard", None)
+
+    def test_standard_provider_is_rejected_by_operator_construction(self) -> None:
+        """'standard' is an internal registry key, not a valid provider for operator construction."""
+        with pytest.raises(ValueError, match="Unknown classification provider: 'standard'"):
+            DocumentClassifierOperator({"provider": "standard", "document_types": ["invoice"]})
 
 
 # ---------------------------------------------------------------------------

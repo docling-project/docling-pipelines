@@ -255,7 +255,8 @@ of `file_reference`. Event ingestion forces reprocessing even when the file has 
 The flow's include and exclude filters still apply, and downstream storage behavior follows the saved flow's
 configuration.
 
-File events currently support the filesystem, `box_driver`, `dropbox`, `s3`, `ibm_cos`, and `sharepoint` providers. For the
+File events currently support the filesystem, `box_driver`, `dropbox`, `s3`, `ibm_cos`, `sharepoint` and `google_drive`
+providers. For the
 filesystem provider, the referenced path must be a readable regular file in the environment where the flow runs; for
 the Docker sample, `/documents` is the mounted invoice directory. For `box_driver`, `file_reference` is the Box file
 ID (for example `"702199884861"`). For `dropbox`, `file_reference` is a Dropbox path (for example `/Reports/q1.pdf`)
@@ -264,9 +265,11 @@ document library already configured on the flow (for example `"01ABC000000000000
 URL with an `id` or `sourcedoc` query parameter (for example
 `"https://contoso.sharepoint.com/?id=/sites/team/Shared%20Documents/Reports/q1.pdf"`). A URL without one of those
 parameters is rejected, as is any other URI. The reference is stored as `file_path`, so ingest fetches that item
-and does not scan the library. In every case the flow's own `provider_config` supplies the credentials and
+and does not scan the library. For `s3` and `ibm_cos`, `file_reference` is the object key in the bucket already
+configured on the flow (for example `invoices/TR-INV_001.pdf`). A leading `/` is ignored; empty values, directory
+keys ending in `/`, and URIs such as `s3://bucket/key` are rejected. The reference is stored as `object_key`, so
+ingest fetches only that object. In every case the flow's own `provider_config` supplies the credentials and
 connection details, which are never read from the event.
-
 
 ### Processing failures
 
