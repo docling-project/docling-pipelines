@@ -31,6 +31,18 @@ repos:
       - id: nbstripout
         files: \.ipynb$
 
+  # License header enforcement
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.6
+    hooks:
+      - id: insert-license
+        name: "Insert license header"
+        args:
+          - --license-filepath=.github/license-header.txt
+          - --comment-style=#
+          - --detect-license-in-X-top-lines=5
+        files: '^(src|tests)/.*\.py$'
+
   # Python linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20

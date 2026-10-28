@@ -21,14 +21,11 @@ import React, { useMemo } from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { FilterableMultiSelect } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import {
-  READABILITY_ATTRIBUTE as ATTR,
-  READABILITY_LABELS as LABEL,
-  READABILITY_SCORE_OPTIONS,
-  READABILITY_SCORE_LABELS,
-} from './constants';
+import { READABILITY_ATTRIBUTE as ATTR, READABILITY_SCORE_LABELS, READABILITY_SCORE_OPTIONS } from './constants';
+import { messages } from './Readability.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface ReadabilityPanelBodyProps {
@@ -37,6 +34,7 @@ interface ReadabilityPanelBodyProps {
 
 /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 export function ReadabilityPanelBody({ controller }: ReadabilityPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   // ── Read operator attribute metadata from Redux (passed via Canvas.tsx) ──
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
   const nodeAttributes: Record<string, OperatorFeature> = operatorMetadata[NodeOperator.READABILITY]?.attributes ?? {};
@@ -84,18 +82,22 @@ export function ReadabilityPanelBody({ controller }: ReadabilityPanelBodyProps):
           <RequiredParamTooltip
             paramId={ATTR.SCORE_LIST}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.SCORE_LIST]?.description ?? 'Select which readability scores to compute for your documents.'}
+            definition={nodeAttributes[ATTR.SCORE_LIST]?.description
+              ?? intl.formatMessage(messages.scoreListDescription)}
           >
-            {LABEL.SCORE_LIST}
+            {intl.formatMessage(messages.scoreList)}
           </RequiredParamTooltip>
         </div>
         <FilterableMultiSelect
           id="readability_score_list"
-          titleText={LABEL.SCORE_LIST}
+          titleText={intl.formatMessage(messages.scoreList)}
           hideLabel
-          placeholder="Select readability scores"
+          placeholder={intl.formatMessage(messages.scoreListPlaceholder)}
           items={scoreOptions}
-          itemToString={(item: string | null) => (item ? (READABILITY_SCORE_LABELS[item] ?? item) : '')}
+          itemToString={(item: string | null) => {
+            if (!item) { return ''; }
+            return READABILITY_SCORE_LABELS[item] ?? item;
+          }}
           initialSelectedItems={initialSelectedItems}
           onChange={({ selectedItems }: { selectedItems: string[] }) => {
             controller?.updatePropertyValue?.({ name: ATTR.SCORE_LIST }, selectedItems);

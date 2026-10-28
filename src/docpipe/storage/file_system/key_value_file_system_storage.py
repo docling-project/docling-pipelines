@@ -112,19 +112,9 @@ class KeyValueFileSystemStorage(AbstractFileSystemStorage, KeyValueStoragePort):
 
     def save_record(self, *, collection: str, key: str, data: dict[str, Any]) -> None:
         """Save a record to a collection."""
-        try:
-            self._validate_key(key=key)
-            self.write_file(collection=collection, file_name=f"{key}.json", data=data)
-            logger.debug("Saved record: %s/%s", collection, key)
-        except StorageValidationError:
-            raise
-        except DocpipeException:
-            raise
-        except Exception as e:
-            raise DocpipeException(
-                f"Failed to save record {collection}/{key}: {e}",
-                error_code=ErrorCode.STORAGE_ERROR,
-            ) from e
+        self._validate_key(key=key)
+        self.write_file(collection=collection, file_name=f"{key}.json", data=data)
+        logger.debug("Saved record: %s/%s", collection, key)
 
     def get_record(self, *, collection: str, key: str) -> dict[str, Any] | None:
         """Retrieve a record by key."""

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { go } from '@/utils';
 import { Add, Renew } from '@carbon/icons-react';
@@ -17,6 +18,7 @@ import { removeProject, setProject, setProjects, setLoading, setError, clearErro
 import { setFlow } from '@/slices/flowSlice';
 import { selectProjectsArray, selectProjectsLoading, selectProjectsError } from '@/selectors';
 import { useNotify } from '@/hooks';
+import { messages } from './Projects.messages';
 import styles from './Projects.module.scss';
 
 /**
@@ -58,6 +60,7 @@ function toProjectRow(p: Project): ProjectRow {
  * No breadcrumb is shown on this page — it is a top-level root.
  */
 export function Projects(): React.JSX.Element {
+  const intl = useIntl();
   const { isDarkMode } = useTheme();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -87,12 +90,12 @@ export function Projects(): React.JSX.Element {
         dispatch(setProjects(projectsMap));
       })
       .catch(() => {
-        dispatch(setError('Failed to load projects. Please try again.'));
+        dispatch(setError(intl.formatMessage(messages.loadError)));
       })
       .finally(() => {
         dispatch(setLoading(false));
       });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   useEffect(() => {
     fetchProjects();
@@ -158,10 +161,10 @@ export function Projects(): React.JSX.Element {
       } else {
         go(navigate, generateRoute.projectDetail(created.id));
       }
-      notify.success(`${project.name} created successfully.`);
+      notify.success(intl.formatMessage(messages.createSuccess, { name: project.name }));
     } catch (err) {
-      dispatch(setError('Failed to create project. Please try again.'));
-      notify.error('Failed to create project');
+      dispatch(setError(intl.formatMessage(messages.createError)));
+      notify.error(intl.formatMessage(messages.createErrorToast));
       throw err;
     }
   };
@@ -190,15 +193,16 @@ export function Projects(): React.JSX.Element {
    * @returns Promise that resolves once the store has been updated.
    */
   const handleDeleteProject = (projectId: string): Promise<void> => {
-    const projectName = projectsArray.find((p) => p.id === projectId)?.name ?? 'Project';
+    const projectName =
+      projectsArray.find((p) => p.id === projectId)?.name ?? intl.formatMessage(messages.defaultProjectName);
     return deleteProject(projectId)
       .then((): void => {
         dispatch(removeProject(projectId));
-        notify.success(`${projectName} deleted successfully.`);
+        notify.success(intl.formatMessage(messages.deleteSuccess, { name: projectName }));
       })
       .catch((err: unknown) => {
-        dispatch(setError('Failed to delete project. Please try again.'));
-        notify.error(`${projectName} failed to delete.`);
+        dispatch(setError(intl.formatMessage(messages.deleteError)));
+        notify.error(intl.formatMessage(messages.deleteErrorToast, { name: projectName }));
         throw err;
       });
   };
@@ -226,10 +230,10 @@ export function Projects(): React.JSX.Element {
         projectId: updated.id,
         project: updated,
       }));
-      notify.success(`${updates.name} updated successfully.`);
+      notify.success(intl.formatMessage(messages.updateSuccess, { name: updates.name }));
     } catch (err) {
-      dispatch(setError('Failed to update project. Please try again.'));
-      notify.error('Failed to update project');
+      dispatch(setError(intl.formatMessage(messages.updateError)));
+      notify.error(intl.formatMessage(messages.updateErrorToast));
       throw err;
     }
   };
@@ -238,7 +242,7 @@ export function Projects(): React.JSX.Element {
     <PageLayout fullBleed>
       {/* White title band */}
       <div className={styles.titleZone}>
-        <h1 className={styles.title}>Projects</h1>
+        <h1 className={styles.title}>{intl.formatMessage(messages.title)}</h1>
       </div>
 
       {/* Grey content zone — error / empty state / table (with built-in skeleton loading) */}
@@ -247,10 +251,10 @@ export function Projects(): React.JSX.Element {
           <div className={styles.centeredState}>
             <ErrorEmptyState
               illustrationTheme={isDarkMode ? 'dark' : 'light'}
-              title="Failed to load projects"
+              title={intl.formatMessage(messages.errorStateTitle)}
               subtitle={error}
               action={{
-                text: 'Try again',
+                text: intl.formatMessage(messages.tryAgain),
                 onClick: () => { dispatch(clearError()); fetchProjects(); },
                 renderIcon: Renew,
                 kind: 'tertiary',
@@ -263,9 +267,9 @@ export function Projects(): React.JSX.Element {
               illustrationTheme={isDarkMode ? 'dark' : 'light'}
               illustrationPosition="top"
               size="sm"
-              title="No projects created"
+              title={intl.formatMessage(messages.emptyTitle)}
               action={{
-                text: 'Create Project',
+                text: intl.formatMessage(messages.createProject),
                 onClick: () => { setTearsheetOpen(true); },
                 renderIcon: Add,
                 kind: 'tertiary',

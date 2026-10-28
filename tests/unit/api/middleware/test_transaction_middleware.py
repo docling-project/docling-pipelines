@@ -4,10 +4,11 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import Request
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
 from starlette.responses import Response
 
-from docpipe.api.middleware.transaction_middleware import TransactionMiddleware
+from docpipe.api.middleware.transaction_middleware import TransactionMiddleware, get_transaction_id
 
 
 @pytest.fixture
@@ -253,3 +254,31 @@ class TestTransactionMiddlewareMetrics:
                 await middleware.dispatch(mock_request, call_next)
 
         mock_telemetry.end_span.assert_called_once_with(mock_span)
+
+
+class TestTransactionIdContext:
+    """get_transaction_id() exposes the middleware's ID to code running inside the request."""
+
+    @pytest.fixture
+    def client(self):
+        app = FastAPI()
+        app.add_middleware(TransactionMiddleware)
+
+        @app.get("/whoami")
+        async def whoami(request: Request):
+            return {"context": get_transaction_id(), "state": request.state.transaction_id}
+
+        return TestClient(app)
+
+    def test_context_holds_the_global_transaction_id_header(self, client):
+        response = client.get("/whoami", headers={"X-Global-Transaction-Id": "caller-trace-42"})
+
+        assert response.json() == {"context": "caller-trace-42", "state": "caller-trace-42"}
+        assert response.headers["X-Transaction-ID"] == "caller-trace-42"
+
+    def test_context_holds_the_generated_id_when_header_missing(self, client):
+        response = client.get("/whoami")
+
+        body = response.json()
+        uuid.UUID(body["context"])
+        assert body["context"] == body["state"] == response.headers["X-Transaction-ID"]

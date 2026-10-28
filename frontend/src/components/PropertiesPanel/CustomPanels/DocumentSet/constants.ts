@@ -26,15 +26,3 @@ export const DOCUMENT_SET_ATTRIBUTE = {
  */
 export type DocumentSetAttributeKey =
   typeof DOCUMENT_SET_ATTRIBUTE[keyof typeof DOCUMENT_SET_ATTRIBUTE];
-
-/**
- * User-friendly labels for every field in the Document Set panel.
- */
-export const DOCUMENT_SET_LABELS = {
-  DOCUMENT_SET_NAME: 'Document set name',
-  DESCRIPTION: 'Document set description',
-  METADATA: 'Metadata (JSON)',
-  DOCUMENT_SET_ID: 'Document set ID',
-  DATABASE_PATH: 'Database path',
-  DATA_BACKEND: 'Data backend',
-} as const;

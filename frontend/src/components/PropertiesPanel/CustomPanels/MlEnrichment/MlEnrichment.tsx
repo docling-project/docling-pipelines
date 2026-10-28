@@ -13,12 +13,11 @@ import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { TextInput } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import {
-  ML_ENRICHMENT_ATTRIBUTE as ATTR,
-  ML_ENRICHMENT_LABELS as LABEL,
-} from './constants';
+import { ML_ENRICHMENT_ATTRIBUTE as ATTR } from './constants';
+import { messages } from './MlEnrichment.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface MlEnrichmentPanelBodyProps {
@@ -28,6 +27,7 @@ interface MlEnrichmentPanelBodyProps {
 export function MlEnrichmentPanelBody({
   controller,
 }: MlEnrichmentPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   // ── Read operator attribute metadata ──────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
@@ -55,12 +55,12 @@ export function MlEnrichmentPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.OUTPUT_COLUMN_PREFIX]?.description ?? ''}
           >
-            {LABEL.OUTPUT_COLUMN_PREFIX}
+            {intl.formatMessage(messages.outputColumnPrefix)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="output_column_prefix"
-          labelText={LABEL.OUTPUT_COLUMN_PREFIX}
+          labelText={intl.formatMessage(messages.outputColumnPrefix)}
           hideLabel
           value={outputColumnPrefix}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {

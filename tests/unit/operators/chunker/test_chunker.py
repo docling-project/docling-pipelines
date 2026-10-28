@@ -646,6 +646,64 @@ class TestChunkerEdgeCases(unittest.TestCase):
         original_content = result_table["content"][0].as_py()
         self.assertEqual(original_content, "Test content for chunking.")
 
+    def test_missing_content_column_records_failed_documents(self):
+        """A missing content column reports each document instead of aborting finalization."""
+        input_table = pa.table(
+            {
+                OperatorConstants.Columns.ID: ["doc1", "doc2"],
+                OperatorConstants.Columns.NAME: ["Document 1", "Document 2"],
+                "body": ["First document", "Second document"],
+            }
+        )
+        for retain_original_content in (False, True):
+            with self.subTest(retain_original_content=retain_original_content):
+                operator = ChunkerOperator(
+                    {
+                        "chunk_type": ChunkType.SIMPLE.value,
+                        "retain_original_content": retain_original_content,
+                    }
+                )
+
+                result_tables, metadata = operator.transform(input_table)
+                result_table = result_tables[0]
+
+                self.assertEqual(result_table.num_rows, 0)
+                self.assertEqual(result_table.column_names, input_table.column_names)
+                self.assertEqual(metadata["failed_docs_count"], 2)
+                self.assertEqual(len(metadata["failed_docs"]), 2)
+                self.assertTrue(
+                    all("column 'content' was not found" in doc["reason"] for doc in metadata["failed_docs"])
+                )
+
+    def test_mixed_successful_and_failed_documents_preserve_schema(self):
+        """Failed rows are removed while successful rows keep the configured schema behavior."""
+        input_table = pa.table(
+            {
+                OperatorConstants.Columns.ID: ["success", "failure"],
+                OperatorConstants.Columns.NAME: ["Successful document", "Failed document"],
+                "content": ["Content that can be chunked.", None],
+            }
+        )
+        for retain_original_content in (False, True):
+            with self.subTest(retain_original_content=retain_original_content):
+                operator = ChunkerOperator(
+                    {
+                        "chunk_type": ChunkType.SIMPLE.value,
+                        "chunk_size": 1000,
+                        "retain_original_content": retain_original_content,
+                    }
+                )
+
+                result_tables, metadata = operator.transform(input_table)
+                result_table = result_tables[0]
+
+                self.assertEqual(result_table.num_rows, 1)
+                self.assertEqual(result_table[OperatorConstants.Columns.ID].to_pylist(), ["success"])
+                self.assertIn(OperatorConstants.Columns.CHUNKED_CONTENT, result_table.column_names)
+                self.assertEqual("content" in result_table.column_names, retain_original_content)
+                self.assertEqual(metadata["processed_docs"], 1)
+                self.assertEqual(metadata["failed_docs_count"], 1)
+
     @patch("langchain_experimental.text_splitter.SemanticChunker")
     @patch("docpipe.core.operators.functional.chunker.OllamaClient")
     def test_chunker_different_breakpoint_types(self, mock_ollama_client_class, mock_semantic_chunker_class):

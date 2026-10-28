@@ -27,6 +27,7 @@ import {
   IconButton,
 } from '@carbon/react';
 import { Edit } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { NodeOperator } from '@/constants/operators';
 import { getOperatorLabel } from '@/constants/operatorLabels';
 import { getIconForOperator } from '@/utils/paletteEnhancer';
@@ -58,6 +59,7 @@ import type { FeatureAttributes } from '@/types';
 import styles from './CommonPropertiesPanel.module.scss';
 import { PROPERTIES_PANEL_CONSTANTS } from '@/constants/propertiesPanelConstants';
 import { hasAnyRequiredParamMissing } from '@/utils/requiredParamValidation';
+import { messages } from './CommonPropertiesPanel.messages';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,7 @@ interface CommonPropertiesPanelProps {
 export function CommonPropertiesPanel({
   controller,
 }: CommonPropertiesPanelProps): React.JSX.Element {
+  const intl = useIntl();
   const [selectedTab, setSelectedTab] = useState(0);
 
   // Resolve node info from Elyra controller app data
@@ -206,7 +209,7 @@ export function CommonPropertiesPanel({
           ref={displayLabelInputRef}
           value={computedLabel}
           size="sm"
-          labelText="Display name"
+          labelText={intl.formatMessage(messages.displayName)}
           hideLabel
           readOnly={!isEditingLabel}
           onChange={handleLabelChange}
@@ -214,7 +217,7 @@ export function CommonPropertiesPanel({
         />
         {!isEditingLabel && (
           <IconButton
-            label="Edit display name"
+            label={intl.formatMessage(messages.editDisplayName)}
             autoAlign
             size="sm"
             kind="ghost"
@@ -235,10 +238,10 @@ export function CommonPropertiesPanel({
           setSelectedTab(selectedIndex);
         }}
       >
-        <TabList aria-label="properties-panel-tabs">
-          <Tab>Configuration</Tab>
-          <Tab>Input</Tab>
-          <Tab>Output</Tab>
+        <TabList aria-label={intl.formatMessage(messages.tabsAriaLabel)}>
+          <Tab>{intl.formatMessage(messages.configurationTab)}</Tab>
+          <Tab>{intl.formatMessage(messages.inputTab)}</Tab>
+          <Tab>{intl.formatMessage(messages.outputTab)}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel>
@@ -247,7 +250,7 @@ export function CommonPropertiesPanel({
                 <ConfigureComponent key={currentNodeId} controller={controller} />
               ) : (
                 <p className={styles.configurationLabel}>
-                  Configuration parameters will be displayed here
+                  {intl.formatMessage(messages.configurationPlaceholder)}
                 </p>
               )}
             </div>

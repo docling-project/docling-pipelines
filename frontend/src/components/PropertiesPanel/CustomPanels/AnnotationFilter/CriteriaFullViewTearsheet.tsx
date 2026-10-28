@@ -12,15 +12,13 @@
  */
 
 import React, { useMemo } from 'react';
+import { useIntl } from 'react-intl';
 import { useThemeElement } from '@/contexts';
 import { Tearsheet } from '@carbon/ibm-products';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
 import type { SharedDataTableRow } from '@/components/common/SharedDataTable';
 import { LOGICAL } from './conditionTypes';
-import {
-  ANNOTATION_FILTER_LABELS,
-  FULL_VIEW_TABLE_HEADERS,
-} from './constants';
+import { messages } from './CriteriaFullViewTearsheet.messages';
 import styles from './CriteriaFullViewTearsheet.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -107,9 +105,10 @@ export function CriteriaFullViewTearsheet({
   onClose,
   criteriaRows,
   logicalOperator,
-  title = 'Criteria',
-  description = 'Review all saved filter criteria.',
+  title,
+  description,
 }: CriteriaFullViewTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
   /** Normalised logical operator string (always uppercase). */
   const portalTarget = useThemeElement();
   const logicalOp = (logicalOperator ?? LOGICAL.AND).toUpperCase();
@@ -138,25 +137,30 @@ export function CriteriaFullViewTearsheet({
     [criteriaRows, logicalOp]
   );
 
+  const fullViewTableHeaders = useMemo(
+    () => [{ key: 'conditionDisplay', header: intl.formatMessage(messages.condition) }],
+    [intl]
+  );
+
   return (
     <Tearsheet
       open={open}
       onClose={onClose}
-      title={title}
-      description={description}
+      title={title ?? intl.formatMessage(messages.title)}
+      description={description ?? intl.formatMessage(messages.description)}
       hasCloseIcon
-      closeIconDescription="Close"
+      closeIconDescription={intl.formatMessage(messages.close)}
       portalTarget={portalTarget}
       actions={[
-        { label: ANNOTATION_FILTER_LABELS.CLOSE, kind: 'primary' as const, onClick: onClose },
+        { label: intl.formatMessage(messages.close), kind: 'primary' as const, onClick: onClose },
       ]}
     >
       <div className={styles.fullViewTableWrapper}>
         <SharedDataTable
-          headers={FULL_VIEW_TABLE_HEADERS}
+          headers={fullViewTableHeaders}
           rows={tableRows}
           searchable
-          searchPlaceholder={ANNOTATION_FILTER_LABELS.SEARCH_CRITERIA}
+          searchPlaceholder={intl.formatMessage(messages.searchCriteria)}
           size="md"
         />
       </div>
