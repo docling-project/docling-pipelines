@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Extract Operator
 
@@ -131,6 +134,11 @@ from docpipe.core.operators.extract.domain.models import (
     EntityExtractionMode,
     TextExtractionMode,
 )
+from docpipe.core.operators.extract.encrypted_documents import (
+    DocumentDecryptor,
+    DocumentPasswordsConfig,
+    DocumentPasswordsConfigError,
+)
 from docpipe.core.operators.extract.ports.outbound.entity_extraction import EntityExtractionPort
 from docpipe.core.operators.extract.ports.outbound.text_extraction import TextExtractionPort
 from docpipe.core.operators.extract.services.entity_extraction_service import EntityExtractionService
@@ -240,6 +248,18 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                 f"Missing required '{OperatorConstants.Config.TEXT_EXTRACTION}' configuration object"
             )
 
+        # Candidate passwords for encrypted documents. Detection runs even when none are
+        # configured, so an encrypted document fails with an explicit, recoverable reason.
+        try:
+            self.document_passwords_config = DocumentPasswordsConfig.from_config(
+                config.get(OperatorConstants.Config.DOCUMENT_PASSWORDS)
+            )
+        except DocumentPasswordsConfigError as e:
+            raise FlowExecutionFailedException(
+                f"Invalid '{OperatorConstants.Config.DOCUMENT_PASSWORDS}' configuration: {e}"
+            ) from None
+        self.document_decryptor = DocumentDecryptor(passwords_config=self.document_passwords_config)
+
         # Parse text extraction mode
         text_mode_str = self.text_extraction_config.get(
             OperatorConstants.Config.PROVIDER,
@@ -332,6 +352,7 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                 max_workers=text_max_workers,
                 use_processes=use_processes,
             )
+            self.text_adapter.document_decryptor = self.document_decryptor
             logger.info(
                 "Created %s adapter for text extraction mode: %s",
                 self.text_adapter.ADAPTER_DISPLAY_NAME,
@@ -908,6 +929,8 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         doc_tasks: list[dict[str, Any]] = OperatorUtils.prepare_document_content_fetch(
             table=table, global_config=self.text_adapter.global_config
         )
+        # Decrypt before submission so both the text adapter and binary entity adapters get plain bytes
+        self.document_decryptor.decrypt_tasks(tasks=doc_tasks, table=table)
         total_docs = len(doc_tasks)
 
         # Per-row accumulators (positional, same length as table)
@@ -986,11 +1009,14 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                     text_failed += 1
                     continue
 
-                future = text_executor.submit(
-                    self.text_adapter.extract_single_document,
-                    file_path=task["doc_name"],
-                    binary_content=task["binary_content"],
-                )
+                # A document that could not be decrypted is reported through the normal result handling
+                future = DocumentDecryptor.failed_result_future(task=task)
+                if future is None:
+                    future = text_executor.submit(
+                        self.text_adapter.extract_single_document,
+                        file_path=task["doc_name"],
+                        binary_content=task["binary_content"],
+                    )
                 text_future_to_task[future] = task
 
             # Map from entity Future → (idx, doc_id, doc_name)
@@ -1098,7 +1124,9 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                     # ---- Text extraction failed ----
                     error_msg = result.get(OperatorConstants.Extraction.ERROR, "Unknown error")
 
-                    if is_non_recoverable_error(error_msg):
+                    if is_non_recoverable_error(
+                        error_msg, failure_reason=result.get(OperatorConstants.Extraction.FAILURE_REASON)
+                    ):
                         non_recoverable_doc_ids.append(idx)
                         error_msg = (
                             f"{error_msg}. This document will not be processed in future "
@@ -1523,6 +1551,12 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         # Validate configuration against metadata
         validate_config_from_metadata(config=self.config, attributes=attributes, errors=errors)
 
+        # Vault references are replaced by a placeholder during validation, so anything else is plain text
+        for location in self.document_passwords_config.plain_text_password_locations():
+            warnings.append(
+                f"{location} is a plain-text password. Store it in a secret store and use a vault:// reference."
+            )
+
         # Warn about any additional_formats values that won't produce an output column
         provider_config = self.text_extraction_config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
         additional_formats = provider_config.get(OperatorConstants.Extraction.ADDITIONAL_FORMATS, [])
@@ -1765,6 +1799,20 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                             OperatorConstants.Misc.TYPE: AttributeDataTypes.BOOLEAN,
                         },
                     },
+                },
+                # Passwords for encrypted documents (decrypted in memory before extraction)
+                OperatorConstants.Config.DOCUMENT_PASSWORDS: {
+                    OperatorConstants.Misc.NAME: "Document Passwords",
+                    OperatorConstants.Config.DESCRIPTION: (
+                        "Candidate passwords for password-protected PDF, DOCX, PPTX and XLSX documents. "
+                        "'rules' is an ordered list of {'match': pattern, 'passwords': [...]}; the first rule whose "
+                        "pattern matches the document's name or path is used, otherwise the optional 'default' list. "
+                        "Use vault:// references."
+                    ),
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Config.DEFAULT: None,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.JSON,
+                    OperatorConstants.Config.SENSITIVE: True,
                 },
                 # Performance configuration
                 OperatorConstants.Config.MAX_WORKERS: {
