@@ -17,8 +17,8 @@ dependencies = [
     "alembic==1.18.4",
     "azure-storage-blob==12.28.0",
     "babel==2.18.0",
-    "boto3==1.42.55",
-    "botocore==1.42.55",
+    "boto3==1.43.1",
+    "botocore==1.43.1",
     "box-sdk-gen==1.17.0",
     "cryptography==50.0.0",
     "data-prep-toolkit-transforms==1.1.8",
@@ -49,7 +49,7 @@ dependencies = [
     "langchain-text-splitters==1.1.2",
     "langdetect==1.0.9",
     "langsmith==0.14.7",
-    "litellm==1.96.2",
+    "litellm==1.104.0",
     "lxml==6.1.0",
     "mako==1.4.3",
     "mlx==0.32.2; sys_platform == 'darwin'",
@@ -226,6 +226,8 @@ exclude = [
 override-dependencies = [
     # Dependabot: bump oauthlib to 4.0.0 (transitive via requests-oauthlib).
     "oauthlib==4.0.0",
+    # litellm 1.104.0+ (CVE-2026-114612 fix) caps filelock<4; filelock==4.2.1 is required by this project.
+    "filelock==4.2.1",
     # CVE-2026-59939: Security fix for httplib2 vulnerability (transitive via google-auth-httplib2).
     "httplib2>=0.32.0",
     # Dependabot: h2 <= 4.4.0 — duplicate Host header request smuggling (transitive via httpx).

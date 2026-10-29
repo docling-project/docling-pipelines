@@ -380,3 +380,69 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 14
+
+  postgres-integration-test:
+    name: PostgreSQL Integration Tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: docpipe-ci-only # pragma: allowlist secret
+          POSTGRES_DB: docpipe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d docpipe_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PYTHONPATH: src
+      DOCPIPE_TEST_POSTGRES_HOST: localhost
+      DOCPIPE_TEST_POSTGRES_PORT: "5432"
+      DOCPIPE_TEST_POSTGRES_DB: docpipe_test
+      DOCPIPE_TEST_POSTGRES_USER: postgres
+      DOCPIPE_TEST_POSTGRES_PASSWORD: docpipe-ci-only # pragma: allowlist secret
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-suffix: "py312"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install System Dependencies
+        run: sudo apt-get install -y libldap2-dev libsasl2-dev
+
+      - name: Install Dependencies
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run PostgreSQL Integration Tests
+        # -rs lists skips, so a PostgreSQL run that was skipped is visible in the log.
+        run: >-
+          python -m pytest -m integration -v -rs
+          tests/integration/storage
+          tests/integration/assets
+          tests/integration/test_ededup_postgres.py
