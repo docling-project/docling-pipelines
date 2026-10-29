@@ -249,14 +249,14 @@ global_storage:
    config:
       base_dir: "./data"
       lock_timeout: 30.0
-   # PostgreSQL configuration (only needed if type is "postgres")
-   postgres:
-      host: "localhost"
-      port: 5432
-      database: "docpipe"
-      user: "docpipe_user"
-      password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
-      schema: "incremental_metadata"
+      # PostgreSQL configuration (only needed if type is "postgres")
+      postgres:
+         host: "localhost"
+         port: 5432
+         database: "docpipe"
+         user: "docpipe_user"
+         password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
+         schema: "incremental_metadata"
 
 incremental_metadata: {} # inherit from global_storage
 ```
@@ -785,13 +785,13 @@ incremental_metadata:
          base_dir: "./incremental_data"
          lock_timeout: 60.0
 #  PostgreSQL configuration (only needed if type is "postgres")
-#  postgres:
-#    host: "localhost"
-#    port: 5432
-#    database: "docpipe"
-#    user: "docpipe_user"
-#    password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
-#    schema: "incremental_metadata"
+#        postgres:
+#        host: "localhost"
+#        port: 5432
+#        database: "docpipe"
+#        user: "docpipe_user"
+#        password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
+#        schema: "incremental_metadata"
 ```
 
 ### Execution

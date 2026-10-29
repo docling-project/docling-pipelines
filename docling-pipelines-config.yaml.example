@@ -112,15 +112,16 @@ incremental_metadata:
 #
 # global_storage:
 #   type: "postgresql"
-#   postgres:
-#     host: "${POSTGRES_HOST:-localhost}"
-#     port: 5432
-#     database: "docpipe"  # Database name
-#     user: "${POSTGRES_USER:-docpipe_user}"
-#     password: "${POSTGRES_PASSWORD}"
-#     schema: "docpipe_oss"  # Both services use same schema
-#     pool_size: 5
-#     max_overflow: 10
+#   config:
+#     postgres:
+#       host: "${POSTGRES_HOST:-localhost}"
+#       port: 5432
+#       database: "docpipe"  # Database name
+#       user: "${POSTGRES_USER:-docpipe_user}"
+#       password: "${POSTGRES_PASSWORD}"
+#       schema: "docpipe_oss"  # Both services use same schema
+#       pool_size: 5
+#       max_overflow: 10
 #
 # job_management: {}  # Inherits PostgreSQL with docpipe_oss schema
 # incremental_metadata: {}  # Inherits PostgreSQL with docpipe_oss schema
@@ -150,10 +151,11 @@ incremental_metadata:
 # job_management:
 #   storage:
 #     type: "postgresql"  # Override: use PostgreSQL instead of Filesystem
-#   postgres:
-#     host: "postgres.example.com"
-#     database: "docpipe_jobs"
-#     schema: "job_management"
+#     config:
+#       postgres:
+#         host: "postgres.example.com"
+#         database: "docpipe_jobs"
+#         schema: "job_management"
 #
 # incremental_metadata: {}  # Inherits Filesystem from global_storage
 
@@ -168,16 +170,18 @@ incremental_metadata:
 # job_management:
 #   storage:
 #     type: "postgresql"  # Job stats in PostgreSQL
-#   postgres:
-#     host: "postgres.example.com"
-#     schema: "job_management"
+#     config:
+#       postgres:
+#       host: "postgres.example.com"
+#       schema: "job_management"
 #
 # incremental_metadata:
 #   storage:
 #     type: "postgresql"  # Incremental metadata in PostgreSQL
-#   postgres:
-#     host: "postgres.example.com"
-#     schema: "incremental_metadata"
+$     config:
+#       postgres:
+#         host: "postgres.example.com"
+#         schema: "incremental_metadata"
 
 # ============================================================================
 # Environment Variable Substitution
@@ -212,13 +216,13 @@ incremental_metadata:
 #     config:
 #       base_dir: "${DATA_DIR:-./data}"
 #       lock_timeout: "${LOCK_TIMEOUT:-30.0}"
-#   postgres:
-#     host: "${JOB_MGMT_DB_HOST:-localhost}"
-#     port: "${JOB_MGMT_DB_PORT:-5432}"
-#     database: "${JOB_MGMT_DB_NAME:-docpipe}"
-#     user: "${JOB_MGMT_DB_USER:-docpipe_user}"
-#     password: "${JOB_MGMT_DB_PASSWORD}"
-#     schema: "${JOB_MGMT_DB_SCHEMA:-job_management}"
+#       postgres:
+#         host: "${JOB_MGMT_DB_HOST:-localhost}"
+#         port: "${JOB_MGMT_DB_PORT:-5432}"
+#         database: "${JOB_MGMT_DB_NAME:-docpipe}"
+#         user: "${JOB_MGMT_DB_USER:-docpipe_user}"
+#         password: "${JOB_MGMT_DB_PASSWORD}"
+#         schema: "${JOB_MGMT_DB_SCHEMA:-job_management}"
 #
 # incremental_metadata:
 #   storage:
@@ -226,13 +230,13 @@ incremental_metadata:
 #     config:
 #       base_dir: "${DATA_DIR:-./data}"
 #       lock_timeout: "${LOCK_TIMEOUT:-30.0}"
-#   postgres:
-#     host: "${INCR_META_DB_HOST:-localhost}"
-#     port: "${INCR_META_DB_PORT:-5432}"
-#     database: "${INCR_META_DB_NAME:-docpipe}"
-#     user: "${INCR_META_DB_USER:-docpipe_user}"
-#     password: "${INCR_META_DB_PASSWORD}"
-#     schema: "${INCR_META_DB_SCHEMA:-incremental_metadata}"
+#       postgres:
+#         host: "${INCR_META_DB_HOST:-localhost}"
+#         port: "${INCR_META_DB_PORT:-5432}"
+#         database: "${INCR_META_DB_NAME:-docpipe}"
+#         user: "${INCR_META_DB_USER:-docpipe_user}"
+#         password: "${INCR_META_DB_PASSWORD}"
+#         schema: "${INCR_META_DB_SCHEMA:-incremental_metadata}"
 
 # ============================================================================
 # Migration Notes

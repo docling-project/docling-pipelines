@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Alembic environment script for docpipe PostgreSQL migrations.
 
 Configures the Alembic migration context with the database URL resolved from
@@ -70,7 +73,7 @@ if not database_url:
         app_config = {}
 
     job_mgmt_config = app_config.get("job_management", {})
-    store_config = job_mgmt_config.get("store", {}).get("config", {})
+    store_config = job_mgmt_config.get("storage", {}).get("config", {})
     database_url = get_postgres_connection_string(config=store_config)
 
 if database_url:

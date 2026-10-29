@@ -176,7 +176,7 @@ Document sets and document libraries store their metadata (name, description, st
 | `duckdb` (default in the shipped config) | `DuckDBAssetRepository` | Single process, local development. DuckDB is an embedded single-writer file, so only one process can write to it at a time. |
 | `postgres` | `PostgresAssetRepository` | More than one API replica or worker reads and writes the same document sets and libraries. |
 
-The repositories are created by [`RepositoryFactory`](../../src/docpipe/core/assets/common/factories/repository_factory.py). Both the REST API and the `document_set` operator resolve the backend from the same configuration, so flow runs and API requests always see the same records.
+The repositories are created by [`AssetRepositoryFactory`](../../src/docpipe/core/assets/common/factories/repository_factory.py). Both the REST API and the `document_set` operator resolve the backend from the same configuration, so flow runs and API requests always see the same records.
 
 ### PostgreSQL Configuration
 
@@ -297,14 +297,14 @@ incremental_metadata:
     config:
       base_dir: "./data"
       lock_timeout: 30.0
-  postgres:
-    host: "${POSTGRES_HOST:-localhost}"
-    port: 5432
-    database: "${POSTGRES_DB:-docpipe}"
-    user: "${POSTGRES_USER:-docpipe_user}"
-    password: "${POSTGRES_PASSWORD}"
-    schema: "incremental_metadata"
-```
+      postgres:
+        host: "${POSTGRES_HOST:-localhost}"
+        port: 5432
+        database: "${POSTGRES_DB:-docpipe}"
+        user: "${POSTGRES_USER:-docpipe_user}"
+        password: "${POSTGRES_PASSWORD}"
+        schema: "incremental_metadata"
+  ```
 
 Use PostgreSQL when:
 
@@ -323,13 +323,13 @@ incremental_metadata:
     config:
       base_dir: "${DATA_DIR:-./data}"
       lock_timeout: "${LOCK_TIMEOUT:-30.0}"
-  postgres:
-    host: "${INCR_META_DB_HOST:-localhost}"
-    port: "${INCR_META_DB_PORT:-5432}"
-    database: "${INCR_META_DB_NAME:-docpipe}"
-    user: "${INCR_META_DB_USER:-docpipe_user}"
-    password: "${INCR_META_DB_PASSWORD}"
-    schema: "${INCR_META_DB_SCHEMA:-incremental_metadata}"
+      postgres:
+        host: "${INCR_META_DB_HOST:-localhost}"
+        port: "${INCR_META_DB_PORT:-5432}"
+        database: "${INCR_META_DB_NAME:-docpipe}"
+        user: "${INCR_META_DB_USER:-docpipe_user}"
+        password: "${INCR_META_DB_PASSWORD}"
+        schema: "${INCR_META_DB_SCHEMA:-incremental_metadata}"
 ```
 
 Guidance:
@@ -468,9 +468,10 @@ Before, `global_storage.config` and `global_storage.postgres` were merged into t
 ```yaml
 global_storage:
   type: postgresql
-  postgres:
-    host: db.internal      # Before: reached job management and incremental metadata
-    database: docpipe      # Now: ignored for connection settings, see below
+  config:
+    postgres:
+      host: db.internal      # Before: reached job management and incremental metadata
+      database: docpipe      # Now: ignored for connection settings, see below
 ```
 
 Put the connection settings where each service reads them:
@@ -479,9 +480,10 @@ Put the connection settings where each service reads them:
 job_management:
   storage:
     type: postgresql
-  postgres:                # sibling of "storage"
-    host: db.internal
-    database: docpipe
+    config:
+      postgres:                # sibling of "storage"
+        host: db.internal
+        database: docpipe
 
 incremental_metadata:
   storage:
@@ -496,13 +498,13 @@ Connection settings can still come from `DOCPIPE_POSTGRES_HOST`, `DOCPIPE_POSTGR
 
 ### Python API changes
 
-| Removed or renamed | Replacement |
-|---|---|
+| Removed or renamed                                                                                                                                                                            | Replacement |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---|
 | `from_config_file()`, `from_default_sources()`, `from_environment()` on `JobManagementFactory`, `IncrementalMetadataFactory`, `ContentStorageFactory`, `FlowDefinitionSnapshotStorageFactory` | `create_default_factory()` |
-| Constructor keyword `backend=` | `storage_type=` |
-| `list_backends()` on the job run report and flow definition snapshot factories | `list_storage_types()` |
-| `RepositoryFactory` (`common/factories/repository_factory.py`) | `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`) |
-| Module constants `DEFAULT_CONFIG_PATH`, `ENV_CONFIG_PATH_KEY`, `ENV_INCREMENTAL_BASE_DIR_KEY` in the factory modules | `docpipe.utils.infrastructure.config_utils` (`ENV_INCREMENTAL_BASE_DIR_KEY` is removed) |
+| Constructor keyword `backend=`                                                                                                                                                                | `storage_type=` |
+| `list_backends()` on the job run report and flow definition snapshot factories                                                                                                                | `list_storage_types()` |
+| `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`)                                                                                                                     | `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`) |
+| Module constants `DEFAULT_CONFIG_PATH`, `ENV_CONFIG_PATH_KEY`, `ENV_INCREMENTAL_BASE_DIR_KEY` in the factory modules                                                                          | `docpipe.utils.infrastructure.config_utils` (`ENV_INCREMENTAL_BASE_DIR_KEY` is removed) |
 
 ---
 
