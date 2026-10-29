@@ -2,18 +2,9 @@
 
 from typing import Any
 
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel
-
-try:
-    import boto3
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    _BOTO3_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    boto3 = None  # type: ignore[assignment]
-    BotoCoreError = Exception  # type: ignore[misc,assignment]
-    ClientError = Exception  # type: ignore[misc,assignment]
-    _BOTO3_AVAILABLE = False
 
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.core.operators.storage.adapters.outbound.destinations.factories.destination_factory import (
@@ -45,10 +36,10 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
         self._s3_client_cache: dict[tuple[str | None, ...], Any] = {}
         self._account_id_cache: dict[tuple[str | None, ...], str | None] = {}
 
-    @classmethod
-    def is_available(cls) -> bool:
-        """Return False when boto3 is not installed."""
-        return _BOTO3_AVAILABLE
+    @staticmethod
+    def is_available() -> bool:
+        """Return True as boto3 is a core dependency."""
+        return True
 
     def validate_destination(
         self,
@@ -61,13 +52,6 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
         under config.key_prefix. If the prefix is empty in the bucket the write is refused with
         the same error pattern used by the filesystem adapter for missing directories.
         """
-        if not _BOTO3_AVAILABLE:
-            return WriteResult(
-                doc_id="",
-                doc_name="",
-                success=False,
-                error_message="boto3 is not installed. Install with: uv pip install boto3",
-            )
         if config is None:
             return None
 
@@ -129,14 +113,6 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
         ``key_prefix + destination_path``; pass a bare key when key_prefix is
         already baked into destination_path.
         """
-        if not _BOTO3_AVAILABLE:
-            return WriteResult(
-                doc_id="",
-                doc_name=destination_path,
-                success=False,
-                error_message="boto3 is not installed. Install with: uv pip install boto3",
-            )
-
         if config is None:
             return WriteResult(
                 doc_id="",
@@ -202,7 +178,7 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
             return WriteResult(doc_id="", doc_name=key, success=False, error_message=msg)
         except Exception as e:
             msg = f"Unexpected error writing to S3 {key}: {e}"
-            logger.error(msg, exc_info=True)
+            logger.exception("Unexpected error writing to S3 %s: %s", key, e)
             return WriteResult(doc_id="", doc_name=key, success=False, error_message=msg)
 
     def ensure_directory(self, *, path: str) -> None:

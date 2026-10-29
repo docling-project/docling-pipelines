@@ -4,12 +4,7 @@ from pathlib import Path
 from types import ModuleType
 from urllib.parse import urlparse
 
-try:
-    import boto3
-
-    _BOTO3_AVAILABLE = True
-except ImportError:  # pragma: no cover - boto3 is a core dependency; this only runs in a broken install
-    _BOTO3_AVAILABLE = False
+import boto3
 
 from docpipe.core.orchestration.operator_loader.adapters.factories.operator_source_factory import (
     register_operator_source,
@@ -50,14 +45,8 @@ class S3Adapter(OperatorSourcePort):
             cache_dir: Optional custom cache directory. Defaults to ~/.docpipe/custom_operators_cache
 
         Raises:
-            ImportError: If boto3 is not available
             ValueError: If URI format is invalid
         """
-        if not _BOTO3_AVAILABLE:
-            raise ImportError(
-                "boto3 is required for S3 adapter. Install with: uv pip install boto3 or uv sync --extra aws"
-            )
-
         self.uri = uri
         self._parse_s3_uri()
 
