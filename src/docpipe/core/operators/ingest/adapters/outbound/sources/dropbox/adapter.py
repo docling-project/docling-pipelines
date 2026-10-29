@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Dropbox source adapter using the official Dropbox Python SDK."""
 
 import hashlib
@@ -32,6 +35,7 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
     SOURCE_DISPLAY_NAME = "Dropbox"
     SOURCE_DESCRIPTION = "Ingest documents from a Dropbox account folder"
     SOURCE_VERSION = "1.0.0"
+    SUPPORTS_DISCOVERY = True
     CONFIG_CLASS = DropboxSourceConfig
 
     def __init__(self) -> None:

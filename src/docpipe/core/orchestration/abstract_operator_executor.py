@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class for operator executors in the docpipe orchestration layer."""
 
 import copy
@@ -249,6 +252,8 @@ class AbstractOperatorExecutor:
         # Remove 'non_recoverable_docs_table' from metadata before saving
         metadata_copy = copy.deepcopy(metadata)
         metadata_copy.pop(Metrics.Internal.NON_RECOVERABLE_DOCS_TABLE, None)
+        metadata_copy.pop(Metrics.Internal.SOURCE_DISCOVERY, None)
+        metadata_copy.pop(Metrics.Internal.SOURCE_DELETION_RESULT, None)
         # Extract batch_id and batch_num from params if micro-batching is enabled
         batch_id = self._params.get(DocpipeConstants.BATCH_ID)
         batch_num = self._params.get(DocpipeConstants.BATCH_NUM)

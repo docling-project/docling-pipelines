@@ -1,7 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document source port - Interface for fetching documents from external sources."""
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from fnmatch import fnmatch
+from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -29,6 +34,57 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
     SOURCE_DISPLAY_NAME: str | None = None  # Human-readable name (e.g., "Local Filesystem")
     SOURCE_DESCRIPTION: str | None = None  # Brief description
     SOURCE_VERSION: str = "1.0.0"  # Semantic version
+    SUPPORTS_DISCOVERY: bool = False
+
+    async def discover_documents(self, *, config: Any) -> AsyncGenerator[Document, None]:
+        """Stream metadata before selection filters, propagating listing failures to the flow."""
+        if not self.SUPPORTS_DISCOVERY:
+            raise NotImplementedError("Source does not support authoritative metadata discovery")
+        update: dict[str, Any] = {
+            "max_files": None,
+            "file_extensions": [],
+            "exclude_patterns": [],
+            "max_file_size_mb": None,
+            "skip_hidden_files": False,
+            "skip_empty_files": False,
+        }
+        discovery_config = config.model_copy(update={k: v for k, v in update.items() if hasattr(config, k)})
+        async for document in self._discover_metadata(config=discovery_config):
+            document.metadata["processing_eligible"] = self._is_processing_eligible(document=document, config=config)
+            yield document
+
+    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
+        """Providers opting in must propagate every listing/identity error."""
+        async for document in self.fetch_documents(config):
+            yield document
+
+    @staticmethod
+    def _is_processing_eligible(*, document: Document, config: Any) -> bool:
+        """Apply processing filters after recording source presence."""
+        extension = document.extension or Path(document.name).suffix
+        extension = f".{extension.lstrip('.')}".lower() if extension else ""
+        extensions = getattr(config, "file_extensions", [])
+        if extensions and extension not in extensions:
+            return False
+        paths = [document.name, document.source_url]
+        for key in ("absolute_path", "relative_path", "key", "path"):
+            path = str(document.metadata.get(key, ""))
+            if path:
+                paths.extend([path, *(str(parent) for parent in Path(path).parents)])
+        if any(fnmatch(path, pattern) for path in paths for pattern in getattr(config, "exclude_patterns", [])):
+            return False
+        size_limit = getattr(config, "max_file_size_mb", None)
+        if size_limit and (document.size or 0) > size_limit * 1024 * 1024:
+            return False
+        if getattr(config, "skip_empty_files", False) and document.size == 0:
+            return False
+        return not (
+            getattr(config, "skip_hidden_files", False)
+            and any(
+                part.startswith(".") and part not in (".", "..")
+                for part in Path(document.metadata.get("key", document.name)).parts
+            )
+        )
 
     @classmethod
     def bind_file_reference(cls, *, provider_config: dict[str, Any], file_reference: str) -> None:
@@ -36,7 +92,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
         raise NotImplementedError(f"Source adapter '{cls.SOURCE_NAME or cls.__name__}' does not support file events")
 
     @abstractmethod
-    async def fetch_documents(self, config: Any) -> AsyncGenerator[Document, None]:
+    def fetch_documents(self, config: Any) -> AsyncGenerator[Document, None]:
         """
         Fetch documents from the source.
 

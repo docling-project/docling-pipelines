@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Google Drive source adapter using Google Drive API."""
 
 import hashlib
@@ -47,6 +50,7 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
     SOURCE_DISPLAY_NAME = "Google Drive"
     SOURCE_DESCRIPTION = "Ingest documents from Google Drive using Google Drive API"
     SOURCE_VERSION = "3.0.0"
+    SUPPORTS_DISCOVERY = True
 
     def __init__(self) -> None:
         # Cache (creds, service) keyed by a hash of the credentials config so a single
@@ -505,6 +509,40 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             .execute()
         )
         return self._prepare_document(file_metadata=file_metadata, config=config)
+
+    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
+        """Stream complete Drive pages rather than materializing an inventory."""
+        service = self._get_drive_service(config=config)
+        if config.file_id:
+            yield self._fetch_single_gdrive_file(config=config)
+            return
+        if config.folder_path and not config.folder_id:
+            raise ValueError("Authoritative Google Drive discovery requires folder_id for folder_path")
+        folders = deque([config.folder_id or config.drive_id or "root"])
+        while folders:
+            folder = folders.popleft()
+            token = None
+            while True:
+                params: dict[str, Any] = {
+                    "q": self._build_drive_query(folder_id=folder, file_extensions=[]),
+                    "fields": "nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
+                    "pageSize": 1000,
+                    "pageToken": token,
+                }
+                if config.drive_id:
+                    params.update(
+                        driveId=config.drive_id, corpora="drive", includeItemsFromAllDrives=True, supportsAllDrives=True
+                    )
+                page = service.files().list(**params).execute()
+                for item in page.get("files", []):
+                    if item.get("mimeType") == "application/vnd.google-apps.folder":
+                        if config.recursive:
+                            folders.append(item["id"])
+                    else:
+                        yield self._prepare_document(file_metadata=item, config=config)
+                token = page.get("nextPageToken")
+                if not token:
+                    break
 
     async def fetch_documents(self, config: GoogleDriveSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """

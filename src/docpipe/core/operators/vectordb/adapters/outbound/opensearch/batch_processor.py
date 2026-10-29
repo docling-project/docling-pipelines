@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 OpenSearch Batch Processor
 Handles bulk operations including indexing, updates, and deletes with batching logic.
@@ -241,7 +244,7 @@ class OpenSearchBatchProcessor:
             )
             return success, failed
         except Exception as e:
-            logger.error(f"Bulk indexing failed: {e!s}")
+            logger.error("Bulk indexing failed: %s", e)
             return 0, actions
 
     def process_batches(self, all_actions: list[list[dict[str, Any]]]) -> tuple[int, list[dict[str, Any]]]:
@@ -259,7 +262,7 @@ class OpenSearchBatchProcessor:
 
         for batch_idx, batch in enumerate(all_actions):
             try:
-                logger.info(f"Processing batch {batch_idx + 1}/{len(all_actions)} with {len(batch)} documents")
+                logger.info("Processing batch %s/%s with %s documents", batch_idx + 1, len(all_actions), len(batch))
 
                 success: int
                 failed: list[dict[str, Any]]
@@ -270,10 +273,10 @@ class OpenSearchBatchProcessor:
                     all_failed.extend(failed)
 
             except Exception as e:
-                logger.error(f"Batch {batch_idx + 1} indexing failed: {e!s}")
+                logger.error("Batch %s indexing failed: %s", batch_idx + 1, e)
                 all_failed.extend(batch)
 
-        logger.info(f"Successfully indexed {success_count} documents in {len(all_actions)} batches")
+        logger.info("Successfully indexed %s documents in %s batches", success_count, len(all_actions))
         return success_count, all_failed
 
     def create_batches(self, documents: list[tuple[str, dict[str, Any]]]) -> list[list[dict[str, Any]]]:
@@ -350,7 +353,7 @@ class OpenSearchBatchProcessor:
             return [hit["_source"] for hit in hits]
 
         except Exception as e:
-            logger.error(f"Error querying documents: {e!s}")
+            logger.error("Error querying documents: %s", e)
             return []
 
     def delete_documents_by_ids(self, doc_ids: list[str]) -> tuple[int, int]:
@@ -386,10 +389,10 @@ class OpenSearchBatchProcessor:
                 success_count += success
                 failed_count += len(failed)
 
-            logger.info(f"Deleted {success_count} documents, {failed_count} failed")
+            logger.info("Deleted %s documents, %s failed", success_count, failed_count)
 
         except Exception as e:
-            logger.error(f"Error deleting documents: {e!s}")
+            logger.error("Error deleting documents: %s", e)
             failed_count = len(doc_ids)
 
         return success_count, failed_count
@@ -405,10 +408,45 @@ class OpenSearchBatchProcessor:
             response: dict[str, Any] = self.client.count(index=self.index_name)
             return response.get("count", 0)
         except Exception as e:
-            logger.error(f"Error getting document count: {e!s}")
+            logger.error("Error getting document count: %s", e)
             return 0
 
-    def get_chunk_ids_for_documents(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
+    def _resolve_source_chunks(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
+        """Use a complete scroll snapshot; timeout/partial responses are not proof of absence."""
+        if not doc_ids:
+            return {}
+        id_field = self._mapping_dict.get(OperatorConstants.Misc.ID, OperatorConstants.Misc.ID)
+        # _id cannot be sorted: https://docs.opensearch.org/latest/field-types/metadata-fields/id/
+        response = self.client.search(
+            index=self.index_name,
+            scroll="1m",
+            body={"query": {"terms": {id_field: doc_ids}}, "_source": [id_field], "size": 1000, "sort": "_doc"},
+        )
+        scroll_id = response.get("_scroll_id")
+        result: dict[str, set[str]] = {}
+        try:
+            while True:
+                if (
+                    response.get("timed_out")
+                    or response.get("terminated_early")
+                    or response.get("_shards", {}).get("failed", 0)
+                ):
+                    raise RuntimeError("Incomplete OpenSearch source chunk lookup")
+                hits = response["hits"]["hits"]
+                for hit in hits:
+                    source_id = hit["_source"][id_field]
+                    result.setdefault(source_id, set()).add(hit["_id"])
+                if not hits:
+                    return result
+                if not scroll_id:
+                    raise RuntimeError("OpenSearch source lookup did not return a continuation cursor")
+                response = self.client.scroll(body={"scroll_id": scroll_id, "scroll": "1m"})
+                scroll_id = response.get("_scroll_id", scroll_id)
+        finally:
+            if scroll_id:
+                self.client.clear_scroll(body={"scroll_id": [scroll_id]})
+
+    def get_chunk_ids_for_documents(self, *, doc_ids: list[str], strict: bool = False) -> dict[str, set[str]]:
         """Return all existing chunk PKs grouped by file ID.
 
         Searches the index for every document whose stored ``id`` field
@@ -429,6 +467,8 @@ class OpenSearchBatchProcessor:
             Mapping of file_id -> set of chunk PKs. File IDs with no indexed
             chunks are omitted from the result.
         """
+        if strict:
+            return self._resolve_source_chunks(doc_ids=doc_ids)
         if not doc_ids:
             return {}
 

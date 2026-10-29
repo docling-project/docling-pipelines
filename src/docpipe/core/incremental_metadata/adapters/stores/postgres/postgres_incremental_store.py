@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 PostgreSQL-based implementation of IncrementalMetadataStore.
 
@@ -11,9 +14,11 @@ Features:
 - Separate schema for isolation from job stats
 """
 
+import hashlib
+from contextlib import contextmanager
 from typing import Any, cast
 
-from sqlalchemy import MetaData, delete, text
+from sqlalchemy import MetaData, delete, text, update
 from sqlalchemy import Table as SATable
 from sqlmodel import select
 
@@ -99,15 +104,19 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         try:
             # Create engine and session factory
             self._engine = create_postgres_engine(connection_string=connection_string, config=wrapped_config)
-            self._session_factory = create_session_factory(engine=self._engine)
 
             # Create schema and incremental metadata table if they don't exist.
             # We copy the SQLAlchemy Table into a per-instance MetaData with the
             # target schema so we never mutate the shared class-level __table__.
             schema_name = flat_config.get("schema", "incremental_metadata")
+            # ORM history reads/upserts and Core synchronization writes must use the same schema.
+            self._session_factory = create_session_factory(
+                engine=self._engine.execution_options(schema_translate_map={None: schema_name})
+            )
             source_table = cast(SATable, IncrementalMetadataPostgresModel.__table__)  # type: ignore[attr-defined]
             instance_metadata = MetaData(schema=schema_name)
             incremental_table = source_table.tometadata(instance_metadata)
+            self._sync_table = incremental_table
 
             with self._engine.begin() as connection:
                 connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
@@ -128,6 +137,49 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                 message=f"PostgreSQL initialization failed: {e}", store_type="postgres"
             ) from e
 
+    @contextmanager
+    def synchronization_guard(self, *, job_id: str):
+        """Hold an advisory lock on a dedicated connection, outside batch transactions."""
+        key = int.from_bytes(hashlib.sha256(job_id.encode()).digest()[:8], "big", signed=True)
+        with self._engine.connect() as connection:
+            acquired = connection.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": key}).scalar()
+            if not acquired:
+                raise FlowExecutionFailedException("An incremental synchronization is already running for this context")
+            try:
+                yield
+            finally:
+                connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+
+    def mark_deleted_candidates(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Update only explicit candidates in this scope."""
+        if not doc_ids:
+            return
+        with self._session_factory() as session:
+            ids = sorted(doc_ids)
+            for offset in range(0, len(ids), 500):
+                session.execute(
+                    update(self._sync_table)
+                    .where(self._sync_table.c.job_id == job_id, self._sync_table.c.id.in_(ids[offset : offset + 500]))
+                    .values(deleted=True)
+                )
+            session.commit()
+
+    def acknowledge_deletions(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Conditionally delete tombstones without removing regenerated records."""
+        if not doc_ids:
+            return
+        with self._session_factory() as session:
+            ids = sorted(doc_ids)
+            for offset in range(0, len(ids), 500):
+                session.execute(
+                    delete(self._sync_table).where(
+                        self._sync_table.c.job_id == job_id,
+                        self._sync_table.c.id.in_(ids[offset : offset + 500]),
+                        self._sync_table.c.deleted.is_(True),
+                    )
+                )
+            session.commit()
+
     def get_processed_docs(self, *, job_id: str) -> dict[str, Any]:
         """Retrieve processed document IDs with modification times and job run IDs (non-deleted only)."""
         try:
@@ -145,7 +197,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                 result = {
                     row.doc_id: {"modified_time": row.modified_time, "job_run_id": row.job_run_id} for row in rows
                 }
-                logger.debug(f"Retrieved {len(result)} processed docs for job_id={job_id}")
+                logger.debug("Retrieved %s processed docs for job_id=%s", len(result), job_id)
                 return result
 
         except Exception as exc:
@@ -175,7 +227,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                     session.add(model)
 
                 session.commit()
-                logger.info(f"Upserted {len(records)} records for job_id={job_id}")
+                logger.info("Upserted %s records for job_id=%s", len(records), job_id)
 
         except Exception as exc:
             raise FlowExecutionFailedException(f"Failed to upsert records for job_id={job_id}: {exc}") from exc
@@ -195,7 +247,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                     .all()
                 )
                 result = set(rows)
-                logger.debug(f"Retrieved {len(result)} soft-deleted docs for job_id={job_id}")
+                logger.debug("Retrieved %s soft-deleted docs for job_id=%s", len(result), job_id)
                 return result
 
         except Exception as exc:
@@ -233,7 +285,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                 session.commit()
 
                 if deleted_ids:
-                    logger.info(f"Marked {len(deleted_ids)} docs as deleted for job_id={job_id}")
+                    logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
 
                 return deleted_ids
 

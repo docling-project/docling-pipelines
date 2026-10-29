@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Milvus adapter for vector database operations.
 
 This adapter implements the VectorStorePort interface for Milvus.
@@ -301,6 +304,10 @@ class MilvusAdapter(VectorStorePort):
             Mapping of doc_id -> set of chunk PKs.
         """
         return self.batch_processor.get_chunk_ids_for_documents(doc_ids=doc_ids)
+
+    def resolve_source_chunks(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
+        """Resolve all chunks, propagating provider errors for retry-safe cleanup."""
+        return self.batch_processor.resolve_source_chunks(doc_ids=doc_ids)
 
     def generate_chunk_pk(self, *, file_id: str, chunk_index: int, chunk_content: str) -> str:
         """Generate a content-hash composite primary key for this chunk.

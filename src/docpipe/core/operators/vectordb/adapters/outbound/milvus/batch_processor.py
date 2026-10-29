@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Milvus Batch Processor
 Handles bulk operations including indexing, updates, and deletes with batching logic.
@@ -143,7 +146,7 @@ class MilvusBatchProcessor:
         current_size: int = 0
         max_size_bytes: int = MAX_BATCH_SIZE_MB * 1024 * 1024
 
-        logger.info(f"Creating batches from {len(documents)} documents (max_batch_size={MAX_BATCH_SIZE_MB}MB)")
+        logger.info("Creating batches from %s documents (max_batch_size=%sMB)", len(documents), MAX_BATCH_SIZE_MB)
 
         for doc_id, doc_data in documents:
             # Prepare document
@@ -162,7 +165,10 @@ class MilvusBatchProcessor:
                 current_size = 0
 
             logger.debug(
-                f"Prepared document {doc_id}: fields={list(prepared_doc.keys())}, has_pk={self.primary_key_field in prepared_doc}"
+                "Prepared document %s: fields=%s, has_pk=%s",
+                doc_id,
+                list(prepared_doc.keys()),
+                self.primary_key_field in prepared_doc,
             )
 
             current_batch.append(prepared_doc)
@@ -173,7 +179,10 @@ class MilvusBatchProcessor:
             batches.append(current_batch)
 
         logger.info(
-            f"Created {len(batches)} batches from {len(documents)} documents, total docs in batches: {sum(len(b) for b in batches)}"
+            "Created %s batches from %s documents, total docs in batches: %s",
+            len(batches),
+            len(documents),
+            sum(len(b) for b in batches),
         )
         return batches
 
@@ -191,14 +200,18 @@ class MilvusBatchProcessor:
         all_failed: list[dict[str, Any]] = []
 
         logger.info(
-            f"Starting batch insertion: {len(batches)} batches, total documents: {sum(len(b) for b in batches)}"
+            "Starting batch insertion: %s batches, total documents: %s", len(batches), sum(len(b) for b in batches)
         )
 
         for i, batch in enumerate(batches):
             try:
                 batch_size = len(batch)
                 logger.info(
-                    f"[MILVUS INSERT] Batch {i + 1}/{len(batches)}: Inserting {batch_size} documents into collection '{self.collection_name}'"
+                    "[MILVUS INSERT] Batch %s/%s: Inserting %s documents into collection '%s'",
+                    i + 1,
+                    len(batches),
+                    batch_size,
+                    self.collection_name,
                 )
 
                 # Insert batch into Milvus
@@ -208,24 +221,33 @@ class MilvusBatchProcessor:
                 if isinstance(result, dict):
                     success_count = result.get("insert_count", len(batch))
                     logger.info(
-                        f"[MILVUS INSERT] Batch {i + 1}/{len(batches)}: Successfully inserted {success_count} documents (result: {result})"
+                        "[MILVUS INSERT] Batch %s/%s: Successfully inserted %s documents (result: %s)",
+                        i + 1,
+                        len(batches),
+                        success_count,
+                        result,
                     )
                 else:
                     success_count = len(batch)
                     logger.info(
-                        f"[MILVUS INSERT] Batch {i + 1}/{len(batches)}: Successfully inserted {success_count} documents"
+                        "[MILVUS INSERT] Batch %s/%s: Successfully inserted %s documents",
+                        i + 1,
+                        len(batches),
+                        success_count,
                     )
 
                 total_success += success_count
 
             except Exception as e:
-                logger.error(f"[MILVUS INSERT] Batch {i + 1}/{len(batches)} FAILED: {e}")
+                logger.error("[MILVUS INSERT] Batch %s/%s FAILED: %s", i + 1, len(batches), e)
                 # Add all documents in failed batch to failed items
                 for doc in batch:
                     all_failed.append({"document": doc, "error": str(e)})
 
         logger.info(
-            f"[MILVUS INSERT] ✓ Batch insertion complete: {total_success} documents inserted successfully, {len(all_failed)} failed"
+            "[MILVUS INSERT] Batch insertion complete: %s documents inserted successfully, %s failed",
+            total_success,
+            len(all_failed),
         )
 
         return total_success, all_failed
@@ -253,7 +275,7 @@ class MilvusBatchProcessor:
             )
 
         except Exception as e:
-            logger.error(f"Query by doc names failed: {e}")
+            logger.error("Query by doc names failed: %s", e)
             return []
 
     def delete_documents_by_ids(self, *, doc_ids: list[str]) -> tuple[int, int]:
@@ -293,13 +315,13 @@ class MilvusBatchProcessor:
                     total_success += delete_count
 
                 except Exception as e:
-                    logger.error(f"Delete batch failed: {e}")
+                    logger.error("Delete batch failed: %s", e)
                     total_failed += len(batch)
 
             return total_success, total_failed
 
         except Exception as e:
-            logger.error(f"Delete documents failed: {e}")
+            logger.error("Delete documents failed: %s", e)
             return 0, len(doc_ids)
 
     def get_document_count(self) -> int:
@@ -313,8 +335,33 @@ class MilvusBatchProcessor:
             stats = self.client.get_collection_stats(collection_name=self.collection_name)
             return stats.get("row_count", 0)
         except Exception as e:
-            logger.error(f"Failed to get document count: {e}")
+            logger.error("Failed to get document count: %s", e)
             return 0
+
+    def resolve_source_chunks(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
+        """Read every matching chunk through a closed iterator with strong consistency."""
+        if not self.client.has_collection(collection_name=self.collection_name):
+            return {}
+        result: dict[str, set[str]] = {}
+        for doc_id in doc_ids:
+            prefix = hashlib.sha3_512(doc_id.encode()).hexdigest()
+            iterator = self.client.query_iterator(
+                collection_name=self.collection_name,
+                batch_size=1000,
+                filter=f'{self.primary_key_field} like "{prefix}_%"',
+                output_fields=[self.primary_key_field],
+                consistency_level="Strong",
+            )
+            try:
+                while True:
+                    rows = iterator.next()
+                    if not rows:
+                        break
+                    for row in rows:
+                        result.setdefault(doc_id, set()).add(str(row[self.primary_key_field]))
+            finally:
+                iterator.close()
+        return result
 
     def get_chunk_ids_for_documents(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
         """Return all existing chunk PKs grouped by file ID.

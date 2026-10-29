@@ -1,7 +1,11 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class for all docpipe flow orchestrators."""
 
 import threading
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from operator import itemgetter
 from queue import Queue
 from typing import Any, ParamSpec, TypeVar
@@ -230,7 +234,7 @@ class AbstractOrchestrator(ABC):
                 operator_names=operator_names,
             ),
         )
-        self.context_id = params.get(DocpipeConstants.CONTEXT_ID, self.job_id)
+        self.context_id = global_config.get(DocpipeConstants.CONTEXT_ID) or self.job_id
         try:
             self.execute_flow(op_flow=op_flow, global_config=global_config)
         finally:
@@ -665,6 +669,8 @@ class AbstractOrchestrator(ABC):
             return tables.num_rows == 0
 
         if executor.get_operator().category != OperatorCategory.Ingest:
+            if executor.get_operator().config.get(DocpipeConstants.SOURCE_DELETION_CLEANUP) is True:
+                return False
             # Special case to delete the data from vector store when input documents are deleted,
             # and no new documents are added for this flow execution
             if executor.get_operator().category == OperatorCategory.VectorDB and deleted_docs_count > 0:
@@ -1224,6 +1230,85 @@ class AbstractOrchestrator(ABC):
 
     # ??? insert some of the parameters to self.
     def execute_flow(self, *, op_flow, global_config):
+        """Serialize source synchronization without blocking writes by this run's batches."""
+        options = global_config
+        self._source_cleanup_nodes: set[str] = set()
+        if op_flow:
+            node = op_flow[0]
+            overrides = global_config.get(
+                node.get("name"), global_config.get(node.get("id"), global_config.get(node.get("operator"), {}))
+            )
+            effective = global_config | node.get("config", {}) | overrides
+            for key in (
+                DocpipeConstants.RETAIN_DELETED_DOCS,
+                DocpipeConstants.FORCE_INGEST,
+                DocpipeConstants.CONTEXT_ID,
+            ):
+                if key in effective:
+                    options[key] = effective[key]
+        self.context_id = options.get(DocpipeConstants.CONTEXT_ID) or self.job_id
+        if options.get(DocpipeConstants.RETAIN_DELETED_DOCS, True) is False:
+            options[DocpipeConstants.CONTEXT_ID] = self.context_id
+        guard = (
+            get_incremental_update_service().store.synchronization_guard(job_id=self.context_id)
+            if options.get(DocpipeConstants.RETAIN_DELETED_DOCS, True) is False
+            else nullcontext()
+        )
+        with guard:
+            return self._execute_flow(op_flow=op_flow, global_config=options)
+
+    def _synchronize_source_deletions(self, *, op_flow, global_config, evidence: dict) -> int:
+        """Run executor-mediated cleanup once per sink, retaining evidence until every sink succeeds."""
+        if (
+            not evidence.get("complete")
+            or global_config.get(DocpipeConstants.RETAIN_DELETED_DOCS, True)
+            or self.job_status in (ExecutionStatus.CANCELING, ExecutionStatus.CANCELED, ExecutionStatus.FAILING)
+        ):
+            return 0
+        if evidence.get("scope") != self.context_id:
+            raise FlowExecutionFailedException("Source discovery and execution tracking scopes differ")
+        service = get_incremental_update_service()
+        pending = service.reconcile_discovery(
+            job_id=self.context_id,
+            missing_ids=set(evidence.get("missing_ids", [])),
+            returned_ids=set(evidence.get("returned_ids", [])),
+        )
+        destinations = [
+            node
+            for node in op_flow[1:]
+            if node.get("operator") == "vectordb" or node.get("operator", "").endswith(".VectorDBOperator")
+        ]
+        if not pending or not destinations:
+            return 0
+        confirmed = set(pending)
+        cleanup_config = global_config | {DocpipeConstants.SOURCE_DELETION_CLEANUP: True}
+        for node in destinations:
+            try:
+                if self.job_status in (ExecutionStatus.CANCELING, ExecutionStatus.CANCELED, ExecutionStatus.FAILING):
+                    confirmed.clear()
+                    break
+                if not hasattr(self, "_source_cleanup_nodes"):
+                    self._source_cleanup_nodes = set()
+                self._source_cleanup_nodes.add(node.get("id", node.get("name", "")))
+                result = self._execute_step(
+                    op_def=node,
+                    global_config=cleanup_config,
+                    prev_results=self._create_empty_result(),
+                    deleted_docs_count=len(pending),
+                )
+                acknowledged = result.internal_metadata.get(Metrics.Internal.SOURCE_DELETION_RESULT, [])
+                confirmed.intersection_update(acknowledged)
+                if set(acknowledged) != pending:
+                    raise FlowExecutionFailedException("VectorDB did not acknowledge complete source cleanup")
+            except Exception as exc:
+                confirmed.clear()
+                self._handle_node_failure(e=exc, op_def=node, global_config=global_config)
+                if not global_config.get(DocpipeConstants.CONTINUE_ON_BATCH_FAILURE, False):
+                    raise
+        service.store.acknowledge_deletions(job_id=self.context_id, doc_ids=confirmed)
+        return len(confirmed)
+
+    def _execute_flow(self, *, op_flow, global_config):
         """
         Execute DAG flow with unified batching approach.
         Supports both batch mode (multiple batches) and non-batch mode (single table).
@@ -1306,8 +1391,16 @@ class AbstractOrchestrator(ABC):
         )
 
         incremental_service = get_incremental_update_service()
-        doc_ids = ingest_results.internal_metadata.get(Metrics.Internal.ALL_DOC_IDS, [])
-        incremental_service.process_ingested_docs(config=global_config, job_id=self.job_id, doc_ids=doc_ids)
+        if global_config.get(DocpipeConstants.RETAIN_DELETED_DOCS, True):
+            incremental_service.process_ingested_docs(config=global_config, job_id=self.context_id, doc_ids=[])
+        else:
+            evidence = ingest_results.internal_metadata.get(Metrics.Internal.SOURCE_DISCOVERY, {})
+            deleted_docs_count = self._synchronize_source_deletions(
+                op_flow=op_flow, global_config=global_config, evidence=evidence
+            )
+            self.message = self._get_ingest_summary_message(
+                output_table=ingest_results.tables[0], deleted_docs_count=deleted_docs_count, operator=ingest_operator
+            )
 
         # Get the ingested table
         ingested_table = ingest_results.tables[0]
@@ -1336,6 +1429,8 @@ class AbstractOrchestrator(ABC):
             )
             downstream_nodes = op_flow[1:] if len(op_flow) > 1 else []
             for downstream_node in downstream_nodes:
+                if downstream_node.get("id", "") in self._source_cleanup_nodes:
+                    continue
                 try:
                     self.flow_execution_event_handler.after_node_skipped(
                         node_id=downstream_node.get(OperatorConstants.Columns.ID),

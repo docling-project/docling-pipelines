@@ -1,11 +1,20 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for PostgreSQL-based incremental metadata store."""
 
+import os
+import uuid
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from sqlalchemy import MetaData, create_engine, text
+from sqlmodel import Session
 
+from docpipe.core.incremental_metadata.adapters.stores.filesystem import FilesystemIncrementalMetadataStore
+from docpipe.core.incremental_metadata.adapters.stores.postgres.models import IncrementalMetadataPostgresModel
 from docpipe.core.incremental_metadata.domain.models import IncrementalMetadataRecord
 from docpipe.exceptions.docpipe_exceptions import (
     FlowExecutionFailedException,
@@ -420,3 +429,127 @@ class TestClear:
         # The execute was called — job_id is passed via the SQLAlchemy expression;
         # what we can verify is that commit was called exactly once with no error.
         mock_session.commit.assert_called_once()
+
+
+@pytest.fixture(params=["filesystem", "sql"])
+def sync_store(*, request, tmp_path):
+    if request.param == "filesystem":
+        yield FilesystemIncrementalMetadataStore(config={"base_dir": str(tmp_path)})
+    else:
+        engine = create_engine("sqlite://")
+        table = IncrementalMetadataPostgresModel.__table__
+        table.create(engine)
+        store = object.__new__(PostgresIncrementalMetadataStore)
+        store._engine, store._sync_table = engine, table
+        store._session_factory = lambda: Session(engine)
+        yield store
+        engine.dispose()
+
+
+def test_candidate_and_acknowledgment_parity(sync_store):
+    for scope in ("scope", "other"):
+        sync_store.upsert_records(
+            job_id=scope,
+            job_run_id="1",
+            records=[
+                IncrementalMetadataRecord(job_id=scope, doc_id="a"),
+                IncrementalMetadataRecord(job_id=scope, doc_id="b"),
+            ],
+        )
+    sync_store.mark_deleted_candidates(job_id="scope", doc_ids={"a"})
+    assert sync_store.get_soft_deleted_doc_ids(job_id="scope") == {"a"}
+    assert sync_store.get_soft_deleted_doc_ids(job_id="other") == set()
+    sync_store.mark_deleted_candidates(job_id="scope", doc_ids={"b"})
+    assert sync_store.get_soft_deleted_doc_ids(job_id="scope") == {"a", "b"}
+    sync_store.upsert_records(
+        job_id="scope", job_run_id="2", records=[IncrementalMetadataRecord(job_id="scope", doc_id="a")]
+    )
+    sync_store.acknowledge_deletions(job_id="scope", doc_ids={"a", "b"})
+    assert set(sync_store.get_processed_docs(job_id="scope")) == {"a"}
+    assert set(sync_store.get_processed_docs(job_id="other")) == {"a", "b"}
+
+
+def test_postgres_guard_connection_releases_after_failure():
+    store = object.__new__(PostgresIncrementalMetadataStore)
+    store._engine = MagicMock()
+    connection = store._engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value.scalar.return_value = True
+    with pytest.raises(RuntimeError, match="cancelled"):
+        with store.synchronization_guard(job_id="scope"):
+            raise RuntimeError("cancelled")
+    statements = [str(call.args[0]) for call in connection.execute.call_args_list]
+    assert statements == ["SELECT pg_try_advisory_lock(:key)", "SELECT pg_advisory_unlock(:key)"]
+    store._engine.connect.return_value.__exit__.assert_called_once()
+
+
+def test_postgres_guard_contended_execution_is_rejected():
+    store = object.__new__(PostgresIncrementalMetadataStore)
+    store._engine = MagicMock()
+    connection = store._engine.connect.return_value.__enter__.return_value
+    connection.execute.return_value.scalar.return_value = False
+    with pytest.raises(FlowExecutionFailedException, match="already running"):
+        with store.synchronization_guard(job_id="scope"):
+            pytest.fail("Contended run must not execute")
+
+
+def test_failed_acknowledgment_preserves_tombstone(*, sync_store, monkeypatch):
+    sync_store.upsert_records(
+        job_id="scope", job_run_id="1", records=[IncrementalMetadataRecord(job_id="scope", doc_id="a", deleted=True)]
+    )
+    sync_store.mark_deleted_candidates(job_id="scope", doc_ids={"a"})
+    if isinstance(sync_store, FilesystemIncrementalMetadataStore):
+        monkeypatch.setattr(sync_store, "_write_table", MagicMock(side_effect=RuntimeError("write failed")))
+    else:
+
+        def failing_transaction():
+            session = Session(sync_store._engine)
+            monkeypatch.setattr(session, "commit", MagicMock(side_effect=RuntimeError("write failed")))
+            return session
+
+        monkeypatch.setattr(sync_store, "_session_factory", failing_transaction)
+    with pytest.raises(RuntimeError, match="write failed"):
+        sync_store.acknowledge_deletions(job_id="scope", doc_ids={"a"})
+    assert sync_store.get_soft_deleted_doc_ids(job_id="scope") == {"a"}
+
+
+@pytest.fixture
+def postgres_store():
+    url = os.environ.get("DOCPIPE_TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("Set DOCPIPE_TEST_POSTGRES_URL to run PostgreSQL synchronization integration tests")
+    engine = create_engine(url)
+    schema = "docpipe_sync_test_" + uuid.uuid4().hex
+    metadata = MetaData(schema=schema)
+    table = IncrementalMetadataPostgresModel.__table__.to_metadata(metadata)
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    table.create(engine)
+    store = object.__new__(PostgresIncrementalMetadataStore)
+    store._engine, store._sync_table = engine, table
+    mapped = engine.execution_options(schema_translate_map={None: schema})
+    store._session_factory = lambda: Session(mapped)
+    try:
+        yield store
+    finally:
+        metadata.drop_all(engine)
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}"'))
+        engine.dispose()
+
+
+@pytest.mark.integration
+def test_real_guard_allows_batch_writes_and_releases_after_error(postgres_store):
+    with pytest.raises(RuntimeError, match="cancelled"):
+        with postgres_store.synchronization_guard(job_id="scope"):
+            with pytest.raises(FlowExecutionFailedException, match="already running"):
+                with postgres_store.synchronization_guard(job_id="scope"):
+                    pytest.fail("Same-context executions must not overlap")
+            postgres_store.upsert_records(
+                job_id="scope", job_run_id="1", records=[IncrementalMetadataRecord(job_id="scope", doc_id="a")]
+            )
+            raise RuntimeError("cancelled")
+    with postgres_store.synchronization_guard(job_id="scope"):
+        postgres_store.mark_deleted_candidates(job_id="scope", doc_ids={"a"})
+    assert postgres_store.get_soft_deleted_doc_ids(job_id="scope") == {"a"}
+    postgres_store.acknowledge_deletions(job_id="scope", doc_ids={"a"})
+    assert not postgres_store.get_soft_deleted_doc_ids(job_id="scope")

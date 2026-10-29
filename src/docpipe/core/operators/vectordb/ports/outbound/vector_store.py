@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Port interface for vector database services.
 
 This port defines the contract that all vector database adapters must implement.
@@ -24,6 +27,10 @@ class VectorStorePort(ABC):
 
     ADAPTER_NAME: str
     ADAPTER_DISPLAY_NAME: str
+
+    def resolve_source_chunks(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
+        """Strict, complete source-ID lookup; errors must never mean successful absence."""
+        raise NotImplementedError("Vector adapter does not support authoritative source cleanup")
 
     @staticmethod
     @abstractmethod

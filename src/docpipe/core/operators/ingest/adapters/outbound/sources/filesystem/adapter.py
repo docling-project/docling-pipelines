@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Filesystem source adapter implementation."""
 
 import mimetypes
@@ -35,6 +38,43 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
     SOURCE_DISPLAY_NAME = "Local Filesystem"
     SOURCE_DESCRIPTION = "Ingest documents from local filesystem directories"
     SOURCE_VERSION = "1.0.0"
+    SUPPORTS_DISCOVERY = True
+
+    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
+        """Walk every identity, propagating inaccessible roots and subtrees."""
+
+        def on_error(error: OSError) -> None:
+            raise error
+
+        for root in self._iter_root_paths(config):
+            if not root.exists():
+                raise FileNotFoundError(str(root))
+            single_file = root.is_file()
+            if single_file:
+                paths = iter([root])
+            elif config.recursive:
+                paths = (
+                    Path(directory) / name
+                    for directory, _, names in os.walk(root, followlinks=config.follow_symlinks, onerror=on_error)
+                    for name in names
+                )
+            else:
+                paths = (p for p in root.iterdir() if p.is_file())
+            for path in paths:
+                stat = path.stat()
+                yield Document(
+                    id=str(path.absolute()),
+                    name=path.name,
+                    content=b"",
+                    source_url=f"file://{path.absolute()}",
+                    modified_time=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+                    size=stat.st_size,
+                    extension=path.suffix.lower(),
+                    metadata={
+                        "absolute_path": str(path.absolute()),
+                        "relative_path": path.name if single_file else str(path.relative_to(root)),
+                    },
+                )
 
     async def fetch_documents(self, config: FilesystemSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """

@@ -513,6 +513,15 @@ node_config = {
 
 Documents are tracked by their ID and modification time. Previously processed documents are automatically skipped unless `force_ingest` is set to `True`.
 
+With retention disabled, the operator completes metadata discovery even after selecting `max_files` eligible
+files. Discovery-only files do not consume processing slots or require content downloads. Failed or partial discovery
+cannot establish that unseen documents were deleted. Source-presence tracking is separate from unchanged-file skips.
+
+Filesystem, S3-compatible, Google Drive, Box, Dropbox, OneDrive, and SharePoint adapters support authoritative discovery.
+Other loaders report incomplete synchronization while retaining normal processing. File-event runs do not represent
+an inventory of the entire source. See [incremental processing and deletion retention](../../reference/GLOBAL_CONFIG.md#retain_deleted_docs)
+for flag combinations, source limitations, memory costs, and retry behavior.
+
 ## Error Handling
 
 ### Graceful Degradation

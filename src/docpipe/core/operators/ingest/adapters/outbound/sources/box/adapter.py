@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Box source adapter using Box SDK directly."""
 
 import hashlib
@@ -23,6 +26,7 @@ class BoxSourceAdapter(DocumentSourcePort):
     """Adapter for ingesting documents from Box using the Box SDK."""
 
     SOURCE_NAME = "box_driver"
+    SUPPORTS_DISCOVERY = True
     SOURCE_DISPLAY_NAME = "Box Driver"
     CONFIG_CLASS = BoxSourceConfig
 
@@ -231,6 +235,33 @@ class BoxSourceAdapter(DocumentSourcePort):
                 "relative_path": relative_path,
             },
         )
+
+    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
+        """Follow all folder pages; do not apply processing filters to presence."""
+        client = self._get_box_client(config=config)
+        if config.file_id:
+            yield self._prepare_document(file_info=client.files.get_file_by_id(config.file_id), root_folder_id="")
+            return
+        folders = [config.folder_id]
+        while folders:
+            folder_id = folders.pop()
+            marker: str | None = None
+            seen_markers: set[str] = set()
+            while True:
+                page = client.folders.get_folder_items(folder_id, usemarker=True, marker=marker, limit=1000)
+                for item in page.entries:
+                    if item.type == "folder":
+                        if config.recursive:
+                            folders.append(str(item.id))
+                    elif item.type == "file":
+                        info = client.files.get_file_by_id(str(item.id))
+                        yield self._prepare_document(file_info=info, root_folder_id=config.folder_id)
+                marker = page.next_marker
+                if not marker:
+                    break
+                if marker in seen_markers:
+                    raise ValueError("Repeated Box pagination marker")
+                seen_markers.add(marker)
 
     async def fetch_documents(self, config: BoxSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """Fetch documents from Box using the Box SDK."""

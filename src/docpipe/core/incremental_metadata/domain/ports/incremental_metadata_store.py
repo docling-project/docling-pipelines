@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Port interface for incremental metadata storage.
 
@@ -6,6 +9,7 @@ storage adapters must implement, following hexagonal architecture principles.
 """
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 from typing import Any
 
 from docpipe.core.incremental_metadata.domain.models import IncrementalMetadataRecord
@@ -19,6 +23,18 @@ class IncrementalMetadataStore(ABC):
     (Filesystem, PostgreSQL) must implement. It provides methods
     for managing document processing metadata in incremental workflows.
     """
+
+    def synchronization_guard(self, *, job_id: str) -> AbstractContextManager:
+        """Serialize executions sharing a tracking context, independently of record locks."""
+        raise NotImplementedError("Store does not support source synchronization guards")
+
+    def mark_deleted_candidates(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Mark only positively reconciled historical IDs; never infer an empty inventory."""
+        raise NotImplementedError("Store does not support candidate reconciliation")
+
+    def acknowledge_deletions(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Remove acknowledged tombstones only, preserving records regenerated since discovery."""
+        raise NotImplementedError("Store does not support deletion acknowledgment")
 
     @abstractmethod
     def get_processed_docs(self, *, job_id: str) -> dict[str, Any]:

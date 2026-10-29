@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project-wide string constants, enums, and configuration keys for docpipe."""
 
 import os
@@ -55,6 +58,7 @@ class DocpipeConstants:
     FORCE_INGEST = "force_ingest"
     RETAIN_DELETED_DOCS = "retain_deleted_docs"
     RETAIN_DELETED_DOCS_DEFAULT = True
+    SOURCE_DELETION_CLEANUP = "source_deletion_cleanup"
     DATA_FOLDER = "data_folder"
     OPERAND_NAMESPACE = "OPERAND_NAMESPACE"
     DAG = "dag"
@@ -560,7 +564,10 @@ class Metrics:
         PAGE_TYPE_STATS = "page_type_stats"
 
     class Internal:
-        """Internal."""
+        """Internal execution metadata, removed from externally reported processing metrics."""
+
+        SOURCE_DISCOVERY = "source_discovery"
+        SOURCE_DELETION_RESULT = "source_deletion_result"
 
         DELETED_FROM_LAST_RUN = "deleted_from_last_run"
         ALL_DOC_IDS = "all_doc_ids"

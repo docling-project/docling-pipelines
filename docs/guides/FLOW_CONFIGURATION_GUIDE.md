@@ -688,3 +688,18 @@ This creates a dependency where the `extract` operator will only run after the `
 - **[Operator Reference](../reference/OPERATORS.md)** - Complete operator parameter specifications
 - **[Flow Authoring Format](FLOW_AUTHORING_FORMAT.md)** - Detailed flow authoring guide
 - **[Sample Flows](../../sample_flows/)** - Example flow configurations
+
+## Source deletion synchronization
+
+Set `global_config.retain_deleted_docs` to `false` to remove chunks for source documents that disappear. Each run
+completes metadata discovery while the ingest operator selects at most `max_files` eligible documents. In incremental
+mode, successive runs skip unchanged completed files and select the next group. Forced ingestion reselects documents
+without suppressing deletion synchronization.
+
+Cleanup is scheduled once per VectorDB destination before concurrent processing batches, including runs with zero new
+documents. An inaccessible source does not count as empty, and incomplete scans do not trigger cleanup. Failed cleanup
+preserves pending deletion records for retry. Synchronization runs sharing `context_id` are serialized while batch
+metadata writes remain independent. Keep source ownership stable within each context.
+
+See [global deletion retention](../reference/GLOBAL_CONFIG.md#retain_deleted_docs) for flag semantics, provider support,
+metrics, and the discovery cost on large sources.
