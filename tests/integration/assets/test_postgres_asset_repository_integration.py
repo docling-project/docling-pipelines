@@ -53,6 +53,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     AssetNotFoundException,
     DocpipeException,
 )
+from docpipe.utils.infrastructure import DocpipeConfigLoader
 
 pytestmark = pytest.mark.integration
 
@@ -87,6 +88,14 @@ ASSET_CASES = [
     pytest.param(DocumentSet, _make_document_set, id="document_set"),
     pytest.param(DocumentLibrary, _make_library, id="document_library"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def reset_config_loader():
+    """Clear the DocpipeConfigLoader cache before and after each test."""
+    DocpipeConfigLoader.reset()
+    yield
+    DocpipeConfigLoader.reset()
 
 
 def _create_repo(*, asset_type: type[Asset], repo_config: dict[str, Any]) -> PostgresAssetRepository:
