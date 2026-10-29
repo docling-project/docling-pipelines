@@ -153,7 +153,7 @@ class OperatorFactory:
         """
         from docpipe.core.operators.operator_registry import get_docpipe_operators
 
-        logger.info(f"Loading docpipe operators from frozenset for orchestrator: {self.orchestrator}")
+        logger.info("Loading docpipe operators from frozenset for orchestrator: %s", self.orchestrator)
 
         # Get all operators from registry (may contain duplicates by short_name)
         all_operators = get_docpipe_operators(orchestrator=self.orchestrator)
@@ -165,7 +165,7 @@ class OperatorFactory:
                 if hasattr(operator_class, "is_available") and callable(operator_class.is_available):
                     if not operator_class.is_available():
                         short_name = getattr(operator_class, "short_name", operator_class.__name__)
-                        logger.debug(f"Operator '{short_name}' is not available in current environment, skipping")
+                        logger.debug("Operator '%s' is not available in current environment, skipping", short_name)
                         continue
 
                 # Apply priority-based resolution
@@ -176,10 +176,11 @@ class OperatorFactory:
                     log_prefix="Operator",
                 )
             except Exception as e:
-                logger.error(f"Error processing operator {operator_class.__name__}: {e}", exc_info=True)
+                logger.exception("Error processing operator %s: %s", operator_class.__name__, e)
 
         logger.info(
-            f"Loaded {len(self.operators)} operators from frozenset (docpipe + external, after priority resolution)"
+            "Loaded %d operators from frozenset (docpipe + external, after priority resolution)",
+            len(self.operators),
         )
 
     def _load_custom_operators_from_packages(self, *, clear_cache: bool = False) -> dict[str, type[AbstractOperator]]:
@@ -195,7 +196,7 @@ class OperatorFactory:
             logger.warning("Attempted to load custom operators but feature is disabled")
             return {}
 
-        logger.info(f"Loading custom operators from sources: {self.package_names}")
+        logger.info("Loading custom operators from sources: %s", self.package_names)
 
         try:
             # Use CustomOperatorLoader for unified loading from all sources
@@ -216,11 +217,11 @@ class OperatorFactory:
                     log_prefix="Custom operator",
                 )
 
-            logger.info(f"Successfully loaded {len(custom_operators)} custom operator(s)")
+            logger.info("Successfully loaded %d custom operator(s)", len(custom_operators))
             return custom_operators
 
         except Exception as e:
-            logger.error(f"Failed to load custom operators: {e}", exc_info=True)
+            logger.exception("Failed to load custom operators: %s", e)
             return {}
 
     @staticmethod
@@ -271,7 +272,7 @@ class OperatorFactory:
             - Logs info/warning messages about resolution decisions
         """
         if not hasattr(new_operator, "short_name"):
-            logger.warning(f"{log_prefix} {new_operator.__name__} missing 'short_name' attribute, skipping")
+            logger.warning("%s %s missing 'short_name' attribute, skipping", log_prefix, new_operator.__name__)
             return False
 
         short_name = new_operator.short_name
@@ -286,19 +287,29 @@ class OperatorFactory:
         if existing_operator is None:
             # No conflict, add the operator
             operators_dict[short_name] = new_operator
-            logger.debug(f"Added {log_prefix.lower()}: {short_name}")
+            logger.debug("Added %s: %s", log_prefix.lower(), short_name)
             return True
 
         if should_override:
             logger.info(
-                f"{log_prefix} '{short_name}': {new_operator.__name__} (priority={new_priority}) "
-                f"overrides {existing_operator.__name__} (priority={existing_priority})"
+                "%s '%s': %s (priority=%s) overrides %s (priority=%s)",
+                log_prefix,
+                short_name,
+                new_operator.__name__,
+                new_priority,
+                existing_operator.__name__,
+                existing_priority,
             )
             operators_dict[short_name] = new_operator
             return True
         logger.info(
-            f"{log_prefix} '{short_name}': {new_operator.__name__} (priority={new_priority}) "
-            f"cannot override {existing_operator.__name__} (priority={existing_priority})"
+            "%s '%s': %s (priority=%s) cannot override %s (priority=%s)",
+            log_prefix,
+            short_name,
+            new_operator.__name__,
+            new_priority,
+            existing_operator.__name__,
+            existing_priority,
         )
         return False
 
@@ -377,10 +388,10 @@ def main():  # pragma: no cover
     main entry point into the program; used for unit testing only
     """
     factory = OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON)
-    logger.info(f"Loaded {len(factory.operators)} operators")
+    logger.info("Loaded %d operators", len(factory.operators))
 
     for key, value in factory.operators.items():
-        print(f" short_name: {key} ==> class_name: {value.__name__}")
+        logger.debug(" short_name: %s ==> class_name: %s", key, value.__name__)
 
 
 # main entry point into the program; used for unit testing only
