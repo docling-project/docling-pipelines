@@ -20,20 +20,13 @@ A Document Library is a named collection that contains references to multiple Do
 - **Reference-Based**: Libraries store Document Set IDs, not copies of data
 
 ### Storage Architecture
-Document Libraries follow a hybrid storage approach aligned with Document Sets pattern:
+Document Libraries use the same generic asset storage as Document Sets and Flows:
 
-1. **Library Metadata (JSON Storage)**:
-   - Uses `KeyValueStorage` interface for library metadata
-   - Stored as JSON in `data` column (CAMS-compatible)
-   - Schema: `key, data (JSON), created_at, updated_at`
-   - Same pattern as Document Sets and Flows
-
-2. **Junction Table (Relational Storage)**:
-   - Uses direct SQL for many-to-many relationships
-   - Optimized for bulk operations
-   - Table: `library_documentset_junction`
-
-This hybrid approach balances architectural consistency (JSON for assets) with performance (SQL for relationships).
+- Each library is one JSON record in the `document_libraries` collection, stored through the
+  `KeyValueStoragePort` interface (DuckDB by default).
+- The record contains the library's `document_set_ids`, so adding or removing document sets
+  updates that one record. There is no separate relationship table.
+- The repository is `DuckDBAssetRepository[DocumentLibrary]`, created by `RepositoryFactory`.
 
 ## Prerequisites
 
@@ -535,15 +528,15 @@ except requests.exceptions.RequestException as e:
 
 ### Database Schema
 
-The Document Library feature uses a hybrid storage approach:
+The Document Library feature stores each library as one JSON record:
 
-**1. Library Metadata (KeyValueStorage - JSON)**:
+**Library records (`KeyValueStoragePort`, JSON)**:
 ```sql
 CREATE TABLE document_libraries (
-    key VARCHAR PRIMARY KEY,           -- library id
-    data JSON NOT NULL,                -- Full library metadata as JSON
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    key VARCHAR PRIMARY KEY,                         -- library id
+    data JSON NOT NULL,                              -- Full library record as JSON
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -551,38 +544,33 @@ CREATE TABLE document_libraries (
 ```json
 {
   "library_id": "uuid",
+  "asset_id": "uuid",
   "name": "Library Name",
   "description": "Description",
   "purpose": "Purpose",
+  "original_size": 1024,
+  "final_size": 512,
   "tags": ["tag1", "tag2"],
   "created_by": "user@example.com",
-  "href": "https://..."
+  "href": "https://...",
+  "document_set_ids": ["docset-uuid-1", "docset-uuid-2"]
 }
 ```
 
-**2. Junction Table (Relational Storage)**:
-```sql
-CREATE TABLE library_documentset_junction (
-    library_id VARCHAR NOT NULL,
-    document_set_id VARCHAR NOT NULL,
-    added_at TIMESTAMP NOT NULL,
-    PRIMARY KEY (library_id, document_set_id)
-);
-```
+`document_set_ids` is stored inside `data`, in the order the document sets were added.
 
 **Architecture Notes**:
-- Library metadata uses `KeyValueStorage` interface (same as Document Sets)
-- JSON storage enables flexible schema and CAMS compatibility
-- Junction table uses relational storage for performance
-- Follows Document Sets pattern: JSON for assets, SQL for relationships
+- Library records use the `KeyValueStoragePort` interface, like Document Sets and Flows
+- JSON storage enables a flexible schema
+- Databases created by older versions may still contain an unused `library_documentset_junction` table; it can be dropped
 
 ### Hexagonal Architecture
 
 The Document Library implementation follows hexagonal architecture (ports & adapters):
 
 - **Domain Layer**: Pure Python business logic (DocumentLibrary model)
-- **Ports**: Repository interface (DocumentLibraryRepositoryPort)
-- **Adapters**: DuckDB implementation (DuckDBDocumentLibraryRepository)
+- **Ports**: Generic repository interface (`AssetRepository[DocumentLibrary]`)
+- **Adapters**: Generic DuckDB implementation (`DuckDBAssetRepository[DocumentLibrary]`), created by `RepositoryFactory`
 - **Application Layer**: Service orchestration (DocumentLibraryService)
 - **API Layer**: FastAPI routes and DTOs
 

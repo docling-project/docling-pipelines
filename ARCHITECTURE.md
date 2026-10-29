@@ -3199,7 +3199,7 @@ Legacy Ollama-only configurations are automatically converted to LiteLLM:
 
 ### 9. Document Set Hexagonal Architecture Pattern
 
-The Document Set operator follows hexagonal architecture (ports and adapters pattern) for flexible storage backend support. It uses the storage layer interfaces (KeyValueStorage and TableStorage) for persistence.
+The Document Set operator follows hexagonal architecture (ports and adapters pattern) for flexible storage backend support. It uses the storage layer interfaces (`KeyValueStoragePort` and `TableStoragePort`) for persistence.
 
 #### Architecture Overview
 
@@ -3213,8 +3213,9 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
    │           │                   │
    ▼           ▼                   ▼
 ┌──────────┐ ┌──────────────┐ ┌──────────────────┐
-│ Metadata │ │ Data Store   │ │ Attachment Repo  │
-│ Factory  │ │ Factory      │ │ Factory          │
+│ Repo-    │ │ Data Store   │ │ Attachment Repo  │
+│ sitory   │ │ Factory      │ │ Factory          │
+│ Factory  │ │              │ │                  │
 └────┬─────┘ └──────┬───────┘ └────────┬─────────┘
      │               │                  │
      ▼               ▼                  ▼
@@ -3225,16 +3226,15 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
      │               │                  │
      ▼               ▼                  ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-│ DuckDB       │ │ DuckDB Data  │ │ DuckDB           │
-│ Metadata     │ │ Adapter      │ │ Attachment Repo  │
-│ Adapter      │ └──────┬───────┘ └────────┬─────────┘
+│ DuckDBAsset  │ │ DuckDB Data  │ │ DuckDB           │
+│ Repository   │ │ Adapter      │ │ Attachment Repo  │
+│ [DocSet]     │ └──────┬───────┘ └────────┬─────────┘
 └──────┬───────┘        │                  │
        │                ▼                  ▼
        ▼         ┌──────────────┐ ┌──────────────────┐
 ┌──────────────┐ │ TableStorage │ │ KeyValueStorage  │
-│ KeyValue     │ │ (Interface)  │ │ (Interface)      │
-│ Storage      │ └──────────────┘ └──────────────────┘
-│ (Interface)  │
+│ KeyValue     │ │ Port         │ │ Port             │
+│ StoragePort  │ └──────────────┘ └──────────────────┘
 └──────────────┘
 ```
 
@@ -3249,7 +3249,6 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
   - `AssetRepository[DocumentSet]`: Metadata CRUD operations
   - `DocumentSetStorage`: PyArrow table data operations
 - **Types** (`types/`): TypedDict-based configuration types
-  - `RepositoryConfig`: Metadata repository configuration
   - `DataStoreConfig`: Data store configuration
   - `HealthCheckResult`: Health check response structure
 
@@ -3271,8 +3270,8 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
 **3. Adapter Layer**
 
 - **DuckDB document set adapters** (`document_sets/adapters/duckdb/`):
-  - **DuckDBAssetRepository** (`common/adapters/repositories/`): Generic metadata persistence using `KeyValueStorage`; stores in the collection returned by `DocumentSet.get_collection_name()` (i.e. `document_sets`)
-  - **DuckDBDocumentSetStorage**: Data persistence using `TableStorage`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
+  - **DuckDBAssetRepository** (`common/adapters/repositories/`): Generic metadata persistence using `KeyValueStoragePort`; stores in the collection returned by `DocumentSet.get_collection_name()` (i.e. `document_sets`)
+  - **DuckDBDocumentSetStorage**: Data persistence using `TableStoragePort`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
 - **Common adapters** (`common/adapters/repositories/`):
   - **DuckDBAttachmentRepository**: Persists `AttachmentRef` records in the `document_set_attachments` KV collection. Registered via `@AttachmentRepositoryFactory.register(name="duckdb")` and self-wires via its `create(*, config)` classmethod.
 - `DuckDBAssetRepository` is registered in `RepositoryFactory.get_available_repository_types()` as a dict entry (not a decorator). `DuckDBAttachmentRepository` uses the `@AttachmentRepositoryFactory.register()` decorator.
@@ -3309,14 +3308,14 @@ To add PostgreSQL, MongoDB, or other backends:
 1. **Implement Storage Layer Interfaces** (if needed):
 
 ```python
-# Implement KeyValueStorage for metadata
-class PostgreSQLKeyValueStorage(KeyValueStorage):
+# Implement KeyValueStoragePort for metadata
+class PostgreSQLKeyValueStorage(KeyValueStoragePort):
     def save_record(self, *, collection: str, key: str, data: dict[str, Any]) -> None:
         pass
     # ... other methods
 
-# Implement TableStorage for data
-class PostgreSQLTableStorage(TableStorage):
+# Implement TableStoragePort for data
+class PostgreSQLTableStorage(TableStoragePort):
     def create_table(self, *, table_name: str, schema: pa.Schema) -> None:
         pass
     # ... other methods
@@ -3327,7 +3326,7 @@ class PostgreSQLTableStorage(TableStorage):
 ```python
 # In StorageFactory
 @staticmethod
-def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueStorage:
+def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueStoragePort:
     if storage_type == "postgresql":
         return PostgreSQLKeyValueStorage(**config)
     # ... existing types
@@ -3335,16 +3334,16 @@ def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueSto
 
 3. **Implement Document Set Adapters**:
 
-```python
-@MetadataRepositoryFactory.register(name="postgresql", display_name="PostgreSQL")
-class PostgreSQLMetadataRepository(DocumentSetMetadataRepository):
-    def __init__(self, *, key_value_storage: KeyValueStorage):
-        self.storage = key_value_storage
-    # ... implement port methods
+Document set metadata is stored through the generic `AssetRepository[DocumentSet]` port, which
+`RepositoryFactory` creates. To add a metadata backend, implement `AssetRepository`, add a value to
+`RepositoryType` and map it in `RepositoryFactory.get_available_repository_types()`. `DocumentSetOperator`
+and the API call `RepositoryFactory.create_repository()` directly, so there is currently no registration
+hook for metadata backends. The data plane uses its own factory:
 
+```python
 @DataStoreFactory.register(name="postgresql", display_name="PostgreSQL")
-class PostgreSQLDataStore(DocumentSetDataStore):
-    def __init__(self, *, table_storage: TableStorage):
+class PostgreSQLDataStore(DocumentSetStorage):
+    def __init__(self, *, table_storage: TableStoragePort):
         self.storage = table_storage
     # ... implement port methods
 ```
@@ -3420,9 +3419,9 @@ And the flow JSON:
 ```
 Ingest → Extract → [Other Operators] → DocumentSetOperator → [Downstream Operators]
                                               │
-                                              ├─> MetadataRepositoryFactory   → DuckDB adapter → KeyValueStorage
-                                              ├─> DataStoreFactory            → DuckDB adapter → TableStorage
-                                              ├─> AttachmentRepositoryFactory → DuckDB adapter → KeyValueStorage
+                                              ├─> RepositoryFactory           → DuckDBAssetRepository → KeyValueStoragePort
+                                              ├─> DataStoreFactory            → DuckDB adapter → TableStoragePort
+                                              ├─> AttachmentRepositoryFactory → DuckDB adapter → KeyValueStoragePort
                                               └─> Original table (pass-through)
 ```
 
@@ -4326,16 +4325,16 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 #### Storage Interfaces
 
-**KeyValueStorage Interface** (`interfaces/key_value_storage.py`)
+**KeyValueStoragePort Interface** (`interfaces/key_value_storage_port.py`)
 
 - Interface for storing JSON-serializable records in logical collections
 - Used for asset metadata (flows, document set metadata)
 - Operations: save_record, get_record, list_records, delete_record, collection_exists, record_exists
 - Implementations:
-  - **FileSystemStorage**: JSON files organized by collection directories
+  - **KeyValueFileSystemStorage**: JSON files organized by collection directories
   - **DuckDBKeyValueStorage**: DuckDB tables with JSON columns
 
-**TableStorage Interface** (`interfaces/table_storage.py`)
+**TableStoragePort Interface** (`interfaces/table_storage_port.py`)
 
 - Interface for PyArrow table storage with SQL query capabilities
 - Used for document set data and structured data operations
@@ -4349,8 +4348,8 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 - Factory pattern for creating storage instances
 - Methods:
-  - `create_key_value_storage(storage_type, **config)`: Creates KeyValueStorage instances
-  - `create_table_storage(storage_type, **config)`: Creates TableStorage instances
+  - `create_key_value_storage(storage_type, **config)`: Creates KeyValueStoragePort instances
+  - `create_table_storage(storage_type, **config)`: Creates TableStoragePort instances
 - Supported types:
   - Key-value: "filesystem", "duckdb"
   - Table: "duckdb"
@@ -4358,14 +4357,14 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 #### DuckDB Implementations
 
-**DuckDBKeyValueStorage** (`duck_db/key_value_storage.py`)
+**DuckDBKeyValueStorage** (`duck_db/duckdb_key_value_storage.py`)
 
 - Stores records as JSON in DuckDB tables (one table per collection)
 - Schema: `key TEXT PRIMARY KEY, data JSON`
 - Singleton pattern per database path for connection reuse
 - Features: JSON serialization, SQL-based filtering, atomic operations
 
-**DuckDBTableStorage** (`duck_db/table_storage.py`)
+**DuckDBTableStorage** (`duck_db/duckdb_table_storage.py`)
 
 - Stores PyArrow tables directly in DuckDB
 - Features:
@@ -4377,7 +4376,7 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 #### FileSystem Implementation
 
-**FileSystemStorage** (`file_system/key_value_storage.py`)
+**KeyValueFileSystemStorage** (`file_system/key_value_file_system_storage.py`)
 
 - Stores records as JSON files in directory structure
 - Directory layout: `base_dir/collection/key.json`
@@ -4413,7 +4412,7 @@ Hexagonal architecture implementation for flow management:
 
 **Adapter Layer** (`adapters/repositories/`):
 
-- **StorageFlowRepository**: Generic repository using KeyValueStorage interface
+- **StorageFlowRepository**: Generic repository using KeyValueStoragePort interface
   - Works with any storage backend (DuckDB, filesystem)
   - Stores flows in 'flows' collection with flow_id as key
   - Exception wrapping with FlowNotFoundException, FlowStorageException
@@ -4432,10 +4431,10 @@ Hexagonal architecture implementation for document set management:
 - **AttachmentRef**: Backend-agnostic storage coordinate for asset attachments
 - **AttachmentRepository**: Port for attachment lifecycle management
 
-**Domain Ports** (`domain/ports/`):
+**Domain Ports**:
 
-- **DocumentSetMetadataRepository**: Interface for metadata persistence
-- **DocumentSetDataStore**: Interface for PyArrow table data operations
+- **AssetRepository[DocumentSet]** (`common/domain/ports/`): Interface for metadata persistence
+- **DocumentSetStorage** (`document_sets/domain/ports/`): Interface for PyArrow table data operations
 
 **Application Layer** (`application/services/`):
 
@@ -4448,13 +4447,12 @@ Hexagonal architecture implementation for document set management:
 **Adapter Layer** (`adapters/`):
 
 - **DuckDB Adapters** (`adapters/duckdb/`):
-  - **DuckDBDocumentSetMetadataRepository**: Metadata persistence using KeyValueStorage
-  - **DuckDBDocumentSetDataStore**: Data persistence using TableStorage
-  - Registered via factory decorators for automatic discovery
+  - **DuckDBDocumentSetStorage**: Data persistence using TableStoragePort
+  - Registered via factory decorator for automatic discovery
+- Metadata is persisted by the generic `DuckDBAssetRepository[DocumentSet]` (`core/assets/common/`), created by `RepositoryFactory`
 
 **Factory Layer** (`factories/`):
 
-- **MetadataRepositoryFactory**: Creates metadata repository adapters
 - **DataStoreFactory**: Creates data store adapters
 - Decorator-based registration system
 - Validates adapter configuration before instantiation
@@ -4574,17 +4572,12 @@ The Assets Management module provides metadata management for document collectio
     - Attributes: library_id, name, description, tags, document_set_ids, aggregate metrics
     - Methods: create(), validate(), add_document_set(), remove_document_set(), update_aggregate_metrics()
     - Validation: Name (3-100 chars), description (max 500 chars), tags (max 20, each 1-50 chars)
-  - **DocumentLibraryRepositoryPort**: Repository interface defining persistence contract
+  - Persistence contract: the generic `AssetRepository[DocumentLibrary]` port (`core/assets/common/`)
   - **Exceptions**: DocumentLibraryNotFoundError, DocumentLibraryAlreadyExistsError, InvalidDocumentLibraryError
 
-- **Adapters Layer** (`adapters/`):
-  - **DuckDBDocumentLibraryStorage**: DuckDB storage implementation (metadata only)
-    - Tables: `document_libraries` (metadata), `library_documentset_junction` (many-to-many relationships)
-    - Schema: library_id (UUID), name, description, tags (JSON), created_at, updated_at, aggregate_metrics (JSON)
-  - **DuckDBDocumentLibraryMetadataRepository**: Repository implementation using DuckDB storage (metadata only)
-    - CRUD operations: create(), get_by_id(), get_by_name(), list_all(), update(), delete()
-    - Relationship management: add_document_set(), remove_document_set(), get_document_sets()
-    - Filtering: list_by_tags(), search_by_name()
+- **Persistence**:
+  - `DuckDBAssetRepository[DocumentLibrary]` (`core/assets/common/`), created by `RepositoryFactory`
+    - Stores each library as one JSON record in the `document_libraries` collection, including its `document_set_ids`
 
 - **Application Layer** (`application/services/`):
   - **DocumentLibraryService**: Business logic orchestration

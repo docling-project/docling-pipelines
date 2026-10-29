@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Generic repository interface for all asset types.
 
 This module defines the abstract repository interface that all asset repositories
@@ -5,7 +8,7 @@ must implement. It provides a consistent API for BASIC CRUD operations across di
 storage backends (local filesystem, DuckDB, CAMS, etc.).
 
 Model-specific repositories can extend this interface to add their own operations
-(e.g., bulk_delete for FlowRepository, junction table operations for DocumentLibraryRepository).
+(e.g., bulk_delete for FlowRepository).
 """
 
 from abc import ABC, abstractmethod

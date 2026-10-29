@@ -2402,12 +2402,12 @@ Using a schema template:
 
 The Document Set operator persists table rows and document-set metadata through separate port interfaces:
 
-- `DocumentSetMetadataRepository`
-- `DocumentSetStorage`
+- `AssetRepository[DocumentSet]` (metadata)
+- `DocumentSetStorage` (table data)
 
 The operator creates concrete adapters through:
 
-- `MetadataRepositoryFactory`
+- `RepositoryFactory`
 - `DataStoreFactory`
 
 The metadata backend is controlled by `global_config.metadata_storage_type` (default: `duckdb`). The data backend is controlled per-operator via `data_backend`. Current production support is DuckDB for both. The operator returns the input table unchanged, so it can be placed mid-pipeline without breaking downstream processing.
@@ -2569,7 +2569,7 @@ uv run pytest tests/integration/api/test_document_sets_api.py -v
 
 **Extension**
 
-For new backends, implement the `DocumentSetStorage` and `DocumentSetMetadataRepository` ports, register the adapters with `DataStoreFactory` and `MetadataRepositoryFactory` respectively. Configure `data_backend` in the operator config to select the data adapter, and `global_config.metadata_storage_type` to select the metadata adapter. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+For new backends, implement the `DocumentSetStorage` port and register it with `DataStoreFactory`. For metadata, implement `AssetRepository`, add a value to `RepositoryType` and map it in `RepositoryFactory.get_available_repository_types()`. The operator and the API call `RepositoryFactory.create_repository()` directly, so there is currently no registration hook for metadata backends that works without this change. Configure `data_backend` in the operator config to select the data adapter, and `global_config.metadata_storage_type` to select the metadata adapter. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
 
 ---
 
