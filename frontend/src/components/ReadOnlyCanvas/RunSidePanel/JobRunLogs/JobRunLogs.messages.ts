@@ -13,4 +13,12 @@ export const messages = defineMessages({
     id: 'src.components.ReadOnlyCanvas.RunSidePanel.JobRunLogs.showDetailedLog',
     defaultMessage: 'Show detailed log',
   },
+  copyToClipboard: {
+    id: 'src.components.ReadOnlyCanvas.RunSidePanel.JobRunLogs.copyToClipboard',
+    defaultMessage: 'Copy to clipboard',
+  },
+  copied: {
+    id: 'src.components.ReadOnlyCanvas.RunSidePanel.JobRunLogs.copied',
+    defaultMessage: 'Copied',
+  },
 });

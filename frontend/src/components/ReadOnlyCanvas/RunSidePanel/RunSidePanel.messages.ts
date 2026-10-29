@@ -21,4 +21,12 @@ export const messages = defineMessages({
     id: 'src.components.ReadOnlyCanvas.RunSidePanel.nodeSummaryEmpty',
     defaultMessage: 'Select a node to view details',
   },
+  copyToClipboard: {
+    id: 'src.components.ReadOnlyCanvas.RunSidePanel.copyToClipboard',
+    defaultMessage: 'Copy to clipboard',
+  },
+  copied: {
+    id: 'src.components.ReadOnlyCanvas.RunSidePanel.copied',
+    defaultMessage: 'Copied',
+  },
 });
