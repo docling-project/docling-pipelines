@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen, fireEvent } from '@testing-library/react';
 import { EntityCurationPanelBody } from '@/components/PropertiesPanel/CustomPanels/EntityCuration/EntityCuration';
 
 function makeController(overrides: Record<string, unknown> = {}) {
@@ -13,22 +14,22 @@ function makeController(overrides: Record<string, unknown> = {}) {
 
 describe('EntityCurationPanelBody', () => {
   it('renders entities_column input', () => {
-    render(<EntityCurationPanelBody controller={makeController()} />);
+    renderWithProviders(<EntityCurationPanelBody controller={makeController()} />);
     expect(document.getElementById('entities_column')).not.toBeNull();
   });
 
   it('renders document_type_column input', () => {
-    render(<EntityCurationPanelBody controller={makeController()} />);
+    renderWithProviders(<EntityCurationPanelBody controller={makeController()} />);
     expect(document.getElementById('document_type_column')).not.toBeNull();
   });
 
   it('renders Entities column label', () => {
-    render(<EntityCurationPanelBody controller={makeController()} />);
+    renderWithProviders(<EntityCurationPanelBody controller={makeController()} />);
     expect(screen.getAllByText('Entities column').length).toBeGreaterThan(0);
   });
 
   it('renders Document type column label', () => {
-    render(<EntityCurationPanelBody controller={makeController()} />);
+    renderWithProviders(<EntityCurationPanelBody controller={makeController()} />);
     expect(screen.getAllByText('Document type column').length).toBeGreaterThan(0);
   });
 
@@ -38,14 +39,14 @@ describe('EntityCurationPanelBody', () => {
         p.name === 'entities_column' ? 'my_entities' : undefined
       ),
     });
-    render(<EntityCurationPanelBody controller={controller} />);
+    renderWithProviders(<EntityCurationPanelBody controller={controller} />);
     const input = document.getElementById('entities_column') as HTMLInputElement;
     expect(input.value).toBe('my_entities');
   });
 
   it('calls updatePropertyValue on entities_column change', () => {
     const update = vi.fn();
-    render(<EntityCurationPanelBody controller={makeController({ updatePropertyValue: update })} />);
+    renderWithProviders(<EntityCurationPanelBody controller={makeController({ updatePropertyValue: update })} />);
     const input = document.getElementById('entities_column') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'ents' } });
     expect(update).toHaveBeenCalledWith({ name: 'entities_column' }, 'ents');
@@ -53,7 +54,7 @@ describe('EntityCurationPanelBody', () => {
 
   it('calls updatePropertyValue on document_type_column change', () => {
     const update = vi.fn();
-    render(<EntityCurationPanelBody controller={makeController({ updatePropertyValue: update })} />);
+    renderWithProviders(<EntityCurationPanelBody controller={makeController({ updatePropertyValue: update })} />);
     const input = document.getElementById('document_type_column') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'doc_type' } });
     expect(update).toHaveBeenCalledWith({ name: 'document_type_column' }, 'doc_type');

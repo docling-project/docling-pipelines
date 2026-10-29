@@ -16,8 +16,10 @@
 
 import React, { useMemo } from 'react';
 import { DataTable, TableContainer, Table, TableHead, TableRow, TableHeader, TableBody, TableCell } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { ElyraController } from '@/types';
 import styles from './Branching.module.scss';
+import { messages } from './Branching.messages';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -39,6 +41,7 @@ interface BranchingPanelBodyProps {
  * condition yet show an em-dash placeholder.
  */
 export function BranchingPanelBody({ controller }: BranchingPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   const appData = controller.getAppData() as {
     nodeId?: string;
     pipelineFlow?: { pipelines?: Array<{ nodes?: Array<Record<string, unknown>> }> };
@@ -76,14 +79,14 @@ export function BranchingPanelBody({ controller }: BranchingPanelBodyProps): Rea
   }, [pipelineFlow, nodeId]);
 
   const headers = [
-    { key: 'nodeName', header: 'Target Node' },
-    { key: 'linkName', header: 'Link Name' },
+    { key: 'nodeName', header: intl.formatMessage(messages.targetNode) },
+    { key: 'linkName', header: intl.formatMessage(messages.linkName) },
   ];
 
   if (rows.length === 0) {
     return (
       <div className={styles.emptyState}>
-        <p>Connect output links from this node and set a condition on each link to define branching logic.</p>
+        <p>{intl.formatMessage(messages.emptyState)}</p>
       </div>
     );
   }
@@ -91,7 +94,7 @@ export function BranchingPanelBody({ controller }: BranchingPanelBodyProps): Rea
   return (
     <div className={styles.panelBody}>
       <p className={styles.helperText}>
-        Each row corresponds to one output link. To edit a link name or condition, right-click the link on the canvas.
+        {intl.formatMessage(messages.helperText)}
       </p>
       <DataTable rows={rows} headers={headers}>
         {({ rows: tableRows, headers: tableHeaders, getTableProps, getHeaderProps, getRowProps }) => (

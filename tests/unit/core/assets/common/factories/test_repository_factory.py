@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the generic RepositoryFactory (core/assets/common/factories)."""
 
 from pathlib import Path
@@ -6,6 +9,7 @@ import pytest
 
 from docpipe.core.assets.common.adapters.repositories.duckdb_asset_repository import DuckDBAssetRepository
 from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
+from docpipe.core.assets.common.adapters.repositories.postgres_asset_repository import PostgresAssetRepository
 from docpipe.core.assets.common.factories.repository_factory import (
     ENV_CONFIG_PATH_KEY,
     RepositoryFactory,
@@ -126,4 +130,5 @@ class TestCreateRepository:
         assert RepositoryFactory.get_available_repository_types() == {
             RepositoryType.LOCAL: LocalAssetRepository,
             RepositoryType.DUCKDB: DuckDBAssetRepository,
+            RepositoryType.POSTGRES: PostgresAssetRepository,
         }

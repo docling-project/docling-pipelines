@@ -17,7 +17,7 @@ reasoning text. Unsupported file formats are skipped, not failed.
 
 ## Key Features
 
-- Multi-provider: LiteLLM (100+ providers including Ollama) and IBM WatsonX
+- Multi-provider: LiteLLM (100+ providers including Ollama), IBM WatsonX
 - Confidence scoring on a 1–10 scale
 - Optional reasoning output
 - Configurable document type lists (simple list or detailed descriptions)
@@ -26,65 +26,96 @@ reasoning text. Unsupported file formats are skipped, not failed.
 
 ---
 
+## Breaking Changes
+
+The classifier now sits behind `ClassificationPort`. These internal names were removed without
+compatibility shims:
+
+| Removed | Replacement |
+|---|---|
+| `docpipe.core.operators.quality.classification.classification_service.ClassificationService` | A `ClassificationPort` implementation resolved by `ClassificationAdapterFactory`, or pass `classification_adapter=` to `DocumentClassifierOperator` |
+| `DocumentClassifierOperator.classification_service` | `DocumentClassifierOperator.adapter` |
+| `DocumentClassifierOperator.model_id` and `.provider_config` | Read `model_id` / `provider_config` from the operator `config` |
+
+Flow JSON is unaffected: default label output matches the previous behavior (see
+[Label matching](#label-matching)).
+
+---
+
 ## Architecture
 
-### Simplified Service-Based Architecture
+### Hexagonal (Ports and Adapters) Architecture
 
-The operator uses a streamlined architecture that leverages shared LLM infrastructure:
+The operator depends only on the `ClassificationPort` interface. A registry-based
+`ClassificationAdapterFactory` resolves the flow `provider` string to a concrete adapter and
+calls its `from_config()` classmethod, which validates the config and builds its own
+dependencies.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   DocumentClassifierOperator                 │
-│                     (Main Operator)                          │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  ClassificationService                       │
-│              (Business Logic Layer)                          │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Domain Models:                                       │  │
-│  │  - ClassificationRequest                              │  │
-│  │  - ClassificationResponse                             │  │
-│  │  - build_classification_prompt()                      │  │
-│  └──────────────────────────────────────────────────────┘  │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Shared LLM Adapter Infrastructure               │
-│                  (LLMAdapterFactory)                         │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   LiteLLM    │  │  Watsonx.ai  │  │ HuggingFace  │
-│   Client     │  │   Client     │  │   Client     │
-└──────────────┘  └──────────────┘  └──────────────┘
+```mermaid
+graph TD
+    OP[DocumentClassifierOperator] -->|classify_document| PORT[ClassificationPort]
+    OP -->|create_adapter| FACTORY[ClassificationAdapterFactory]
+    FACTORY -->|from_config| STD[StandardLLMClassificationAdapter]
+    STD -.implements.-> PORT
+    STD -->|uses| LLMPORT[LLMInferencePort]
+    LLMPORT --> LITE[LiteLLM adapter]
+    LLMPORT --> WX[WatsonX adapter]
 ```
 
 ### Component Responsibilities
 
-#### 1. **Operator Layer** ([`document_classifier.py`](../../../src/docpipe/core/operators/quality/classification/document_classifier.py))
+#### 1. Operator ([`document_classifier.py`](../../../src/docpipe/core/operators/quality/classification/document_classifier.py))
 - Handles PyArrow table processing and orchestration
 - Manages parallel document classification
 - Integrates with job tracking and progress reporting
+- Calls only `ClassificationPort`; never imports concrete adapters
+- Does not extract text itself: it passes `existing_text` (from the `content` column) and/or the raw `binary_content` to the adapter, which decides what it needs
+- Writes the `_temp_content_for_extract` / `_temp_pages_processed` reuse columns only when the adapter reports `extracted_content` (see [Content reuse](#content-reuse-by-the-extract-operator))
 
-#### 2. **Service Layer** ([`classification_service.py`](../../../src/docpipe/core/operators/quality/classification/classification_service.py))
-- Contains business logic for document classification
-- Validates configuration parameters
-- Manages LLM adapter lifecycle
+#### 2. Port ([`classification_port.py`](../../../src/docpipe/core/operators/quality/classification/ports/outbound/classification_port.py))
+- Defines `classify_document()` and the `from_config()` classmethod contract
+- `ClassificationResponse` may carry optional `extracted_content` and `extraction_metadata` for adapters that extract text as a by-product
 
-#### 3. **Domain Layer** ([`domain/models.py`](../../../src/docpipe/core/operators/quality/classification/domain/models.py))
+#### 3. Factory ([`classification_adapter_factory.py`](../../../src/docpipe/core/operators/quality/classification/adapters/outbound/factories/classification_adapter_factory.py))
+- Registry of adapters keyed by `ADAPTER_NAME`; custom registered names are valid providers
+- Alias table (`litellm`, `watsonx` resolve to the `standard` adapter)
+- Rejects deprecated providers (`ollama`) with migration guidance
+
+#### 4. Adapter ([`standard_llm_adapter.py`](../../../src/docpipe/core/operators/quality/classification/adapters/outbound/standard_llm_adapter.py))
+- `StandardLLMClassificationAdapter` builds an `LLMInferencePort` through `LLMAdapterFactory` and performs prompt building, LLM call and response parsing
+- Classifies from text: uses `existing_text` when given, otherwise extracts text from `binary_content` with Docling and returns it as `extracted_content` / `extraction_metadata`
+
+#### 5. Domain ([`domain/models.py`](../../../src/docpipe/core/operators/quality/classification/domain/models.py))
 - Pure domain models: `ClassificationRequest`, `ClassificationResponse`
 - Provider-agnostic prompt building logic
 - No infrastructure dependencies
 
-#### 4. **Infrastructure Layer** (Shared `LLMAdapterFactory`)
-- Creates provider-specific LLM adapters (LiteLLM, Watsonx)
-- Manages adapter configuration and initialization
-- Provides unified `LLMInferencePort` interface
+### Adding a new adapter
+
+Implement `ClassificationPort` (set `ADAPTER_NAME`, implement `from_config()` and
+`classify_document()`) and decorate the class with `@register_classification_adapter`. The
+decorator registers the adapter with `ClassificationAdapterFactory`; the module must be imported
+(for example from `adapters/outbound/__init__.py`) for registration to occur. Select the adapter in a
+flow with `"provider": "<ADAPTER_NAME>"`; no alias registration is needed.
+
+Adapters that do not need Docling text (for example, ones that classify from raw bytes) simply
+leave `extracted_content` and `extraction_metadata` as `None`; the operator then never runs
+Docling and does not write the reuse columns.
+
+### Content reuse by the Extract operator
+
+When the input table has no `content` column and the adapter had to extract text itself (the
+standard adapter does), the operator adds two temporary columns so a downstream
+[Extract Operator](../extract/extract_operator_readme.md) can skip a second Docling pass:
+
+| Column | Description |
+|---|---|
+| `_temp_content_for_extract` | Text extracted by the adapter |
+| `_temp_pages_processed` | Native Docling `page_count`, or an estimate from character count |
+
+The columns are written only when every document was extracted. If any document is skipped
+(unsupported extension, blank extraction) or fails to fetch, neither column is added, so Extract
+never sees mixed content.
 
 ---
 
@@ -177,8 +208,8 @@ The operator uses a streamlined architecture that leverages shared LLM infrastru
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `provider` | string | LLM provider: `"litellm"` or `"watsonx"` |
-| `model_id` | string | Model identifier in `<provider>/<model_id>` format for LiteLLM (e.g., `"openai/granite3.1-dense:8b"`, `"openai/gpt-4o-mini"`, `"anthropic/claude-3-sonnet"`), or plain format for Watsonx (e.g., `"ibm/granite-13b-chat-v2"`) |
+| `provider` | string | LLM provider: `"litellm"` or `"watsonx"`. A custom adapter registered with `@register_classification_adapter` is selected by its `ADAPTER_NAME` |
+| `model_id` | string | Text model identifier (inside `provider_config`). For LiteLLM: `"openai/granite3.1-dense:8b"`; for WatsonX: `"ibm/granite-13b-chat-v2"` |
 
 ### Optional Parameters
 
@@ -191,6 +222,7 @@ The operator uses a streamlined architecture that leverages shared LLM infrastru
 | `include_confidence` | boolean | true | Include confidence score in output |
 | `include_reasoning` | boolean | false | Include reasoning explanation in output |
 | `max_content_length` | integer | 2000 | Maximum content length to send to LLM |
+| `strict_label_matching` | boolean | false | Write the configured spelling of the matched document type and reject labels that match none (output `None`). When false, any label is accepted and normalised to lower-case with underscores. See [Label matching](#label-matching) |
 | `max_workers` | integer | Auto | Number of parallel workers |
 | `use_processes` | boolean | false | Use processes instead of threads |
 
@@ -289,6 +321,18 @@ The operator uses a streamlined architecture that leverages shared LLM infrastru
 - Better handling of ambiguous documents
 - Improved confidence scores
 
+### Label matching
+
+By default the label returned by the model is written as `label.lower().replace(" ", "_")` and any
+label is accepted. For example, with a type named `"Purchase Order"`, a model answer of
+`purchase_order` is written as `"purchase_order"`, and `"Expense Report"` is written as
+`"expense_report"` even if you configured `"Expense Reports"`.
+
+Set `strict_label_matching` to `true` to match the label against your document types ignoring case,
+spaces and underscores and write the type exactly as you spelled it (`"Purchase Order"` in the
+example above). If the label matches none of the configured types, the output is `None` and the
+reasoning column explains which label was rejected.
+
 ---
 
 ## Input Requirements
@@ -306,7 +350,7 @@ The operator validates file extensions and only processes documents with the fol
 
 - PyArrow Table with document content
 - Required: `name` column containing filename (used for extension validation)
-- Optional: `content` column (if not present, will be fetched from binary content)
+- Optional: `content` column (if not present, the raw document bytes are fetched and passed to the adapter, which extracts text when it needs to)
 
 ## Output Columns
 
@@ -317,7 +361,8 @@ All input columns are preserved. The operator appends:
 | `document_type` | `string` | Classified document type label |
 | `document_type_confidence` | `float32` | Confidence score (1–10); present when `include_confidence: true` |
 | `document_type_reasoning` | `string` | Explanation for the classification; present when `include_reasoning: true` |
-| `content` | `string` | Document text content; added only if not already in the input table |
+| `_temp_content_for_extract` | `string` | Internal reuse column for the Extract operator; added only when no `content` column was supplied and the adapter extracted text for every document |
+| `_temp_pages_processed` | `int` | Internal reuse column; added together with `_temp_content_for_extract` |
 
 **Note:** Documents with unsupported file extensions are not removed — they remain in the output table with `None` values in the classification columns and are tracked in `skipped_docs` metadata.
 
@@ -328,7 +373,7 @@ All input columns are preserved. The operator appends:
 | Column | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Filename — used for file extension validation |
-| `content` | string | No | Document text; fetched from binary content if absent |
+| `content` | string | No | Document text; if absent, binary content is fetched and the adapter extracts text from it |
 
 ---
 
@@ -341,7 +386,8 @@ The operator adds the following columns to the output table:
 | `document_type` | string | Classified document type | Yes |
 | `document_type_confidence` | float | Confidence score (1-10) | If `include_confidence=true` |
 | `document_type_reasoning` | string | Classification explanation | If `include_reasoning=true` |
-| `content` | string | Document content (if fetched) | If not already present |
+| `_temp_content_for_extract` | string | Text extracted by the adapter, for reuse by Extract | Only when adapter extracted all documents |
+| `_temp_pages_processed` | int | Page count for the extracted text | Only with `_temp_content_for_extract` |
 
 ### Metadata
 
@@ -567,7 +613,8 @@ The operator provides detailed processing statistics in metadata:
 **Cause**: Missing or invalid provider configuration
 
 **Solution**:
-- Verify provider name is correct (`litellm`, `watsonx`)
+- Verify provider name is correct (`litellm`, `watsonx`); any other value fails at construction with the list of supported providers
+- `provider_config` is required for `litellm`; for `watsonx` it may be omitted when the `WATSONX_*` environment variables are set
 - Check all required provider_config parameters
 - Ensure API keys and endpoints are valid
 - For LiteLLM, verify model ID format matches provider (e.g., `openai/gpt-4o-mini`, `anthropic/claude-3-sonnet-20240229`)
@@ -626,66 +673,39 @@ curl http://localhost:11434/api/tags
 
 ## API Reference
 
-### ClassificationService
+### ClassificationPort
+
+Outbound port that every classification adapter implements. Adapters are resolved by
+`ClassificationAdapterFactory`, which dispatches to the adapter's `from_config()` classmethod.
 
 ```python
-class ClassificationService:
-    """Simplified classification service using LLM adapters directly."""
+class ClassificationPort(ABC):
+    ADAPTER_NAME: str
+    ADAPTER_DISPLAY_NAME: str
 
-    def __init__(
+    @classmethod
+    @abstractmethod
+    def from_config(cls, config: dict[str, Any]) -> Self:
+        """Validate config, build dependencies, and return a ready adapter."""
+
+    @abstractmethod
+    def classify_document(
         self,
         *,
-        model_id: str | None = None,
-        provider_name: str,
-        provider_config: dict[str, Any] | None = None,
-        temperature: float = 0.0,
-        max_tokens: int = 500,
-    ) -> None:
-        """Initialize classification service."""
-        pass
-
-    def classify_document(self, *, request: ClassificationRequest) -> ClassificationResponse:
-        """Classify a document using the LLM adapter.
-
-        Args:
-            request: Classification request with content and document types
-
-        Returns:
-            Classification response with type, confidence, and reasoning
-        """
-        pass
-
-    def get_model_info(self) -> dict[str, Any]:
-        """Get model information.
-
-        Returns:
-            Dictionary with model_id, provider, temperature, and max_tokens
-        """
-        pass
-
-    @staticmethod
-    def validate_config(
-        *,
-        provider: str | None = None,
-        model_id: str | None = None,
-        provider_config: dict[str, Any] | None = None,
-        document_types: list[str] | dict[str, str] | None = None,
-        confidence_threshold: float | None = None,
-    ) -> tuple[list[str], list[str]]:
-        """Validate classification configuration parameters.
-
-        Validates:
-        - Provider is 'litellm' or 'watsonx' (rejects 'ollama')
-        - provider_config is present for both litellm and watsonx providers
-        - model_id is not empty
-        - document_types is valid list or dict
-        - confidence_threshold is between 1.0 and 10.0
-
-        Returns:
-            Tuple of (errors, warnings) lists
-        """
-        pass
+        doc_name: str,
+        binary_content: bytes | None,
+        existing_text: str | None,
+        document_types: list[str] | dict[str, str],
+    ) -> ClassificationResponse:
+        """Classify a single document and return a structured response."""
 ```
+
+### StandardLLMClassificationAdapter
+
+Built-in adapter serving the `litellm` and `watsonx` providers. It
+builds its `LLMInferencePort` through `LLMAdapterFactory` in `from_config()`. When it extracts text itself
+it honors the flow's `doc_format` (`markdown` by default, or `doclang`). See the
+[Architecture](#architecture) section for how the operator, factory, and adapter interact.
 
 ### Domain Models
 
@@ -699,11 +719,13 @@ class ClassificationRequest:
 
 @dataclass
 class ClassificationResponse:
-    document_type: str
+    document_type: str | None  # normalised label; with strict_label_matching, None when not a configured type
     confidence: float
     reasoning: str
     success: bool
     error: str | None = None
+    extracted_content: str | None = None  # text the adapter extracted itself (e.g. via Docling)
+    extraction_metadata: dict[str, Any] | None = None  # e.g. Docling page_count
 
 @dataclass
 class ModelInfo:
@@ -712,6 +734,11 @@ class ModelInfo:
     supports_json_mode: bool = True
     max_tokens: int = 4096
 ```
+
+The module `domain/models.py` also exposes the reusable pure functions `build_classification_prompt()`,
+`parse_classification_response()` (raw LLM text to `ClassificationResponse`: JSON parse, required-field
+check, confidence clamp), `normalize_label()` (lower-case, spaces to underscores) and
+`resolve_document_type()` (maps a returned label onto the configured types, used with `strict_label_matching`).
 
 ---
 
@@ -726,11 +753,21 @@ class ModelInfo:
 
 ## Version History
 
-- **v2.0.0** : Simplified architecture
-  - Removed hexagonal architecture (ports/adapters) in favor of simplified service-based design
+- **v3.0.0** : Hexagonal port/adapter architecture
+  - Operator depends only on `ClassificationPort`; adapters are resolved by `ClassificationAdapterFactory`
+  - Built-in `StandardLLMClassificationAdapter` serves the `litellm` and `watsonx` providers
+  - Adapters self-register via `@register_classification_adapter`
+  - `provider_config` is required for `litellm` and optional for `watsonx` (environment-variable credentials); its metadata flag is `required: false` and the adapter enforces the `litellm` rule
+  - Unsupported providers raise at construction instead of silently falling back to `litellm`
+  - Optional `strict_label_matching` resolves the returned label against `document_types`; unmatched labels yield `None`
+  - Registered `ADAPTER_NAME` values are accepted as `provider` values
+- **v2.1.0** : Dependency injection and pluggable document class provider
+  - The classifier accepts an optional pre-built `LLMInferencePort`, bypassing `LLMAdapterFactory`
+  - Added `DocumentClassProvider` port; default `StaticDocumentClassProvider` preserves existing local-file behaviour
+  - Classification and entity extraction adapters accept `document_class_provider=` for injecting custom metadata sources
+- **v2.0.0** : Shared LLM infrastructure
   - Leverages shared LLM infrastructure (`LLMAdapterFactory`)
   - Removed standalone Ollama provider (use LiteLLM with OpenAI-compatible API instead)
-  - Added `validate_config()` static method for configuration validation
   - Supports LiteLLM (100+ providers) and Watsonx
 - **v1.1.0** : LiteLLM integration
   - Replaced OpenAI adapter with LiteLLM adapter

@@ -18,11 +18,3 @@ export const REDACTION_ATTRIBUTE = {
  */
 export type RedactionAttributeKey =
   typeof REDACTION_ATTRIBUTE[keyof typeof REDACTION_ATTRIBUTE];
-
-/**
- * Human-readable labels for every field in the Redaction panel.
- */
-export const REDACTION_LABELS = {
-  REDACTION_REGEX: 'Redaction pattern (regex or word)',
-  REDACTION_MASKING_CHARACTER: 'Masking character',
-} as const;

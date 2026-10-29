@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen } from '@testing-library/react';
 import { DocQualityPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocQuality/DocQuality';
 
 function makeController() {
@@ -12,29 +13,29 @@ function makeController() {
 
 describe('DocQualityPanelBody', () => {
   it('renders without crashing', () => {
-    const { container } = render(<DocQualityPanelBody controller={makeController()} />);
+    const { container } = renderWithProviders(<DocQualityPanelBody controller={makeController()} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders the "No configuration required" inline notification', () => {
-    render(<DocQualityPanelBody controller={makeController()} />);
+    renderWithProviders(<DocQualityPanelBody controller={makeController()} />);
     expect(screen.getByText(/No configuration required/i)).toBeInTheDocument();
   });
 
   it('renders the notification subtitle', () => {
-    render(<DocQualityPanelBody controller={makeController()} />);
+    renderWithProviders(<DocQualityPanelBody controller={makeController()} />);
     expect(
       screen.getByText(/automatically computes document quality metrics/i)
     ).toBeInTheDocument();
   });
 
   it('renders with null controller', () => {
-    const { container } = render(<DocQualityPanelBody controller={null} />);
+    const { container } = renderWithProviders(<DocQualityPanelBody controller={null} />);
     expect(container).toBeInTheDocument();
   });
 
   it('does not render a text_lang input', () => {
-    render(<DocQualityPanelBody controller={makeController()} />);
+    renderWithProviders(<DocQualityPanelBody controller={makeController()} />);
     expect(document.getElementById('text_lang')).toBeNull();
   });
 });

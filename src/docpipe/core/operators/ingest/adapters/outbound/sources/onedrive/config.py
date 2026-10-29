@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for OneDrive source adapter."""
 
 from typing import ClassVar
@@ -34,7 +37,12 @@ class OneDriveSourceConfig(BaseModel):
 
     file_path: str | None = Field(
         None,
-        description="Specific file path or URL to ingest. Can be: (1) Direct path like '/personal/user/Documents/file.txt', (2) SharePoint URL with 'id=' parameter. If provided, only this file is processed (ignores folder_path, recursive, and filter settings).",
+        description=(
+            "OneDrive item to ingest on its own. A non-URL value is a Microsoft Graph drive item id. "
+            "An http(s) value is a OneDrive or SharePoint file URL with an id or sourcedoc query parameter. "
+            "If provided, only this file is processed (ignores folder_path, recursive, and filter settings). "
+            "File events for the onedrive provider set this from file_reference."
+        ),
     )
 
     # Behavior configuration
