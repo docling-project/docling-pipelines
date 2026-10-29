@@ -56,29 +56,28 @@ async def test_web_adapter():
     )
 
     logger.info("Testing Web Page adapter with single URL...")
-    logger.info(f"Configuration: {config}")
+    logger.info("Configuration: %s", config)
 
     # Test connection
     logger.info("\n=== Testing Connection ===")
     success, message = await adapter.test_connection(config=config)
-    logger.info(f"Connection test: {'✓ Success' if success else '✗ Failed'}")
-    logger.info(f"Message: {message}")
+    logger.info("Connection test: %s", "Success" if success else "Failed")
+    logger.info("Message: %s", message)
 
     if not success:
-        logger.error("Connection test failed. Exiting.")
-        return
+        raise RuntimeError(f"Connection test failed: {message}")
 
     # Fetch documents
     logger.info("\n=== Fetching Documents ===")
     doc_count = 0
     async for document in adapter.fetch_documents(config=config):
         doc_count += 1
-        logger.info(f"\nDocument {doc_count}:")
-        logger.info(f"  ID: {document.id}")
-        logger.info(f"  Name: {document.name}")
-        logger.info(f"  Source URL: {document.source_url}")
-        logger.info(f"  Content size: {len(document.content)} bytes")
-        logger.info(f"  Metadata: {document.metadata}")
+        logger.info("\nDocument %s:", doc_count)
+        logger.info("  ID: %s", document.id)
+        logger.info("  Name: %s", document.name)
+        logger.info("  Source URL: %s", document.source_url)
+        logger.info("  Content size: %s bytes", len(document.content))
+        logger.info("  Metadata: %s", document.metadata)
 
         # Limit output for testing
         if doc_count >= 3:
@@ -86,7 +85,7 @@ async def test_web_adapter():
             break
 
     logger.info("\n=== Summary ===")
-    logger.info(f"Total documents fetched: {doc_count}")
+    logger.info("Total documents fetched: %s", doc_count)
 
 
 async def test_multiple_urls():
@@ -109,17 +108,16 @@ async def test_multiple_urls():
     )
 
     logger.info("\n=== Testing Multiple URLs ===")
-    logger.info(f"Configuration: {config}")
+    logger.info("Configuration: %s", config)
 
     # Test connection
     logger.info("\n=== Testing Connection for Multiple URLs ===")
     success, message = await adapter.test_connection(config=config)
-    logger.info(f"Connection test: {'✓ Success' if success else '✗ Failed'}")
-    logger.info(f"Message:\n{message}")
+    logger.info("Connection test: %s", "Success" if success else "Failed")
+    logger.info("Message:\n%s", message)
 
     if not success:
-        logger.error("Connection test failed. Exiting.")
-        return
+        raise RuntimeError(f"Connection test failed: {message}")
 
     # Fetch documents
     logger.info("\n=== Fetching Documents from Multiple URLs ===")
@@ -134,11 +132,11 @@ async def test_multiple_urls():
         base_url = source_url.split("/")[2] if "/" in source_url else source_url
         url_counts[base_url] = url_counts.get(base_url, 0) + 1
 
-        logger.info(f"\nDocument {doc_count}:")
-        logger.info(f"  ID: {document.id}")
-        logger.info(f"  Name: {document.name}")
-        logger.info(f"  Source URL: {document.source_url}")
-        logger.info(f"  Content size: {len(document.content)} bytes")
+        logger.info("\nDocument %s:", doc_count)
+        logger.info("  ID: %s", document.id)
+        logger.info("  Name: %s", document.name)
+        logger.info("  Source URL: %s", document.source_url)
+        logger.info("  Content size: %s bytes", len(document.content))
 
         # Limit output for testing
         if doc_count >= 5:
@@ -146,8 +144,8 @@ async def test_multiple_urls():
             break
 
     logger.info("\n=== Summary ===")
-    logger.info(f"Total documents fetched: {doc_count}")
-    logger.info(f"Documents per URL: {url_counts}")
+    logger.info("Total documents fetched: %s", doc_count)
+    logger.info("Documents per URL: %s", url_counts)
 
 
 async def test_build_config():
@@ -163,24 +161,21 @@ async def test_build_config():
     logger.info("\n=== Testing Config Builder ===")
 
     # Simulate operator parameters
-    connection_params = {
+    provider_config = {
         "urls": urls,
         "max_depth": max_depth,
         "exclude_patterns": ["/admin", "/login"],
         "timeout": timeout,
     }
 
-    credentials = {}  # Web adapter doesn't use credentials
-
     # Build config
     config = adapter.build_config_from_operator_params(
-        connection_params=connection_params,
-        credentials=credentials,
+        provider_config=provider_config,
         included_extensions=None,  # Not used for web
     )
 
-    logger.info(f"Built config: {config}")
-    logger.info(f"Config type: {type(config)}")
+    logger.info("Built config: %s", config)
+    logger.info("Config type: %s", type(config))
 
     # Verify config
     assert config.urls == urls
@@ -188,7 +183,7 @@ async def test_build_config():
     assert config.exclude_patterns == ["/admin", "/login"]
     assert config.timeout == timeout
 
-    logger.info("✓ Config builder test passed")
+    logger.info("Config builder test passed")
 
 
 async def test_metadata():
@@ -198,13 +193,13 @@ async def test_metadata():
     logger.info("\n=== Testing Adapter Metadata ===")
 
     metadata = adapter.get_metadata()
-    logger.info(f"Adapter metadata: {metadata}")
+    logger.info("Adapter metadata: %s", metadata)
 
     assert metadata["name"] == "web"
     assert metadata["display_name"] == "Web Pages"
     assert metadata["version"] == "1.0.0"
 
-    logger.info("✓ Metadata test passed")
+    logger.info("Metadata test passed")
 
 
 async def main():
@@ -214,9 +209,9 @@ async def main():
         await test_build_config()
         await test_web_adapter()
         await test_multiple_urls()
-        logger.info("\n✓ All tests completed successfully!")
+        logger.info("\nAll tests completed successfully!")
     except Exception as e:
-        logger.error(f"\n✗ Test failed with error: {e}", exc_info=True)
+        logger.exception("\nTest failed with error: %s", e)
         raise
 
 
