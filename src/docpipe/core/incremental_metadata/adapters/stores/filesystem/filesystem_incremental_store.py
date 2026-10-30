@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Filesystem-based implementation of IncrementalMetadataStore.
 
@@ -13,6 +16,8 @@ Features:
 
 import os
 import shutil
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +30,12 @@ from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_fact
     ENV_INCREMENTAL_BASE_DIR_KEY,
     register_incremental_update_store,
 )
+from docpipe.core.incremental_metadata.adapters.stores.discovery_history import open_discovery_history
 from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataRecord,
     IncrementalMetadataStore,
 )
+from docpipe.core.incremental_metadata.domain.ports.incremental_metadata_store import DiscoveryHistory
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
@@ -125,6 +132,72 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         """Get directory path for job's incremental metadata."""
         return self._base_dir / job_id / "inc_update_metadata"
 
+    @contextmanager
+    def synchronization_guard(self, *, job_id: str):
+        """Use a separate cross-process lock so batch writes can still take record locks."""
+        path = self._get_lock_path(job_id=job_id).with_name("synchronization.lock")
+        with FileLock(str(path), timeout=self._lock_timeout):
+            yield
+
+    def discovery_history(self, *, job_id: str) -> AbstractContextManager[DiscoveryHistory]:
+        """Read tracking columns in bounded Parquet batches into an indexed snapshot."""
+        return open_discovery_history(self._iter_tracking_records(job_id=job_id))
+
+    def _iter_tracking_records(self, *, job_id: str) -> Iterator[tuple[str, int | None, bool]]:
+        with FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout):
+            path = self._get_parquet_path(job_id=job_id)
+            if not path.exists():
+                return
+            parquet = pq.ParquetFile(path)
+            try:
+                for batch in parquet.iter_batches(batch_size=1000, columns=["id", "modified_time", "deleted"]):
+                    for row in batch.to_pylist():
+                        yield row["id"], row["modified_time"], row["deleted"]
+            finally:
+                parquet.close()
+
+    def mark_deleted_candidates(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Persist missing candidates without deleting prior pending records."""
+        if not doc_ids:
+            return
+        with FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout):
+            table = self._read_table(job_id=job_id)
+            if table is None:
+                return
+            mask = pc.is_in(table["id"], pa.array(list(doc_ids), type=pa.string()))  # type: ignore[attr-defined]
+            deleted = pc.or_(table["deleted"], mask)  # type: ignore[attr-defined]
+            self._write_table(
+                job_id=job_id, table=table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted)
+            )
+
+    def restore_reappeared_docs(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Preserve returned identities while making still-deleted records eligible for regeneration."""
+        if not doc_ids:
+            return
+        with FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout):
+            table = self._read_table(job_id=job_id)
+            if table is None:
+                return
+            mask = pc.and_(table["deleted"], pc.is_in(table["id"], pa.array(list(doc_ids), type=pa.string())))  # type: ignore[attr-defined]
+            deleted = pc.if_else(mask, False, table["deleted"])  # type: ignore[attr-defined]
+            modified = pc.if_else(mask, pa.scalar(None, type=pa.int64()), table["modified_time"])  # type: ignore[attr-defined]
+            table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted)
+            self._write_table(
+                job_id=job_id,
+                table=table.set_column(table.schema.get_field_index("modified_time"), "modified_time", modified),
+            )
+
+    def acknowledge_deletions(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Acknowledge only still-deleted records, under the same atomic record lock."""
+        if not doc_ids:
+            return
+        with FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout):
+            table = self._read_table(job_id=job_id)
+            if table is None:
+                return
+            mask = pc.and_(table["deleted"], pc.is_in(table["id"], pa.array(list(doc_ids), type=pa.string())))  # type: ignore[attr-defined]
+            self._write_table(job_id=job_id, table=table.filter(pc.invert(mask)))  # type: ignore[attr-defined]
+
     def _get_parquet_path(self, *, job_id: str) -> Path:
         """Get parquet file path for job."""
         return self._get_job_dir(job_id=job_id) / "inc_update_metadata.parquet"
@@ -152,7 +225,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
 
         try:
             table = pq.read_table(parquet_path)
-            logger.debug(f"Read {table.num_rows} records from {parquet_path}")
+            logger.debug("Read %s records from %s", table.num_rows, parquet_path)
             return table
         except Exception as exc:
             raise FlowExecutionFailedException(f"Failed to read parquet file for job_id={job_id}: {exc}") from exc
@@ -183,7 +256,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
             )
             # Atomic rename
             temp_path.replace(parquet_path)
-            logger.debug(f"Wrote {table.num_rows} records to {parquet_path}")
+            logger.debug("Wrote %s records to %s", table.num_rows, parquet_path)
         except Exception as exc:
             # Clean up temp file on error
             if temp_path.exists():
@@ -225,7 +298,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                     job_run_id = filtered_table["job_run_id"][i].as_py()
                     result[doc_id] = {"modified_time": modified_time, "job_run_id": job_run_id}
 
-                logger.debug(f"Retrieved {len(result)} processed docs for job_id={job_id}")
+                logger.debug("Retrieved %s processed docs for job_id=%s", len(result), job_id)
                 return result
 
         except Timeout as exc:
@@ -249,7 +322,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 if existing_table is None or existing_table.num_rows == 0:
                     # No existing data, just write new records
                     self._write_table(job_id=job_id, table=new_table)
-                    logger.info(f"Inserted {len(records)} new records for job_id={job_id}")
+                    logger.info("Inserted %s new records for job_id=%s", len(records), job_id)
                     return
 
                 # Get doc_ids from new records
@@ -263,7 +336,9 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 combined_table = pa.concat_tables([filtered_existing, new_table])
 
                 self._write_table(job_id=job_id, table=combined_table)
-                logger.info(f"Upserted {len(records)} records for job_id={job_id} (total: {combined_table.num_rows})")
+                logger.info(
+                    "Upserted %s records for job_id=%s (total: %s)", len(records), job_id, combined_table.num_rows
+                )
 
         except Timeout as exc:
             raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
@@ -284,7 +359,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 deleted_table = table.filter(mask)
 
                 result = set(deleted_table["id"].to_pylist())
-                logger.debug(f"Retrieved {len(result)} soft-deleted docs for job_id={job_id}")
+                logger.debug("Retrieved %s soft-deleted docs for job_id=%s", len(result), job_id)
                 return result
 
         except Timeout as exc:
@@ -321,7 +396,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 updated_table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted_column)
 
                 self._write_table(job_id=job_id, table=updated_table)
-                logger.info(f"Marked {len(deleted_ids)} docs as deleted for job_id={job_id}")
+                logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
                 return deleted_ids
 
         except Timeout as exc:
@@ -350,11 +425,11 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                     parquet_path = self._get_parquet_path(job_id=job_id)
                     if parquet_path.exists():
                         parquet_path.unlink()
-                    logger.info(f"Deleted all records for job_id={job_id}")
+                    logger.info("Deleted all records for job_id=%s", job_id)
                 else:
                     self._write_table(job_id=job_id, table=filtered_table)
                     logger.info(
-                        f"Deleted {len(doc_ids)} docs for job_id={job_id} (remaining: {filtered_table.num_rows})"
+                        "Deleted %s docs for job_id=%s (remaining: %s)", len(doc_ids), job_id, filtered_table.num_rows
                     )
 
         except Timeout as exc:
@@ -387,7 +462,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 if not remaining:
                     job_dir.rmdir()
 
-            logger.info(f"Cleared all metadata for job_id={job_id}")
+            logger.info("Cleared all metadata for job_id=%s", job_id)
 
         except Timeout as exc:
             raise FlowExecutionFailedException(f"Failed to acquire clear lock for job_id={job_id}") from exc

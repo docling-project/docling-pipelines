@@ -171,8 +171,12 @@ For full details on the priority system, override behaviour, and registering cus
 | `credentials`      | object |       No | -       | **Deprecated.** Use `provider_config` instead                                |
 | `include_filter`   | string |       No | -       | Extension include list (comma-separated, e.g. `"pdf,docx"`)                  |
 | `exclude_filter`   | string |       No | -       | Extension exclude list (comma-separated)                                     |
-| `max_files`        | int    |       No | `100`   | Maximum number of files to ingest                                            |
+| `max_files`        | int    |       No | `100`   | Maximum eligible files selected per run                                            |
 | `force_ingest`     | bool   |       No | `false` | Reprocess prior docs                                                         |
+
+When `global_config.retain_deleted_docs` is `false`, source metadata discovery continues after the selection limit.
+Only selected rows reach downstream operators. See [deletion retention](GLOBAL_CONFIG.md#retain_deleted_docs) for
+forced ingestion, complete-scan requirements, supported sources, and VectorDB cleanup retries.
 
 **Input Schema**
 

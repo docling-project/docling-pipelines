@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenSearch adapter for vector database operations.
 
 This adapter implements the VectorStorePort interface.
@@ -271,6 +274,19 @@ class OpenSearchAdapter(VectorStorePort):
             Mapping of doc_id -> set of chunk PKs.
         """
         return self.batch_processor.get_chunk_ids_for_documents(doc_ids=doc_ids)
+
+    def resolve_source_chunks(self, *, doc_ids: list[str]) -> dict[str, set[str]]:
+        """Strict lookup in bounded terms-query batches; existence errors propagate."""
+        if not self.client_manager.get_client().indices.exists(index=self.index_name):
+            return {}
+        if not self.batch_processor._mapping_dict.get(OperatorConstants.Misc.ID):
+            raise ValueError("Source cleanup requires an OpenSearch feature mapping for the original ingest id")
+        result: dict[str, set[str]] = {}
+        for start in range(0, len(doc_ids), 500):
+            result.update(
+                self.batch_processor.get_chunk_ids_for_documents(doc_ids=doc_ids[start : start + 500], strict=True)
+            )
+        return result
 
     def generate_chunk_pk(self, *, file_id: str, chunk_index: int, chunk_content: str) -> str:
         """Generate a positional primary key for this chunk.

@@ -225,12 +225,43 @@ Configuration for tracking and processing only changed documents.
 - Maintaining historical records (set to `true`)
 - Keeping output synchronized with source (set to `false`)
 
-**Important Limitations**:
-- This feature only works when the source directory/path still exists
-- If you delete the entire source directory (e.g., `./sample_documents`), the system will report an error: `Path does not exist`
-- To handle deleted directories, you must either:
-  - Keep the source directory structure intact (even if empty)
-  - Set `force_ingest: true` to reset incremental metadata
+**Discovery and processing limits**:
+- With `false`, discovery enumerates the full source metadata inventory on every run, while `max_files` limits only
+  the new or changed documents selected for processing. Unchanged, filtered, and unselected existing files remain present.
+- With `true` (the backend default), discovery retains its existing processing-limit behavior and performs no source
+  deletion cleanup, including any pending backlog.
+- With `force_ingest: true` and retention disabled, discovery still detects deletions. Selected documents bypass
+  incremental checks, but historical records and pending deletions are preserved. Repeated forced runs can select the
+  same first group again; use incremental mode to progress through successive groups.
+- Full discovery streams metadata without downloading unselected file contents. It still incurs source listing cost
+  proportional to the source size. Synchronization reads tracking history in batches into a temporary indexed file,
+  removed after discovery, instead of retaining all historical IDs in Python memory. Temporary disk space scales with
+  tracked history; selected rows and actual missing/returned document evidence still consume memory.
+
+**Deletion lifecycle**:
+- Only a successful complete scan marks tracked missing documents soft-deleted. Missing roots, unreadable subtrees,
+  listing failures, cancellation, unsupported discovery, and single-file events do not prove source absence.
+- Discovery listing failures fail the flow before deletion reconciliation or downstream processing.
+- An accessible empty folder is a complete inventory and can mark all its tracked documents missing.
+- VectorDB cleanup runs once per configured destination before processing batches, including runs with zero selected
+  documents. All chunks for each missing source ID are removed. Document-set outputs are not synchronized.
+- Pending deletion records survive failed cleanup until every configured VectorDB destination confirms removal.
+  Successful destinations can receive idempotent repeated cleanup on retry. With no VectorDB destinations, records remain.
+- A reappearing document cancels its pending deletion and becomes eligible for regeneration. It does not become
+  processed merely because discovery encountered it. Its tracking record is preserved with an invalidated processing
+  timestamp, so another disappearance before regeneration is still detected.
+- `context_id`, when supplied, scopes history, cleanup, and writes; otherwise the job ID is used. Synchronization runs
+  sharing that scope are serialized independently of batch metadata writes. An already-running Postgres scope is rejected.
+
+**Supported sources and limitations**:
+- Authoritative metadata discovery is supported for filesystem, S3/IBM COS, Google Drive, Box, Dropbox, OneDrive, and
+  SharePoint. Google Drive discovery uses a folder ID; a folder path without an ID reports incomplete synchronization.
+- Legacy/custom loaders and other providers without a discovery contract retain processing support but cannot establish
+  deletion from a partial inventory. Check `source_discovery_complete` in ingest metadata.
+- Do not replace or broaden a source configuration within a shared tracking context without reconciling ownership.
+  Discovery is not an atomic snapshot of external source edits. Cleanup covers current flow destinations only.
+- Existing provider caps when retention is enabled are unchanged; providers that cap before incremental selection can
+  require provider-specific pagination configuration to progress beyond the first listing.
 
 ---
 

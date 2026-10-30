@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Incremental update service - Core business logic for incremental processing.
 
@@ -5,6 +8,7 @@ This service encapsulates all business logic for managing incremental document
 processing, including metadata tracking, soft deletion, and document filtering.
 """
 
+from contextlib import AbstractContextManager
 from typing import Any
 
 import pyarrow as pa
@@ -15,6 +19,7 @@ from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataRecord,
     IncrementalMetadataStore,
 )
+from docpipe.core.incremental_metadata.domain.ports.incremental_metadata_store import DiscoveryHistory
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -43,6 +48,17 @@ class IncrementalUpdateService:
             store: Storage adapter implementing IncrementalMetadataStore interface
         """
         self.store = store
+
+    def discovery_history(self, *, job_id: str) -> AbstractContextManager[DiscoveryHistory]:
+        """Open the store's bounded-memory, execution-local processing history."""
+        return self.store.discovery_history(job_id=job_id)
+
+    def reconcile_discovery(self, *, job_id: str, missing_ids: set[str], returned_ids: set[str]) -> set[str]:
+        """Commit successful discovery and invalidate reappeared documents for regeneration."""
+        pending = self.get_soft_deleted_doc_ids(job_id=job_id)
+        self.store.restore_reappeared_docs(job_id=job_id, doc_ids=returned_ids & pending)
+        self.store.mark_deleted_candidates(job_id=job_id, doc_ids=missing_ids)
+        return self.get_soft_deleted_doc_ids(job_id=job_id)
 
     def delete_failed_doc(self, *, table: pa.Table, result_table: pa.Table, job_id: str) -> set[str]:
         """
@@ -115,14 +131,14 @@ class IncrementalUpdateService:
 
             # After merging, check if we have anything to save
             if table_to_save is None or table_to_save.num_rows == 0:
-                logger.info(f"No documents to save to incremental metadata for job_id={job_id}")
+                logger.info("No documents to save to incremental metadata for job_id=%s", job_id)
                 return
 
             # Filter out ONLY recoverable failed docs from the merged table
             table_to_save = self.filter_rows(table=table_to_save, ids_to_delete=recoverable_failed_ids)
 
             if table_to_save is None or table_to_save.num_rows == 0:
-                logger.info(f"No documents remaining after filtering for job_id={job_id}")
+                logger.info("No documents remaining after filtering for job_id=%s", job_id)
                 return
 
             # Convert table to records and save
@@ -134,8 +150,10 @@ class IncrementalUpdateService:
 
             self.store.upsert_records(job_id=job_id, job_run_id=job_run_id, records=records)
             logger.info(
-                f"Incremental metadata saved successfully for job_id={job_id}, "
-                f"job_run_id={job_run_id}, records={len(records)}"
+                "Incremental metadata saved successfully for job_id=%s, job_run_id=%s, records=%s",
+                job_id,
+                job_run_id,
+                len(records),
             )
         except Exception as exc:
             raise FlowExecutionFailedException(
@@ -171,20 +189,21 @@ class IncrementalUpdateService:
         non_recoverable_doc_ids: list[str] = []
         if non_recoverable_docs_table and non_recoverable_docs_table.num_rows > 0:
             non_recoverable_doc_ids = non_recoverable_docs_table[OperatorConstants.Misc.ID].to_pylist()
-            logger.info(f"Processing {len(non_recoverable_doc_ids)} non-recoverable docs from table")
+            logger.info("Processing %s non-recoverable docs from table", len(non_recoverable_doc_ids))
 
         # Calculate recoverable failed doc IDs (failed_doc_ids - non_recoverable_doc_ids)
         recoverable_failed_ids = list(failed_doc_ids or [])
         if failed_doc_ids and non_recoverable_doc_ids:
             recoverable_failed_ids = list(set(failed_doc_ids) - set(non_recoverable_doc_ids))
             logger.info(
-                f"Filtering out {len(recoverable_failed_ids)} recoverable failed docs, "
-                f"keeping {len(non_recoverable_doc_ids)} non-recoverable docs in metadata"
+                "Filtering out %s recoverable failed docs, keeping %s non-recoverable docs in metadata",
+                len(recoverable_failed_ids),
+                len(non_recoverable_doc_ids),
             )
 
         # Merge non-recoverable docs table with successful docs table
         if non_recoverable_docs_table is not None and non_recoverable_docs_table.num_rows > 0:
-            logger.info(f"Processing {non_recoverable_docs_table.num_rows} non-recoverable docs for metadata save")
+            logger.info("Processing %s non-recoverable docs for metadata save", non_recoverable_docs_table.num_rows)
 
             non_rec_prepared = non_recoverable_docs_table.select(
                 [
@@ -198,14 +217,16 @@ class IncrementalUpdateService:
                 successful_count = table_to_save.num_rows
                 merged_table = self.concatenate_tables(table1=table_to_save, table2=non_rec_prepared)
                 logger.info(
-                    f"Merged {non_rec_prepared.num_rows} non-recoverable docs with "
-                    f"{successful_count} successful docs. Total: {merged_table.num_rows}"
+                    "Merged %s non-recoverable docs with %s successful docs. Total: %s",
+                    non_rec_prepared.num_rows,
+                    successful_count,
+                    merged_table.num_rows,
                 )
                 table_to_save = merged_table
             else:
                 table_to_save = non_rec_prepared
                 logger.info(
-                    f"No successful docs this run. Saving {non_rec_prepared.num_rows} non-recoverable docs to metadata"
+                    "No successful docs this run. Saving %s non-recoverable docs to metadata", non_rec_prepared.num_rows
                 )
 
         return table_to_save, recoverable_failed_ids
@@ -263,7 +284,7 @@ class IncrementalUpdateService:
             FlowExecutionFailedException: If retrieval fails
         """
         try:
-            logger.debug(f"Retrieving processed documents for job_id={job_id}")
+            logger.debug("Retrieving processed documents for job_id=%s", job_id)
             return self.store.get_processed_docs(job_id=job_id)
         except Exception as exc:
             raise FlowExecutionFailedException(
@@ -299,7 +320,8 @@ class IncrementalUpdateService:
             job_id: Job identifier
             doc_ids: List of document IDs identified by ingest operator
         """
-        if config.get(DocpipeConstants.FORCE_INGEST):
+        retain = bool(config.get(DocpipeConstants.RETAIN_DELETED_DOCS, DocpipeConstants.RETAIN_DELETED_DOCS_DEFAULT))
+        if config.get(DocpipeConstants.FORCE_INGEST) and retain:
             # Force ingest: clear all previously saved metadata
             self.clear_incremental_table(job_id=job_id)
 
@@ -327,8 +349,6 @@ class IncrementalUpdateService:
             FlowExecutionFailedException: If marking fails
         """
         try:
-            previously_soft_deleted_doc_ids = self.get_soft_deleted_doc_ids(job_id=job_id)
-            self.delete_docs_for_ids(doc_ids=list(previously_soft_deleted_doc_ids), job_id=job_id)
             return self.store.mark_missing_docs_as_deleted(job_id=job_id, doc_ids=doc_ids)
         except Exception as exc:
             raise FlowExecutionFailedException(

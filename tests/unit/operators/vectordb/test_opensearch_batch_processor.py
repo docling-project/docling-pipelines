@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for OpenSearchBatchProcessor
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from docpipe.core.operators.vectordb.adapters.outbound.opensearch.adapter import OpenSearchAdapter
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.batch_processor import (
     BULK_DELETE_BATCH_SIZE,
     BULK_INSERT_TIMEOUT,
@@ -1054,3 +1058,71 @@ class TestQueryPksByDocIds:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_opensearch_strict_failure_does_not_become_absence():
+    client = Mock()
+    client.search.side_effect = ConnectionError("unreachable")
+    processor = OpenSearchBatchProcessor(client=client, index_name="test")
+    with pytest.raises(ConnectionError):
+        processor.get_chunk_ids_for_documents(doc_ids=["file"], strict=True)
+    assert processor.get_chunk_ids_for_documents(doc_ids=["file"]) == {}
+
+
+def test_opensearch_pages_all_chunks_and_uses_mapped_identity():
+    client = Mock()
+    hits = [{"_id": f"chunk-{i}", "_source": {"original_id": "file"}, "sort": [i]} for i in range(1000)]
+    client.search.return_value = {"_scroll_id": "first", "hits": {"hits": hits}}
+    client.scroll.side_effect = [
+        {"_scroll_id": "second", "hits": {"hits": [{"_id": "last", "_source": {"original_id": "file"}}]}},
+        {"_scroll_id": "second", "hits": {"hits": []}},
+    ]
+    processor = OpenSearchBatchProcessor(
+        client=client, index_name="test", feature_mappings=[{"feature_name": "id", "mapped_column_name": "original_id"}]
+    )
+    assert len(processor.get_chunk_ids_for_documents(doc_ids=["file"], strict=True)["file"]) == 1001
+    query = client.search.call_args.kwargs["body"]
+    assert query["query"]["terms"] == {"original_id": ["file"]}
+    assert query["sort"] == "_doc"
+    assert client.scroll.call_count == 2
+    client.clear_scroll.assert_called_once_with(body={"scroll_id": ["second"]})
+
+
+@pytest.mark.parametrize("failure", [{"timed_out": True}, {"_shards": {"failed": 1}}, {"terminated_early": True}])
+def test_opensearch_partial_results_are_not_absence(failure):
+    client = Mock()
+    client.search.return_value = {"_scroll_id": "cursor", "hits": {"hits": []}, **failure}
+    processor = OpenSearchBatchProcessor(client=client, index_name="test")
+    with pytest.raises(RuntimeError, match="Incomplete"):
+        processor.get_chunk_ids_for_documents(doc_ids=["file"], strict=True)
+    client.clear_scroll.assert_called_once()
+
+
+def test_opensearch_bounds_terms_requests_and_checks_missing_index():
+    adapter = object.__new__(OpenSearchAdapter)
+    adapter.client_manager = Mock()
+    adapter.index_name = "test"
+    adapter.batch_processor = Mock()
+    adapter.batch_processor._mapping_dict = {"id": "original_id"}
+    adapter.batch_processor.get_chunk_ids_for_documents.return_value = {}
+    adapter.client_manager.get_client.return_value.indices.exists.return_value = True
+    adapter.resolve_source_chunks(doc_ids=[str(i) for i in range(1200)])
+    assert [
+        len(call.kwargs["doc_ids"]) for call in adapter.batch_processor.get_chunk_ids_for_documents.call_args_list
+    ] == [500, 500, 200]
+    adapter.client_manager.get_client.return_value.indices.exists.return_value = False
+    assert adapter.resolve_source_chunks(doc_ids=["file"]) == {}
+    adapter.client_manager.get_client.return_value.indices.exists.side_effect = ConnectionError("failed")
+    with pytest.raises(ConnectionError):
+        adapter.resolve_source_chunks(doc_ids=["file"])
+
+
+def test_opensearch_missing_identity_mapping_cannot_acknowledge_absence():
+    adapter = object.__new__(OpenSearchAdapter)
+    adapter.client_manager = Mock()
+    adapter.index_name = "test"
+    adapter.batch_processor = Mock()
+    adapter.batch_processor._mapping_dict = {}
+    adapter.client_manager.get_client.return_value.indices.exists.return_value = True
+    with pytest.raises(ValueError, match="original ingest id"):
+        adapter.resolve_source_chunks(doc_ids=["file"])

@@ -240,13 +240,16 @@ class OneDriveSourceAdapter(DocumentSourcePort):
             msg = f"Folder path '{folder_path}' not found in drive '{drive_id}': {e!s}"
             raise ValueError(msg) from e
 
-    async def fetch_documents(self, config: OneDriveSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: OneDriveSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """
         Fetch document metadata from OneDrive using Microsoft Graph API.
 
         This method implements lazy loading - it only fetches metadata, not binary content.
         Binary content is fetched on-demand by the Extract operator via fetch_binary_content().
         """
+        config = self._listing_config(config=config, full_listing=full_listing)
         onedrive_config: OneDriveSourceConfig = config
         try:
             loader = self._get_loader(
@@ -290,10 +293,19 @@ class OneDriveSourceAdapter(DocumentSourcePort):
                     headers=headers,
                 )
 
-            for item in loader._list_files(folder_item_id=folder_item_id):
+            if full_listing and onedrive_config.folder_path and not folder_item_id:
+                raise ValueError("Source folder could not be resolved")
+            items = (
+                loader.iter_metadata(folder_item_id=folder_item_id, recursive=config.recursive)
+                if full_listing
+                else loader._list_files(folder_item_id=folder_item_id)
+            )
+            for item in items:
                 doc_name = item.get(OperatorConstants.Columns.NAME, "unknown")
                 file_size = item.get("size", 0)
-                if self._should_skip_onedrive_item(doc_name=doc_name, file_size=file_size, config=onedrive_config):
+                if not full_listing and self._should_skip_onedrive_item(
+                    doc_name=doc_name, file_size=file_size, config=onedrive_config
+                ):
                     continue
                 document = self._build_onedrive_document(
                     item=item, drive_id=onedrive_config.drive_id, config=onedrive_config

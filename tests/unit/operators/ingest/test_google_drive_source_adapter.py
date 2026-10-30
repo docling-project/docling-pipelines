@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import asyncio
-from collections import deque
 from datetime import datetime
 from unittest.mock import Mock, mock_open, patch
 
@@ -324,28 +326,6 @@ class TestGoogleDriveSourceAdapter:
         assert "mimeType = 'text/plain'" in query
         assert "application/vnd.google-apps.folder" in query
 
-    def test_process_page_items_stops_at_max_files(self):
-        adapter = GoogleDriveSourceAdapter()
-        all_files: list[dict[str, str]] = []
-        folders_to_process: deque[str] = deque()
-        items = [
-            {"id": "folder1", "mimeType": "application/vnd.google-apps.folder"},
-            {"id": "file1", "mimeType": "application/pdf"},
-            {"id": "file2", "mimeType": "application/pdf"},
-        ]
-
-        reached_limit = adapter._process_page_items(
-            items=items,
-            all_files=all_files,
-            folders_to_process=folders_to_process,
-            recursive=True,
-            max_files=1,
-        )
-
-        assert reached_limit is True
-        assert all_files == [{"id": "file1", "mimeType": "application/pdf"}]
-        assert list(folders_to_process) == ["folder1"]
-
     def test_resolve_workspace_extension_returns_expected_mapped_extension(self):
         adapter = GoogleDriveSourceAdapter()
 
@@ -356,56 +336,20 @@ class TestGoogleDriveSourceAdapter:
 
         assert extension == ".pptx"
 
-    def test_fetch_folder_pages_returns_true_when_max_files_reached(self):
+    def test_list_files_from_drive_stops_before_next_page(self):
         adapter = GoogleDriveSourceAdapter()
         service = Mock()
         service.files.return_value.list.return_value.execute.return_value = {
-            "files": [{"id": "file1", "mimeType": "application/pdf"}],
-            "nextPageToken": None,
+            "files": [{"id": "file1", "mimeType": "application/pdf"}, {"id": "file2"}],
+            "nextPageToken": "next",
         }
         config = GoogleDriveSourceConfig(
-            credentials_path="/tmp/credentials.json",
-            token_path="/tmp/token.json",
-            drive_id=None,
-            folder_id="folder123",
-            folder_path=None,
-            recursive=False,
-            max_files=1,
-            max_file_size_mb=None,
+            credentials_path="/tmp/credentials.json", folder_id="folder123", recursive=False, max_files=1
         )
-
-        reached = adapter._fetch_folder_pages(
-            service=service,
-            folder_id="folder123",
-            config=config,
-            all_files=[],
-            folders_to_process=deque(),
-        )
-
-        assert reached is True
-
-    def test_list_files_from_drive_stops_after_max_files(self):
-        adapter = GoogleDriveSourceAdapter()
-        config = GoogleDriveSourceConfig(
-            credentials_path="/tmp/credentials.json",
-            token_path="/tmp/token.json",
-            drive_id=None,
-            folder_id="folder123",
-            folder_path=None,
-            recursive=False,
-            max_files=1,
-            max_file_size_mb=None,
-        )
-
-        with (
-            patch.object(adapter, "_get_credentials", return_value=Mock()),
-            patch("googleapiclient.discovery.build", return_value=Mock()),
-            patch.object(adapter, "_fetch_folder_pages", return_value=True) as mock_fetch,
-        ):
-            files = adapter._list_files_from_drive(config=config)
-
-        assert files == []
-        mock_fetch.assert_called_once()
+        with patch.object(adapter, "_get_drive_service", return_value=service):
+            files = list(adapter._list_files_from_drive(config=config))
+        assert files == [{"id": "file1", "mimeType": "application/pdf"}]
+        service.files.return_value.list.assert_called_once()
 
     def test_should_skip_file_checks_workspace_extension_and_size(self):
         adapter = GoogleDriveSourceAdapter()

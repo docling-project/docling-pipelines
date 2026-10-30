@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for S3SourceAdapter."""
 
 import asyncio
@@ -384,7 +387,7 @@ class TestFetchBinaryContent:
 
 
 @pytest.mark.unit
-class TestDownloadS3Object:
+class TestPrepareS3Document:
     def test_creates_document_from_metadata(self, adapter):
         config = make_config(endpoint_url="http://minio:9000")
         mock_client = Mock()
@@ -396,7 +399,7 @@ class TestDownloadS3Object:
             "ETag": '"abc123"',
             "StorageClass": "STANDARD",
         }
-        result = _run(adapter._download_s3_object(mock_client, config, s3_obj))
+        result = adapter._prepare_document(config=config, s3_obj=s3_obj)
         assert result is not None
         assert result.name == "file.pdf"
         assert result.size == 1024
@@ -408,7 +411,7 @@ class TestDownloadS3Object:
         mock_client = Mock()
         mock_client.head_object.return_value = {"ContentType": "text/plain"}
         s3_obj = {"Key": "file.txt", "Size": 512, "LastModified": None}
-        result = _run(adapter._download_s3_object(mock_client, config, s3_obj))
+        result = adapter._prepare_document(config=config, s3_obj=s3_obj)
         assert result is not None
         assert "amazonaws.com" in result.metadata["http_url"]
 
@@ -417,7 +420,7 @@ class TestDownloadS3Object:
         mock_client = Mock()
         mock_client.head_object.side_effect = Exception("head error")
         s3_obj = {"Key": "file.txt", "Size": 100, "LastModified": None}
-        result = _run(adapter._download_s3_object(mock_client, config, s3_obj))
+        result = adapter._prepare_document(config=config, s3_obj=s3_obj)
         assert result is not None
         assert result.mimetype == "text/plain"
 
@@ -431,7 +434,7 @@ class TestDownloadS3Object:
             "docpipe.core.operators.ingest.adapters.outbound.sources.s3.adapter.Document",
             side_effect=make_client_error("Error"),
         ):
-            result = _run(adapter._download_s3_object(mock_client, config, s3_obj))
+            result = adapter._prepare_document(config=config, s3_obj=s3_obj)
         assert result is None
 
     def test_exception_returns_none(self, adapter):
@@ -443,5 +446,5 @@ class TestDownloadS3Object:
             "docpipe.core.operators.ingest.adapters.outbound.sources.s3.adapter.Document",
             side_effect=RuntimeError("processing error"),
         ):
-            result = _run(adapter._download_s3_object(mock_client, config, s3_obj))
+            result = adapter._prepare_document(config=config, s3_obj=s3_obj)
         assert result is None

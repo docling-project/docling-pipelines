@@ -276,6 +276,15 @@ chaining with downstream operators.
 
 ---
 
+Source-deletion synchronization is separate from stale-chunk replacement for updated documents. When retention is
+disabled, the execution engine invokes a cleanup phase before processing batches, even with no new embedding rows.
+The operator resolves the original ingest ID to every chunk primary key and verifies removal before acknowledgment.
+Lookup or deletion errors leave pending evidence for a later run; cleanup across multiple destinations is acknowledged
+only after all destinations succeed. Ordinary empty-table indexing still performs no indexing requests.
+OpenSearch cleanup requires a feature mapping for the original ingest `id`; the default mappings supply it. Custom
+mappings must preserve that identity field. Missing identity mappings cause cleanup failure rather than acknowledgment.
+See [source deletion retention](../../reference/GLOBAL_CONFIG.md#retain_deleted_docs) for the complete lifecycle.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

@@ -1,4 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import pathlib
+from collections.abc import Mapping
 from typing import Any
 
 from docpipe.utils.infrastructure.logging import get_logger
@@ -30,12 +34,15 @@ def filter_based_on_extension(
     """Filter based on extension."""
     extn: str = pathlib.Path(file_path).suffix.lower()
     if excluded_extensions and extn in excluded_extensions:
-        logger.info(f"Skipping {file_path} as the file is in the exclusion list")
+        logger.info("Skipping %s as the file is in the exclusion list", file_path)
         return True
 
     if included_extensions and extn not in included_extensions:
         logger.info(
-            f"Skipping {file_path} as the file type is not supported. Extension: '{extn}', Included: {included_extensions}"
+            "Skipping %s as the file type is not supported. Extension: '%s', Included: %s",
+            file_path,
+            extn,
+            included_extensions,
         )
         return True
 
@@ -43,7 +50,7 @@ def filter_based_on_extension(
 
 
 def is_doc_previously_processed(
-    *, previously_processed_docs_dict: dict[str, Any], doc_id: str, modified_time: Any
+    *, previously_processed_docs_dict: Mapping[str, Any], doc_id: str, modified_time: Any
 ) -> bool:
     """Returns True if the doc was processed in the previous job run and the doc is not modified since the last processed time."""
     if not previously_processed_docs_dict:
@@ -116,23 +123,28 @@ def resolve_msgraph_file_id_to_item_id(
                     if item_id:
                         if actual_drive_id:
                             logger.info(
-                                f"Resolved path '{file_id}' via /shares endpoint: item_id={item_id}, drive_id={actual_drive_id}"
+                                "Resolved path '%s' via /shares endpoint: item_id=%s, drive_id=%s",
+                                file_id,
+                                item_id,
+                                actual_drive_id,
                             )
                         else:
                             logger.info(
-                                f"Resolved path '{file_id}' to item ID via /shares endpoint: {item_id} (using provided drive_id)"
+                                "Resolved path '%s' to item ID via /shares endpoint: %s (using provided drive_id)",
+                                file_id,
+                                item_id,
                             )
                             actual_drive_id = drive_id
                         return item_id, actual_drive_id
                 except Exception as shares_error:
-                    logger.debug(f"/shares endpoint failed for path, trying direct path resolution: {shares_error}")
+                    logger.debug("/shares endpoint failed for path, trying direct path resolution: %s", shares_error)
 
             # Fallback: Use path-based API: /drives/{drive-id}/root:/{path}
             # Remove leading slash for API call
             path = file_id.lstrip("/")
             endpoint = f"/drives/{drive_id}/root:/{path}"
 
-            logger.debug(f"Resolving path to item ID using direct path API: {path}")
+            logger.debug("Resolving path to item ID using direct path API: %s", path)
             try:
                 data = rest_client.call_rest_json(
                     method=RestMethod.GET,
@@ -140,16 +152,16 @@ def resolve_msgraph_file_id_to_item_id(
                     headers=headers,
                 )
                 item_id = data.get("id")
-                logger.info(f"Resolved path '{path}' to item ID: {item_id}")
+                logger.info("Resolved path '%s' to item ID: %s", path, item_id)
                 return item_id, drive_id
             except Exception as e:
                 # If path includes common prefixes, try stripping them
                 if strip_path_prefixes:
-                    logger.debug(f"Initial path resolution failed: {e}")
+                    logger.debug("Initial path resolution failed: %s", e)
                     for prefix in strip_path_prefixes:
                         if path.startswith(prefix):
                             stripped_path = path[len(prefix) :]
-                            logger.debug(f"Trying stripped path: {stripped_path}")
+                            logger.debug("Trying stripped path: %s", stripped_path)
                             try:
                                 endpoint = f"/drives/{drive_id}/root:/{stripped_path}"
                                 data = rest_client.call_rest_json(
@@ -158,10 +170,10 @@ def resolve_msgraph_file_id_to_item_id(
                                     headers=headers,
                                 )
                                 item_id = data.get("id")
-                                logger.info(f"Resolved stripped path '{stripped_path}' to item ID: {item_id}")
+                                logger.info("Resolved stripped path '%s' to item ID: %s", stripped_path, item_id)
                                 return item_id, drive_id
                             except Exception as strip_error:
-                                logger.debug(f"Stripped path '{stripped_path}' also failed: {strip_error}")
+                                logger.debug("Stripped path '%s' also failed: %s", stripped_path, strip_error)
                                 continue
                 # If all attempts failed, raise the original error
                 raise e
@@ -190,37 +202,42 @@ def resolve_msgraph_file_id_to_item_id(
                     if item_id:
                         if actual_drive_id:
                             logger.info(
-                                f"Resolved GUID '{file_id}' via /shares endpoint: item_id={item_id}, drive_id={actual_drive_id}"
+                                "Resolved GUID '%s' via /shares endpoint: item_id=%s, drive_id=%s",
+                                file_id,
+                                item_id,
+                                actual_drive_id,
                             )
                         else:
                             logger.info(
-                                f"Resolved GUID '{file_id}' to item ID via /shares endpoint: {item_id} (using provided drive_id)"
+                                "Resolved GUID '%s' to item ID via /shares endpoint: %s (using provided drive_id)",
+                                file_id,
+                                item_id,
                             )
                             actual_drive_id = drive_id
                         return item_id, actual_drive_id
                 except Exception as shares_error:
-                    logger.debug(f"/shares endpoint failed: {shares_error}")
+                    logger.debug("/shares endpoint failed: %s", shares_error)
 
             # Method 2: Try direct access (GUID might be the item ID)
             try:
                 endpoint = f"/drives/{drive_id}/items/{file_id}"
-                logger.debug(f"Trying direct access with GUID: {file_id}")
+                logger.debug("Trying direct access with GUID: %s", file_id)
                 data = rest_client.call_rest_json(
                     method=RestMethod.GET,
                     url=endpoint,
                     headers=headers,
                 )
                 item_id = data.get("id")
-                logger.info(f"Resolved GUID '{file_id}' to item ID via direct access: {item_id}")
+                logger.info("Resolved GUID '%s' to item ID via direct access: %s", file_id, item_id)
                 return item_id, drive_id
             except Exception as direct_error:
-                logger.debug(f"Direct access failed: {direct_error}")
+                logger.debug("Direct access failed: %s", direct_error)
 
             # Method 3: Search for the file using the GUID in the drive
             try:
                 # Use search API to find file by unique ID
                 search_endpoint = f"/drives/{drive_id}/root/search"
-                logger.debug(f"Searching for file with GUID: {file_id}")
+                logger.debug("Searching for file with GUID: %s", file_id)
                 search_data = rest_client.call_rest_json(
                     method=RestMethod.GET,
                     url=search_endpoint,
@@ -232,19 +249,19 @@ def resolve_msgraph_file_id_to_item_id(
                 if items:
                     # Return the first matching item's ID
                     item_id = items[0].get("id")
-                    logger.info(f"Found file via search, GUID '{file_id}' -> item ID: {item_id}")
+                    logger.info("Found file via search, GUID '%s' -> item ID: %s", file_id, item_id)
                     return item_id, drive_id
-                logger.warning(f"No files found in search for GUID: {file_id}")
+                logger.warning("No files found in search for GUID: %s", file_id)
 
             except Exception as search_error:
-                logger.debug(f"Search failed: {search_error}")
+                logger.debug("Search failed: %s", search_error)
 
             # All methods failed
-            logger.error(f"Could not resolve file_id '{file_id}' to item ID using any method")
+            logger.error("Could not resolve file_id '%s' to item ID using any method", file_id)
             return None, None
 
     except Exception as e:
-        logger.error(f"Error resolving file_id '{file_id}' to item ID: {e}", exc_info=True)
+        logger.exception("Error resolving file_id '%s' to item ID: %s", file_id, e)
         return None, None
 
 
@@ -281,7 +298,7 @@ def extract_msgraph_file_id_from_url(url: str) -> str | None:
             file_path = query_params["id"][0]
             # URL decode the path
             file_path = unquote(file_path)
-            logger.debug(f"Extracted file path from 'id' parameter: {file_path}")
+            logger.debug("Extracted file path from 'id' parameter: %s", file_path)
             return file_path
 
         # Method 2: Extract from 'sourcedoc' parameter (Office Online URLs)
@@ -289,14 +306,14 @@ def extract_msgraph_file_id_from_url(url: str) -> str | None:
             sourcedoc = query_params["sourcedoc"][0]
             # Remove curly braces if present (GUID format: {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX})
             guid = sourcedoc.strip("{}")
-            logger.debug(f"Extracted GUID from 'sourcedoc' parameter: {guid}")
+            logger.debug("Extracted GUID from 'sourcedoc' parameter: %s", guid)
             return guid
 
-        logger.warning(f"Could not extract file ID from URL: {url}")
+        logger.warning("Could not extract file ID from URL: %s", url)
         return None
 
     except Exception as e:
-        logger.error(f"Error extracting file ID from URL {url}: {e}", exc_info=True)
+        logger.exception("Error extracting file ID from URL %s: %s", url, e)
         return None
 
 

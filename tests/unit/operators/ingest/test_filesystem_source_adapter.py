@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import asyncio
 import gzip
 import io
@@ -155,7 +158,7 @@ class TestFilesystemSourceAdapter:
         )
         adapter = FilesystemSourceAdapter()
 
-        result = list(adapter._walk_directory(tmp_path, config))
+        result = list(adapter._walk_directory(root_path=tmp_path, config=config))
         assert result == [included]
 
     def test_should_include_file_and_exclusion(self, tmp_path):

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for MilvusBatchProcessor
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -692,3 +695,29 @@ class TestQueryPksByDocIds:
         )
         result = processor.get_chunk_ids_for_documents(doc_ids=["doc_a"])
         assert result == {}
+
+
+def test_milvus_uses_exhausted_iterator_and_closes_it():
+    client = Mock()
+    client.has_collection.return_value = True
+    iterator = client.query_iterator.return_value
+    iterator.next.side_effect = [[{"pk": "one"}], [{"pk": "two"}], []]
+    processor = MilvusBatchProcessor(client=client, collection_name="test")
+    assert processor.resolve_source_chunks(doc_ids=["file"]) == {"file": {"one", "two"}}
+    iterator.close.assert_called_once()
+    assert client.query_iterator.call_args.kwargs["consistency_level"] == "Strong"
+    iterator.next.side_effect = ConnectionError("failed page")
+    with pytest.raises(ConnectionError):
+        processor.resolve_source_chunks(doc_ids=["file"])
+    assert iterator.close.call_count == 2
+
+
+def test_milvus_absence_requires_successful_existence_check():
+    client = Mock()
+    processor = MilvusBatchProcessor(client=client, collection_name="test")
+    client.has_collection.return_value = False
+    assert processor.resolve_source_chunks(doc_ids=["file"]) == {}
+    client.query_iterator.assert_not_called()
+    client.has_collection.side_effect = ConnectionError("unreachable")
+    with pytest.raises(ConnectionError):
+        processor.resolve_source_chunks(doc_ids=["file"])

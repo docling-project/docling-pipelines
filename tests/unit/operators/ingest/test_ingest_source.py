@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for IngestSourceOperator.
 Tests the operator with various providers and configurations using mocks.
 """
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 import pyarrow as pa
 import pytest
 from langchain_core.documents import Document
+from pydantic import BaseModel
+
+from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.adapter import FilesystemSourceAdapter
+from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.config import FilesystemSourceConfig
+from docpipe.core.operators.ingest.domain.models import Document as DiscoveryDocument
 
 
 @pytest.fixture
@@ -1088,28 +1097,6 @@ class TestMicrosoftGraphLoader:
         # (_rest_client) and one for direct downloads (_download_client).
         assert mock_rest_client.call_count == 2
 
-    def test_process_items_splits_files_and_folders(self):
-        from docpipe.core.operators.ingest.ingest_source import MicrosoftGraphLoader
-
-        loader = MicrosoftGraphLoader(
-            drive_id="drive1",
-            client_id="client",
-            client_secret="secret",  # pragma: allowlist secret
-            tenant_id="tenant",
-        )
-        files: list[dict[str, object]] = []
-
-        folder_ids = loader._process_items(
-            items=[
-                {"id": "folder1", "folder": {}},
-                {"id": "file1", "name": "doc.txt"},
-            ],
-            files=files,
-        )
-
-        assert folder_ids == ["folder1"]
-        assert files == [{"id": "file1", "name": "doc.txt"}]
-
     @patch("docpipe.core.operators.ingest.ingest_source.RestClient")
     def test_download_file_uses_content_endpoint_without_download_url(self, mock_rest_client_cls):
         from docpipe.core.operators.ingest.ingest_source import MicrosoftGraphLoader
@@ -2053,3 +2040,215 @@ def test_float_timestamp_does_not_skip_a_changed_document():
     assert metadata["skipped_docs_count"] == 0
     # Preserve the existing integer-only output schema for custom loader metadata.
     assert result["modified_time"] == 0
+
+
+async def discover(*, adapter, config):
+    docs = [doc async for doc in adapter.fetch_documents(config, full_listing=True)]
+    for doc in docs:
+        doc.metadata["processing_eligible"] = adapter._is_processing_eligible(document=doc, config=config)
+    return docs
+
+
+@pytest.mark.asyncio
+async def test_discovery_exhausts_listing_without_selection_filters(tmp_path):
+    for name in ("a.txt", "b.pdf", "c.txt"):
+        (tmp_path / name).write_text(name)
+    config = FilesystemSourceConfig(paths=[str(tmp_path)], file_extensions=[".txt"])
+    adapter = FilesystemSourceAdapter()
+    generator = adapter.fetch_documents(config, full_listing=True)
+    await anext(generator)
+    await generator.aclose()
+    docs = await discover(adapter=adapter, config=config)
+    assert len(docs) == 3
+    assert sum(doc.metadata["processing_eligible"] for doc in docs) == 2
+    assert all(doc.content == b"" for doc in docs)
+    assert config.file_extensions == [".txt"]
+
+
+@pytest.mark.asyncio
+async def test_empty_and_failed_roots(tmp_path):
+    config = FilesystemSourceConfig(paths=[str(tmp_path)])
+    docs = await discover(adapter=FilesystemSourceAdapter(), config=config)
+    assert docs == []
+    config = config.model_copy(update={"paths": [str(tmp_path / "missing")]})
+    with pytest.raises(FileNotFoundError):
+        _ = [doc async for doc in FilesystemSourceAdapter().fetch_documents(config, full_listing=True)]
+
+
+@pytest.mark.asyncio
+async def test_subtree_error_invalidates_discovery(*, tmp_path, monkeypatch):
+    def walk(*args, **kwargs):
+        yield str(tmp_path), [], ["a.txt"]
+        kwargs["onerror"](PermissionError("unreadable subtree"))
+
+    (tmp_path / "a.txt").write_text("a")
+    monkeypatch.setattr("os.walk", walk)
+    with pytest.raises(PermissionError):
+        _ = [
+            doc
+            async for doc in FilesystemSourceAdapter().fetch_documents(
+                FilesystemSourceConfig(paths=[str(tmp_path)]), full_listing=True
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_s3_pages_preserve_filtered_identities(monkeypatch):
+    from docpipe.core.operators.ingest.adapters.outbound.sources.s3.adapter import S3SourceAdapter
+    from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
+
+    adapter = S3SourceAdapter()
+    client = Mock()
+    client.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "a.txt", "Size": 10}]},
+        {"Contents": [{"Key": "b.pdf", "Size": 20}]},
+    ]
+    monkeypatch.setattr(adapter, "_create_s3_client", lambda config: client)
+    config = S3SourceConfig(access_key="test", secret_key="test", bucket="test", max_files=1, file_extensions=[".txt"])
+    docs = await discover(adapter=adapter, config=config)
+    assert [d.id for d in docs] == ["a.txt", "b.pdf"]
+    assert [d.metadata["processing_eligible"] for d in docs] == [True, False]
+    client.get_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_full_s3_listing_fails_on_metadata_conversion_error(monkeypatch):
+    from docpipe.core.operators.ingest.adapters.outbound.sources.s3.adapter import S3SourceAdapter
+    from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
+
+    adapter = S3SourceAdapter()
+    client = Mock()
+    client.get_paginator.return_value.paginate.return_value = [{"Contents": [{"Key": "a.txt", "Size": 10}]}]
+    monkeypatch.setattr(adapter, "_create_s3_client", lambda config: client)
+    monkeypatch.setattr(adapter, "_prepare_document", Mock(return_value=None))
+    config = S3SourceConfig(access_key="test", secret_key="test", bucket="test")
+    with pytest.raises(ValueError, match="Cannot read source metadata"):
+        await discover(adapter=adapter, config=config)
+    client.get_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_google_drive_streams_pages_and_folders(monkeypatch):
+    from docpipe.core.operators.ingest.adapters.outbound.sources.google_drive.adapter import GoogleDriveSourceAdapter
+    from docpipe.core.operators.ingest.adapters.outbound.sources.google_drive.config import GoogleDriveSourceConfig
+
+    adapter = GoogleDriveSourceAdapter()
+    service = Mock()
+    service.files.return_value.list.return_value.execute.side_effect = [
+        {"files": [{"id": "folder", "mimeType": "application/vnd.google-apps.folder"}], "nextPageToken": "next"},
+        {"files": [{"id": "a", "name": "a.txt", "size": "10"}]},
+        {"files": [{"id": "b", "name": "b.txt", "size": "10"}]},
+    ]
+    monkeypatch.setattr(adapter, "_get_drive_service", lambda **kwargs: service)
+    config = GoogleDriveSourceConfig(service_account_json={"test": "test"}, folder_id="root", max_files=1)
+    docs = await discover(adapter=adapter, config=config)
+    assert [d.id for d in docs] == ["a", "b"]
+    assert service.files.return_value.list.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_box_pages_are_exhausted(monkeypatch):
+    from docpipe.core.operators.ingest.adapters.outbound.sources.box.adapter import BoxSourceAdapter
+    from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import BoxSourceConfig
+
+    adapter = BoxSourceAdapter()
+    client = Mock()
+    client.folders.get_folder_items.side_effect = [
+        SimpleNamespace(entries=[SimpleNamespace(id="a", type="file")], next_marker="next"),
+        SimpleNamespace(entries=[SimpleNamespace(id="b", type="file")], next_marker=None),
+    ]
+    monkeypatch.setattr(adapter, "_get_box_client", lambda config: client)
+    monkeypatch.setattr(
+        adapter,
+        "_prepare_document",
+        lambda **kwargs: DiscoveryDocument(
+            id=str(client.files.get_file_by_id.call_count), name="a.txt", source_url="a", content=b""
+        ),
+    )
+    docs = await discover(adapter=adapter, config=BoxSourceConfig(max_files=1))
+    assert len(docs) == 2
+    assert client.folders.get_folder_items.call_args.kwargs["marker"] == "next"
+    assert client.folders.get_folder_items.call_args.kwargs["usemarker"] is True
+
+
+@pytest.mark.asyncio
+async def test_dropbox_continuation_ignores_processing_cap(monkeypatch):
+    from datetime import UTC, datetime
+
+    from dropbox.files import FileMetadata
+
+    from docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.adapter import DropboxSourceAdapter
+    from docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.config import DropboxSourceConfig
+
+    def entry(name):
+        return FileMetadata(
+            name=name,
+            id=name,
+            size=1,
+            rev="0123456789abc",
+            client_modified=datetime(2026, 1, 1, tzinfo=UTC),
+            server_modified=datetime(2026, 1, 1, tzinfo=UTC),
+            path_lower="/" + name,
+        )
+
+    client = Mock()
+    client.files_list_folder.return_value = SimpleNamespace(entries=[entry("a.txt")], has_more=True, cursor="next")
+    client.files_list_folder_continue.return_value = SimpleNamespace(entries=[entry("b.pdf")], has_more=False)
+    adapter = DropboxSourceAdapter()
+    monkeypatch.setattr(adapter, "_get_dropbox_client", lambda **kwargs: client)
+    docs = await discover(adapter=adapter, config=DropboxSourceConfig(access_token="test", max_files=1))
+    assert len(docs) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["onedrive", "sharepoint"])
+async def test_graph_discovery_uses_streamed_metadata(*, provider, monkeypatch):
+    import importlib
+
+    adapter_module = importlib.import_module(
+        f"docpipe.core.operators.ingest.adapters.outbound.sources.{provider}.adapter"
+    )
+    adapter = getattr(
+        adapter_module, "OneDriveSourceAdapter" if provider == "onedrive" else "SharePointSourceAdapter"
+    )()
+
+    class Config(BaseModel):
+        drive_id: str = "drive"
+        document_library_id: str = "drive"
+        client_id: str = "client"
+        client_secret: str = "test"
+        tenant_id: str = "tenant"
+        file_path: str | None = None
+        folder_path: str | None = None
+        recursive: bool = True
+
+    loader = Mock()
+    loader.iter_metadata.return_value = iter([{"id": "a"}, {"id": "b"}])
+    monkeypatch.setattr(adapter, "_get_loader", lambda **kwargs: loader)
+    monkeypatch.setattr(
+        adapter,
+        f"_build_{provider}_document",
+        lambda **kwargs: DiscoveryDocument(
+            id=kwargs["item"]["id"], name="a.txt", source_url=kwargs["item"]["id"], content=b""
+        ),
+    )
+    docs = await discover(adapter=adapter, config=Config())
+    assert len(docs) == 2
+    loader._list_files.assert_not_called()
+
+
+def test_graph_metadata_pagination_and_failure():
+    from docpipe.core.operators.ingest.ingest_source import MicrosoftGraphLoader
+
+    loader = object.__new__(MicrosoftGraphLoader)
+    loader.drive_id, loader.recursive, loader._token = "drive", True, "token"
+    loader._rest_client = Mock()
+    loader._rest_client.call_rest_json.side_effect = [
+        {"value": [{"id": "folder", "folder": {}}], "@odata.nextLink": "next"},
+        {"value": [{"id": "a"}]},
+        {"value": [{"id": "b"}]},
+    ]
+    assert [item["id"] for item in loader.iter_metadata()] == ["a", "b"]
+    loader._rest_client.call_rest_json.side_effect = PermissionError("denied")
+    with pytest.raises(PermissionError):
+        list(loader.iter_metadata())

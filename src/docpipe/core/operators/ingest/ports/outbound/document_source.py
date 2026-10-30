@@ -1,7 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document source port - Interface for fetching documents from external sources."""
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from fnmatch import fnmatch
+from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -30,18 +35,62 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
     SOURCE_DESCRIPTION: str | None = None  # Brief description
     SOURCE_VERSION: str = "1.0.0"  # Semantic version
 
+    @staticmethod
+    def _listing_config(*, config: Any, full_listing: bool) -> Any:
+        """Remove processing filters only for a complete source inventory."""
+        if not full_listing:
+            return config
+        update: dict[str, Any] = {
+            "max_files": None,
+            "file_extensions": [],
+            "exclude_patterns": [],
+            "max_file_size_mb": None,
+            "skip_hidden_files": False,
+            "skip_empty_files": False,
+        }
+        return config.model_copy(update={k: v for k, v in update.items() if hasattr(config, k)})
+
+    @staticmethod
+    def _is_processing_eligible(*, document: Document, config: Any) -> bool:
+        """Apply processing filters after recording source presence."""
+        extension = document.extension or Path(document.name).suffix
+        extension = f".{extension.lstrip('.')}".lower() if extension else ""
+        extensions = getattr(config, "file_extensions", [])
+        if extensions and extension not in extensions:
+            return False
+        paths = [document.name, document.source_url]
+        for key in ("absolute_path", "relative_path", "key", "path"):
+            path = str(document.metadata.get(key) or "")
+            if path:
+                paths.extend([path, *(str(parent) for parent in Path(path).parents)])
+        if any(fnmatch(path, pattern) for path in paths for pattern in getattr(config, "exclude_patterns", [])):
+            return False
+        size_limit = getattr(config, "max_file_size_mb", None)
+        if size_limit and (document.size or 0) > size_limit * 1024 * 1024:
+            return False
+        if getattr(config, "skip_empty_files", False) and document.size == 0:
+            return False
+        return not (
+            getattr(config, "skip_hidden_files", False)
+            and any(
+                part.startswith(".") and part not in (".", "..")
+                for part in Path(document.metadata.get("key", document.name)).parts
+            )
+        )
+
     @classmethod
     def bind_file_reference(cls, *, provider_config: dict[str, Any], file_reference: str) -> None:
         """Update provider settings for a file event, or reject unsupported providers."""
         raise NotImplementedError(f"Source adapter '{cls.SOURCE_NAME or cls.__name__}' does not support file events")
 
     @abstractmethod
-    async def fetch_documents(self, config: Any) -> AsyncGenerator[Document, None]:
+    def fetch_documents(self, config: Any, *, full_listing: bool = False) -> AsyncGenerator[Document, None]:
         """
         Fetch documents from the source.
 
         Args:
             config: Type-safe configuration (Pydantic model specific to this source)
+            full_listing: Stream all identities without processing filters or caps; listing errors must propagate.
 
         Yields:
             Document: Domain documents one at a time

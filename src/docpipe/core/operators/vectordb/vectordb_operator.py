@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Generic Vector Database Operator
 """
@@ -9,6 +12,7 @@ from pydantic import ValidationError
 
 from docpipe.core.constants.constants import AttributeDataTypes, DocpipeConstants, ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.incremental_metadata import get_incremental_update_service
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
@@ -236,6 +240,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
 
         Important: If ANY chunk of a document fails to index, the entire document is marked as failed.
         """
+        if self.config.get(DocpipeConstants.SOURCE_DELETION_CLEANUP):
+            return self._cleanup_missing_sources(table=table if table is not None else pa.table({}))
         unique_doc_ids, doc_hash_to_id, doc_hash_to_name, file_ids = self._build_doc_id_mappings(table=table)
         total_unique_docs = len(unique_doc_ids) if unique_doc_ids else table.num_rows
 
@@ -261,6 +267,39 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 self.adapter.close()
             except Exception as e:
                 logger.warning("Failed to close adapter: %s", e, extra=self.common_log_arguments)
+
+    def _cleanup_missing_sources(self, *, table: pa.Table) -> tuple[list[pa.Table], dict[str, Any]]:
+        """Remove missing source chunks independently of embedding/indexing batches."""
+        service = get_incremental_update_service()
+        scope = self.context_id or self.job_id or ""
+        pending = sorted(service.get_soft_deleted_doc_ids(job_id=scope))
+        metadata = self.create_base_metadata(total_docs_count=0)
+        acknowledged: set[str] = set()
+        deleted_chunks = 0
+        try:
+            if self.config.get(DocpipeConstants.RETAIN_DELETED_DOCS, True):
+                return [table], metadata
+            for start in range(0, len(pending), 100):
+                batch = pending[start : start + 100]
+                chunks = self.adapter.resolve_source_chunks(doc_ids=batch)
+                keys = [key for values in chunks.values() for key in values]
+                if keys:
+                    for offset in range(0, len(keys), 1000):
+                        self.adapter.delete_documents_by_ids(keys[offset : offset + 1000])
+                    self.adapter.refresh_index()
+                remaining = self.adapter.resolve_source_chunks(doc_ids=batch)
+                done = {doc_id for doc_id in batch if not remaining.get(doc_id)}
+                acknowledged.update(done)
+                deleted_chunks += sum(len(chunks.get(doc_id, set())) for doc_id in done)
+            metadata[Metrics.Internal.SOURCE_DELETION_RESULT] = sorted(acknowledged)
+            metadata[Metrics.External.DELETED_DOC_COUNT] = len(acknowledged)
+            metadata["deleted_chunk_count"] = deleted_chunks
+            metadata[Metrics.External.PROCESSED_DOCS] = 0
+            if acknowledged != set(pending):
+                raise RuntimeError("Some source document chunks could not be deleted")
+            return [table], metadata
+        finally:
+            self.adapter.close()
 
     def _transform_internal(
         self,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Dropbox source adapter using the official Dropbox Python SDK."""
 
 import hashlib
@@ -194,8 +197,11 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
     # Port implementation
     # ------------------------------------------------------------------
 
-    async def fetch_documents(self, config: DropboxSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: DropboxSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """Fetch document metadata from Dropbox, streaming results as they are listed."""
+        config = self._listing_config(config=config, full_listing=full_listing)
         try:
             client = self._get_dropbox_client(config=config)
 
