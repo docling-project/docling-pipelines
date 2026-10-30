@@ -315,16 +315,27 @@ class TestIndexTypes:
 
     def test_all_index_types_defined(self):
         """Test that all index types are properly defined"""
+        # CPU dense
         assert MilvusIndexTypes.FLAT == "FLAT"
         assert MilvusIndexTypes.IVF_FLAT == "IVF_FLAT"
         assert MilvusIndexTypes.IVF_SQ8 == "IVF_SQ8"
         assert MilvusIndexTypes.IVF_PQ == "IVF_PQ"
         assert MilvusIndexTypes.HNSW == "HNSW"
+        assert MilvusIndexTypes.HNSW_SQ == "HNSW_SQ"
+        assert MilvusIndexTypes.HNSW_PQ == "HNSW_PQ"
+        assert MilvusIndexTypes.HNSW_PRQ == "HNSW_PRQ"
         assert MilvusIndexTypes.DISKANN == "DISKANN"
         assert MilvusIndexTypes.AUTOINDEX == "AUTOINDEX"
+        # GPU dense
+        assert MilvusIndexTypes.GPU_FLAT == "GPU_FLAT"
+        assert MilvusIndexTypes.GPU_IVF_FLAT == "GPU_IVF_FLAT"
+        assert MilvusIndexTypes.GPU_IVF_PQ == "GPU_IVF_PQ"
+        assert MilvusIndexTypes.GPU_CAGRA == "GPU_CAGRA"
+        assert MilvusIndexTypes.GPU_BRUTE_FORCE == "GPU_BRUTE_FORCE"
+        # Sparse
         assert MilvusIndexTypes.SPARSE_INVERTED_INDEX == "SPARSE_INVERTED_INDEX"
         assert MilvusIndexTypes.SPARSE_WAND == "SPARSE_WAND"
-        assert len(MilvusIndexTypes.ALL_TYPES) == 9
+        assert len(MilvusIndexTypes.ALL_TYPES) == 17
 
     def test_default_parameters_for_all_types(self):
         """Test that default parameters exist for all index types"""
