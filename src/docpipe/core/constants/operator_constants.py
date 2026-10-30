@@ -424,6 +424,13 @@ class OperatorConstants:
         SPARSE_VECTOR_FIELD_NAME: Final[str] = "sparse_vector"
         DENSE_VECTOR_FIELD_NAME: Final[str] = "vector"
 
+        # GPU and Quantization Configuration
+        QUANTIZATION: Final[str] = "quantization"
+        QUANTIZATION_PARAMETERS: Final[str] = "quantization_parameters"
+        SEARCH_PARAMETERS: Final[str] = "search_parameters"
+        USE_GPU: Final[str] = "use_gpu"
+        GPU_DEVICE_ID: Final[str] = "gpu_device_id"
+
         # VectorDB Metrics and Configuration
         METRIC_TYPE: Final[str] = "metric_type"
         SEMANTIC_CONFIG: Final[str] = "semantic_config"

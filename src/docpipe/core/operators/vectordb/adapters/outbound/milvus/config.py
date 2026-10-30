@@ -74,15 +74,24 @@ class MilvusConfig(BaseModel):
         "IVF_SQ8",
         "IVF_PQ",
         "HNSW",
+        "HNSW_SQ",
+        "HNSW_PQ",
+        "HNSW_PRQ",
         "DISKANN",
         "AUTOINDEX",
+        "GPU_FLAT",
+        "GPU_IVF_FLAT",
+        "GPU_IVF_PQ",
+        "GPU_CAGRA",
+        "GPU_BRUTE_FORCE",
         "SPARSE_INVERTED_INDEX",
         "SPARSE_WAND",
     ] = Field(
         default="HNSW",
         description=(
             "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
-            "Use HNSW for standalone/remote deployments."
+            "Use HNSW, HNSW_SQ, HNSW_PQ for standalone/remote deployments, or "
+            "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ for GPU-accelerated deployments."
         ),
     )
     metric_type: Literal["L2", "IP", "COSINE", "BM25"] = Field(
@@ -92,6 +101,39 @@ class MilvusConfig(BaseModel):
     index_parameters: dict = Field(
         default_factory=dict,
         description='Index-specific parameters (e.g. {"M": 16, "efConstruction": 256} for HNSW).',
+    )
+    quantization: Literal["SQ8", "PQ", "PRQ", "NONE"] | None = Field(
+        default=None,
+        description=(
+            "Vector quantization method to reduce memory consumption. "
+            "Options: 'SQ8' (Scalar Quantization, ~75% memory reduction), "
+            "'PQ' (Product Quantization, up to 90%+ memory reduction), "
+            "'PRQ' (Product Residual Quantization), or None."
+        ),
+    )
+    quantization_parameters: dict = Field(
+        default_factory=dict,
+        description=(
+            "Parameters for vector quantization, e.g. {'m': 16, 'nbits': 8} for PQ or {'sq_type': 'SQ8'} for SQ."
+        ),
+    )
+    search_parameters: dict = Field(
+        default_factory=dict,
+        description=(
+            "Search and query-time parameters (e.g. {'nprobe': 16} for IVF indexes, "
+            "{'search_width': 4, 'itopk_size': 64} for GPU_CAGRA, or {'ef': 64} for HNSW)."
+        ),
+    )
+    use_gpu: bool | None = Field(
+        default=None,
+        description=(
+            "Whether to enable GPU acceleration. If true, auto-upgrades compatible CPU indexes "
+            "to GPU equivalents if a GPU is available. If None, GPU is used when a GPU index_type is selected."
+        ),
+    )
+    gpu_device_id: int | None = Field(
+        default=None,
+        description="Target GPU device index (e.g. 0). Defaults to first available GPU.",
     )
     add_sparse_vector: bool = Field(
         default=False,

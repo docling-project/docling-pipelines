@@ -30,36 +30,96 @@ class MilvusMetricTypes:
 class MilvusIndexTypes:
     """Index types supported by Milvus"""
 
-    # Dense vector index types
+    # Dense vector index types - CPU
     FLAT: str = "FLAT"
     IVF_FLAT: str = "IVF_FLAT"
     IVF_SQ8: str = "IVF_SQ8"
     IVF_PQ: str = "IVF_PQ"
     HNSW: str = "HNSW"
+    HNSW_SQ: str = "HNSW_SQ"
+    HNSW_PQ: str = "HNSW_PQ"
+    HNSW_PRQ: str = "HNSW_PRQ"
     DISKANN: str = "DISKANN"
     AUTOINDEX: str = "AUTOINDEX"
+
+    # Dense vector index types - GPU
+    GPU_FLAT: str = "GPU_FLAT"
+    GPU_IVF_FLAT: str = "GPU_IVF_FLAT"
+    GPU_IVF_PQ: str = "GPU_IVF_PQ"
+    GPU_CAGRA: str = "GPU_CAGRA"
+    GPU_BRUTE_FORCE: str = "GPU_BRUTE_FORCE"
 
     # Sparse vector index types
     SPARSE_INVERTED_INDEX: str = "SPARSE_INVERTED_INDEX"
     SPARSE_WAND: str = "SPARSE_WAND"
 
-    ALL_DENSE_TYPES: ClassVar[list[str]] = [FLAT, IVF_FLAT, IVF_SQ8, IVF_PQ, HNSW, DISKANN, AUTOINDEX]
+    ALL_CPU_DENSE_TYPES: ClassVar[list[str]] = [
+        FLAT,
+        IVF_FLAT,
+        IVF_SQ8,
+        IVF_PQ,
+        HNSW,
+        HNSW_SQ,
+        HNSW_PQ,
+        HNSW_PRQ,
+        DISKANN,
+        AUTOINDEX,
+    ]
+    ALL_GPU_TYPES: ClassVar[list[str]] = [
+        GPU_FLAT,
+        GPU_IVF_FLAT,
+        GPU_IVF_PQ,
+        GPU_CAGRA,
+        GPU_BRUTE_FORCE,
+    ]
+    ALL_DENSE_TYPES: ClassVar[list[str]] = ALL_CPU_DENSE_TYPES + ALL_GPU_TYPES
     ALL_SPARSE_TYPES: ClassVar[list[str]] = [SPARSE_INVERTED_INDEX, SPARSE_WAND]
     ALL_TYPES: ClassVar[list[str]] = ALL_DENSE_TYPES + ALL_SPARSE_TYPES
     # Milvus Lite only supports FLAT for dense vectors
     LITE_SUPPORTED_DENSE_TYPES: ClassVar[list[str]] = [FLAT]
 
 
+# Fallback mapping from GPU index types to their optimal CPU counterparts
+GPU_TO_CPU_FALLBACK_MAP: dict[str, str] = {
+    MilvusIndexTypes.GPU_CAGRA: MilvusIndexTypes.HNSW,
+    MilvusIndexTypes.GPU_IVF_FLAT: MilvusIndexTypes.IVF_FLAT,
+    MilvusIndexTypes.GPU_IVF_PQ: MilvusIndexTypes.IVF_PQ,
+    MilvusIndexTypes.GPU_FLAT: MilvusIndexTypes.FLAT,
+    MilvusIndexTypes.GPU_BRUTE_FORCE: MilvusIndexTypes.FLAT,
+}
+
+# Optional upgrade mapping from CPU index types to GPU counterparts when use_gpu is explicitly enabled
+CPU_TO_GPU_UPGRADE_MAP: dict[str, str] = {
+    MilvusIndexTypes.HNSW: MilvusIndexTypes.GPU_CAGRA,
+    MilvusIndexTypes.IVF_FLAT: MilvusIndexTypes.GPU_IVF_FLAT,
+    MilvusIndexTypes.IVF_PQ: MilvusIndexTypes.GPU_IVF_PQ,
+    MilvusIndexTypes.FLAT: MilvusIndexTypes.GPU_FLAT,
+}
+
 # Default parameters for index types
 INDEX_DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
-    # Dense vector index parameters
+    # Dense vector index parameters - CPU
     MilvusIndexTypes.FLAT: {},
     MilvusIndexTypes.IVF_FLAT: {"nlist": 128},
     MilvusIndexTypes.IVF_SQ8: {"nlist": 128},
     MilvusIndexTypes.IVF_PQ: {"nlist": 128, "m": 8, "nbits": 8},
     MilvusIndexTypes.HNSW: {"M": 16, "efConstruction": 200},
+    MilvusIndexTypes.HNSW_SQ: {"M": 16, "efConstruction": 200, "sq_type": "SQ8"},
+    MilvusIndexTypes.HNSW_PQ: {"M": 16, "efConstruction": 200, "m": 16, "nbits": 8},
+    MilvusIndexTypes.HNSW_PRQ: {"M": 16, "efConstruction": 200, "m": 16, "nbits": 8},
     MilvusIndexTypes.DISKANN: {},
     MilvusIndexTypes.AUTOINDEX: {},
+    # Dense vector index parameters - GPU
+    MilvusIndexTypes.GPU_FLAT: {},
+    MilvusIndexTypes.GPU_IVF_FLAT: {"nlist": 1024},
+    MilvusIndexTypes.GPU_IVF_PQ: {"nlist": 1024, "m": 16, "nbits": 8},
+    MilvusIndexTypes.GPU_CAGRA: {
+        "intermediate_graph_degree": 64,
+        "graph_degree": 32,
+        "build_algo": "IVF_PQ",
+        "cache_dataset_on_device": False,
+    },
+    MilvusIndexTypes.GPU_BRUTE_FORCE: {},
     # Sparse vector index parameters
     MilvusIndexTypes.SPARSE_INVERTED_INDEX: {"drop_ratio_build": 0.2},
     MilvusIndexTypes.SPARSE_WAND: {"drop_ratio_build": 0.2},
@@ -76,7 +136,149 @@ class MilvusIndexManager:
     - Schema mapping generation
     - Index-specific parameter management
     - Vector dimension detection
+    - Automatic GPU detection and graceful CPU fallback
+    - Quantization resolution and configuration
     """
+
+    @staticmethod
+    def detect_gpu_available(*, device_id: int | None = None) -> bool:
+        """Detect whether GPU resources are available on the host system.
+
+        Probes environment overrides first (DOCPIPE_DISABLE_GPU, DOCPIPE_FORCE_GPU),
+        followed by torch.cuda, pynvml, and nvidia-smi.
+
+        Args:
+            device_id: Optional zero-based GPU device index to probe.
+
+        Returns:
+            True if GPU resources are available, False otherwise.
+        """
+        import os
+
+        # Check explicit overrides
+        if os.getenv("DOCPIPE_DISABLE_GPU", "").strip().lower() in ("true", "1", "yes"):
+            return False
+        if os.getenv("DOCPIPE_FORCE_GPU", "").strip().lower() in ("true", "1", "yes"):
+            return True
+
+        # 1. Probe PyTorch CUDA
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                if device_id is not None:
+                    return 0 <= device_id < torch.cuda.device_count()
+                return torch.cuda.device_count() > 0
+        except (ImportError, Exception):
+            pass
+
+        # 2. Probe pynvml if installed
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            count = pynvml.nvmlDeviceGetCount()
+            pynvml.nvmlShutdown()
+            if count > 0:
+                if device_id is not None:
+                    return 0 <= device_id < count
+                return True
+        except (ImportError, Exception):
+            pass
+
+        # 3. Probe nvidia-smi command
+        try:
+            import shutil
+            import subprocess  # nosec B404
+
+            if shutil.which("nvidia-smi") is not None:
+                res = subprocess.run(  # nosec B603 B607
+                    ["nvidia-smi", "-L"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                if res.returncode == 0 and "GPU " in res.stdout:
+                    if device_id is not None:
+                        gpu_lines = [line for line in res.stdout.strip().split("\n") if line.startswith("GPU ")]
+                        return 0 <= device_id < len(gpu_lines)
+                    return True
+        except Exception:  # nosec B110
+            pass
+
+        return False
+
+    @staticmethod
+    def resolve_quantized_index_type(
+        *,
+        base_index_type: str,
+        quantization: str | None,
+    ) -> str:
+        """Resolve base index type and quantization setting into the appropriate index algorithm.
+
+        Args:
+            base_index_type: Base index type (e.g. 'HNSW', 'IVF_FLAT', 'GPU_IVF_FLAT').
+            quantization: Quantization option ('SQ8', 'PQ', 'PRQ', 'NONE', or None).
+
+        Returns:
+            Resolved index type string.
+        """
+        if not quantization or quantization.upper() in ("NONE", ""):
+            return base_index_type
+
+        q_upper = quantization.upper()
+        if q_upper == "SQ8":
+            if base_index_type == MilvusIndexTypes.HNSW:
+                return MilvusIndexTypes.HNSW_SQ
+            if base_index_type in (MilvusIndexTypes.IVF_FLAT, MilvusIndexTypes.FLAT):
+                return MilvusIndexTypes.IVF_SQ8
+        elif q_upper == "PQ":
+            if base_index_type == MilvusIndexTypes.HNSW:
+                return MilvusIndexTypes.HNSW_PQ
+            if base_index_type in (MilvusIndexTypes.IVF_FLAT, MilvusIndexTypes.FLAT):
+                return MilvusIndexTypes.IVF_PQ
+            if base_index_type in (MilvusIndexTypes.GPU_IVF_FLAT, MilvusIndexTypes.GPU_FLAT):
+                return MilvusIndexTypes.GPU_IVF_PQ
+        elif q_upper == "PRQ":
+            if base_index_type == MilvusIndexTypes.HNSW:
+                return MilvusIndexTypes.HNSW_PRQ
+
+        return base_index_type
+
+    @staticmethod
+    def adapt_fallback_parameters(
+        *,
+        gpu_index_type: str,
+        cpu_index_type: str,
+        current_parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Adapt index parameters when falling back from a GPU index to a CPU index.
+
+        Args:
+            gpu_index_type: The original GPU index type.
+            cpu_index_type: The fallback CPU index type.
+            current_parameters: Custom or default index parameters.
+
+        Returns:
+            Adapted parameters dict suitable for the CPU index type.
+        """
+        adapted = INDEX_DEFAULT_PARAMETERS.get(cpu_index_type, {}).copy()
+        user_params = current_parameters.copy()
+
+        # Remove CAGRA specific parameters that have no meaning on CPU HNSW
+        cagra_keys = {
+            "intermediate_graph_degree",
+            "graph_degree",
+            "build_algo",
+            "cache_dataset_on_device",
+            "adapt_for_cpu",
+        }
+        for k in cagra_keys:
+            user_params.pop(k, None)
+
+        adapted.update(user_params)
+        return adapted
 
     def __init__(
         self,
@@ -92,6 +294,11 @@ class MilvusIndexManager:
         auto_id: bool = False,
         add_sparse_vector: bool = False,
         is_lite: bool = False,
+        quantization: str | None = None,
+        quantization_parameters: dict[str, Any] | None = None,
+        search_parameters: dict[str, Any] | None = None,
+        use_gpu: bool | None = None,
+        gpu_device_id: int | None = None,
     ) -> None:
         """
         Initialize the index manager.
@@ -99,7 +306,7 @@ class MilvusIndexManager:
         Args:
             client: Milvus client instance
             collection_name: Name of the collection
-            index_type: Index type (FLAT, IVF_FLAT, HNSW, etc.)
+            index_type: Index type (FLAT, IVF_FLAT, HNSW, GPU_CAGRA, etc.)
             metric_type: Similarity metric (L2, IP, COSINE)
             index_parameters: Custom index-specific parameters
             available_features: Feature configuration
@@ -107,12 +314,18 @@ class MilvusIndexManager:
             primary_key_field: Name of primary key field
             auto_id: Whether to auto-generate IDs
             add_sparse_vector: Whether to use sparse vectors instead of dense vectors
+            is_lite: Whether running against Milvus Lite (.db file)
+            quantization: Quantization option ('SQ8', 'PQ', 'PRQ', 'NONE')
+            quantization_parameters: Quantization tuning parameters
+            search_parameters: Search-time parameters (e.g. nprobe, search_width)
+            use_gpu: Explicit GPU acceleration flag
+            gpu_device_id: Target GPU device index
         """
         self.client = client
         self.collection_name = collection_name
-        self.index_type = index_type
+        self.requested_index_type = index_type
         self.metric_type = metric_type
-        self.index_parameters = index_parameters or {}
+        self.index_parameters = (index_parameters or {}).copy()
         self.available_features = available_features or {}
         self.feature_mappings: list[dict[str, str]] = feature_mappings or []
         self._mapping_dict: dict[str, str] = build_mapping_dict(self.feature_mappings)
@@ -120,6 +333,68 @@ class MilvusIndexManager:
         self.auto_id = auto_id
         self.add_sparse_vector = add_sparse_vector
         self.is_lite = is_lite
+        self.quantization = quantization
+        self.quantization_parameters = quantization_parameters or {}
+        self.search_parameters = search_parameters or {}
+        self.use_gpu = use_gpu
+        self.gpu_device_id = gpu_device_id
+        self.gpu_fallback_triggered: bool = False
+        self.gpu_fallback_reason: str | None = None
+
+        # 1. Merge quantization parameters if provided
+        if self.quantization_parameters:
+            self.index_parameters.update(self.quantization_parameters)
+
+        # 2. Resolve quantized index type if quantization option is provided
+        resolved_index_type = self.resolve_quantized_index_type(
+            base_index_type=index_type,
+            quantization=quantization,
+        )
+        self.index_type = resolved_index_type
+
+        # 3. Handle explicit use_gpu flag
+        if self.use_gpu is True and self.index_type in CPU_TO_GPU_UPGRADE_MAP:
+            if not self.is_lite:
+                self.index_type = CPU_TO_GPU_UPGRADE_MAP[self.index_type]
+        elif self.use_gpu is False and self.index_type in GPU_TO_CPU_FALLBACK_MAP:
+            self.index_type = GPU_TO_CPU_FALLBACK_MAP[self.index_type]
+
+        # 4. Enforce Milvus Lite restrictions on GPU index types
+        if self.is_lite and self.index_type in MilvusIndexTypes.ALL_GPU_TYPES:
+            raise DocpipeException(
+                message=(
+                    f"MilvusDB Error: GPU index type '{self.index_type}' is not supported by Milvus Lite. "
+                    "Milvus Lite runs as an embedded local database without GPU acceleration. "
+                    "Set index_type to 'FLAT' or use a standalone/remote Milvus deployment with GPU."
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+
+        # 5. Automatic GPU detection and graceful fallback
+        if not self.is_lite and self.index_type in MilvusIndexTypes.ALL_GPU_TYPES:
+            has_gpu = self.detect_gpu_available(device_id=self.gpu_device_id)
+            if not has_gpu:
+                fallback_type = GPU_TO_CPU_FALLBACK_MAP.get(self.index_type, MilvusIndexTypes.FLAT)
+                logger.warning(
+                    "GPU not available for index type '%s'. Falling back to CPU index '%s'.",
+                    self.index_type,
+                    fallback_type,
+                )
+                self.index_parameters = self.adapt_fallback_parameters(
+                    gpu_index_type=self.index_type,
+                    cpu_index_type=fallback_type,
+                    current_parameters=self.index_parameters,
+                )
+                self.index_type = fallback_type
+                self.gpu_fallback_triggered = True
+                self.gpu_fallback_reason = "No GPU detected during initialization"
+            else:
+                logger.info(
+                    "GPU acceleration enabled for index_type '%s' (device_id=%s)",
+                    self.index_type,
+                    self.gpu_device_id if self.gpu_device_id is not None else "default",
+                )
 
         self._validate_index_type()
         self._validate_metric_type()
@@ -360,7 +635,7 @@ class MilvusIndexManager:
         try:
             return self.client.has_collection(collection_name=self.collection_name)  # type: ignore[return-value]
         except Exception as e:
-            logger.error(f"Error checking collection existence: {e}")
+            logger.error("Error checking collection existence: %s", e)
             return False
 
     def validate_existing_collection(self, *, dimension_mapping: dict[str, int]) -> None:
@@ -470,7 +745,10 @@ class MilvusIndexManager:
             # Log schema field details
             field_names = [f.name for f in fields]
             logger.info(
-                f"[MILVUS COLLECTION] Creating collection '{self.collection_name}' with {len(fields)} fields: {field_names}"
+                "[MILVUS COLLECTION] Creating collection '%s' with %s fields: %s",
+                self.collection_name,
+                len(fields),
+                field_names,
             )
 
             # Create collection schema
@@ -536,8 +814,10 @@ class MilvusIndexManager:
                 )
 
                 logger.info(
-                    f"[MILVUS COLLECTION] ✓ Sparse vector index created on '{sparse_vector_field_name}' "
-                    f"(index_type={MilvusIndexTypes.SPARSE_INVERTED_INDEX}, metric={MilvusMetricTypes.BM25})"
+                    "[MILVUS COLLECTION] Sparse vector index created on '%s' (index_type=%s, metric=%s)",
+                    sparse_vector_field_name,
+                    MilvusIndexTypes.SPARSE_INVERTED_INDEX,
+                    MilvusMetricTypes.BM25,
                 )
 
             # Create dense vector indexes for ALL vector fields (both sparse and dense modes)
@@ -569,8 +849,10 @@ class MilvusIndexManager:
             )
 
             logger.info(
-                f"[MILVUS COLLECTION] ✓ Dense vector indexes created for {len(dimension_mapping)} field(s) "
-                f"(index_type={self.index_type}, metric={self.metric_type})"
+                "[MILVUS COLLECTION] Dense vector indexes created for %s field(s) (index_type=%s, metric=%s)",
+                len(dimension_mapping),
+                self.index_type,
+                self.metric_type,
             )
 
         except Exception as e:
@@ -621,9 +903,9 @@ class MilvusIndexManager:
         try:
             if self.collection_exists():
                 self.client.drop_collection(collection_name=self.collection_name)
-                logger.info(f"Dropped collection '{self.collection_name}'")
+                logger.info("Dropped collection '%s'", self.collection_name)
             else:
-                logger.warning(f"Collection '{self.collection_name}' does not exist, nothing to drop")
+                logger.warning("Collection '%s' does not exist, nothing to drop", self.collection_name)
         except Exception as e:
             raise DocpipeException(
                 message=f"MilvusDB Error: Failed to drop collection '{self.collection_name}': {e}",
