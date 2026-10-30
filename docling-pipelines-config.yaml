@@ -17,6 +17,39 @@ assets_management:
       # Database path for DuckDB storage
       database_path: data/duckdb/document_sets.duckdb
 
+  # To keep document set / document library metadata in PostgreSQL (needed when
+  # running more than one API replica or worker against the same assets),
+  # replace the two blocks above with the following. Any connection key left out
+  # falls back to DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD; the password is
+  # required (YAML or DOCPIPE_POSTGRES_PASSWORD). Tables are created on first use
+  # in the given schema. The document set data tables themselves still live in
+  # DuckDB at database_path (operator option data_backend).
+  # Env overrides: DOCUMENTSET_REPOSITORY_TYPE=postgres, DOCUMENTLIBRARY_REPOSITORY_TYPE=postgres
+#  documentset_repository:
+#    type: postgres
+#    config:
+#      database_path: data/duckdb/document_sets.duckdb  # data tables (DuckDB)
+#      postgres:
+#        host: localhost
+#        port: 5432
+#        database: docpipe
+#        user: docpipe_user
+#        # password: set DOCPIPE_POSTGRES_PASSWORD instead of committing it here
+#        schema: docpipe_assets
+#        pool_size: 5
+#        max_overflow: 10
+#        pool_timeout: 30
+#
+#  documentlibrary_repository:
+#    type: postgres
+#    config:
+#      postgres:
+#        host: localhost
+#        port: 5432
+#        database: docpipe
+#        user: docpipe_user
+#        schema: docpipe_assets
+
 projects_management:
   project_repository:
     type: local

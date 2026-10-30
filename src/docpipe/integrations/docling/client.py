@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
 Docling Serve Client for document processing via REST API.
@@ -163,7 +163,7 @@ class DoclingServeClient:
         # Error handler — use register() to add new error types as needed
         self.error_handler = DoclingServeErrorHandler(base_url=self.base_url)
 
-        logger.info(f"Initialized DoclingServeClient with base_url={self.base_url}")
+        logger.info("Initialized DoclingServeClient with base_url=%s", self.base_url)
 
     def _build_options(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
         """
@@ -255,12 +255,12 @@ class DoclingServeClient:
                 raise FileNotFoundError(f"File not found: {file_path}")
             content = path.read_bytes()
             actual_filename = path.name
-            logger.info(f"Submitting document: {file_path}")
+            logger.info("Submitting document: %s", file_path)
         else:
             # binary_content is guaranteed to be bytes here due to validation above
             content = binary_content  # type: ignore[assignment]
             actual_filename = filename if filename else OperatorConstants.Extraction.DEFAULT_FALLBACK_FILENAME
-            logger.info(f"Submitting document from binary content with filename: {actual_filename}")
+            logger.info("Submitting document from binary content with filename: %s", actual_filename)
 
         # Submit request using multipart/form-data
         endpoint = "/v1/convert/file/async"
@@ -337,7 +337,7 @@ class DoclingServeClient:
                 error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
             )
 
-        logger.info(f"Document submitted successfully, task_id={task_id}, params={list(data.keys())}")
+        logger.info("Document submitted successfully, task_id=%s, params=%s", task_id, list(data.keys()))
         return task_id
 
     def _poll_for_completion(
@@ -366,7 +366,7 @@ class DoclingServeClient:
         interval = poll_interval if poll_interval is not None else self.poll_interval
         start_time = time.time()
 
-        logger.info(f"Polling status for task_id={task_id} with timeout={timeout}s")
+        logger.info("Polling status for task_id=%s with timeout=%ss", task_id, timeout)
 
         while True:
             elapsed = time.time() - start_time
@@ -383,20 +383,22 @@ class DoclingServeClient:
                 task_status = result.get("task_status", "unknown").upper()
                 file_label = filename if filename is not None else "unknown"
 
-                logger.info(f"Polling task {task_id} for file '{file_label}': status={task_status}")
+                logger.info("Polling task %s for file '%s': status=%s", task_id, file_label, task_status)
 
                 if task_status == "SUCCESS":
-                    logger.info(f"Task {task_id} completed successfully")
+                    logger.info("Task %s completed successfully", task_id)
                     return result
 
                 if task_status == "FAILURE":
                     error_msg = result.get("error_message", "Unknown error")
                     logger.error(
-                        f"Task {task_id} failed with error: {error_msg}. "
-                        f"If this is an 'Internal processing error', check that the processing "
-                        f"parameters sent to docling-serve are supported by this deployment "
-                        f"(e.g. ocr_engine, table_mode, pdf_backend). "
-                        f"See the submission log above for the params that were sent.",
+                        "Task %s failed with error: %s. "
+                        "If this is an 'Internal processing error', check that the processing "
+                        "parameters sent to docling-serve are supported by this deployment "
+                        "(e.g. ocr_engine, table_mode, pdf_backend). "
+                        "See the submission log above for the params that were sent.",
+                        task_id,
+                        error_msg,
                         extra={"task_id": task_id, "full_response": result},
                     )
                     raise DocpipeException(
@@ -406,7 +408,7 @@ class DoclingServeClient:
                     )
 
                 # Continue polling for PENDING/STARTED/unknown statuses
-                logger.debug(f"Task {task_id} status: {task_status}, continuing to poll...")
+                logger.debug("Task %s status: %s, continuing to poll...", task_id, task_status)
                 time.sleep(interval)
 
             except DocpipeException as e:
@@ -414,7 +416,7 @@ class DoclingServeClient:
                 if e.error_code != ErrorCode.CONNECTION_ERROR:
                     raise
                 # For connection errors, log and retry
-                logger.warning(f"Connection error during polling: {e}, retrying...")
+                logger.warning("Connection error during polling: %s, retrying...", e)
                 time.sleep(interval)
 
     def poll_status(
@@ -478,8 +480,8 @@ class DoclingServeClient:
             # Only retry on 404 errors (task not found during pod transitions)
             if e.status_code == 404:
                 logger.warning(
-                    f"Task not found (404) at {endpoint}. "
-                    f"This may occur during pod restarts or HPA scaling. Retrying..."
+                    "Task not found (404) at %s. This may occur during pod restarts or HPA scaling. Retrying...",
+                    endpoint,
                 )
                 raise  # Let decorator handle retry
             # For other errors, raise immediately without retry
@@ -499,7 +501,7 @@ class DoclingServeClient:
             DocpipeException: For HTTP or network errors
         """
         endpoint = f"/v1/result/{task_id}"
-        logger.info(f"Retrieving result for task_id={task_id}")
+        logger.info("Retrieving result for task_id=%s", task_id)
 
         result = self.rest_client.call_rest_json(
             method=RestMethod.GET,
@@ -507,7 +509,7 @@ class DoclingServeClient:
             headers=self.custom_headers,
         )
 
-        logger.info(f"Result retrieved successfully for task_id={task_id}")
+        logger.info("Result retrieved successfully for task_id=%s", task_id)
         return result
 
     def process_document(
@@ -555,9 +557,9 @@ class DoclingServeClient:
             timeout=timeout,
             filename=filename,
         )
-        logger.info(f"Final Status before: {task_id}, {final_response}")
+        logger.info("Final Status before: %s, %s", task_id, final_response)
         final_status = str(final_response.get("task_status", "")).upper()
-        logger.info(f"Final Status: {task_id}, {final_status}")
+        logger.info("Final Status: %s, %s", task_id, final_status)
         if final_status != "SUCCESS":
             error_message = final_response.get("error_message", "Unknown Error")
             raise DocpipeException(

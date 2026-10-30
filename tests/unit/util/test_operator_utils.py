@@ -1226,8 +1226,28 @@ def test_sanitize_doc_id_for_filename_multiple_slashes():
 
 
 # ---------------------------------------------------------------------------
-# DocumentConverter singleton cache tests
+# DocumentConverter pool key / lease tests
 # ---------------------------------------------------------------------------
+
+
+def _docling_format_options(*, do_ocr: bool = True, ocr_options=None, ocr_lang=None) -> dict:
+    """Build a real Docling format_options dict (no models are loaded)."""
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import ImageFormatOption, PdfFormatOption
+
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.do_ocr = do_ocr
+    if ocr_options is not None:
+        pipeline_options.ocr_options = ocr_options
+    if ocr_lang is not None:
+        pipeline_options.ocr_options.lang = ocr_lang
+    return {
+        "format_options": {
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+            InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options),
+        }
+    }
 
 
 class TestConverterCacheKey:
@@ -1257,7 +1277,8 @@ class TestConverterCacheKey:
         opt.__class__.__name__ = "PdfFormatOption"
         key = _converter_cache_key({"format_options": {"pdf": opt}})
         assert key != "default"
-        assert len(key) == 32  # MD5 hex digest length
+        assert len(key) == 64  # SHA-256 hex digest length
+        int(key, 16)
 
     def test_same_config_produces_same_key(self):
         from unittest.mock import MagicMock
@@ -1283,107 +1304,122 @@ class TestConverterCacheKey:
         key_vlm = _converter_cache_key({"format_options": {"pdf": opt_vlm}})
         assert key_pdf != key_vlm
 
+    def test_equal_values_built_independently_share_key(self):
+        """Two operator instances building the same Docling options get the same key."""
+        from docpipe.core.operators.operator_utils import _converter_cache_key
 
-class TestGetOrCreateConverter:
-    """Tests for _get_or_create_converter() — cache-miss, cache-hit, multi-config isolation."""
+        assert _converter_cache_key(_docling_format_options()) == _converter_cache_key(_docling_format_options())
 
-    def setup_method(self):
-        """Clear the thread-local cache before each test for isolation."""
-        import docpipe.core.operators.operator_utils as ou
+    def test_same_option_class_different_values_produce_different_keys(self):
+        """Regression: the old key only used option *type* names, so these collided."""
+        from docling.datamodel.pipeline_options import EasyOcrOptions
 
-        if hasattr(ou._thread_local_converters, "cache"):
-            ou._thread_local_converters.cache.clear()
+        from docpipe.core.operators.operator_utils import _converter_cache_key
 
-    def teardown_method(self):
-        """Clear the thread-local cache after each test so other tests start clean."""
-        import docpipe.core.operators.operator_utils as ou
+        keys = {
+            _converter_cache_key(_docling_format_options()),
+            _converter_cache_key(_docling_format_options(do_ocr=False)),
+            _converter_cache_key(_docling_format_options(ocr_options=EasyOcrOptions())),
+            _converter_cache_key(_docling_format_options(ocr_options=EasyOcrOptions(), ocr_lang=["de"])),
+        }
+        assert len(keys) == 4
 
-        if hasattr(ou._thread_local_converters, "cache"):
-            ou._thread_local_converters.cache.clear()
+    def test_different_ocr_engines_produce_different_keys(self):
+        from docling.datamodel.pipeline_options import (
+            EasyOcrOptions,
+            RapidOcrOptions,
+            TesseractCliOcrOptions,
+            TesseractOcrOptions,
+        )
 
-    def test_cache_miss_creates_default_converter(self):
-        """First call with no config constructs a new DocumentConverter."""
+        from docpipe.core.operators.operator_utils import _converter_cache_key
+
+        engines = [EasyOcrOptions(), RapidOcrOptions(), TesseractOcrOptions(), TesseractCliOcrOptions()]
+        keys = {_converter_cache_key(_docling_format_options(ocr_options=engine)) for engine in engines}
+        assert len(keys) == len(engines)
+
+
+class TestLeaseConverter:
+    """Tests for _lease_converter() — pooled, exclusive DocumentConverter reuse."""
+
+    def test_lease_creates_default_converter(self):
+        """First lease with no config constructs a new DocumentConverter with no args."""
         from unittest.mock import MagicMock, patch
 
-        mock_converter = MagicMock()
-        with patch(
-            "docling.document_converter.DocumentConverter",
-            return_value=mock_converter,
-        ) as mock_cls:
-            from docpipe.core.operators.operator_utils import _get_or_create_converter
+        from docpipe.core.operators.operator_utils import _lease_converter
 
-            result = _get_or_create_converter(None)
+        mock_converter = MagicMock()
+        with patch("docling.document_converter.DocumentConverter", return_value=mock_converter) as mock_cls:
+            with _lease_converter(None) as converter:
+                assert converter is mock_converter
 
         mock_cls.assert_called_once_with()
-        assert result is mock_converter
 
-    def test_cache_hit_does_not_recreate_converter(self):
-        """Second call with the same config returns the cached instance without constructing again."""
+    def test_converter_reused_after_release(self):
+        """A released converter is reused by the next lease instead of being rebuilt."""
         from unittest.mock import MagicMock, patch
 
-        mock_converter = MagicMock()
-        with patch(
-            "docling.document_converter.DocumentConverter",
-            return_value=mock_converter,
-        ) as mock_cls:
-            from docpipe.core.operators.operator_utils import _get_or_create_converter
+        from docpipe.core.operators.operator_utils import _lease_converter
 
-            first = _get_or_create_converter(None)
-            second = _get_or_create_converter(None)
+        with patch("docling.document_converter.DocumentConverter", side_effect=lambda **_: MagicMock()) as mock_cls:
+            with _lease_converter(None) as first:
+                pass
+            with _lease_converter(None) as second:
+                pass
 
-        # DocumentConverter constructed exactly once
         assert mock_cls.call_count == 1
         assert first is second
 
-    def test_different_configs_produce_independent_cache_entries(self):
-        """Distinct format_options produce separate cache entries."""
+    def test_nested_leases_get_distinct_converters(self):
+        """A converter is never handed to two holders at once."""
         from unittest.mock import MagicMock, patch
 
-        mock_default = MagicMock(name="default_converter")
-        mock_vlm = MagicMock(name="vlm_converter")
-        side_effects = [mock_default, mock_vlm]
+        from docpipe.core.operators.operator_utils import _lease_converter
 
-        opt = MagicMock()
-        opt.__class__.__name__ = "VlmPipelineOption"
-        vlm_config = {"format_options": {"pdf": opt}}
-
-        with patch(
-            "docling.document_converter.DocumentConverter",
-            side_effect=side_effects,
-        ) as mock_cls:
-            from docpipe.core.operators.operator_utils import _get_or_create_converter
-
-            default_converter = _get_or_create_converter(None)
-            vlm_converter = _get_or_create_converter(vlm_config)
+        with patch("docling.document_converter.DocumentConverter", side_effect=lambda **_: MagicMock()) as mock_cls:
+            with _lease_converter(None) as first, _lease_converter(None) as second:
+                assert first is not second
 
         assert mock_cls.call_count == 2
-        assert default_converter is mock_default
-        assert vlm_converter is mock_vlm
-        assert default_converter is not vlm_converter
 
-    def test_cache_populates_for_config_with_format_options(self):
-        """A converter built with format_options is stored under the correct key."""
+    def test_different_configs_use_independent_converters(self):
+        """Distinct format_options produce separate converters, each built with its options."""
         from unittest.mock import MagicMock, patch
 
-        import docpipe.core.operators.operator_utils as ou
+        from docpipe.core.operators.operator_utils import _lease_converter
 
-        opt = MagicMock()
-        opt.__class__.__name__ = "PdfFormatOption"
-        config = {"format_options": {"pdf": opt}}
+        no_ocr = _docling_format_options(do_ocr=False)
+        with patch("docling.document_converter.DocumentConverter", side_effect=lambda **_: MagicMock()) as mock_cls:
+            with _lease_converter(None) as default_converter:
+                pass
+            with _lease_converter(no_ocr) as no_ocr_converter:
+                pass
+            with _lease_converter(_docling_format_options(do_ocr=False)) as no_ocr_again:
+                pass
 
-        mock_converter = MagicMock()
-        with patch(
-            "docling.document_converter.DocumentConverter",
-            return_value=mock_converter,
-        ):
-            from docpipe.core.operators.operator_utils import _converter_cache_key, _get_or_create_converter
+        assert mock_cls.call_count == 2
+        assert default_converter is not no_ocr_converter
+        assert no_ocr_again is no_ocr_converter
+        assert mock_cls.call_args_list[1].kwargs == {"format_options": no_ocr["format_options"]}
 
-            _get_or_create_converter(config)
-            expected_key = _converter_cache_key(config)
+    def test_extract_content_uses_supplied_converter_without_pool(self):
+        """An explicitly supplied converter bypasses the pool entirely."""
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
 
-        assert hasattr(ou._thread_local_converters, "cache")
-        assert expected_key in ou._thread_local_converters.cache
-        assert ou._thread_local_converters.cache[expected_key] is mock_converter
+        doc = MagicMock()
+        doc.export_to_markdown.return_value = "# hi"
+        doc.pages = {1: None}
+        supplied = MagicMock()
+        supplied.convert.return_value = SimpleNamespace(document=doc)
+
+        with patch("docling.document_converter.DocumentConverter") as mock_cls:
+            result = OperatorUtils.extract_content(file_path="a.pdf", binary_content=b"%PDF", converter=supplied)
+
+        mock_cls.assert_not_called()
+        supplied.convert.assert_called_once()
+        assert result[OperatorConstants.Extraction.SUCCESS] is True
+        assert result[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] == "# hi"
 
 
 # ---------------------------------------------------------------------------
@@ -2080,11 +2116,11 @@ def test_build_doc_metadata_invalid_json_metadata_ignored():
 
 
 # ---------------------------------------------------------------------------
-# _get_or_create_converter — docling unavailable path
+# _lease_converter — docling unavailable path
 # ---------------------------------------------------------------------------
 
 
-def test_get_or_create_converter_docling_unavailable_raises():
+def test_lease_converter_docling_unavailable_raises():
     """Raises RuntimeError when docling is not installed."""
     from unittest.mock import patch
 
@@ -2092,33 +2128,28 @@ def test_get_or_create_converter_docling_unavailable_raises():
 
     with patch.object(ou, "_DOCLING_AVAILABLE", False):
         with pytest.raises(RuntimeError, match="docling is not installed"):
-            ou._get_or_create_converter(None)
+            with ou._lease_converter(None):
+                pass
 
 
-def test_get_or_create_converter_with_format_options():
+def test_lease_converter_with_format_options():
     """Constructs converter with format_options when provided in config."""
     from unittest.mock import MagicMock, patch
 
     import docpipe.core.operators.operator_utils as ou
 
-    if hasattr(ou._thread_local_converters, "cache"):
-        ou._thread_local_converters.cache.clear()
-    try:
-        mock_converter = MagicMock()
-        mock_cls = MagicMock(return_value=mock_converter)
+    mock_converter = MagicMock()
+    mock_cls = MagicMock(return_value=mock_converter)
 
-        opt = MagicMock()
-        opt.__class__.__name__ = "PdfFormatOption"
-        config = {"format_options": {"pdf": opt}}
+    opt = MagicMock()
+    opt.__class__.__name__ = "PdfFormatOption"
+    config = {"format_options": {"pdf": opt}}
 
-        with patch("docling.document_converter.DocumentConverter", mock_cls):
-            result = ou._get_or_create_converter(config)
+    with patch("docling.document_converter.DocumentConverter", mock_cls):
+        with ou._lease_converter(config) as result:
+            assert result is mock_converter
 
-        mock_cls.assert_called_once_with(format_options={"pdf": opt})
-        assert result is mock_converter
-    finally:
-        if hasattr(ou._thread_local_converters, "cache"):
-            ou._thread_local_converters.cache.clear()
+    mock_cls.assert_called_once_with(format_options={"pdf": opt})
 
 
 # ---------------------------------------------------------------------------
@@ -2169,7 +2200,7 @@ def test_extract_content_docling_unavailable_returns_error():
     from unittest.mock import patch
 
     with patch(
-        "docpipe.core.operators.operator_utils._get_or_create_converter",
+        "docpipe.core.operators.operator_utils._lease_converter",
         side_effect=RuntimeError("docling not installed"),
     ):
         result = OperatorUtils.extract_content(

@@ -56,6 +56,10 @@ node_config = {
 
 **File filtering** is also controlled by the top-level `include_filter` / `exclude_filter` operator parameters (comma-separated extension list, e.g. `"pdf,docx,txt"`).
 
+**Archive expansion:** The filesystem provider expands top-level `.zip`, `.tar`, `.tar.gz`, `.tgz`, and `.gz` files. Each regular archive entry is emitted as an independent row with a synthetic `zip://...#entry` source and the metadata fields `archive_depth=1`, `source_archive`, and `archive_entry`. Archive paths and member names are URL-encoded in that URI. Entry bytes are read lazily in memory when a downstream operator requests them; no temporary files are written.
+
+Archive expansion is limited permanently to depth 1. An archive stored inside another archive is emitted as an opaque row and is never opened recursively. Regular filesystem rows carry `archive_depth=0`. Add the archive extension to `include_filter` when using an explicit filter (for example, `"zip,pdf,txt"`).
+
 ### 2. Amazon S3 and S3-Compatible Storage
 Ingest documents from Amazon S3 buckets and S3-compatible storage services (IBM Cloud Object Storage, MinIO, etc.).
 
