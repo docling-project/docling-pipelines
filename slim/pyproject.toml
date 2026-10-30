@@ -62,7 +62,7 @@ dependencies = [
     "pandas==2.3.3",
     "passlib[bcrypt]==1.7.4",
     "pillow==13.0.0",
-    "polars==1.32.3",
+    "polars==2.1.0",
     "prefect==3.8.4",
     "psycopg2-binary==2.9.12",
     "pyarrow==26.0.0",
