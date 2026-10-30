@@ -381,8 +381,8 @@ jobs:
           path: coverage.xml
           retention-days: 14
 
-  storage-integration-test:
-    name: Storage Integration Tests (PostgreSQL 16)
+  postgres-integration-test:
+    name: PostgreSQL Integration Tests (PostgreSQL 16)
     runs-on: ubuntu-latest
     needs: lint
     if: >
@@ -439,6 +439,10 @@ jobs:
           uv pip install --python .venv/bin/python -e ".[dev]"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
-      - name: Run Storage Integration Tests
+      - name: Run PostgreSQL Integration Tests
         # -rs lists skips, so a PostgreSQL run that was skipped is visible in the log.
-        run: python -m pytest tests/integration/storage -m integration -v -rs
+        run: >-
+          python -m pytest -m integration -v -rs
+          tests/integration/storage
+          tests/integration/assets
+          tests/integration/test_ededup_postgres.py
