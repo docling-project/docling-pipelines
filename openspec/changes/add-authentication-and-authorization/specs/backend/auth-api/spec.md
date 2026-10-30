@@ -150,6 +150,21 @@ A local administrator login SHALL be available when both `DOCPIPE_AUTH_BOOTSTRAP
 - **WHEN** the bootstrap administrator logs in while LDAP is also configured
 - **THEN** an audit entry records the login
 
+### Requirement: Bootstrap administrator safeguards
+The bootstrap authenticator SHALL compare the username with `secrets.compare_digest` and SHALL still run the bcrypt check when the username does not match, so response time does not reveal the username. The API SHALL log a warning at startup while the bootstrap administrator is configured. The lockout SHALL be keyed on client address and username, so remote attempts cannot lock out the administrator from other addresses.
+
+#### Scenario: Warning while active
+- **WHEN** the API starts with both bootstrap variables set
+- **THEN** a warning states that the bootstrap administrator is active
+
+#### Scenario: Wrong username
+- **WHEN** the posted username does not match the bootstrap username
+- **THEN** the response is 401 after the same bcrypt work as a wrong password
+
+#### Scenario: Remote lockout attempt
+- **WHEN** another address sends 5 bad passwords for the bootstrap username
+- **THEN** the administrator can still log in from a different address
+
 ### Requirement: Bootstrap secrets are not shipped as defaults
 The Docker Compose files SHALL NOT contain a default bootstrap password hash. They SHALL reference variables that the operator supplies.
 
