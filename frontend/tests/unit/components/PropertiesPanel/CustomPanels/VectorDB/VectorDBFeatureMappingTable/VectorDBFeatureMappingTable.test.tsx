@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../../utils/renderWithProviders';
 import { VectorDBFeatureMappingTable } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDBFeatureMappingTable';
 import type { FeatureMappingItem } from '@/types';
 
@@ -10,7 +11,7 @@ const makeRows = (): FeatureMappingItem[] => [
 
 describe('VectorDBFeatureMappingTable', () => {
   it('renders without crashing with empty rows', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={[]}
         onColumnChange={vi.fn()}
@@ -22,7 +23,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders feature names in the table', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -35,7 +36,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders the Add feature mappings button', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -48,7 +49,7 @@ describe('VectorDBFeatureMappingTable', () => {
 
   it('clicking Add feature mappings calls onAddClick', () => {
     const onAddClick = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -61,7 +62,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders column TextInput for each row', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -75,7 +76,7 @@ describe('VectorDBFeatureMappingTable', () => {
 
   it('changing column TextInput calls onColumnChange', () => {
     const onColumnChange = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={onColumnChange}
@@ -93,7 +94,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders WarningFilled icon for mandatory rows', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -107,7 +108,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('does not render WarningFilled icon for non-mandatory rows', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={[{ feature: 'embedding', description: 'Vector', column: 'vec', isMandatory: false }]}
         onColumnChange={vi.fn()}
@@ -121,7 +122,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders the Filter table search input', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -133,7 +134,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('search filter narrows rows by feature name', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -148,7 +149,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('search filter narrows rows by description', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -163,7 +164,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('search filter clears when empty string entered', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -180,7 +181,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders table headers: Feature, Feature description, Column', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -193,7 +194,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('mandatory row has disabled checkbox', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -211,7 +212,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('non-mandatory row has enabled checkbox', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -229,7 +230,7 @@ describe('VectorDBFeatureMappingTable', () => {
 
   it('clicking Remove batch action calls onRemoveSelected with selected non-mandatory row ids', () => {
     const onRemoveSelected = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -256,7 +257,7 @@ describe('VectorDBFeatureMappingTable', () => {
 
   it('selecting mandatory row does not include it in Remove action', () => {
     const onRemoveSelected = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
@@ -281,7 +282,7 @@ describe('VectorDBFeatureMappingTable', () => {
   });
 
   it('renders description text in table cells', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTable
         rows={makeRows()}
         onColumnChange={vi.fn()}
