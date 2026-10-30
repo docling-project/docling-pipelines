@@ -59,6 +59,7 @@ exceeds the model token limit.
 | `provider` | string | **Yes** | `"litellm"` | Provider: `huggingface`, `litellm`, `watsonx` |
 | `provider_config` | object | Varies | — | Provider-specific config including `model_id` (see below) |
 | `embeddings_column` | string | No | `"embeddings"` | Output column name for generated embeddings |
+| `quantization` | string | No | `"none"` | `"none"`, `"binary"` or `"ubinary"`. `binary` and `ubinary` are equivalent: 1-bit sign thresholding (`value > 0`) packed 8 dimensions per byte. Best with zero-centred (e.g. normalized) embeddings; the output feature becomes `vector_binary` and its dimension is counted in bits |
 | `doc_column` | string | No | `"content"` | Input column containing text to embed |
 | `overlap_ratio` | float | No | `0.2` | Overlap ratio when auto-chunking long text (0.0–0.5) |
 | `token_limit` | integer | No | `8192` | Max token limit; text beyond this is auto-chunked and averaged |
@@ -106,6 +107,7 @@ All input columns are preserved. The operator appends:
 | Column | PyArrow Type | Description |
 |---|---|---|
 | `embeddings` (or `embeddings_column`) | `list<float32>` | Dense embedding vector. For chunked input, a list of vectors (one per chunk). |
+| `embeddings` with `quantization: binary` | `binary` | Packed-bit vector (`dimension / 8` bytes). For chunked input, a list of byte strings. |
 
 ---
 

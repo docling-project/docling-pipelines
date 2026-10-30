@@ -16,11 +16,14 @@ from docpipe.core.operators.vectordb.adapters.outbound.opensearch.client import 
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.index_manager import OpenSearchIndexManager
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
     detect_vector_dimension,
     generate_positional_pk,
+    is_binary_vector_feature,
 )
 
 logger = get_logger(__name__)
@@ -226,6 +229,29 @@ class OpenSearchAdapter(VectorStorePort):
     def validate_existing_schema(self, *, dimension_mapping: dict[str, int]) -> None:
         """Validate existing OpenSearch index schema against runtime vector dimensions."""
         self.index_manager.validate_existing_index(dimension_mapping=dimension_mapping)
+
+    def validate_vector_feature_types(self, *, feature_types: dict[str, str | None]) -> None:
+        """Reject binary vector features, which the OpenSearch adapter cannot index.
+
+        Args:
+            feature_types: Mapping of input feature name to its propagated feature type.
+
+        Raises:
+            DocpipeException: An upstream operator emits a binary vector feature.
+        """
+        binary_features = sorted(
+            name for name, ftype in feature_types.items() if is_binary_vector_feature(feature_config={"type": ftype})
+        )
+        if binary_features:
+            raise DocpipeException(
+                message=(
+                    f"OpenSearch Error: Binary vector features are not supported (found: {', '.join(binary_features)}). "
+                    "Remove 'quantization' from the embeddings operator or use a provider that supports binary vectors "
+                    "(e.g. Milvus)."
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
 
     def index_exists(self) -> bool:
         """Check if the OpenSearch index exists.

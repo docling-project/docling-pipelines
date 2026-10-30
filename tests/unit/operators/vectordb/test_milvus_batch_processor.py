@@ -190,6 +190,40 @@ class TestDocumentPreparation:
 
         assert "text" not in doc
 
+    def test_prepare_document_with_binary_vector(self, mock_client):
+        """Test that binary vector bytes are preserved for vector fields."""
+        features = {
+            "doc_id": {"name": "Document ID", "available_for_vector_db": True, "type": "string"},
+            "binary_embeddings": {
+                "name": "Binary Embeddings",
+                "available_for_vector_db": True,
+                "type": "vector_binary",
+            },
+        }
+        mappings = [
+            {"feature_name": "doc_id", "mapped_column_name": "pk"},
+            {"feature_name": "binary_embeddings", "mapped_column_name": "vector_embeddings"},
+        ]
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=features,
+            feature_mappings=mappings,
+            embeddings_column="binary_embeddings",
+        )
+
+        binary_data = b"\x01\x02\x03\x04"
+        row_data = {
+            "doc_id": "doc1",
+            "binary_embeddings": binary_data,
+        }
+
+        doc = processor.prepare_document(row_data=row_data)
+
+        assert doc["pk"] == "doc1"
+        assert doc["vector_embeddings"] == binary_data
+        assert isinstance(doc["vector_embeddings"], bytes)
+
     def test_prepare_document_converts_numpy_arrays(self, mock_client, basic_features, feature_mappings):
         """Test that numpy arrays are converted to lists"""
         import numpy as np

@@ -16,7 +16,11 @@ import pytest
 from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.operators.functional.embeddings import EmbeddingsOperator
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
-from docpipe.utils.core.memmap_file_utils import load_embeddings_from_memmap_file, write_chunks_to_file
+from docpipe.utils.core.memmap_file_utils import (
+    load_embeddings_from_memmap_file,
+    read_embedding_metadata,
+    write_chunks_to_file,
+)
 
 _ADAPTER_FACTORY_PATH = "docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter"
 _FEATURES = ["id", "name", "content", "chunked_content"]
@@ -158,6 +162,22 @@ class TestChunkedContentFormats:
             [11.0, 1.0, 0.0],
             [6.0, 1.0, 0.0],
         ]
+
+    def test_file_backed_chunks_with_binary_quantization_store_packed_bits(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(DocpipeConstants.DOCPIPE_DATA_PATH, str(tmp_path / "data"))
+        chunks_file = tmp_path / "chunks0.bin"
+        write_chunks_to_file(chunks_list=[{"chunk": "first chunk"}, {"chunk": "second"}], filepath=str(chunks_file))
+        table = _table(content=["c0"], chunked_content=[{DocpipeConstants.CHUNKS_MEMMAP_FILE: str(chunks_file)}])
+
+        tables, metadata = _operator(quantization="binary").transform(table)
+
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
+        reference = tables[0].column("embeddings").to_pylist()[0]
+        embeddings_file = reference[DocpipeConstants.EMBEDDINGS_MEMMAP_FILE]
+        # _EchoAdapter vectors are [len, 1.0, 0.0] -> bits 110 padded to one byte (0b11000000)
+        assert load_embeddings_from_memmap_file(filepath=embeddings_file) == [b"\xc0", b"\xc0"]
+        # dimension is reported in bits (bytes * 8), not bytes
+        assert read_embedding_metadata(filepath=embeddings_file) == 8
 
 
 class TestDocumentContent:

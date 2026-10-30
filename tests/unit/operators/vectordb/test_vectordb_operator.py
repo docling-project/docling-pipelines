@@ -6,10 +6,11 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from docpipe.core.constants.constants import Metrics
+from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb import VectorDBOperator
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
+from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.config import get_opensearch_config
 from docpipe.utils.operators.vectordb_utils import generate_composite_pk, generate_positional_pk
@@ -1950,3 +1951,41 @@ class TestIndexAndRecordResultsFailedChunks:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestVectorDBOperatorValidateFeatureTypes:
+    """validate() forwards the propagated feature types to the adapter and reports its rejection."""
+
+    @staticmethod
+    def _validate(*, feature_types: dict | None, adapter_error: Exception | None = None) -> tuple[list, MagicMock]:
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "test_index", "host": "localhost"},
+        }
+        if feature_types is not None:
+            config[DocpipeConstants.VALIDATION_FEATURE_TYPES] = feature_types
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearch"):
+            operator = VectorDBOperator(config)
+        operator.adapter = MagicMock()
+        operator.adapter.get_config_schema.return_value = OpenSearchConfig
+        operator.adapter.validate_vector_feature_types.side_effect = adapter_error
+        errors: list = []
+        operator.validate(errors=errors, warnings=[], available_features=[])
+        return errors, operator.adapter
+
+    def test_feature_types_are_forwarded_to_adapter(self):
+        types = {"embeddings": "vector_binary"}
+        errors, adapter = self._validate(feature_types=types)
+        adapter.validate_vector_feature_types.assert_called_once_with(feature_types=types)
+        assert not errors
+
+    def test_adapter_rejection_is_reported_as_error(self):
+        errors, adapter = self._validate(
+            feature_types={"embeddings": "vector"}, adapter_error=DocpipeException("bad index")
+        )
+        assert "bad index" in errors
+        adapter.validate_vector_feature_types.assert_called_once()
+
+    def test_adapter_not_called_without_feature_types(self):
+        _, adapter = self._validate(feature_types=None)
+        adapter.validate_vector_feature_types.assert_not_called()

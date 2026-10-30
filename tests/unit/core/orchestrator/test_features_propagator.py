@@ -674,3 +674,85 @@ class TestExtractOperatorEntityMode:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestEmbeddingsQuantizationSpecialCase:
+    """Embeddings feature is typed vector_binary only when quantization packs bits."""
+
+    @pytest.fixture
+    def propagator(self):
+        """Create FeaturePropagator whose embeddings operator exposes a float `vector` feature."""
+        with patch.object(FeaturePropagator, "__init__", lambda x: None):
+            prop = FeaturePropagator()
+            prop.operator_metadata = Mock()
+            prop.operator_metadata.get_features = Mock(
+                return_value={
+                    OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT: _make_feature_def(
+                        description="Embeddings",
+                        available_for_vector_db=True,
+                        type_=OperatorConstants.Types.TYPE_VECTOR,
+                    ),
+                }
+            )
+            return prop
+
+    def _propagate(self, propagator, operator_config: dict):
+        return propagator.propagate_features(
+            node_id="embed-node",
+            operator_short_name=OperatorConstants.Operators.EMBEDDINGS,
+            operator_config=operator_config,
+            input_features={"content": _make_feature_def()},
+            global_config={},
+            parent_results=[],
+        )
+
+    @pytest.mark.parametrize("quantization", ["binary", "ubinary", "BINARY"])
+    def test_binary_quantization_types_embeddings_as_vector_binary(self, propagator, quantization):
+        result = self._propagate(propagator, {OperatorConstants.Config.QUANTIZATION: quantization})
+        feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
+        assert feature.type == OperatorConstants.Types.TYPE_VECTOR_BINARY
+
+    @pytest.mark.parametrize("config", [{}, {OperatorConstants.Config.QUANTIZATION: "none"}])
+    def test_no_quantization_keeps_dense_vector_type(self, propagator, config):
+        result = self._propagate(propagator, config)
+        feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
+        assert feature.type == OperatorConstants.Types.TYPE_VECTOR
+
+    def test_downstream_node_declaring_plain_vector_keeps_upstream_binary_type(self, propagator):
+        """A consumer (e.g. vectordb) declaring `vector` must not erase an upstream `vector_binary`."""
+        input_features = {
+            OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT: _make_feature_def(
+                description="Embeddings",
+                available_for_vector_db=True,
+                type_=OperatorConstants.Types.TYPE_VECTOR_BINARY,
+            ),
+        }
+        result = propagator.propagate_features(
+            node_id="vectordb-node",
+            operator_short_name=OperatorConstants.Operators.VECTORDB,
+            operator_config={},
+            input_features=input_features,
+            global_config={},
+            parent_results=[],
+        )
+        feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
+        assert feature.type == OperatorConstants.Types.TYPE_VECTOR_BINARY
+
+    def test_downstream_node_declaring_plain_vector_keeps_dense_type(self, propagator):
+        input_features = {
+            OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT: _make_feature_def(
+                description="Embeddings",
+                available_for_vector_db=True,
+                type_=OperatorConstants.Types.TYPE_VECTOR,
+            ),
+        }
+        result = propagator.propagate_features(
+            node_id="vectordb-node",
+            operator_short_name=OperatorConstants.Operators.VECTORDB,
+            operator_config={},
+            input_features=input_features,
+            global_config={},
+            parent_results=[],
+        )
+        feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
+        assert feature.type == OperatorConstants.Types.TYPE_VECTOR

@@ -14,6 +14,7 @@ from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
 
 logger = get_logger()
 
@@ -96,9 +97,9 @@ def compute_default_feature_mappings(
         )
         covered.add(OperatorConstants.Columns.NAME)
 
-    # Rule 4 — first feature with type=vector → "vector_embeddings"
+    # Rule 4 — first feature with type=vector or vector_binary → "vector_embeddings"
     for name, meta in available_features.items():
-        if name not in covered and meta.get(OperatorConstants.Misc.TYPE) == OperatorConstants.Types.TYPE_VECTOR:
+        if name not in covered and is_dense_or_binary_vector_feature(feature_config=meta):
             result.append(
                 {
                     OperatorConstants.Misc.FEATURE_NAME: name,

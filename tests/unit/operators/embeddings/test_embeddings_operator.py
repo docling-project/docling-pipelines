@@ -23,6 +23,7 @@ from docpipe.core.operators.functional.embeddings import EmbeddingsOperator
 from docpipe.core.operators.functional.embeddings.adapters.outbound.factories.llm_adapter_factory import (
     LLMAdapterFactory,
 )
+from docpipe.utils.operators.vectordb_utils import detect_vector_dimension
 
 
 # Test Fixtures
@@ -1353,6 +1354,132 @@ class TestEmbeddingsBuildChunkText:
         chunk = {"chunk": "Clean Content with <tag>"}
         result = EmbeddingsOperator._build_chunk_text_for_embedding(chunk=chunk)
         assert result == "Clean Content with <tag>"
+
+
+class TestEmbeddingsQuantization:
+    """Tests for EmbeddingsOperator binary quantization support."""
+
+    def test_quantize_vectors_to_binary_empty(self):
+        result = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[])
+        assert result == []
+
+    def test_quantize_vectors_to_binary_known_pattern(self):
+        # 8 floats: positive should be 1 bit, zero/negative 0 bit
+        # [1.0, -1.0, 0.5, -0.2, 0.0, 3.0, -2.0, 1.0] -> bits: 1, 0, 1, 0, 0, 1, 0, 1 -> 0b10100101 = 0xA5 = 165
+        vectors = [[1.0, -1.0, 0.5, -0.2, 0.0, 3.0, -2.0, 1.0]]
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=vectors)
+        assert len(quantized) == 1
+        assert isinstance(quantized[0], bytes)
+        assert len(quantized[0]) == 1
+        assert quantized[0][0] == 0b10100101
+
+    def test_quantize_vectors_to_binary_dimension_packing(self):
+        # 16-dim float vector -> 2 bytes
+        v1 = [1.0] * 8 + [-1.0] * 8
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[v1])
+        assert len(quantized) == 1
+        assert len(quantized[0]) == 2
+        assert quantized[0][0] == 0xFF
+        assert quantized[0][1] == 0x00
+
+        # 384-dim float vector -> 48 bytes
+        v384 = [0.5] * 384
+        quantized_384 = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[v384])
+        assert len(quantized_384) == 1
+        assert len(quantized_384[0]) == 48
+        assert all(b == 0xFF for b in quantized_384[0])
+
+    def test_quantize_non_multiple_of_8_dimension_pads_to_whole_bytes(self):
+        # 250 dims -> ceil(250 / 8) = 32 bytes -> 256 bits, a valid BINARY_VECTOR dimension
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[[1.0] * 250])
+        assert len(quantized[0]) == 32
+        table = pa.table({"embeddings": pa.array(quantized, type=pa.binary())})
+        assert detect_vector_dimension(table=table, embeddings_column="embeddings") == 256
+
+    @pytest.mark.parametrize("quantization", ["none", "binary", "ubinary", "BINARY", "None"])
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_init_with_valid_quantization(self, mock_factory, litellm_config, mock_llm_adapter, quantization):
+        mock_factory.return_value = mock_llm_adapter
+        op = EmbeddingsOperator({**litellm_config, "quantization": quantization})
+        assert op.quantization == quantization.lower()
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_ubinary_output_is_identical_to_binary(
+        self, mock_factory, litellm_config, mock_llm_adapter, sample_pyarrow_table
+    ):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [1.0, -1.0, 0.5, -0.5] * 96
+        outputs = {}
+        for quantization in ("binary", "ubinary"):
+            op = EmbeddingsOperator({**litellm_config, "quantization": quantization})
+            tables, _ = op.transform(sample_pyarrow_table)
+            outputs[quantization] = tables[0]["embeddings"].to_pylist()
+        assert outputs["binary"] == outputs["ubinary"]
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_init_with_invalid_quantization_raises(self, mock_factory, litellm_config, mock_llm_adapter):
+        from docpipe.exceptions.docpipe_exceptions import DocpipeException
+
+        mock_factory.return_value = mock_llm_adapter
+        cfg = {**litellm_config, "quantization": "int8"}
+        with pytest.raises(DocpipeException) as exc_info:
+            EmbeddingsOperator(cfg)
+        assert "Invalid quantization 'int8'" in str(exc_info.value)
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_transform_with_binary_quantization_single_doc(
+        self, mock_factory, litellm_config, mock_llm_adapter, sample_pyarrow_table
+    ):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [1.0, -1.0] * 192  # 384 dims
+        cfg = {**litellm_config, "quantization": "binary"}
+        op = EmbeddingsOperator(cfg)
+
+        tables, _ = op.transform(sample_pyarrow_table)
+        assert len(tables) == 1
+        result_table = tables[0]
+        assert "embeddings" in result_table.column_names
+
+        # Each document row should have bytes instead of list of floats
+        embeddings_col = result_table["embeddings"].to_pylist()
+        assert len(embeddings_col) == len(sample_pyarrow_table)
+        for item in embeddings_col:
+            assert isinstance(item, bytes)
+            assert len(item) == 48  # 384 / 8 bytes
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_transform_with_binary_quantization_chunked_doc(self, mock_factory, litellm_config, mock_llm_adapter):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [0.5] * 384
+        cfg = {**litellm_config, "quantization": "binary"}
+        op = EmbeddingsOperator(cfg)
+
+        chunked_table = pa.Table.from_pydict(
+            {
+                "id": ["doc1", "doc2"],
+                "name": ["file1.txt", "file2.txt"],
+                "content": ["text one", "text two"],
+                "doc_id_hash": ["hash1", "hash2"],
+                "chunked_content": [
+                    [{"chunk": "chunk 1", "start_index": 0}, {"chunk": "chunk 2", "start_index": 10}],
+                    [{"chunk": "chunk 3", "start_index": 0}],
+                ],
+            }
+        )
+
+        tables, _ = op.transform(chunked_table)
+        assert len(tables) == 1
+        result_table = tables[0]
+        embeddings_col = result_table["embeddings"].to_pylist()
+        assert len(embeddings_col) == 2
+        # Chunked docs return a list of chunk embeddings (each chunk embedding is bytes)
+        assert len(embeddings_col[0]) == 2
+        assert len(embeddings_col[1]) == 1
+        for chunk_embeddings in embeddings_col:
+            assert isinstance(chunk_embeddings, list)
+            for chunk_emb in chunk_embeddings:
+                assert isinstance(chunk_emb, bytes)
+                assert len(chunk_emb) == 48
 
 
 if __name__ == "__main__":

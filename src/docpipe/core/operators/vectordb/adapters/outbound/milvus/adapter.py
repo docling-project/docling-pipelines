@@ -256,6 +256,10 @@ class MilvusAdapter(VectorStorePort):
         """Validate existing Milvus collection schema against runtime vector dimensions."""
         self.index_manager.validate_existing_collection(dimension_mapping=dimension_mapping)
 
+    def validate_vector_feature_types(self, *, feature_types: dict[str, str | None]) -> None:
+        """Validate the index configuration against upstream vector feature types."""
+        self.index_manager.validate_vector_feature_types(feature_types=feature_types)
+
     def index_exists(self) -> bool:
         """Check if the Milvus collection already exists.
 

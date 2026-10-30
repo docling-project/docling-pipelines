@@ -325,3 +325,55 @@ class TestMemmapFileUtils:
         # Reading should return empty list
         loaded = load_chunks_from_file(filepath=filepath)
         assert len(loaded) == 0
+
+
+class TestPackedBitEmbeddings:
+    """Binary (1-bit packed) embeddings must survive the memmap round trip with a bit-count dimension."""
+
+    @pytest.fixture
+    def packed_rows(self):
+        return [b"\xa5" * 48, b"\x00" * 48, b"\xff" * 48]  # 384-bit vectors
+
+    def test_metadata_records_bit_dimension_and_layout(self, tmp_path, packed_rows):
+        filepath = str(tmp_path / "bin_embeddings.bin")
+
+        write_content_to_file(content_list=packed_rows, filepath=filepath)
+
+        assert read_embedding_metadata(filepath=filepath) == 384
+        metadata = json.loads(Path(filepath + DocpipeConstants.METADATA_SUFFIX).read_text())
+        assert metadata == {"dim": 384, "dtype": "packed_bits"}
+        assert Path(filepath).stat().st_size == 48 * 3
+
+    def test_load_returns_original_bytes(self, tmp_path, packed_rows):
+        filepath = str(tmp_path / "bin_embeddings.bin")
+        write_content_to_file(content_list=packed_rows, filepath=filepath)
+
+        assert load_embeddings_from_memmap_file(filepath=filepath) == packed_rows
+
+    def test_yield_streams_original_bytes(self, tmp_path, packed_rows):
+        filepath = str(tmp_path / "bin_embeddings.bin")
+        write_content_to_file(content_list=packed_rows, filepath=filepath)
+
+        assert list(yield_embeddings_from_memmap_file(filepath=filepath, dim=384)) == packed_rows
+
+    def test_float_metadata_stays_backward_compatible(self, tmp_path):
+        filepath = str(tmp_path / "float_embeddings.bin")
+
+        write_content_to_file(content_list=[[0.1, 0.2], [0.3, 0.4]], filepath=filepath)
+
+        metadata = json.loads(Path(filepath + DocpipeConstants.METADATA_SUFFIX).read_text())
+        assert metadata == {"dim": 2}
+
+    def test_replace_memmap_paths_combined_expands_packed_bits(self, tmp_path, packed_rows):
+        filepath = str(tmp_path / "bin_embeddings.bin")
+        write_content_to_file(content_list=packed_rows, filepath=filepath)
+        table = pa.table(
+            {
+                OperatorConstants.Columns.ID: ["doc1"],
+                "embeddings": [{DocpipeConstants.EMBEDDINGS_MEMMAP_FILE: filepath}],
+            }
+        )
+
+        result = replace_memmap_paths_combined(table=table)
+
+        assert result.column("embeddings").to_pylist() == [packed_rows]

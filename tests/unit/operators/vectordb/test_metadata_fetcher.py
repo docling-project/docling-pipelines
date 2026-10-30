@@ -1159,3 +1159,12 @@ class TestMilvusApplyIndexInfo:
         MilvusResourceMetadata._apply_index_info(client=mock_client, collection_name="col", schema=schema)
         assert schema["vector"]["index_created"] is True
         assert schema["vector"]["index_info"]["metric_type"] == "IP"
+
+
+class TestComputeDefaultFeatureMappingsBinaryVector:
+    """Rule 4 also maps a packed-bit (vector_binary) feature to vector_embeddings."""
+
+    def test_vector_binary_feature_maps_to_vector_embeddings(self):
+        feats = {"embeddings": _feature(type_=OperatorConstants.Types.TYPE_VECTOR_BINARY)}
+        result = compute_default_feature_mappings(feats)
+        assert _lookup(result, "embeddings") == "vector_embeddings"

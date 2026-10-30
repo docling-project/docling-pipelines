@@ -22,6 +22,7 @@ from docpipe.utils.core.memmap_file_utils import (
 )
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
+from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
 
 logger = get_logger()
 
@@ -194,6 +195,15 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     errors.append(f"{field_name} is not provided")
                 else:
                     errors.append(error["msg"])
+
+        # Reject index settings that cannot work with the vector kinds produced upstream (e.g. BIN_* without
+        # a binary vector feature). Only possible when the validator supplied the propagated feature types.
+        feature_types: dict[str, str | None] | None = self.config.get(DocpipeConstants.VALIDATION_FEATURE_TYPES)
+        if feature_types is not None and not errors:
+            try:
+                self.adapter.validate_vector_feature_types(feature_types=feature_types)
+            except DocpipeException as exc:
+                errors.append(str(exc))
 
         # Validate that feature mappings are present.
         feature_mappings: list[dict[str, str]] = self.config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
@@ -401,11 +411,12 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         Returns (vector_columns, None) and sets NODE_STATUS=FAILED when detection
         is required but fails so the caller can short-circuit.
         """
-        # Identify all DENSE vector columns from available_features
+        # Identify all dense (float) and binary vector columns from available_features
         vector_columns = [
             col_name
             for col_name, feature_config in self.config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {}).items()
-            if feature_config.get("type") == "vector" and feature_config.get("available_for_vector_db", False)
+            if is_dense_or_binary_vector_feature(feature_config=feature_config)
+            and feature_config.get("available_for_vector_db", False)
         ]
 
         # Handle sparse vector mode
@@ -508,9 +519,11 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             chunk_data = chunk_and_embeddings[0]
             chunk_embeddings = chunk_and_embeddings[1:]
 
-            # Add embeddings from all vector columns
+            # Add embeddings from all vector columns (packed binary vectors stream as raw bytes)
             for vec_col, chunk_embedding in zip(vec_col_names, chunk_embeddings, strict=True):
-                chunk_row_data[vec_col] = chunk_embedding.tolist()
+                chunk_row_data[vec_col] = (
+                    chunk_embedding if isinstance(chunk_embedding, bytes) else chunk_embedding.tolist()
+                )
 
             chunk_dict = json.loads(chunk_data) if isinstance(chunk_data, str) else chunk_data
             if isinstance(chunk_dict, dict):

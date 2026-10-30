@@ -9,10 +9,11 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 ## Features
 
 ### Core Capabilities
-- **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX
-- **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE
+- **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX, BIN_FLAT, BIN_IVF_FLAT
+- **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE, HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE
+- **Binary Vector Support**: 1-bit quantized compact vector embeddings (`BIN_FLAT`, `BIN_IVF_FLAT`) for 32x memory and storage savings
 - **Hybrid Search**: Dense + sparse vector support with BM25
-- **Multi-Model Embeddings**: Multiple embedding models with different dimensions in same collection
+- **Multi-Model Embeddings**: Multiple embedding models with different dimensions in same collection (including mixing dense float and binary vectors)
 - **Batch Processing**: Configurable batch sizes for optimal performance
 - **Incremental Updates**: Query and delete capabilities
 - **Error Handling**: Detailed failure tracking and retry logic
@@ -20,21 +21,51 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 
 ### Supported Index Types
 
-| Index Type | Speed | Accuracy | Memory | Use Case |
-|-----------|-------|----------|--------|----------|
-| HNSW | Fast | High | Medium | General purpose, recommended |
-| IVF_FLAT | Very Fast | Medium | Low | Large datasets, speed priority |
-| IVF_SQ8 | Very Fast | Medium | Very Low | Memory-constrained environments |
-| FLAT | Slow | Perfect | High | Small datasets, exact search |
-| AUTOINDEX | Varies | High | Varies | Automatic optimization |
+| Index Type | Vector Type | Speed | Accuracy | Memory | Use Case |
+|-----------|-------------|-------|----------|--------|----------|
+| HNSW | Dense Float | Fast | High | Medium | General purpose, recommended |
+| IVF_FLAT | Dense Float | Very Fast | Medium | Low | Large datasets, speed priority |
+| IVF_SQ8 | Dense Float | Very Fast | Medium | Very Low | Memory-constrained environments |
+| FLAT | Dense Float | Slow | Perfect | High | Small datasets, exact search |
+| AUTOINDEX | Dense Float | Varies | High | Varies | Automatic optimization |
+| BIN_FLAT | Binary | Brute force | Perfect | Very Low | Exact search for 1-bit quantized binary vectors |
+| BIN_IVF_FLAT | Binary | Very Fast | High | Very Low | Inverted index for large-scale binary vector retrieval |
+
+> **Note on Milvus Lite (`auth_type: "lite"`):** Milvus Lite does not support binary vectors or binary index types (`BIN_FLAT`, `BIN_IVF_FLAT`). For binary vector storage, use standalone, cluster, or wx.data deployments.
+
+#### How `index_type`, `metric_type` and `index_parameters` apply to each vector field
+
+Whether a vector field is dense (`FLOAT_VECTOR`) or binary (`BINARY_VECTOR`) is decided only by the feature's own
+type (`vector` vs `vector_binary`) -- never by `index_type`. The single `index_type` / `metric_type` /
+`index_parameters` configuration is applied to every vector field according to that kind:
+
+| Configured `index_type` | Dense field | Binary field |
+|---|---|---|
+| Dense (`HNSW`, `IVF_FLAT`, ...) | Used as configured | `BIN_FLAT` + `HAMMING` (dense metrics and parameters are not valid for binary fields) |
+| Binary (`BIN_FLAT`, `BIN_IVF_FLAT`) | `HNSW` + `L2` defaults (mixed collections only) | Used as configured, with a binary `metric_type` |
+
+A `BIN_*` `index_type` on a collection with no binary vector field is rejected, as is a dense `index_type` paired
+with a binary-only `metric_type` (`HAMMING`, `JACCARD`, `TANIMOTO`, `SUBSTRUCTURE`, `SUPERSTRUCTURE`). The `BIN_*`
+check also runs during flow validation (`POST /api/v1/validation/validate_flow`): it fails when no upstream feature is
+typed `vector_binary`, for example when the embeddings operator has no `quantization: "binary"` or `"ubinary"`.
+
+When `EmbeddingsOperator` runs with `quantization: "binary"` or `"ubinary"`, the flow's feature propagation types its
+`embeddings` feature as `vector_binary`, so the binary schema and index are selected automatically.
+
+> **Embedding quality:** 1-bit quantization keeps only the sign of each dimension, so it works best with zero-centred (e.g. normalized) embedding models. `quantization: ubinary` behaves identically to `binary`.
 
 ### Similarity Metrics
 
-| Metric | Description | Use Case |
-|--------|-------------|----------|
-| L2 | Euclidean distance | General embeddings, default |
-| IP | Inner product | Pre-normalized vectors |
-| COSINE | Cosine similarity | Text embeddings, normalized similarity |
+| Metric | Applicable Vector Type | Description | Use Case |
+|--------|------------------------|-------------|----------|
+| L2 | Dense Float | Euclidean distance | General embeddings, default |
+| IP | Dense Float | Inner product | Pre-normalized vectors |
+| COSINE | Dense Float | Cosine similarity | Text embeddings, normalized similarity |
+| HAMMING | Binary | Bitwise Hamming distance | General 1-bit quantized binary vector retrieval |
+| JACCARD | Binary | Jaccard distance | Set similarity & binary token overlap |
+| TANIMOTO | Binary | Tanimoto distance | Molecular fingerprints / chemical search |
+| SUBSTRUCTURE | Binary | Substructure match | Chemical / hierarchical inclusion |
+| SUPERSTRUCTURE | Binary | Superstructure match | Chemical / hierarchical containment |
 
 ## Configuration Parameters
 
@@ -375,6 +406,59 @@ config = {
         }
     }
 }
+```
+
+### Example 5: Binary Vector Indexing (1-bit Quantized)
+
+Binary vectors store 1-bit quantized embeddings as raw byte strings (bit dimension must be a multiple of 8, e.g. 768 bits = 96 bytes).
+
+```python
+config = {
+    "provider": "milvus",
+    OperatorConstants.Config.PROVIDER_CONFIG: {
+        "collection_name": "binary_docs",
+        "host": "localhost",
+        "port": 19530,
+        "index_type": "BIN_IVF_FLAT",
+        "metric_type": "HAMMING",
+        "index_parameters": {
+            "nlist": 128
+        }
+    },
+    "available_features": {
+        "doc_id_hash": {
+            "available_for_vector_db": True,
+            "mandatory_for_vector_db": True,
+            "type": "string",
+            "is_primary": True
+        },
+        "content": {
+            "available_for_vector_db": True,
+            "type": "string"
+        },
+        "embeddings": {
+            "available_for_vector_db": True,
+            "mandatory_for_vector_db": True,
+            "type": "vector_binary"
+        }
+    },
+    "feature_mappings": [
+        {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+        {"feature_name": "content", "mapped_column_name": "text"},
+        {"feature_name": "embeddings", "mapped_column_name": "binary_vector"}
+    ]
+}
+
+# Ingest packed bytes (e.g. 384 bits = 48 bytes per document)
+data = {
+    "doc_id_hash": ["doc1", "doc2"],
+    "content": ["First document", "Second document"],
+    "embeddings": [b"\xff" * 48, b"\x00" * 48]
+}
+
+table = pa.table(data)
+operator = VectorDBOperator(config)
+result_tables, metadata = operator.transform(table)
 ```
 
 ## Flow Configuration
