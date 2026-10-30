@@ -1,16 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import NodeSuggestion from '@/components/Canvas/NodeSuggestion/NodeSuggestion';
 import type { NodeSuggestionProps } from '@/components/Canvas/NodeSuggestion/NodeSuggestion';
 import type { PaletteData } from '@/types/palette';
 
 const SAMPLE_PALETTE: PaletteData = {
+  version: '1.0',
   categories: [
     {
       id: 'functional',
       label: 'Functional',
+      description: 'Functional operators',
       node_types: [
         {
           id: 'chunker-node',
@@ -78,7 +79,7 @@ describe('NodeSuggestion', () => {
   });
 
   it('renders empty state when palette has no categories', () => {
-    renderSuggestion({ paletteData: { categories: [] } });
+    renderSuggestion({ paletteData: { version: '1.0', categories: [] } });
     expect(screen.getByText('No suggestions available')).toBeDefined();
   });
 

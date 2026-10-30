@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { CreateProjectTearsheet } from '@/components/common/CreateProjectTearsheet/CreateProjectTearsheet';
 

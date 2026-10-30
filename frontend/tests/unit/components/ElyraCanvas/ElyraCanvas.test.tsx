@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { ElyraCanvas } from '@/components/ElyraCanvas/ElyraCanvas';
 import type { CanvasConfig } from '@elyra/canvas';

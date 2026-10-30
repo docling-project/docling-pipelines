@@ -51,9 +51,9 @@ describe('NotificationPanel', () => {
       <NotificationPanel {...defaultProps} onStateChange={onStateChange} onBottomContent={vi.fn()} onTopContent={vi.fn()} />
     );
     expect(onStateChange).toHaveBeenCalled();
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
-    expect(lastCall.showBottomPanel).toBe(false);
-    expect(lastCall.notifications).toEqual([]);
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
+    expect(lastCall?.showBottomPanel).toBe(false);
+    expect(lastCall?.notifications).toEqual([]);
   });
 
   it('calls onBottomContent with null when panel is closed', () => {
@@ -76,7 +76,8 @@ describe('NotificationPanel', () => {
     const onStateChange = vi.fn();
     const validationData = {
       status: 'Failed',
-      errors: [{ code: 'E001', message: 'Missing param', node_name: 'Chunker', node_id: 'n1', message_code: null }],
+      message: null,
+      errors: [{ code: 'E001', message: 'Missing param', node_name: 'Chunker', node_id: 'n1', message_code: null, operator: null }],
       warnings: [],
     };
     renderWithProviders(
@@ -88,18 +89,19 @@ describe('NotificationPanel', () => {
         onTopContent={vi.fn()}
       />
     );
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
-    expect(lastCall.notifications).toHaveLength(1);
-    expect(lastCall.notifications[0].type).toBe('error');
-    expect(lastCall.notifications[0].code).toBe('E001');
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
+    expect(lastCall?.notifications).toHaveLength(1);
+    expect(lastCall?.notifications[0]?.type).toBe('error');
+    expect(lastCall?.notifications[0]?.code).toBe('E001');
   });
 
   it('processes succeeded_with_warnings validation with warnings', () => {
     const onStateChange = vi.fn();
     const validationData = {
       status: 'succeeded_with_warnings',
+      message: null,
       errors: [],
-      warnings: [{ code: 'W001', message: 'Slow node', node_name: 'Ingest', node_id: 'n2', message_code: 'INGEST_OPERATOR_MISPLACED' }],
+      warnings: [{ code: 'W001', message: 'Slow node', node_name: 'Ingest', node_id: 'n2', message_code: 'INGEST_OPERATOR_MISPLACED', operator: null }],
     };
     renderWithProviders(
       <NotificationPanel
@@ -110,9 +112,9 @@ describe('NotificationPanel', () => {
         onTopContent={vi.fn()}
       />
     );
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
-    expect(lastCall.notifications).toHaveLength(1);
-    expect(lastCall.notifications[0].type).toBe('warning');
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
+    expect(lastCall?.notifications).toHaveLength(1);
+    expect(lastCall?.notifications[0]?.type).toBe('warning');
   });
 
   it('clears notifications when validation succeeds with no issues', () => {
@@ -121,7 +123,7 @@ describe('NotificationPanel', () => {
     const { rerender } = renderWithProviders(
       <NotificationPanel
         {...defaultProps}
-        validationData={{ status: 'Failed', errors: [{ code: 'E1', message: 'err', node_name: null, node_id: null, message_code: null }], warnings: [] }}
+        validationData={{ status: 'Failed', message: null, errors: [{ code: 'E1', message: 'err', node_name: null, node_id: null, message_code: null, operator: null }], warnings: [] }}
         onStateChange={onStateChange}
         onBottomContent={vi.fn()}
         onTopContent={vi.fn()}
@@ -132,15 +134,15 @@ describe('NotificationPanel', () => {
     rerender(
       <NotificationPanel
         {...defaultProps}
-        validationData={{ status: 'Succeeded', errors: [], warnings: [] }}
+        validationData={{ status: 'Succeeded', message: null, errors: [], warnings: [] }}
         onStateChange={onStateChange}
         onBottomContent={vi.fn()}
         onTopContent={vi.fn()}
       />
     );
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
-    expect(lastCall.notifications).toEqual([]);
-    expect(lastCall.showBottomPanel).toBe(false);
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
+    expect(lastCall?.notifications).toEqual([]);
+    expect(lastCall?.showBottomPanel).toBe(false);
   });
 
   it('shows top bar content when validation has errors', () => {
@@ -148,7 +150,7 @@ describe('NotificationPanel', () => {
     renderWithProviders(
       <NotificationPanel
         {...defaultProps}
-        validationData={{ status: 'Failed', errors: [{ code: 'E1', message: 'err', node_name: null, node_id: null, message_code: null }], warnings: [] }}
+        validationData={{ status: 'Failed', message: null, errors: [{ code: 'E1', message: 'err', node_name: null, node_id: null, message_code: null, operator: null }], warnings: [] }}
         onStateChange={vi.fn()}
         onBottomContent={vi.fn()}
         onTopContent={onTopContent}
@@ -191,8 +193,8 @@ describe('NotificationPanel', () => {
     );
     act(() => { globalThis.dispatchEvent(new Event('showBottomPanel')); });
     act(() => { globalThis.dispatchEvent(new Event('hideBottomPanel')); });
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
-    expect(lastCall.showBottomPanel).toBe(false);
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
+    expect(lastCall?.showBottomPanel).toBe(false);
   });
 
   it('handleNodeClick calls setSelections when messageCode is a HIGHLIGHT_MESSAGE_CODE', () => {
@@ -203,7 +205,7 @@ describe('NotificationPanel', () => {
 
     renderWithProviders(
       <NotificationPanel
-        validationData={{ status: 'Failed', errors: [{ code: 'E1', message: 'err', node_name: 'N', node_id: 'nodeX', message_code: 'DISJOINT_OPERATORS_DETECTED' }], warnings: [] }}
+        validationData={{ status: 'Failed', message: null, errors: [{ code: 'E1', message: 'err', node_name: 'N', node_id: 'nodeX', message_code: 'DISJOINT_OPERATORS_DETECTED', operator: null }], warnings: [] }}
         canvasControllerRef={canvasControllerRef as unknown as React.RefObject<null>}
         setActivePanelNodeId={setActivePanelNodeId}
         onStateChange={vi.fn()}
@@ -216,7 +218,7 @@ describe('NotificationPanel', () => {
     // Open the panel
     act(() => { globalThis.dispatchEvent(new Event('showBottomPanel')); });
 
-    const lastCall = onBottomContent.mock.calls[onBottomContent.mock.calls.length - 1][0];
+    const lastCall = onBottomContent.mock.calls[onBottomContent.mock.calls.length - 1]?.[0];
     expect(lastCall).not.toBeNull();
 
     // Call onNodeClick directly from the rendered props
@@ -237,7 +239,7 @@ describe('NotificationPanel', () => {
 
     renderWithProviders(
       <NotificationPanel
-        validationData={{ status: 'Failed', errors: [{ code: 'E1', message: 'err', node_name: 'N', node_id: 'nodeY', message_code: 'SOME_OTHER_CODE' }], warnings: [] }}
+        validationData={{ status: 'Failed', message: null, errors: [{ code: 'E1', message: 'err', node_name: 'N', node_id: 'nodeY', message_code: 'SOME_OTHER_CODE', operator: null }], warnings: [] }}
         canvasControllerRef={canvasControllerRef as unknown as React.RefObject<null>}
         openNodeProperties={openNodeProperties}
         setActivePanelNodeId={setActivePanelNodeId}
@@ -247,7 +249,7 @@ describe('NotificationPanel', () => {
       />
     );
     act(() => { globalThis.dispatchEvent(new Event('showBottomPanel')); });
-    const lastCall = onBottomContent.mock.calls[onBottomContent.mock.calls.length - 1][0];
+    const lastCall = onBottomContent.mock.calls[onBottomContent.mock.calls.length - 1]?.[0];
     const onNodeClick: (nodeId: string, messageCode?: string | null) => void = lastCall.props.onNodeClick;
     act(() => { onNodeClick('nodeY', 'SOME_OTHER_CODE'); });
     expect(openNodeProperties).toHaveBeenCalledWith('nodeY');
@@ -259,7 +261,7 @@ describe('NotificationPanel', () => {
     const onBottomContent = vi.fn();
     renderWithProviders(
       <NotificationPanel
-        validationData={{ status: 'Failed', errors: [{ code: 'E1', message: 'err', node_name: 'N', node_id: 'nodeZ', message_code: null }], warnings: [] }}
+        validationData={{ status: 'Failed', message: null, errors: [{ code: 'E1', message: 'err', node_name: 'N', node_id: 'nodeZ', message_code: null, operator: null }], warnings: [] }}
         canvasControllerRef={{ current: null } as React.RefObject<null>}
         openNodeProperties={openNodeProperties}
         onStateChange={vi.fn()}
@@ -268,7 +270,7 @@ describe('NotificationPanel', () => {
       />
     );
     act(() => { globalThis.dispatchEvent(new Event('showBottomPanel')); });
-    const lastCall = onBottomContent.mock.calls[onBottomContent.mock.calls.length - 1][0];
+    const lastCall = onBottomContent.mock.calls[onBottomContent.mock.calls.length - 1]?.[0];
     const onNodeClick: (nodeId: string, messageCode?: string | null) => void = lastCall.props.onNodeClick;
     act(() => { onNodeClick('nodeZ', null); });
     expect(openNodeProperties).not.toHaveBeenCalled();
@@ -281,17 +283,17 @@ describe('NotificationPanel', () => {
     renderWithProviders(
       <NotificationPanel
         {...defaultProps}
-        validationData={{ status: 'running', errors: [], warnings: [] }}
+        validationData={{ status: 'running', message: null, errors: [], warnings: [] }}
         onStateChange={onStateChange}
         onBottomContent={vi.fn()}
         onTopContent={vi.fn()}
       />
     );
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
     // No item from this validationData (empty errors) should appear
-    const fromThisData = lastCall.notifications.filter(
+    const fromThisData = lastCall?.notifications.filter(
       (n: { message: string }) => n.message === 'from_running_status'
-    );
+    ) ?? [];
     expect(fromThisData).toEqual([]);
   });
 
@@ -302,17 +304,17 @@ describe('NotificationPanel', () => {
     renderWithProviders(
       <NotificationPanel
         {...defaultProps}
-        validationData={{ status: 'pending', errors: [{ code: 'PENDING_CODE', message: 'pending_sentinel_error', node_name: null, node_id: null, message_code: null }], warnings: [] }}
+        validationData={{ status: 'pending', message: null, errors: [{ code: 'PENDING_CODE', message: 'pending_sentinel_error', node_name: null, node_id: null, message_code: null, operator: null }], warnings: [] }}
         onStateChange={onStateChange}
         onBottomContent={vi.fn()}
         onTopContent={vi.fn()}
       />
     );
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]?.[0];
     // The sentinel error must NOT appear — pending status is not processed
-    const pendingItems = lastCall.notifications.filter(
+    const pendingItems = lastCall?.notifications.filter(
       (n: { code: string }) => n.code === 'PENDING_CODE'
-    );
+    ) ?? [];
     expect(pendingItems).toEqual([]);
   });
 });
