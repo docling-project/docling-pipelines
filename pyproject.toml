@@ -70,7 +70,7 @@ dependencies = [
     "pyasn1==0.6.4",
     "pydantic==2.12.5",
     "pydantic-settings==2.14.2",
-    "pygments==2.20.0",
+    "pygments==2.21.0",
     "pyiceberg-core==0.7.0",
     "pyiceberg[glue]==0.9.1",
     "pyjwt==2.15.1",
