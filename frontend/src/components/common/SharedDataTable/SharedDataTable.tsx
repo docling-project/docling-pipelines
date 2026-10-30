@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, type ComponentProps } from 'react';
 import {
   DataTable,
   DataTableSkeleton,
@@ -229,7 +229,7 @@ export function SharedDataTable({
       rows={filteredRows}
       headers={headers}
       isSortable={isSortable}
-      sortRow={sortRow}
+      sortRow={sortRow as ComponentProps<typeof DataTable>['sortRow']}
     >
       {({
         rows: tableRows,

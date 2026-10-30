@@ -83,7 +83,7 @@ export function InputFeaturesTab({
     const result: SharedDataTableRow[] = [];
     let groupIdx = 0;
     for (const nId of sortedNodeIds) {
-      const features = groups[nId];
+      const features = groups[nId] ?? [];
       const label = nodeLabels[nId] ?? nId;
       // Group header row
       result.push({
