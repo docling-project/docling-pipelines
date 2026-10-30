@@ -1,0 +1,62 @@
+name: Slim pyproject Reminder
+
+# pull_request_target loads this file from the base branch and never checks out
+# PR code, so it is safe to run with a write token on fork PRs.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - pyproject.toml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  remind:
+    name: Remind to update slim/pyproject.toml
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment when slim/pyproject.toml is not updated
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const marker = "<!-- slim-pyproject-reminder -->";
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const files = await github.paginate(github.rest.pulls.listFiles,
+              { owner, repo, pull_number: issue_number, per_page: 100 });
+            const names = files.map(f => f.filename);
+            const needsReminder = names.includes("pyproject.toml")
+              && !names.includes("slim/pyproject.toml");
+
+            const comments = await github.paginate(github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            // slim/pyproject.toml was added since the last run: remove the stale reminder
+            if (!needsReminder) {
+              if (existing) {
+                await github.rest.issues.deleteComment(
+                  { owner, repo, comment_id: existing.id });
+              }
+              return;
+            }
+
+            const body = [
+              marker,
+              "### Slim package reminder",
+              "",
+              "This PR changes `pyproject.toml` but not `slim/pyproject.toml`. Please update `slim/pyproject.toml` as appropriate and regenerate `slim/uv.lock` (`cd slim && uv lock`).",
+              "",
+              "When you do, check whether the dependency belongs in the slim base `dependencies` or should be optional, in an extra such as `extract`, so the slim wheel stays small.",
+            ].join("\n");
+
+            if (existing) {
+              await github.rest.issues.updateComment(
+                { owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment(
+                { owner, repo, issue_number, body });
+            }
