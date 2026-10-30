@@ -17,6 +17,7 @@ from docpipe.core.constants.constants import (
     Metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.event_streaming.kafka_producer import KafkaProducer
 from docpipe.core.incremental_metadata import get_incremental_update_service
 from docpipe.core.job_management.domain.ports import JobRunManager, JobStatsService
 from docpipe.core.lineage.domain.ports.execution_lifecycle_observer import ExecutionLifecycleObserverPort
@@ -231,11 +232,16 @@ class AbstractOrchestrator(ABC):
             ),
         )
         self.context_id = params.get(DocpipeConstants.CONTEXT_ID, self.job_id)
+        event_id = (global_config.get("input_event") or {}).get("event_id")
+        if event_id:
+            KafkaProducer.notify(event_id=event_id, operation="flow", status="Started")
         try:
             self.execute_flow(op_flow=op_flow, global_config=global_config)
         finally:
             self._check_and_upload_deleted_rows()
             self._cleanup_memmap_files()
+            if event_id:
+                KafkaProducer.notify(event_id=event_id, operation="flow", status="Completed")
 
     def _get_ingest_summary_message(self, *, output_table, deleted_docs_count: int, operator: dict) -> str | None:
         """Process and log ingest step results."""
@@ -540,12 +546,22 @@ class AbstractOrchestrator(ABC):
                 op_def=op_def, executor=executor, prev_results=prev_results, global_config=global_config, start=start
             )
         else:
+            event_id = (global_config.get("input_event") or {}).get("event_id")
+            if event_id:
+                KafkaProducer.notify(event_id=event_id, operation=op_def["name"], status="Started")
             data_accesses, tables, metadata, internal_metadata = self._handle_active_execution(
                 op_def=op_def,
                 executor=executor,
                 prev_data_access=prev_data_access,
                 batch_id=global_config.get(DocpipeConstants.BATCH_ID),
             )
+            if event_id:
+                KafkaProducer.notify(
+                    event_id=event_id,
+                    operation=op_def["name"],
+                    status="Completed",
+                    pages_processed=metadata.get(OperatorConstants.Metadata.TOTAL_PAGES_PROCESSED),
+                )
 
         processed_docs_count = OperatorUtils.find_doc_count_from_tables(tables=tables)
         if Metrics.External.PROCESSED_DOCS not in metadata:

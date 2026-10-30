@@ -10,6 +10,7 @@ from typing import Any
 
 from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.core.event_streaming.dispatch_service import EventDispatchService
+from docpipe.core.event_streaming.kafka_producer import KafkaProducer
 from docpipe.core.event_streaming.models import InputEvent
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -117,6 +118,7 @@ class KafkaEventListener:
                     payload = deserializer(message.value(), serialization_context)
                     event = InputEvent.model_validate(payload)
                     event_id = str(event.event_id)
+                    KafkaProducer.notify(event_id=event.event_id, operation="event", status="Received")
                     self._dispatch_service.dispatch(event=event)
                     logger.info(
                         "Kafka event dispatched event_id=%s topic=%s partition=%s offset=%s",
