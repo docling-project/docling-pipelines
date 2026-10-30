@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import types
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
@@ -9,6 +12,7 @@ from pydantic import ValidationError
 
 from docpipe.core.operators.ingest.adapters.outbound.sources.box.adapter import BoxSourceAdapter
 from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import BoxSourceConfig
+from docpipe.core.operators.ingest.domain.models import Document
 
 
 class TestBoxSourceConfig:
@@ -327,29 +331,59 @@ class TestBoxShouldIncludeFile:
     def test_no_filters_always_included(self):
         adapter = BoxSourceAdapter()
         config = _make_config()
-        assert adapter._should_include_file("report.pdf", 1024, config) is True
+        assert (
+            adapter._is_processing_eligible(
+                document=Document(id="test", name="report.pdf", source_url="test", content=b"", size=1024),
+                config=config,
+            )
+            is True
+        )
 
     def test_extension_filter_excludes(self):
         adapter = BoxSourceAdapter()
         config = _make_config(file_extensions=[".pdf"])
-        assert adapter._should_include_file("report.txt", 1024, config) is False
+        assert (
+            adapter._is_processing_eligible(
+                document=Document(id="test", name="report.txt", source_url="test", content=b"", size=1024),
+                config=config,
+            )
+            is False
+        )
 
     def test_extension_filter_includes(self):
         adapter = BoxSourceAdapter()
         config = _make_config(file_extensions=[".pdf"])
-        assert adapter._should_include_file("report.pdf", 1024, config) is True
+        assert (
+            adapter._is_processing_eligible(
+                document=Document(id="test", name="report.pdf", source_url="test", content=b"", size=1024),
+                config=config,
+            )
+            is True
+        )
 
     def test_max_file_size_excludes_large_files(self):
         adapter = BoxSourceAdapter()
         config = _make_config(max_file_size_mb=1)
         big_size = 2 * 1024 * 1024
-        assert adapter._should_include_file("big.pdf", big_size, config) is False
+        assert (
+            adapter._is_processing_eligible(
+                document=Document(id="test", name="big.pdf", source_url="test", content=b"", size=big_size),
+                config=config,
+            )
+            is False
+        )
 
     def test_max_file_size_includes_small_files(self):
         adapter = BoxSourceAdapter()
         config = _make_config(max_file_size_mb=10)
         small_size = 1024
-        assert adapter._should_include_file("small.pdf", small_size, config) is True
+        assert (
+            adapter._is_processing_eligible(
+                document=Document(id="test", name="small.pdf", source_url="test", content=b"", size=small_size),
+                config=config,
+            )
+            is True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +489,8 @@ class TestBoxIterBoxFiles:
         assert len(results) == 1
         assert results[0] is file_info
 
-    def test_skips_files_not_matching_extension(self):
+    @pytest.mark.asyncio
+    async def test_skips_files_not_matching_extension(self):
         adapter = BoxSourceAdapter()
         config = _make_config(file_extensions=[".pdf"])
 
@@ -469,7 +504,8 @@ class TestBoxIterBoxFiles:
         mock_client.folders.get_folder_items.return_value = mock_items
         mock_client.files.get_file_by_id.return_value = file_info
 
-        results = list(adapter._iter_box_files(client=mock_client, config=config, folder_id="0"))
+        with patch.object(adapter, "_get_box_client", return_value=mock_client):
+            results = [doc async for doc in adapter.fetch_documents(config)]
         assert results == []
 
     def test_raises_on_api_error(self):
@@ -895,3 +931,53 @@ class TestGetBoxClient:
             mock_jwt_config.from_config_json_string.side_effect = Exception("JWT error")
             with pytest.raises(ValueError, match="Failed to authenticate with Box from inline credentials"):
                 get_box_client(credentials_json={"boxAppSettings": {}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pattern", ["*.tmp", "*subdir*"])
+@pytest.mark.parametrize("file_id", [None, "f1"])
+async def test_box_processing_exclusions_match_full_listing(*, pattern, file_id):
+    adapter = BoxSourceAdapter()
+    config = _make_config(exclude_patterns=[pattern], file_id=file_id)
+    info = _make_file_info(
+        file_id="f1",
+        name="draft.tmp",
+        path_entries=[types.SimpleNamespace(id="0", name="root"), types.SimpleNamespace(id="sub", name="subdir")],
+    )
+    client = Mock()
+    client.files.get_file_by_id.return_value = info
+    with (
+        patch.object(adapter, "_get_box_client", return_value=client),
+        patch.object(adapter, "_iter_box_files", side_effect=lambda **kwargs: iter([info])),
+    ):
+        normal = [doc async for doc in adapter.fetch_documents(config)]
+        full = [doc async for doc in adapter.fetch_documents(config, full_listing=True)]
+    assert normal == []
+    assert len(full) == 1
+    assert not adapter._is_processing_eligible(document=full[0], config=config)
+
+
+@pytest.mark.asyncio
+async def test_box_full_listing_uses_metadata_from_pages():
+    from box_sdk_gen.schemas.file_full import FileFull
+
+    adapter = BoxSourceAdapter()
+    info = FileFull.from_dict(
+        {
+            "type": "file",
+            "id": "f1",
+            "name": "report.pdf",
+            "size": 20,
+            "modified_at": "2026-01-01T00:00:00Z",
+            "created_at": "2026-01-01T00:00:00Z",
+            "path_collection": {"total_count": 1, "entries": [{"type": "folder", "id": "0", "name": "root"}]},
+        }
+    )
+    client = Mock()
+    client.folders.get_folder_items.return_value = types.SimpleNamespace(entries=[info], next_marker=None)
+    with patch.object(adapter, "_get_box_client", return_value=client):
+        docs = [doc async for doc in adapter.fetch_documents(_make_config(), full_listing=True)]
+    assert len(docs) == 1
+    assert docs[0].modified_time == datetime(2026, 1, 1, tzinfo=UTC)
+    assert "modified_at" in client.folders.get_folder_items.call_args.kwargs["fields"]
+    client.files.get_file_by_id.assert_not_called()

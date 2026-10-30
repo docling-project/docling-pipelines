@@ -34,12 +34,12 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
     SOURCE_DISPLAY_NAME: str | None = None  # Human-readable name (e.g., "Local Filesystem")
     SOURCE_DESCRIPTION: str | None = None  # Brief description
     SOURCE_VERSION: str = "1.0.0"  # Semantic version
-    SUPPORTS_DISCOVERY: bool = False
 
-    async def discover_documents(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """Stream metadata before selection filters, propagating listing failures to the flow."""
-        if not self.SUPPORTS_DISCOVERY:
-            raise NotImplementedError("Source does not support authoritative metadata discovery")
+    @staticmethod
+    def _listing_config(*, config: Any, full_listing: bool) -> Any:
+        """Remove processing filters only for a complete source inventory."""
+        if not full_listing:
+            return config
         update: dict[str, Any] = {
             "max_files": None,
             "file_extensions": [],
@@ -48,15 +48,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
             "skip_hidden_files": False,
             "skip_empty_files": False,
         }
-        discovery_config = config.model_copy(update={k: v for k, v in update.items() if hasattr(config, k)})
-        async for document in self._discover_metadata(config=discovery_config):
-            document.metadata["processing_eligible"] = self._is_processing_eligible(document=document, config=config)
-            yield document
-
-    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """Providers opting in must propagate every listing/identity error."""
-        async for document in self.fetch_documents(config):
-            yield document
+        return config.model_copy(update={k: v for k, v in update.items() if hasattr(config, k)})
 
     @staticmethod
     def _is_processing_eligible(*, document: Document, config: Any) -> bool:
@@ -68,7 +60,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
             return False
         paths = [document.name, document.source_url]
         for key in ("absolute_path", "relative_path", "key", "path"):
-            path = str(document.metadata.get(key, ""))
+            path = str(document.metadata.get(key) or "")
             if path:
                 paths.extend([path, *(str(parent) for parent in Path(path).parents)])
         if any(fnmatch(path, pattern) for path in paths for pattern in getattr(config, "exclude_patterns", [])):
@@ -92,12 +84,13 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
         raise NotImplementedError(f"Source adapter '{cls.SOURCE_NAME or cls.__name__}' does not support file events")
 
     @abstractmethod
-    def fetch_documents(self, config: Any) -> AsyncGenerator[Document, None]:
+    def fetch_documents(self, config: Any, *, full_listing: bool = False) -> AsyncGenerator[Document, None]:
         """
         Fetch documents from the source.
 
         Args:
             config: Type-safe configuration (Pydantic model specific to this source)
+            full_listing: Stream all identities without processing filters or caps; listing errors must propagate.
 
         Yields:
             Document: Domain documents one at a time

@@ -16,7 +16,8 @@ Features:
 
 import os
 import shutil
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +30,12 @@ from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_fact
     ENV_INCREMENTAL_BASE_DIR_KEY,
     register_incremental_update_store,
 )
+from docpipe.core.incremental_metadata.adapters.stores.discovery_history import open_discovery_history
 from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataRecord,
     IncrementalMetadataStore,
 )
+from docpipe.core.incremental_metadata.domain.ports.incremental_metadata_store import DiscoveryHistory
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
@@ -136,6 +139,23 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         with FileLock(str(path), timeout=self._lock_timeout):
             yield
 
+    def discovery_history(self, *, job_id: str) -> AbstractContextManager[DiscoveryHistory]:
+        """Read tracking columns in bounded Parquet batches into an indexed snapshot."""
+        return open_discovery_history(self._iter_tracking_records(job_id=job_id))
+
+    def _iter_tracking_records(self, *, job_id: str) -> Iterator[tuple[str, int | None, bool]]:
+        with FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout):
+            path = self._get_parquet_path(job_id=job_id)
+            if not path.exists():
+                return
+            parquet = pq.ParquetFile(path)
+            try:
+                for batch in parquet.iter_batches(batch_size=1000, columns=["id", "modified_time", "deleted"]):
+                    for row in batch.to_pylist():
+                        yield row["id"], row["modified_time"], row["deleted"]
+            finally:
+                parquet.close()
+
     def mark_deleted_candidates(self, *, job_id: str, doc_ids: set[str]) -> None:
         """Persist missing candidates without deleting prior pending records."""
         if not doc_ids:
@@ -148,6 +168,23 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
             deleted = pc.or_(table["deleted"], mask)  # type: ignore[attr-defined]
             self._write_table(
                 job_id=job_id, table=table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted)
+            )
+
+    def restore_reappeared_docs(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Preserve returned identities while making still-deleted records eligible for regeneration."""
+        if not doc_ids:
+            return
+        with FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout):
+            table = self._read_table(job_id=job_id)
+            if table is None:
+                return
+            mask = pc.and_(table["deleted"], pc.is_in(table["id"], pa.array(list(doc_ids), type=pa.string())))  # type: ignore[attr-defined]
+            deleted = pc.if_else(mask, False, table["deleted"])  # type: ignore[attr-defined]
+            modified = pc.if_else(mask, pa.scalar(None, type=pa.int64()), table["modified_time"])  # type: ignore[attr-defined]
+            table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted)
+            self._write_table(
+                job_id=job_id,
+                table=table.set_column(table.schema.get_field_index("modified_time"), "modified_time", modified),
             )
 
     def acknowledge_deletions(self, *, job_id: str, doc_ids: set[str]) -> None:

@@ -65,7 +65,6 @@ class SharePointSourceAdapter(DocumentSourcePort):
     SOURCE_DISPLAY_NAME = "Microsoft SharePoint"
     SOURCE_DESCRIPTION = "Ingest documents from SharePoint using Microsoft Graph API"
     SOURCE_VERSION = "1.0.0"
-    SUPPORTS_DISCOVERY = True
 
     def __init__(self) -> None:
         # Cache MicrosoftGraphLoader keyed by (drive_id, client_id, tenant_id, secret_hash) so
@@ -243,42 +242,16 @@ class SharePointSourceAdapter(DocumentSourcePort):
                 f"Folder path '{folder_path}' not found in document library '{document_library_id}': {e!s}"
             ) from e
 
-    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """Stream Graph pages with explicit errors and without processing filters."""
-        if config.file_path:
-            async for document in self.fetch_documents(config):
-                yield document
-            return
-        loader = self._get_loader(
-            drive_id=config.document_library_id,
-            client_id=config.client_id,
-            client_secret=config.client_secret,
-            tenant_id=config.tenant_id,
-            folder_path=config.folder_path,
-            recursive=config.recursive,
-        )
-        folder_id = None
-        if config.folder_path:
-            folder_id = self._resolve_sharepoint_folder_item_id(
-                loader=loader,
-                document_library_id=config.document_library_id,
-                folder_path=config.folder_path,
-                headers={"Authorization": f"Bearer {loader._get_token()}"},
-            )
-            if not folder_id:
-                raise ValueError("Source folder could not be resolved")
-        for item in loader.iter_metadata(folder_item_id=folder_id, recursive=config.recursive):
-            yield self._build_sharepoint_document(
-                item=item, document_library_id=config.document_library_id, config=config
-            )
-
-    async def fetch_documents(self, config: SharePointSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: SharePointSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """
         Fetch document metadata from SharePoint using Microsoft Graph API.
 
         This method implements lazy loading - it only fetches metadata, not binary content.
         Binary content is fetched on-demand by the Extract operator via fetch_binary_content().
         """
+        config = self._listing_config(config=config, full_listing=full_listing)
         sharepoint_config: SharePointSourceConfig = config
         try:
             loader = self._get_loader(
@@ -325,10 +298,19 @@ class SharePointSourceAdapter(DocumentSourcePort):
                     headers=headers,
                 )
 
-            for item in loader._list_files(folder_item_id=folder_item_id):
+            if full_listing and sharepoint_config.folder_path and not folder_item_id:
+                raise ValueError("Source folder could not be resolved")
+            items = (
+                loader.iter_metadata(folder_item_id=folder_item_id, recursive=config.recursive)
+                if full_listing
+                else loader._list_files(folder_item_id=folder_item_id)
+            )
+            for item in items:
                 doc_name = item.get(OperatorConstants.Columns.NAME, "unknown")
                 file_size = item.get("size", 0)
-                if self._should_skip_sharepoint_item(doc_name=doc_name, file_size=file_size, config=sharepoint_config):
+                if not full_listing and self._should_skip_sharepoint_item(
+                    doc_name=doc_name, file_size=file_size, config=sharepoint_config
+                ):
                     continue
                 document = self._build_sharepoint_document(
                     item=item,

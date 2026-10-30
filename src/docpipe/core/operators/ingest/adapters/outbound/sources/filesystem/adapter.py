@@ -38,45 +38,10 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
     SOURCE_DISPLAY_NAME = "Local Filesystem"
     SOURCE_DESCRIPTION = "Ingest documents from local filesystem directories"
     SOURCE_VERSION = "1.0.0"
-    SUPPORTS_DISCOVERY = True
 
-    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """Walk every identity, propagating inaccessible roots and subtrees."""
-
-        def on_error(error: OSError) -> None:
-            raise error
-
-        for root in self._iter_root_paths(config):
-            if not root.exists():
-                raise FileNotFoundError(str(root))
-            single_file = root.is_file()
-            if single_file:
-                paths = iter([root])
-            elif config.recursive:
-                paths = (
-                    Path(directory) / name
-                    for directory, _, names in os.walk(root, followlinks=config.follow_symlinks, onerror=on_error)
-                    for name in names
-                )
-            else:
-                paths = (p for p in root.iterdir() if p.is_file())
-            for path in paths:
-                stat = path.stat()
-                yield Document(
-                    id=str(path.absolute()),
-                    name=path.name,
-                    content=b"",
-                    source_url=f"file://{path.absolute()}",
-                    modified_time=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                    size=stat.st_size,
-                    extension=path.suffix.lower(),
-                    metadata={
-                        "absolute_path": str(path.absolute()),
-                        "relative_path": path.name if single_file else str(path.relative_to(root)),
-                    },
-                )
-
-    async def fetch_documents(self, config: FilesystemSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: FilesystemSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """
         Fetch documents from filesystem.
 
@@ -86,7 +51,10 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
         Yields:
             Document: Domain documents from filesystem
         """
+        config = self._listing_config(config=config, full_listing=full_listing)
         for root_path in self._iter_root_paths(config):
+            if full_listing and not root_path.exists():
+                raise FileNotFoundError(str(root_path))
             # Single file mode - if root_path is a file
             if root_path.is_file():
                 try:
@@ -140,7 +108,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
 
             else:
                 # Directory mode - walk through directory tree
-                for file_path in self._walk_directory(root_path, config):
+                for file_path in self._walk_directory(root_path=root_path, config=config, full_listing=full_listing):
                     try:
                         # Get file metadata to check size and populate Document fields
                         stat = file_path.stat()
@@ -184,6 +152,8 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                         yield document
 
                     except Exception as e:
+                        if full_listing:
+                            raise
                         # Log error but continue processing other files
                         print(f"Error processing file {file_path}: {e}")
                         continue
@@ -390,7 +360,9 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
         for p in config.paths:
             yield Path(p)
 
-    def _walk_directory(self, root_path: Path, config: FilesystemSourceConfig) -> Generator[Path, None, None]:
+    def _walk_directory(
+        self, *, root_path: Path, config: FilesystemSourceConfig, full_listing: bool = False
+    ) -> Generator[Path, None, None]:
         """
         Walk through directory tree and yield file paths.
 
@@ -401,9 +373,15 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
         Yields:
             Path: File paths matching criteria
         """
+
+        def on_error(error: OSError) -> None:
+            raise error
+
         if config.recursive:
             # Recursive walk
-            for dirpath, dirnames, filenames in os.walk(root_path, followlinks=config.follow_symlinks):
+            for dirpath, dirnames, filenames in os.walk(
+                root_path, followlinks=config.follow_symlinks, onerror=on_error if full_listing else None
+            ):
                 # Filter out excluded directories
                 dirnames[:] = [d for d in dirnames if not self._is_excluded(str(Path(dirpath) / d), config)]
 

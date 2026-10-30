@@ -24,8 +24,8 @@ The Python orchestrator uses `PrefectEngine`, so its batch scheduling changes af
 and make cleanup durable, idempotent, and independent of batch count. Preserve data/metadata contracts and existing
 retention-enabled behavior.
 
-**Non-Goals:** See the proposal. This design does not promise constant memory for the full incremental history,
-cross-flow shared-index ownership, or a consistent snapshot of a source being edited externally during discovery.
+**Non-Goals:** See the proposal. This design does not promise cross-flow shared-index ownership or a consistent
+snapshot of a source being edited externally during discovery.
 No frontend components or SCSS modules are involved.
 
 ## Decisions
@@ -37,20 +37,28 @@ enumerate source identity metadata to completion; retain the original `max_files
 Record presence before unchanged checks, processing filters, conversion failures, or selection-limit checks.
 Use the current MD5 of the source reference consistently, not the adapter's raw ID or content-derived `doc_id_hash`.
 
-Load historical source IDs, including pending deletions, into an unmatched-candidate set. Remove IDs as discovery
-encounters them. Only the remaining historically tracked IDs are candidates for deletion; never track all unprocessed
+Stream tracking records into a temporary indexed disk-backed snapshot in bounded batches. Mark historical IDs seen
+as discovery encounters them; look up processing timestamps only while selection has capacity. Reuse the snapshot for
+pending-deletion reappearance and missing-ID queries, rather than materializing a history dictionary and candidate set.
+The snapshot is closed and removed on success, failure, or cancellation. Persistent tracking is unchanged until complete
+successful discovery. Missing/returned evidence remains proportional to actual changes. Only the remaining historically
+tracked IDs are candidates for deletion; never track all unprocessed
 source IDs just to compare them. Emit only selected rows in the existing PyArrow schema. Beyond the limit, avoid
 creating full LangChain documents or JSON metadata solely to record presence.
 
-Rejected: collecting all ten million IDs in `ALL_DOC_IDS` and serializing them through every batch. The candidate set
-reduces duplicate inventory memory and avoids carrying unprocessed source entries through orchestration.
+Rejected: collecting all ten million IDs in `ALL_DOC_IDS` and serializing them through every batch. The snapshot avoids
+keeping a second inventory in memory or carrying unprocessed source entries through orchestration.
 
 ### 2. Make discovery completeness explicit in the source contract
 
-Add a metadata discovery capability to the source port that propagates listing failures. Adapt built-in
-filesystem, S3-compatible, Google Drive, Box, Dropbox, OneDrive, and SharePoint discovery to expose it. In synchronization
-mode, remove provider listing caps and stream paginated identity metadata; Google Drive must stop materializing the
-entire inventory. Preserve normal limited fetching outside synchronization mode.
+Reuse `fetch_documents(config, full_listing=True)` for complete metadata enumeration in the existing source port.
+Filesystem, S3-compatible, Google Drive, Box, Dropbox, OneDrive, and SharePoint adapters share their existing listing
+and conversion paths between both modes. Full listing removes processing filters and provider caps, streams pages,
+and propagates listing or conversion failures. Apply processing eligibility using the original configuration only
+after recording presence. Preserve normal limited fetching outside synchronization mode. Google Drive streams its
+listing in both modes rather than materializing the inventory. No separate discovery method or capability flag is
+needed. Legacy/custom adapters must explicitly declare the `full_listing` keyword to authorize reconciliation;
+accepting arbitrary keyword arguments alone does not establish that contract.
 
 Keep root paths, buckets, prefixes, and configured folder IDs as the authoritative source scope. Processing-only
 filters do not prove deletion: enumerate identities before those filters, or explicitly resolve existence of tracked
@@ -83,7 +91,10 @@ For retention enabled, keep the existing force-ingest reset policy and skip sour
 
 When a previously pending ID is discovered again, cancel that deletion and invalidate its completed-processing marker
 so it is eligible for regeneration, even when outside this run's selection. This conservative choice repairs output
-that a prior partially successful cleanup may have removed. It does not falsely mark regeneration complete.
+that a prior partially successful cleanup may have removed. Preserve the tracking record, clear `deleted`, and reset
+`modified_time` to null; do not acknowledge or remove the record merely because its source reappeared. If it disappears
+again before successful regeneration, the retained identity must become a deletion candidate again. Restoration only
+updates still-deleted records in the same scope and must not invalidate an already regenerated record.
 
 Rejected: clearing history and then attempting comparison, or restoring pending records directly as already processed.
 
@@ -141,8 +152,8 @@ execute in different processes. Persisted per-destination acknowledgments can op
 
 - Full inventory discovery on every retention-disabled run is O(source size) -> make the cost explicit in docs;
   fetch metadata only, stream provider pages, and never exceed the processing selection limit.
-- Historical IDs still occupy O(tracked size) memory -> reuse existing history where possible and avoid an additional
-  full source inventory; bounded-memory storage reconciliation remains separate work.
+- Historical tracking now occupies temporary disk space proportional to tracked size. Python history memory is bounded
+  by the record batch size; selected output and actual missing/returned evidence still scale with their own cardinality.
 - Discovery can fail after rows are selected -> propagate the exception and fail the flow before reconciliation or
   downstream processing. Successful exhaustion establishes completeness; a separate mutable discovery-state model is
   unnecessary. Preserve existing tracking records on failure.
@@ -164,3 +175,10 @@ execute in different processes. Persisted per-destination acknowledgments can op
 5. On rollout, require fresh complete discovery before consuming existing tombstones. On rollback, pause affected
    retention-disabled flows; the previous runtime can purge pending metadata unsafely, so changing code alone is not
    a safe retry strategy. Export pending metadata before rollback and reconcile it before resuming synchronization.
+
+## Reviewed follow-up improvements
+
+Use shared processing eligibility in Box's normal and full-listing selection paths. Request complete file metadata
+in Box folder pages and reuse it, retaining a detail-request fallback for incomplete entries. Convert S3 listing
+metadata directly without asynchronous task batches; preserve best-effort normal conversion and strict full-listing
+failure behavior. Make the Microsoft Graph list-returning API collect from its streaming traversal.

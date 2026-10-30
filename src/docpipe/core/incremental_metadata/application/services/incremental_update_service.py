@@ -8,6 +8,7 @@ This service encapsulates all business logic for managing incremental document
 processing, including metadata tracking, soft deletion, and document filtering.
 """
 
+from contextlib import AbstractContextManager
 from typing import Any
 
 import pyarrow as pa
@@ -18,6 +19,7 @@ from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataRecord,
     IncrementalMetadataStore,
 )
+from docpipe.core.incremental_metadata.domain.ports.incremental_metadata_store import DiscoveryHistory
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -47,10 +49,14 @@ class IncrementalUpdateService:
         """
         self.store = store
 
+    def discovery_history(self, *, job_id: str) -> AbstractContextManager[DiscoveryHistory]:
+        """Open the store's bounded-memory, execution-local processing history."""
+        return self.store.discovery_history(job_id=job_id)
+
     def reconcile_discovery(self, *, job_id: str, missing_ids: set[str], returned_ids: set[str]) -> set[str]:
         """Commit successful discovery and invalidate reappeared documents for regeneration."""
         pending = self.get_soft_deleted_doc_ids(job_id=job_id)
-        self.store.acknowledge_deletions(job_id=job_id, doc_ids=returned_ids & pending)
+        self.store.restore_reappeared_docs(job_id=job_id, doc_ids=returned_ids & pending)
         self.store.mark_deleted_candidates(job_id=job_id, doc_ids=missing_ids)
         return self.get_soft_deleted_doc_ids(job_id=job_id)
 

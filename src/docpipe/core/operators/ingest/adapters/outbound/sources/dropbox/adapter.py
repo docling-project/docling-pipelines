@@ -35,7 +35,6 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
     SOURCE_DISPLAY_NAME = "Dropbox"
     SOURCE_DESCRIPTION = "Ingest documents from a Dropbox account folder"
     SOURCE_VERSION = "1.0.0"
-    SUPPORTS_DISCOVERY = True
     CONFIG_CLASS = DropboxSourceConfig
 
     def __init__(self) -> None:
@@ -198,8 +197,11 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
     # Port implementation
     # ------------------------------------------------------------------
 
-    async def fetch_documents(self, config: DropboxSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: DropboxSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """Fetch document metadata from Dropbox, streaming results as they are listed."""
+        config = self._listing_config(config=config, full_listing=full_listing)
         try:
             client = self._get_dropbox_client(config=config)
 

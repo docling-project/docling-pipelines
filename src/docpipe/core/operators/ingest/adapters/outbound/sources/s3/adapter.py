@@ -3,7 +3,6 @@
 
 """S3 source adapter using boto3."""
 
-import asyncio
 import fnmatch
 import mimetypes
 from datetime import datetime
@@ -38,13 +37,11 @@ class S3SourceAdapter(DocumentSourcePort):
     - File filtering by extension and patterns
     - Hidden file exclusion
     - Size-based filtering
-    - Parallel downloads with bounded concurrency
 
     Features:
     - Lazy loading: Documents contain metadata only, no binary content
     - Binary content loaded on-demand by downstream operators
     - Efficient pagination for large buckets
-    - Parallel processing with configurable concurrency (default: 20)
     - Metadata preservation (modified time, size, content type)
     - Error handling with detailed logging
     - Support for custom S3 endpoints
@@ -60,7 +57,6 @@ class S3SourceAdapter(DocumentSourcePort):
     SOURCE_DISPLAY_NAME = "Amazon S3"
     SOURCE_DESCRIPTION = "Ingest documents from Amazon S3 or S3-compatible storage"
     SOURCE_VERSION = "1.0.0"
-    SUPPORTS_DISCOVERY = True
 
     def __init__(self):
         """Initialize adapter with cached AWS account ID and reusable S3 clients."""
@@ -72,33 +68,13 @@ class S3SourceAdapter(DocumentSourcePort):
         # most once per unique set of credentials rather than once per document.
         self._account_id_cache: dict[tuple, str | None] = {}
 
-    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """List identities directly, without filtering or binary/metadata downloads."""
-        client = self._create_s3_client(config)
-        for page in client.get_paginator("list_objects_v2").paginate(Bucket=config.bucket, Prefix=config.prefix):
-            for item in page.get("Contents", []):
-                key = item["Key"]
-                if key.endswith("/"):
-                    continue
-                if not config.recursive and "/" in key[len(config.prefix) :].lstrip("/"):
-                    continue
-                yield Document(
-                    id=key,
-                    name=Path(key).name,
-                    content=b"",
-                    source_url=f"s3://{config.bucket}/{key}",
-                    modified_time=item.get("LastModified"),
-                    size=item.get("Size"),
-                    extension=Path(key).suffix.lower(),
-                    metadata={"bucket": config.bucket, "key": key},
-                )
-
-    async def fetch_documents(self, config: S3SourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: S3SourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """
-        Fetch documents from S3 bucket with batched parallel downloads.
+        Stream document metadata from an S3 bucket.
 
-        This method processes S3 objects in batches with bounded concurrency,
-        streaming results as they complete. Memory-efficient for large buckets.
+        Convert each listed object directly; binary content is fetched downstream.
 
         Args:
             config: Validated S3 configuration
@@ -111,72 +87,28 @@ class S3SourceAdapter(DocumentSourcePort):
             BotoCoreError: If boto3 encounters errors
             ValueError: If bucket or credentials are invalid
         """
+        config = self._listing_config(config=config, full_listing=full_listing)
         try:
             # Create S3 client
             s3_client = self._create_s3_client(config)
 
             # Cache AWS account ID once for all operations
-            self._cached_account_id = self._get_aws_account_id(config)
+            self._cached_account_id = None if full_listing else self._get_aws_account_id(config)
 
             logger.info("Streaming S3 objects from bucket '%s' with prefix '%s' ", config.bucket, config.prefix)
 
-            # Process in batches to avoid loading all objects into memory
-            batch_size = config.max_concurrent_downloads * 5  # Process 5x concurrency at a time
-            semaphore = asyncio.Semaphore(config.max_concurrent_downloads)
-
-            async def download_with_semaphore(s3_obj: dict[str, Any]) -> Document | None:
-                """Download S3 object with semaphore-bounded concurrency."""
-                async with semaphore:
-                    try:
-                        return await self._download_s3_object(s3_client, config, s3_obj)
-                    except Exception as e:
-                        logger.exception("Failed to download S3 object %s: %s", s3_obj["Key"], e)
-                        return None
-
             fetched_count = 0
-            total_listed = 0
-            batch = []
-
-            # Stream objects and process in batches
             async for s3_obj in self._stream_s3_objects(s3_client, config):
-                batch.append(s3_obj)
-                total_listed += 1
-
-                # Process batch when it reaches batch_size
-                if len(batch) >= batch_size:
-                    logger.info("Processing batch of %s objects (total listed: %s)", len(batch), total_listed)
-
-                    # Create tasks for this batch
-                    tasks = [download_with_semaphore(obj) for obj in batch]
-
-                    # Gather results in order to maintain deterministic ordering
-                    documents = await asyncio.gather(*tasks)
-                    for document in documents:
-                        if document:
-                            fetched_count += 1
-                            yield document
-
-                    # Clear batch for next iteration
-                    batch.clear()
-
-            # Process remaining objects in final batch
-            if batch:
-                logger.info("Processing final batch of %s objects (total listed: %s)", len(batch), total_listed)
-                tasks = [download_with_semaphore(obj) for obj in batch]
-
-                # Gather results in order to maintain deterministic ordering
-                documents = await asyncio.gather(*tasks)
-                for document in documents:
-                    if document:
-                        fetched_count += 1
-                        yield document
-
-            logger.info(
-                "Completed streaming from S3 bucket '%s': listed %s objects, fetched %s documents",
-                config.bucket,
-                total_listed,
-                fetched_count,
-            )
+                if full_listing and not config.recursive and "/" in s3_obj["Key"][len(config.prefix) :].lstrip("/"):
+                    continue
+                document = self._prepare_document(config=config, s3_obj=s3_obj)
+                if document is None:
+                    if full_listing:
+                        raise ValueError(f"Cannot read source metadata: {s3_obj['Key']}")
+                    continue
+                fetched_count += 1
+                yield document
+            logger.info("Fetched %s document metadata entries from S3 bucket '%s'", fetched_count, config.bucket)
 
         except (ClientError, BotoCoreError) as e:
             logger.exception("S3 error while fetching documents: %s", e)
@@ -359,7 +291,6 @@ class S3SourceAdapter(DocumentSourcePort):
         from S3, enabling true streaming behavior without loading all into memory.
 
         Args:
-            s3_client: boto3 S3 client
             config: S3 configuration
 
         Yields:
@@ -463,14 +394,12 @@ class S3SourceAdapter(DocumentSourcePort):
         path_parts = key.split("/")
         return any(part.startswith(".") and part not in [".", ".."] for part in path_parts)
 
-    async def _download_s3_object(
-        self, s3_client: Any, config: S3SourceConfig, s3_obj: dict[str, Any]
-    ) -> Document | None:
+    @staticmethod
+    def _prepare_document(*, config: S3SourceConfig, s3_obj: dict[str, Any]) -> Document | None:
         """
         Create domain Document from S3 object metadata (lazy loading - no binary download).
 
         Args:
-            s3_client: boto3 S3 client
             config: S3 configuration
             s3_obj: S3 object metadata
 

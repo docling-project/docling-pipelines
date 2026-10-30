@@ -9,6 +9,8 @@ import importlib
 import itertools
 import json
 import pathlib
+from collections.abc import Mapping
+from inspect import signature
 from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import pyarrow as pa
@@ -22,6 +24,7 @@ from docpipe.core.constants.constants import (
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.event_streaming.models import InputEvent
 from docpipe.core.incremental_metadata import get_incremental_update_service
+from docpipe.core.incremental_metadata.domain.ports.incremental_metadata_store import DiscoveryHistory
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.ingest.ingest_utils import (
     get_filter_extensions,
@@ -123,43 +126,9 @@ class MicrosoftGraphLoader:
         self._token = access_token
         return access_token
 
-    def _process_items(self, *, items: list[dict], files: list[dict]) -> list[str]:
-        """Separate folders from files and return folder IDs to recurse into."""
-        folder_ids = []
-        for item in items:
-            if "folder" in item:
-                folder_ids.append(item["id"])
-            else:
-                files.append(item)
-        return folder_ids
-
     def _list_files(self, folder_item_id: str | None = None) -> list[dict]:
-        """Recursively list all files in the drive (or a specific folder)."""
-        token = self._get_token()
-        headers = {"Authorization": f"Bearer {token}"}
-
-        if folder_item_id:
-            endpoint = f"/drives/{self.drive_id}/items/{folder_item_id}/children"
-        else:
-            endpoint = f"/drives/{self.drive_id}/root/children"
-
-        files: list[dict] = []
-        while endpoint:
-            data = self._rest_client.call_rest_json(
-                method=RestMethod.GET,
-                url=endpoint,
-                headers=headers,
-            )
-
-            folder_ids = self._process_items(items=data.get("value", []), files=files)
-            if self.recursive:
-                for folder_id in folder_ids:
-                    files.extend(self._list_files(folder_item_id=folder_id))
-
-            next_link = data.get("@odata.nextLink")
-            endpoint = next_link.replace(MICROSOFT_GRAPH_API_BASE, "") if next_link else None  # type: ignore[assignment]
-
-        return files
+        """Collect the streaming traversal for legacy list-returning callers."""
+        return list(self.iter_metadata(folder_item_id=folder_item_id))
 
     def iter_metadata(self, *, folder_item_id: str | None = None, recursive: bool | None = None) -> Iterator[dict]:
         """Stream Graph metadata pages and propagate incomplete traversal errors."""
@@ -430,7 +399,7 @@ class IngestSourceOperator(AbstractOperator):
             DocpipeConstants.JOB_ID: self.job_id,
             DocpipeConstants.JOB_RUN_ID: self.job_run_id,
         }
-        self.previously_processed_docs_dict: dict[str, Any] | None = None
+        self.previously_processed_docs_dict: Mapping[str, Any] | None = None
 
         # Validate extensions
         self._validate_extensions()
@@ -485,20 +454,22 @@ class IngestSourceOperator(AbstractOperator):
         incremental_service = get_incremental_update_service()
         job_id_for_tracking: str = self.context_id or self.job_id or ""
 
-        history = (
-            incremental_service.get_all_processed_docs(job_id=job_id_for_tracking)
-            if not self.force_ingest or not self.retain_deleted_docs
-            else {}
-        )
-        self.previously_processed_docs_dict = None if self.force_ingest else history
-
-        # Initialize metadata
         metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=0)
-
-        # Process documents
         if not self.retain_deleted_docs and self.input_event is None:
-            doc_data = self._process_with_discovery(metadata=metadata, history=history, scope=job_id_for_tracking)
+            with incremental_service.discovery_history(job_id=job_id_for_tracking) as history:
+                self.previously_processed_docs_dict = None if self.force_ingest else history
+                try:
+                    doc_data = self._process_with_discovery(
+                        metadata=metadata, history=history, scope=job_id_for_tracking
+                    )
+                finally:
+                    self.previously_processed_docs_dict = None
         else:
+            self.previously_processed_docs_dict = (
+                incremental_service.get_all_processed_docs(job_id=job_id_for_tracking)
+                if not self.force_ingest
+                else None
+            )
             doc_data = self.process_documents(metadata)
 
         # Create output table
@@ -545,16 +516,12 @@ class IngestSourceOperator(AbstractOperator):
 
         return [output_table], metadata
 
-    def _process_with_discovery(self, *, metadata: dict, history: dict, scope: str) -> list[dict[str, Any]]:
+    def _process_with_discovery(self, *, metadata: dict, history: DiscoveryHistory, scope: str) -> list[dict[str, Any]]:
         """Record presence independently of eligibility, without buffering a source inventory."""
         from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import (
             SourceAdapterFactory,
         )
 
-        service = get_incremental_update_service()
-        pending = service.get_soft_deleted_doc_ids(job_id=scope)
-        candidates = set(history) | pending
-        returned: set[str] = set()
         discovered = 0
         evidence = {"complete": False, "scope": scope, "missing_ids": [], "returned_ids": [], "discovered": 0}
         metadata[Metrics.Internal.SOURCE_DISCOVERY] = evidence
@@ -563,21 +530,21 @@ class IngestSourceOperator(AbstractOperator):
             evidence["error"] = "Source does not support authoritative metadata discovery"
             return self.process_documents(metadata)
         adapter, config = self._build_adapter_config(self.provider)
-        if not adapter.SUPPORTS_DISCOVERY:
+        # Legacy/custom adapters must explicitly implement the full-listing contract.
+        if "full_listing" not in signature(adapter.fetch_documents).parameters:
             evidence["error"] = "Source does not support authoritative metadata discovery"
             return self.process_documents(metadata)
+        documents = adapter.fetch_documents(config, full_listing=True)
         selected: list[dict[str, Any]] = []
 
         async def consume():
             nonlocal discovered
-            async for doc in adapter.discover_documents(config=config):
+            async for doc in documents:
                 discovered += 1
                 source = doc.metadata.get("source", doc.source_url)
                 identity = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()
-                candidates.discard(identity)
-                if identity in pending:
-                    returned.add(identity)
-                if len(selected) < self.max_files and doc.metadata.get("processing_eligible", True):
+                history.mark_seen(identity)
+                if len(selected) < self.max_files and adapter._is_processing_eligible(document=doc, config=config):
                     modified = doc.metadata.get(
                         "last_modified", doc.modified_time.isoformat() if doc.modified_time else 0
                     )
@@ -593,16 +560,17 @@ class IngestSourceOperator(AbstractOperator):
                         selected.append(row)
 
         self._run_async_generator_in_sync_context(consume())
+        missing_ids = history.missing_ids()
         evidence.update(
             complete=True,
             discovered=discovered,
-            missing_ids=list(candidates),
-            returned_ids=list(returned),
+            missing_ids=list(missing_ids),
+            returned_ids=list(history.returned_ids()),
         )
         metadata["source_documents_discovered"] = discovered
         metadata["source_discovery_complete"] = True
-        metadata["source_documents_missing"] = len(candidates)
-        metadata["source_documents_newly_missing"] = len(candidates - pending)
+        metadata["source_documents_missing"] = len(missing_ids)
+        metadata["source_documents_newly_missing"] = history.newly_missing_count()
         return selected
 
     def _process_doc_batch(

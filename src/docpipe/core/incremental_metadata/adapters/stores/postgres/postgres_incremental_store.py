@@ -15,7 +15,8 @@ Features:
 """
 
 import hashlib
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any, cast
 
 from sqlalchemy import MetaData, delete, text, update
@@ -25,10 +26,12 @@ from sqlmodel import select
 from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_factory import (
     register_incremental_update_store,
 )
+from docpipe.core.incremental_metadata.adapters.stores.discovery_history import open_discovery_history
 from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataRecord,
     IncrementalMetadataStore,
 )
+from docpipe.core.incremental_metadata.domain.ports.incremental_metadata_store import DiscoveryHistory
 from docpipe.core.job_management.adapters.stores.postgres.database import (
     create_postgres_engine,
     create_session_factory,
@@ -150,6 +153,23 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
             finally:
                 connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
 
+    def discovery_history(self, *, job_id: str) -> AbstractContextManager[DiscoveryHistory]:
+        """Stream only tracking columns into an indexed snapshot, avoiding ORM row materialization."""
+        return open_discovery_history(self._iter_tracking_records(job_id=job_id))
+
+    def _iter_tracking_records(self, *, job_id: str) -> Iterator[tuple[str, int | None, bool]]:
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(self._sync_table.c.id, self._sync_table.c.modified_time, self._sync_table.c.deleted)
+                .where(self._sync_table.c.job_id == job_id)
+                .execution_options(yield_per=1000)
+            )
+            try:
+                for row in rows:
+                    yield row[0], row[1], row[2]
+            finally:
+                rows.close()
+
     def mark_deleted_candidates(self, *, job_id: str, doc_ids: set[str]) -> None:
         """Update only explicit candidates in this scope."""
         if not doc_ids:
@@ -161,6 +181,24 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                     update(self._sync_table)
                     .where(self._sync_table.c.job_id == job_id, self._sync_table.c.id.in_(ids[offset : offset + 500]))
                     .values(deleted=True)
+                )
+            session.commit()
+
+    def restore_reappeared_docs(self, *, job_id: str, doc_ids: set[str]) -> None:
+        """Cancel pending deletion without dropping identity or changing regenerated records."""
+        if not doc_ids:
+            return
+        with self._session_factory() as session:
+            ids = sorted(doc_ids)
+            for offset in range(0, len(ids), 500):
+                session.execute(
+                    update(self._sync_table)
+                    .where(
+                        self._sync_table.c.job_id == job_id,
+                        self._sync_table.c.id.in_(ids[offset : offset + 500]),
+                        self._sync_table.c.deleted.is_(True),
+                    )
+                    .values(deleted=False, modified_time=None)
                 )
             session.commit()
 

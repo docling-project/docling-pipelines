@@ -18,6 +18,8 @@ the limit on documents processed per run, including forced re-ingestion and micr
 - Resolve pending source IDs to all stored chunk IDs in OpenSearch and Milvus, with retry-safe acknowledgment.
 - Schedule cleanup once per VectorDB destination per run, including runs with no selected documents, without
   duplicating cleanup across concurrent processing batches.
+- Stream synchronization history into temporary indexed storage instead of materializing all tracking records in Python.
+- Share Box eligibility rules, reuse complete listing metadata, and simplify S3/Graph metadata traversal.
 - Document the discovery cost, four flag combinations, supported source scope, and cleanup failure behavior.
 
 ## Capabilities
@@ -45,8 +47,7 @@ No frontend, `/ui` routing, BFF, Redux, or dependency changes are planned. Backe
 - Deletion synchronization for document sets or other output types.
 - Changing frontend defaults or redesigning flow run properties.
 - Fixing existing provider discovery caps when retention is enabled.
-- Persistent traversal cursors, source change feeds, scheduled reconciliation, or bounded-memory redesign of the
-  existing full incremental-history dictionary.
+- Persistent traversal cursors, source change feeds, or scheduled reconciliation.
 - Automatic cleanup of destinations removed from a flow, cross-flow shared-index ownership, or source snapshot
   isolation during concurrent external edits.
 - Implementing the change as part of this proposal.

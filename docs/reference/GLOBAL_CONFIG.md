@@ -234,7 +234,9 @@ Configuration for tracking and processing only changed documents.
   incremental checks, but historical records and pending deletions are preserved. Repeated forced runs can select the
   same first group again; use incremental mode to progress through successive groups.
 - Full discovery streams metadata without downloading unselected file contents. It still incurs source listing cost
-  proportional to the source size and retains historical IDs in memory.
+  proportional to the source size. Synchronization reads tracking history in batches into a temporary indexed file,
+  removed after discovery, instead of retaining all historical IDs in Python memory. Temporary disk space scales with
+  tracked history; selected rows and actual missing/returned document evidence still consume memory.
 
 **Deletion lifecycle**:
 - Only a successful complete scan marks tracked missing documents soft-deleted. Missing roots, unreadable subtrees,
@@ -246,7 +248,8 @@ Configuration for tracking and processing only changed documents.
 - Pending deletion records survive failed cleanup until every configured VectorDB destination confirms removal.
   Successful destinations can receive idempotent repeated cleanup on retry. With no VectorDB destinations, records remain.
 - A reappearing document cancels its pending deletion and becomes eligible for regeneration. It does not become
-  processed merely because discovery encountered it.
+  processed merely because discovery encountered it. Its tracking record is preserved with an invalidated processing
+  timestamp, so another disappearance before regeneration is still detected.
 - `context_id`, when supplied, scopes history, cleanup, and writes; otherwise the job ID is used. Synchronization runs
   sharing that scope are serialized independently of batch metadata writes. An already-running Postgres scope is rejected.
 

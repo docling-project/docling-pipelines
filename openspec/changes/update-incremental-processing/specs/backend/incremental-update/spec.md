@@ -119,6 +119,11 @@ output may already have been removed.
 - **THEN** it is not deleted on the strength of the old pending record
 - **AND** later incremental selection can reprocess it if prior cleanup may have removed its output
 
+#### Scenario: Reappeared document disappears before regeneration
+- **WHEN** a pending document reappears outside `max_files` and disappears again before successful reprocessing
+- **THEN** its tracking identity remains available and the next complete scan marks it pending deletion again
+- **AND** reappearance cancels deletion without falsely retaining a completed-processing timestamp
+
 ### Requirement: Source-deletion cleanup runs independently of selected document batches
 
 With retention disabled and successful complete discovery, the engine SHALL schedule source-deletion cleanup for
@@ -160,3 +165,15 @@ as a successfully scanned empty source.
 #### Scenario: Ingestion does not provide reconciliation evidence
 - **WHEN** an ingestion result lacks proof of a complete source inventory
 - **THEN** the engine does not mark historical documents deleted using a default empty list
+
+### Requirement: Synchronization history is read in bounded batches
+
+Full-source synchronization SHALL avoid materializing the complete tracking history as Python dictionaries and
+candidate sets. Filesystem and PostgreSQL stores SHALL stream tracking records into temporary indexed storage.
+Temporary presence evidence MUST NOT alter durable tracking before successful discovery and MUST be removed on
+success, failure, and cancellation. Selected rows and actual missing/returned evidence may scale with their counts.
+
+#### Scenario: Large processing history and small selection
+- **WHEN** a synchronization run has millions of tracked records and a small `max_files` limit
+- **THEN** history is streamed in bounded batches and incremental eligibility remains correct
+- **AND** unsuccessful discovery leaves persistent tracking unchanged and removes temporary history

@@ -6,7 +6,7 @@ including its source, orchestration, and VectorDB integration.
 
 ## 1. Source discovery contracts and adapters
 
-- [x] 1.1 [backend] Define identity-only discovery with listing errors propagated to the flow, with
+- [x] 1.1 [backend] Reuse `fetch_documents(..., full_listing=True)` for identity-only listing with errors propagated to the flow, with
   unsupported/event-scoped behavior; verify contract tests cannot mistake capped or unsupported discovery for completion.
 - [x] 1.2 [backend] Implement filesystem identity discovery before processing filters, with missing-root, subtree,
   and stat-error propagation; verify empty-root success and incomplete-walk tests in the filesystem adapter suite.
@@ -95,6 +95,20 @@ including its source, orchestration, and VectorDB integration.
 - [x] 6.5 [backend] Run `openspec validate update-incremental-processing --strict`, review changed docs
   and relative links, and verify the implementation diff contains no frontend, dependency, or changelog changes.
 
+## 7. Reviewed follow-up improvements
+
+- [x] 7.1 [backend] Use shared processing filters in Box for both modes; verify exclusion patterns and paths.
+- [x] 7.2 [backend] Replace S3 metadata task batches with direct streaming conversion; preserve error semantics.
+- [x] 7.3 [backend] Reuse Graph streaming traversal in the list-returning compatibility API; verify pagination/recursion.
+- [x] 7.4 [backend] Reuse complete Box listing metadata with a fallback for incomplete entries; verify request counts.
+- [x] 7.5 [backend] Stream filesystem/Postgres tracking into a temporary disk-backed snapshot for synchronization;
+  verify bounded ingestion history, incremental eligibility, force behavior, reappearance, and cleanup on errors.
+
+## 8. Tracking-loss correction
+
+- [x] 8.1 [backend] Restore reappearing tombstones in place with an invalidated processing timestamp in filesystem
+  and PostgreSQL stores; verify second disappearance, regeneration, scope isolation, and rollback in existing tests.
+
 ## Workflow follow-up
 
 - Review these planning artifacts before starting implementation with `openspec-apply-change`.
@@ -125,3 +139,35 @@ including its source, orchestration, and VectorDB integration.
 - Strict OpenSpec validation, changed Python formatting, whitespace checks, and touched-document relative links pass.
 - Live OpenSearch/Milvus and cloud credentials were not used; their pagination, strict lookup, and failure behavior
   are covered with mocked clients. Canonical specs, frontend, dependencies, and the changelog are unchanged.
+
+- Fetch-path simplification: removed `SUPPORTS_DISCOVERY`, `discover_documents()`, and `_discover_metadata()`.
+  Complete enumeration now uses `fetch_documents(..., full_listing=True)` and the existing provider listing paths;
+  Google Drive streams pages in both modes. Legacy signatures do not authorize reconciliation. All 627 ingestion
+  and incremental tests passed; after final simplification and compatibility cases, 220 focused tests passed,
+  followed by 34 filesystem checks. Tests remain in existing files. Changed-file Ruff/formatting and strict OpenSpec
+  validation pass; mypy remains at the existing 45 errors in 12 files.
+
+- Reviewed follow-up improvements: shared Box processing eligibility in folder/single-file modes; full folder pages
+  request and reuse complete metadata, with a per-file fallback only for incomplete entries. S3 converts metadata
+  directly without async task batches, and Graph list-returning callers use the streaming traversal.
+- Synchronization history now streams filesystem Parquet or PostgreSQL rows in 1,000-record batches into a temporary
+  SQLite snapshot (standard library, no dependency or persistent-schema change). Tests verify scope/soft-deletion
+  parity, repeated/forced ingestion, failure/cancellation cleanup, and no all-history dictionary API calls. A lazy
+  100,000-record history stays below 8 MiB of traced Python allocations; selected rows and actual deletion evidence
+  still scale with their own counts. Temporary disk usage scales with tracked history.
+- Follow-up regression verification: 2,323 checks passed in the sandbox; six Prefect integration checks initially
+  failed because the temporary server could not bind a local port, then all six passed with local-server access.
+  Two opt-in PostgreSQL checks were skipped in that run and both passed against an isolated temporary PostgreSQL
+  server, including a 2,501-record streaming snapshot. The server was stopped and removed. One previously documented
+  baseline log-capture test remains deselected. Updated history tests separately pass (102 passed, two opt-in skips).
+- Changed-file Ruff/formatting, strict OpenSpec validation, and whitespace checks pass. Mypy remains at 45 existing
+  errors in 12 files. All test additions remain in existing test files.
+
+- Tracking-loss correction: reappearance now restores still-deleted records in place and nulls the processing
+  timestamp, preserving identity until regeneration or acknowledged cleanup. A regression reproduced the old loss
+  in filesystem and SQL stores before the fix. Existing-file tests now cover reappearance beyond `max_files`, a
+  second disappearance and orphaned-chunk cleanup, scope isolation, stale restoration after regeneration, and atomic
+  failure/rollback. The incremental-metadata and VectorDB suites pass (730 passed, three opt-in PostgreSQL skips);
+  six focused transition checks also pass. The new live PostgreSQL restoration check passed against an isolated
+  temporary server, which was stopped and removed. Ruff, formatting, whitespace, and strict OpenSpec validation
+  pass. Mypy remains at the existing 45 errors in 12 files.

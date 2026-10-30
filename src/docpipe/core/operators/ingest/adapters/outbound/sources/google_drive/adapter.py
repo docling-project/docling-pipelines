@@ -8,7 +8,7 @@ import json
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Iterator
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -50,7 +50,6 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
     SOURCE_DISPLAY_NAME = "Google Drive"
     SOURCE_DESCRIPTION = "Ingest documents from Google Drive using Google Drive API"
     SOURCE_VERSION = "3.0.0"
-    SUPPORTS_DISCOVERY = True
 
     def __init__(self) -> None:
         # Cache (creds, service) keyed by a hash of the credentials config so a single
@@ -310,82 +309,6 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
 
         return " and ".join(query_parts)
 
-    def _process_page_items(
-        self,
-        *,
-        items: list[dict],
-        all_files: list[dict],
-        folders_to_process: deque,
-        recursive: bool,
-        max_files: int | None,
-    ) -> bool:
-        """
-        Process a page of Drive API results, separating files from folders.
-
-        Returns True if the max_files limit has been reached.
-        """
-        for item in items:
-            if item.get("mimeType") == "application/vnd.google-apps.folder":
-                if recursive:
-                    folders_to_process.append(item["id"])
-            else:
-                all_files.append(item)
-                if max_files is not None and len(all_files) >= max_files:
-                    return True
-        return False
-
-    def _fetch_folder_pages(
-        self,
-        *,
-        service: Any,
-        folder_id: str,
-        config: GoogleDriveSourceConfig,
-        all_files: list[dict],
-        folders_to_process: deque,
-    ) -> bool:
-        """Fetch all pages for one folder, populating all_files/folders_to_process.
-
-        Returns True when the max_files limit is reached.
-        """
-        query = self._build_drive_query(
-            folder_id=folder_id,
-            file_extensions=config.file_extensions or [],
-        )
-        page_token = None
-
-        while True:
-            if config.max_files is not None and len(all_files) >= config.max_files:
-                return True
-
-            page_size = min(config.max_files - len(all_files), 100) if config.max_files is not None else 100
-
-            results = (
-                service.files()
-                .list(
-                    q=query,
-                    spaces="drive",
-                    fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
-                    pageToken=page_token,
-                    pageSize=page_size,
-                )
-                .execute()
-            )
-
-            if self._process_page_items(
-                items=results.get("files", []),
-                all_files=all_files,
-                folders_to_process=folders_to_process,
-                recursive=config.recursive,
-                max_files=config.max_files,
-            ):
-                return True
-
-            page_token = results.get("nextPageToken")
-            if not page_token:
-                break
-
-        return False
-
     def _get_drive_service(self, *, config: GoogleDriveSourceConfig) -> Any:
         """Return a cached Drive API service for the given credentials configuration.
 
@@ -408,29 +331,41 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         _creds, service = self._service_cache[cache_key]
         return service
 
-    def _list_files_from_drive(self, *, config: GoogleDriveSourceConfig) -> list[dict]:
-        """
-        List files from Google Drive using Drive API v3 (metadata only, no download).
-
-        Returns list of file metadata dictionaries.
-        """
+    def _list_files_from_drive(self, *, config: GoogleDriveSourceConfig) -> Iterator[dict]:
+        """Stream folder pages, stopping at the configured listing limit."""
+        if config.folder_path and not config.folder_id:
+            raise ValueError("Google Drive listing requires folder_id for folder_path")
         service = self._get_drive_service(config=config)
-
-        all_files: list[dict[str, Any]] = []
-        folders_to_process: deque[str] = deque([config.folder_id] if config.folder_id else [])
-
-        while folders_to_process:
-            current_folder_id = folders_to_process.popleft()
-            if self._fetch_folder_pages(
-                service=service,
-                folder_id=current_folder_id,
-                config=config,
-                all_files=all_files,
-                folders_to_process=folders_to_process,
-            ):
-                return all_files
-
-        return all_files
+        folders = deque([config.folder_id or config.drive_id or "root"])
+        count = 0
+        while folders:
+            folder = folders.popleft()
+            token = None
+            while True:
+                params: dict[str, Any] = {
+                    "q": self._build_drive_query(folder_id=folder, file_extensions=config.file_extensions or []),
+                    "spaces": "drive",
+                    "fields": "nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
+                    "pageSize": min(config.max_files - count, 100) if config.max_files is not None else 1000,
+                    "pageToken": token,
+                }
+                if config.drive_id:
+                    params.update(
+                        driveId=config.drive_id, corpora="drive", includeItemsFromAllDrives=True, supportsAllDrives=True
+                    )
+                page = service.files().list(**params).execute()
+                for item in page.get("files", []):
+                    if item.get("mimeType") == "application/vnd.google-apps.folder":
+                        if config.recursive:
+                            folders.append(item["id"])
+                    else:
+                        yield item
+                        count += 1
+                        if config.max_files is not None and count >= config.max_files:
+                            return
+                token = page.get("nextPageToken")
+                if not token:
+                    break
 
     @staticmethod
     def _resolve_workspace_extension(*, file_ext: str, file_mime: str) -> str:
@@ -470,36 +405,6 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
 
         return False
 
-    def _iter_documents(self, config: GoogleDriveSourceConfig) -> list[Document]:
-        """
-        List Google Drive files and create documents with metadata only (lazy loading).
-
-        No binary content is downloaded - that happens on-demand via fetch_binary_content().
-        """
-        files = self._list_files_from_drive(config=config)
-        logger.info("Found %s files in Google Drive folder '%s'", len(files), config.folder_id)
-
-        documents = []
-        for file_metadata in files:
-            if self._should_skip_file(file_metadata=file_metadata, config=config):
-                continue
-            doc = self._prepare_document(file_metadata=file_metadata, config=config)
-            documents.append(doc)
-            logger.debug("Created document metadata for Google Drive file: %s (%s bytes)", doc.name, doc.size)
-
-        extension_counts: dict[str, int] = {}
-        for doc in documents:
-            extension = doc.extension or "unknown"
-            extension_counts[extension] = extension_counts.get(extension, 0) + 1
-
-        if extension_counts:
-            logger.info("  File breakdown by extension:")
-            for extension, count in sorted(extension_counts.items(), key=lambda x: x[1], reverse=True):
-                logger.info("    - %s: %s file(s)", extension, count)
-
-        logger.info("Created %s document metadata entries from Google Drive", len(documents))
-        return documents
-
     def _fetch_single_gdrive_file(self, *, config: GoogleDriveSourceConfig) -> Document:
         """Fetch metadata for a single Google Drive file by file_id."""
         service = self._get_drive_service(config=config)
@@ -510,41 +415,9 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         )
         return self._prepare_document(file_metadata=file_metadata, config=config)
 
-    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """Stream complete Drive pages rather than materializing an inventory."""
-        service = self._get_drive_service(config=config)
-        if config.file_id:
-            yield self._fetch_single_gdrive_file(config=config)
-            return
-        if config.folder_path and not config.folder_id:
-            raise ValueError("Authoritative Google Drive discovery requires folder_id for folder_path")
-        folders = deque([config.folder_id or config.drive_id or "root"])
-        while folders:
-            folder = folders.popleft()
-            token = None
-            while True:
-                params: dict[str, Any] = {
-                    "q": self._build_drive_query(folder_id=folder, file_extensions=[]),
-                    "fields": "nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
-                    "pageSize": 1000,
-                    "pageToken": token,
-                }
-                if config.drive_id:
-                    params.update(
-                        driveId=config.drive_id, corpora="drive", includeItemsFromAllDrives=True, supportsAllDrives=True
-                    )
-                page = service.files().list(**params).execute()
-                for item in page.get("files", []):
-                    if item.get("mimeType") == "application/vnd.google-apps.folder":
-                        if config.recursive:
-                            folders.append(item["id"])
-                    else:
-                        yield self._prepare_document(file_metadata=item, config=config)
-                token = page.get("nextPageToken")
-                if not token:
-                    break
-
-    async def fetch_documents(self, config: GoogleDriveSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: GoogleDriveSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """
         Fetch documents from Google Drive using Google Drive API.
 
@@ -558,19 +431,18 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             ImportError: If google-api-python-client is not installed
             ValueError: If credentials are invalid or folder not found
         """
+        config = self._listing_config(config=config, full_listing=full_listing)
         try:
             if config.file_id:
                 logger.info("Fetching single file from Google Drive: file_id=%s", config.file_id)
                 yield self._fetch_single_gdrive_file(config=config)
                 return
 
-            fetched_count = 0
-            for document in self._iter_documents(config):
-                if config.max_files is not None and fetched_count >= config.max_files:
-                    logger.info("Reached max_files limit (%s), stopping fetch", config.max_files)
-                    break
+            for file_metadata in self._list_files_from_drive(config=config):
+                if not full_listing and self._should_skip_file(file_metadata=file_metadata, config=config):
+                    continue
+                document = self._prepare_document(file_metadata=file_metadata, config=config)
                 yield document
-                fetched_count += 1
         except ImportError as e:
             msg = "Google API client not installed. Install with: pip install google-api-python-client"
             raise ImportError(msg) from e

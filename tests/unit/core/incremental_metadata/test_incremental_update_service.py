@@ -519,7 +519,7 @@ def test_reappearance_cancels_tombstone_and_requires_reprocessing(sync_service):
         records=[IncrementalMetadataRecord(job_id="scope", doc_id="returned", deleted=True)],
     )
     assert sync_service.reconcile_discovery(job_id="scope", missing_ids=set(), returned_ids={"returned"}) == set()
-    assert sync_service.get_all_processed_docs(job_id="scope") == {}
+    assert sync_service.get_all_processed_docs(job_id="scope")["returned"]["modified_time"] is None
 
 
 class VectorSink:
@@ -735,13 +735,13 @@ def test_deletion_only_run_reaches_real_vector_executor(
 def test_large_lazy_inventory_does_not_convert_unselected_documents(*, tmp_path, sync_service, monkeypatch):
     from docpipe.core.operators.ingest.domain.models import Document
 
-    adapter = Mock(SUPPORTS_DISCOVERY=True)
+    adapter = Mock()
 
-    async def discovery(*, config):
+    async def discovery(config, *, full_listing=False):
         for i in range(100_000):
             yield Document(id=str(i), name=f"{i}.txt", content=b"", source_url=str(i))
 
-    adapter.discover_documents = discovery
+    adapter.fetch_documents = discovery
     op = ingest(root=tmp_path, limit=10)
     monkeypatch.setattr(op, "_build_adapter_config", lambda provider: (adapter, None))
     convert = Mock(wraps=op._domain_doc_to_langchain)
@@ -762,16 +762,36 @@ def test_retention_enabled_never_requires_discovery(*, tmp_path, sync_service, m
     assert Metrics.Internal.SOURCE_DISCOVERY not in metadata
 
 
+@pytest.mark.parametrize("accepts_kwargs", [False, True])
+def test_legacy_fetch_cannot_authorize_deletions(*, tmp_path, sync_service, monkeypatch, accepts_kwargs):
+    async def legacy(config):
+        yield
+
+    async def permissive_legacy(config, **kwargs):
+        yield
+
+    adapter = Mock()
+    adapter.fetch_documents = permissive_legacy if accepts_kwargs else legacy
+    op = ingest(root=tmp_path)
+    monkeypatch.setattr(op, "_build_adapter_config", lambda provider: (adapter, None))
+    fallback = Mock(return_value=[])
+    monkeypatch.setattr(op, "process_documents", fallback)
+    _, metadata = op.transform(None)
+    fallback.assert_called_once()
+    assert not metadata[Metrics.Internal.SOURCE_DISCOVERY]["complete"]
+    assert not metadata[Metrics.Internal.SOURCE_DISCOVERY]["missing_ids"]
+
+
 def test_discovery_failure_after_selection_aborts_ingestion(*, tmp_path, sync_service, monkeypatch):
     from docpipe.core.operators.ingest.domain.models import Document
 
-    adapter = Mock(SUPPORTS_DISCOVERY=True)
+    adapter = Mock()
 
-    async def failing_listing(*, config):
+    async def failing_listing(config, *, full_listing=False):
         yield Document(id="a", name="a.txt", content=b"", source_url="a")
         raise PermissionError("failed next page")
 
-    adapter.discover_documents = failing_listing
+    adapter.fetch_documents = failing_listing
     op = ingest(root=tmp_path)
     monkeypatch.setattr(op, "_build_adapter_config", lambda provider: (adapter, None))
     sync_service.store.upsert_records(
@@ -801,11 +821,11 @@ def test_discovery_failure_aborts_flow_before_cleanup(*, tmp_path, sync_service,
     from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.adapter import FilesystemSourceAdapter
     from docpipe.core.operators.ingest.domain.models import Document
 
-    async def failing_listing(self, *, config):
+    async def failing_listing(self, config, *, full_listing=False):
         yield Document(id="a", name="a.txt", content=b"", source_url="a")
         raise PermissionError("unreadable subtree")
 
-    monkeypatch.setattr(FilesystemSourceAdapter, "_discover_metadata", failing_listing)
+    monkeypatch.setattr(FilesystemSourceAdapter, "fetch_documents", failing_listing)
     orch = PythonOrchestrator()
     orch.job_id, orch.job_run_id = "job", "run"
     orch.job_status, orch.common_log_arguments = ExecutionStatus.RUNNING, {}
@@ -840,3 +860,52 @@ def test_discovery_failure_aborts_flow_before_cleanup(*, tmp_path, sync_service,
     failed.assert_called_once()
     cleanup.assert_not_called()
     prepare.assert_not_called()
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_full_scan_does_not_materialize_history(*, tmp_path, sync_service, monkeypatch, force):
+    (tmp_path / "a.txt").write_text("a")
+    tables, _ = ingest(root=tmp_path).transform(None)
+    sync_service.save_metadata_for_incremental_update(job_id="scope", job_run_id="first", tables=tables)
+    monkeypatch.setattr(sync_service, "get_all_processed_docs", Mock(side_effect=AssertionError("unbounded history")))
+    tables, metadata = ingest(root=tmp_path, force=force).transform(None)
+    assert tables[0].num_rows == int(force)
+    assert metadata["source_documents_missing"] == 0
+
+
+def test_reappeared_document_beyond_limit_can_be_deleted_again(*, tmp_path, sync_service, monkeypatch):
+    from docpipe.core.operators.ingest.domain.models import Document
+    from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
+
+    first_id = hashlib.md5(b"first", usedforsecurity=False).hexdigest()
+    returned_id = hashlib.md5(b"returned", usedforsecurity=False).hexdigest()
+    sync_service.store.upsert_records(
+        job_id="scope",
+        job_run_id="old",
+        records=[IncrementalMetadataRecord(job_id="scope", doc_id=returned_id, modified_time=10)],
+    )
+    sync_service.store.mark_deleted_candidates(job_id="scope", doc_ids={returned_id})
+    documents = [Document(id=key, name=f"{key}.txt", source_url=key, content=b"") for key in ("first", "returned")]
+    adapter = Mock()
+    adapter._is_processing_eligible = DocumentSourcePort._is_processing_eligible
+
+    async def fetch(config, *, full_listing=False):
+        for document in documents:
+            yield document
+
+    adapter.fetch_documents = fetch
+    op = ingest(root=tmp_path, limit=1)
+    monkeypatch.setattr(op, "_build_adapter_config", lambda provider: (adapter, None))
+    tables, metadata = op.transform(None)
+    assert tables[0]["id"].to_pylist() == [first_id]
+    assert reconcile(sync_service=sync_service, metadata=metadata) == set()
+    assert sync_service.get_all_processed_docs(job_id="scope")[returned_id]["modified_time"] is None
+    sync_service.save_metadata_for_incremental_update(job_id="scope", job_run_id="first", tables=tables)
+    documents.pop()
+    _, metadata = op.transform(None)
+    assert reconcile(sync_service=sync_service, metadata=metadata) == {returned_id}
+    sink = VectorSink()
+    sink.chunks = {returned_id: {"orphaned-chunk"}, first_id: {"keep"}}
+    _, metadata = operator(sink=sink).transform(pa.table({}))
+    assert metadata[Metrics.Internal.SOURCE_DELETION_RESULT] == [returned_id]
+    assert sink.chunks == {returned_id: set(), first_id: {"keep"}}

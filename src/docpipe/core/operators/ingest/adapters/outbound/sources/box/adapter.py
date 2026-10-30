@@ -26,7 +26,6 @@ class BoxSourceAdapter(DocumentSourcePort):
     """Adapter for ingesting documents from Box using the Box SDK."""
 
     SOURCE_NAME = "box_driver"
-    SUPPORTS_DISCOVERY = True
     SOURCE_DISPLAY_NAME = "Box Driver"
     CONFIG_CLASS = BoxSourceConfig
 
@@ -73,21 +72,9 @@ class BoxSourceAdapter(DocumentSourcePort):
             )
         return self._client_cache[key]
 
-    def _should_include_file(self, file_name: str, file_size_bytes: int, config: BoxSourceConfig) -> bool:
-        """Check whether a Box file passes extension and size filters."""
-        file_ext = Path(file_name).suffix.lower()
-
-        if config.file_extensions and file_ext not in config.file_extensions:
-            return False
-
-        if config.max_file_size_mb is not None:
-            size_mb = file_size_bytes / (1024 * 1024)
-            if size_mb > config.max_file_size_mb:
-                return False
-
-        return True
-
-    def _iter_box_files(self, *, client: BoxClient, config: BoxSourceConfig, folder_id: str | None = None):
+    def _iter_box_files(
+        self, *, client: BoxClient, config: BoxSourceConfig, folder_id: str | None = None, full_listing: bool = False
+    ):
         """Iterate Box files recursively from the given folder.
 
         Args:
@@ -98,28 +85,52 @@ class BoxSourceAdapter(DocumentSourcePort):
         if folder_id is None:
             folder_id = config.folder_id
         try:
-            folder = client.folders.get_folder_by_id(folder_id)
-            items = client.folders.get_folder_items(folder.id)
-
-            for item in items.entries:
-                item_type = getattr(item, "type", None)
-
-                if item_type == "folder":
-                    if config.recursive:
-                        yield from self._iter_box_files(client=client, config=config, folder_id=str(item.id))
-                    continue
-
-                if item_type != "file":
-                    continue
-
-                file_info = client.files.get_file_by_id(str(item.id))
-                file_name = getattr(file_info, "name", "unknown")
-                file_size = getattr(file_info, "size", 0) or 0
-
-                if not self._should_include_file(file_name, file_size, config):
-                    continue
-
-                yield file_info
+            if not full_listing:
+                folder_id = client.folders.get_folder_by_id(folder_id).id
+            marker = None
+            seen_markers: set[str] = set()
+            while True:
+                items = (
+                    client.folders.get_folder_items(
+                        folder_id,
+                        usemarker=True,
+                        marker=marker,
+                        limit=1000,
+                        fields=[
+                            "id",
+                            "type",
+                            "name",
+                            "size",
+                            "modified_at",
+                            "created_at",
+                            "shared_link",
+                            "path_collection",
+                            "owned_by",
+                        ],
+                    )
+                    if full_listing
+                    else client.folders.get_folder_items(folder_id)
+                )
+                for item in items.entries:
+                    if item.type == "folder":
+                        if config.recursive:
+                            yield from self._iter_box_files(
+                                client=client, config=config, folder_id=str(item.id), full_listing=full_listing
+                            )
+                    elif item.type == "file":
+                        if full_listing and all(
+                            getattr(item, field, None) is not None
+                            for field in ("name", "size", "modified_at", "path_collection")
+                        ):
+                            yield item
+                        else:
+                            yield client.files.get_file_by_id(str(item.id))
+                if not full_listing or not items.next_marker:
+                    break
+                marker = items.next_marker
+                if marker in seen_markers:
+                    raise ValueError("Repeated Box pagination marker")
+                seen_markers.add(marker)
         except Exception as e:
             logger.exception("Error iterating Box files: %s", e)
             raise
@@ -236,35 +247,11 @@ class BoxSourceAdapter(DocumentSourcePort):
             },
         )
 
-    async def _discover_metadata(self, *, config: Any) -> AsyncGenerator[Document, None]:
-        """Follow all folder pages; do not apply processing filters to presence."""
-        client = self._get_box_client(config=config)
-        if config.file_id:
-            yield self._prepare_document(file_info=client.files.get_file_by_id(config.file_id), root_folder_id="")
-            return
-        folders = [config.folder_id]
-        while folders:
-            folder_id = folders.pop()
-            marker: str | None = None
-            seen_markers: set[str] = set()
-            while True:
-                page = client.folders.get_folder_items(folder_id, usemarker=True, marker=marker, limit=1000)
-                for item in page.entries:
-                    if item.type == "folder":
-                        if config.recursive:
-                            folders.append(str(item.id))
-                    elif item.type == "file":
-                        info = client.files.get_file_by_id(str(item.id))
-                        yield self._prepare_document(file_info=info, root_folder_id=config.folder_id)
-                marker = page.next_marker
-                if not marker:
-                    break
-                if marker in seen_markers:
-                    raise ValueError("Repeated Box pagination marker")
-                seen_markers.add(marker)
-
-    async def fetch_documents(self, config: BoxSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
+    async def fetch_documents(
+        self, config: BoxSourceConfig, *, full_listing: bool = False
+    ) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """Fetch documents from Box using the Box SDK."""
+        config = self._listing_config(config=config, full_listing=full_listing)
         try:
             client = self._get_box_client(config=config)
 
@@ -273,12 +260,15 @@ class BoxSourceAdapter(DocumentSourcePort):
                 logger.info("Fetching single file from Box: file_id=%s", config.file_id)
                 file_info = client.files.get_file_by_id(config.file_id)
                 document = self._prepare_document(file_info=file_info, root_folder_id="")
-                yield document
+                if full_listing or self._is_processing_eligible(document=document, config=config):
+                    yield document
                 return
 
             # Folder mode
             doc_count = 0
-            for file_info in self._iter_box_files(client=client, config=config, folder_id=config.folder_id):
+            for file_info in self._iter_box_files(
+                client=client, config=config, folder_id=config.folder_id, full_listing=full_listing
+            ):
                 # Check max_files limit
                 if config.max_files is not None and doc_count >= config.max_files:
                     break
@@ -287,6 +277,8 @@ class BoxSourceAdapter(DocumentSourcePort):
                     file_info=file_info,
                     root_folder_id=config.folder_id,
                 )
+                if not full_listing and not self._is_processing_eligible(document=document, config=config):
+                    continue
                 yield document
                 doc_count += 1
 

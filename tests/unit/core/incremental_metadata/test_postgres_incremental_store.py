@@ -492,7 +492,8 @@ def test_postgres_guard_contended_execution_is_rejected():
             pytest.fail("Contended run must not execute")
 
 
-def test_failed_acknowledgment_preserves_tombstone(*, sync_store, monkeypatch):
+@pytest.mark.parametrize("operation", ["acknowledge_deletions", "restore_reappeared_docs"])
+def test_failed_pending_transition_preserves_tombstone(*, sync_store, monkeypatch, operation):
     sync_store.upsert_records(
         job_id="scope", job_run_id="1", records=[IncrementalMetadataRecord(job_id="scope", doc_id="a", deleted=True)]
     )
@@ -508,7 +509,7 @@ def test_failed_acknowledgment_preserves_tombstone(*, sync_store, monkeypatch):
 
         monkeypatch.setattr(sync_store, "_session_factory", failing_transaction)
     with pytest.raises(RuntimeError, match="write failed"):
-        sync_store.acknowledge_deletions(job_id="scope", doc_ids={"a"})
+        getattr(sync_store, operation)(job_id="scope", doc_ids={"a"})
     assert sync_store.get_soft_deleted_doc_ids(job_id="scope") == {"a"}
 
 
@@ -553,3 +554,162 @@ def test_real_guard_allows_batch_writes_and_releases_after_error(postgres_store)
     assert postgres_store.get_soft_deleted_doc_ids(job_id="scope") == {"a"}
     postgres_store.acknowledge_deletions(job_id="scope", doc_ids={"a"})
     assert not postgres_store.get_soft_deleted_doc_ids(job_id="scope")
+
+
+def test_discovery_history_parity_does_not_materialize_processed_dict(*, sync_store, monkeypatch):
+    records = [
+        IncrementalMetadataRecord(job_id="scope", doc_id=key, modified_time=10)
+        for key in ("present", "missing", "returned", "pending")
+    ]
+    sync_store.upsert_records(job_id="scope", job_run_id="run", records=records)
+    sync_store.upsert_records(
+        job_id="other",
+        job_run_id="run",
+        records=[IncrementalMetadataRecord(job_id="other", doc_id="unrelated", modified_time=10)],
+    )
+    sync_store.mark_deleted_candidates(job_id="scope", doc_ids={"returned", "pending"})
+    monkeypatch.setattr(sync_store, "get_processed_docs", Mock(side_effect=AssertionError("full dictionary read")))
+    with sync_store.discovery_history(job_id="scope") as history:
+        assert len(history) == 2
+        assert history.get("present") == {"modified_time": 10}
+        assert history.get("returned") is None
+        history.mark_seen("present")
+        history.mark_seen("returned")
+        history.mark_seen("untracked")
+        assert history.missing_ids() == {"missing", "pending"}
+        assert history.returned_ids() == {"returned"}
+        assert history.newly_missing_count() == 1
+    assert sync_store.get_soft_deleted_doc_ids(job_id="scope") == {"returned", "pending"}
+
+
+@pytest.mark.parametrize("failure", ["none", "loading", "discovery", "cancelled"])
+def test_discovery_snapshot_removed_after_execution(*, tmp_path, monkeypatch, failure):
+    from asyncio import CancelledError
+    from contextlib import nullcontext
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from docpipe.core.incremental_metadata.adapters.stores import discovery_history as module
+
+    paths = []
+    closed = []
+
+    def temporary(**kwargs):
+        directory = TemporaryDirectory(dir=tmp_path, **kwargs)
+        paths.append(Path(directory.name))
+        return directory
+
+    def records():
+        try:
+            yield "a", 10, False
+            if failure == "loading":
+                raise RuntimeError("loading failed")
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(module, "TemporaryDirectory", temporary)
+    expected = (
+        pytest.raises(CancelledError)
+        if failure == "cancelled"
+        else pytest.raises(RuntimeError)
+        if failure != "none"
+        else nullcontext()
+    )
+    with expected:
+        with module.open_discovery_history(records()) as history:
+            history.mark_seen("a")
+            if failure == "discovery":
+                raise RuntimeError("discovery failed")
+            if failure == "cancelled":
+                raise CancelledError
+    assert closed == [True]
+    assert paths and all(not path.exists() for path in paths)
+
+
+def test_discovery_snapshot_python_memory_is_bounded():
+    import tracemalloc
+
+    from docpipe.core.incremental_metadata.adapters.stores.discovery_history import open_discovery_history
+
+    tracemalloc.start()
+    try:
+        records = ((f"{index:032x}", index, False) for index in range(100_000))
+        with open_discovery_history(records) as history:
+            assert len(history) == 100_000
+            assert history.get(f"{99_999:032x}") == {"modified_time": 99_999}
+            assert tracemalloc.get_traced_memory()[1] < 8 * 1024 * 1024
+    finally:
+        tracemalloc.stop()
+
+
+@pytest.mark.integration
+def test_real_postgres_discovery_history_streams_all_batches(postgres_store):
+    rows = [
+        {"job_id": "scope", "id": str(index), "modified_time": index, "deleted": index == 1} for index in range(2501)
+    ]
+    with postgres_store._engine.begin() as connection:
+        connection.execute(postgres_store._sync_table.insert(), rows)
+    with postgres_store.synchronization_guard(job_id="scope"):
+        with postgres_store.discovery_history(job_id="scope") as history:
+            assert len(history) == 2500
+            assert history.get("2500") == {"modified_time": 2500}
+            assert history.get("1") is None
+            history.mark_seen("2500")
+            history.mark_seen("1")
+            assert len(history.missing_ids()) == 2499
+            assert history.returned_ids() == {"1"}
+            assert history.newly_missing_count() == 2499
+    assert postgres_store.get_soft_deleted_doc_ids(job_id="scope") == {"1"}
+
+
+def test_reappeared_document_remains_tracked_until_regeneration(sync_store):
+    from docpipe.core.incremental_metadata.application.services import IncrementalUpdateService
+    from docpipe.core.operators.ingest.ingest_utils import is_doc_previously_processed
+
+    for scope in ("scope", "other"):
+        sync_store.upsert_records(
+            job_id=scope,
+            job_run_id="first",
+            records=[
+                IncrementalMetadataRecord(job_id=scope, doc_id="returned", modified_time=10, job_run_id="first"),
+                IncrementalMetadataRecord(job_id=scope, doc_id="active", modified_time=20, job_run_id="first"),
+            ],
+        )
+        sync_store.mark_deleted_candidates(job_id=scope, doc_ids={"returned"})
+    service = IncrementalUpdateService(store=sync_store)
+    assert service.reconcile_discovery(job_id="scope", missing_ids=set(), returned_ids={"returned", "active"}) == set()
+    records = sync_store.get_processed_docs(job_id="scope")
+    assert records["returned"] == {"modified_time": None, "job_run_id": "first"}
+    assert records["active"]["modified_time"] == 20
+    assert not is_doc_previously_processed(previously_processed_docs_dict=records, doc_id="returned", modified_time=10)
+    assert sync_store.get_soft_deleted_doc_ids(job_id="other") == {"returned"}
+    with service.discovery_history(job_id="scope") as history:
+        history.mark_seen("active")
+        missing_ids = history.missing_ids()
+    assert missing_ids == {"returned"}
+    assert service.reconcile_discovery(job_id="scope", missing_ids=missing_ids, returned_ids=set()) == {"returned"}
+    sync_store.upsert_records(
+        job_id="scope",
+        job_run_id="regenerated",
+        records=[IncrementalMetadataRecord(job_id="scope", doc_id="returned", modified_time=30)],
+    )
+    # A stale reappearance request cannot invalidate a newly regenerated record.
+    sync_store.restore_reappeared_docs(job_id="scope", doc_ids={"returned"})
+    assert sync_store.get_processed_docs(job_id="scope")["returned"]["modified_time"] == 30
+
+
+@pytest.mark.integration
+def test_real_postgres_reappearance_preserves_tracking(postgres_store):
+    postgres_store.upsert_records(
+        job_id="scope",
+        job_run_id="first",
+        records=[IncrementalMetadataRecord(job_id="scope", doc_id="returned", modified_time=10)],
+    )
+    postgres_store.mark_deleted_candidates(job_id="scope", doc_ids={"returned"})
+    postgres_store.restore_reappeared_docs(job_id="scope", doc_ids={"returned"})
+    assert postgres_store.get_processed_docs(job_id="scope")["returned"]["modified_time"] is None
+    assert not postgres_store.get_soft_deleted_doc_ids(job_id="scope")
+    with postgres_store.discovery_history(job_id="scope") as history:
+        assert history.missing_ids() == {"returned"}
+    postgres_store.mark_deleted_candidates(job_id="scope", doc_ids={"returned"})
+    assert postgres_store.get_soft_deleted_doc_ids(job_id="scope") == {"returned"}
