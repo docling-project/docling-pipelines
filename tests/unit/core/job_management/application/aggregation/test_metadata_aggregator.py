@@ -4,6 +4,7 @@ Unit tests for MetadataAggregator - nested metadata handling.
 Tests the enterprise-compatible nested node_metadata aggregation.
 """
 
+from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.application.aggregation.aggregator import MetadataAggregator
 from docpipe.core.job_management.application.aggregation.strategies import AggregationStrategy
 
@@ -169,6 +170,75 @@ class TestAggregationStrategies:
         result = aggregator.aggregate_metadata(metadata_list=metadata_list)
 
         assert set(result["docs"]) == {"doc1", "doc2", "doc3", "doc4"}
+
+    def test_intersection_keeps_shared_items_in_first_list_order(self):
+        """INTERSECTION returns the unique overlap, in the order of the first list."""
+        aggregator = MetadataAggregator()
+        aggregator.register_strategy(field_path="tags", strategy=AggregationStrategy.INTERSECTION)
+
+        result = aggregator.aggregate_metadata(metadata_list=[{"tags": ["a", "b"]}, {"tags": ["b", "c"]}])
+
+        assert result["tags"] == ["b"]
+
+    def test_intersection_drops_duplicates_and_keeps_first_list_order(self):
+        aggregator = MetadataAggregator()
+        aggregator.register_strategy(field_path="tags", strategy=AggregationStrategy.INTERSECTION)
+
+        result = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"tags": ["c", "b", "a", "b"]},
+                {"tags": ["a", "b", "d"]},
+                {"tags": ["a", "x", "b"]},
+            ]
+        )
+
+        assert result["tags"] == ["b", "a"]
+
+    def test_priority_status_completed_with_errors_beats_completed(self):
+        aggregator = MetadataAggregator()
+
+        errors_first = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"status": ExecutionStatus.COMPLETED_WITH_ERRORS.value},
+                {"status": ExecutionStatus.COMPLETED.value},
+            ]
+        )
+        completed_first = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"status": ExecutionStatus.COMPLETED.value},
+                {"status": ExecutionStatus.COMPLETED_WITH_ERRORS.value},
+            ]
+        )
+
+        assert errors_first["status"] == ExecutionStatus.COMPLETED_WITH_ERRORS.value
+        assert completed_first["status"] == ExecutionStatus.COMPLETED_WITH_ERRORS.value
+
+    def test_priority_status_legacy_screaming_keys_still_rank(self):
+        aggregator = MetadataAggregator()
+
+        running = aggregator.aggregate_metadata(
+            metadata_list=[{"status": "COMPLETED"}, {"status": "RUNNING"}, {"status": "COMPLETED_WITH_ERRORS"}]
+        )
+        errors = aggregator.aggregate_metadata(
+            metadata_list=[{"status": "COMPLETED"}, {"status": "COMPLETED_WITH_ERRORS"}]
+        )
+
+        assert running["status"] == "RUNNING"
+        assert errors["status"] == "COMPLETED_WITH_ERRORS"
+
+    def test_priority_status_canceled_pending_queued_lose_to_completed(self):
+        aggregator = MetadataAggregator()
+
+        result = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"status": ExecutionStatus.CANCELED.value},
+                {"status": ExecutionStatus.PENDING.value},
+                {"status": ExecutionStatus.QUEUED.value},
+                {"status": ExecutionStatus.COMPLETED.value},
+            ]
+        )
+
+        assert result["status"] == ExecutionStatus.COMPLETED.value
 
     def test_last_strategy_default(self):
         """Test LAST strategy is used as default for unknown fields."""

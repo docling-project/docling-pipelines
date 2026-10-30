@@ -68,6 +68,7 @@ Each batch execution produces a `NodeMetadataItem` with the following structure:
 |----------|-------------|---------|
 | **SUM** | Add numeric values | `10 + 20 = 30` |
 | **UNION** | Combine lists, remove duplicates | `[a,b] + [b,c] = [a,b,c]` |
+| **INTERSECTION** | Items present in every list, first-list order, no duplicates | `[a,b] ∩ [b,c] = [b]` |
 | **CONCAT** | Combine lists, keep duplicates | `[a,b] + [b,c] = [a,b,b,c]` |
 | **PRIORITY_STATUS** | Select most severe status | `RUNNING > FAILED > COMPLETED` |
 | **MIN** | Select minimum value | `min(10, 5, 15) = 5` |
@@ -135,14 +136,14 @@ These fields are aggregated at the `NodeStatsDto` level (not in nested metadata)
 | `node_status` | PRIORITY_STATUS | Most severe status wins |
 | `start_time` | MIN | Earliest batch start |
 | `end_time` | MAX | Latest batch end |
-| `time_taken` | SUM | Total processing time |
+| `time_taken` | wall clock | Latest end minus earliest start |
 | `total_docs` | UNION | All unique document IDs |
 | `docs_completed` | UNION | All completed document IDs |
 | `failed_docs` | UNION | All failed document IDs |
 | `skipped_docs` | UNION | All skipped document IDs |
 | `docs_completed_count` | Calculated | `len(docs_completed)` |
-| `col_names` | FIRST | Schema from first batch |
-| `error` | LAST_COMPLETED | Last meaningful error |
+| `col_names` | sorted union | Column names from every batch, sorted |
+| `error` | join | Non-empty errors joined with `" \| "` |
 | `node_metadata` | MetadataAggregator | Nested aggregation |
 
 ---
