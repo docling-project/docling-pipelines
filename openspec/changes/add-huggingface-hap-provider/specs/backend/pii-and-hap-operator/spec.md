@@ -48,7 +48,7 @@ When `model_id` names a model other than the default, `toxic_labels` SHALL be a 
 
 #### Scenario: Missing toxic labels
 - **WHEN** `hap_provider_config` sets `model_id` to a non-default model and omits `toxic_labels`
-- **THEN** flow validation fails with an error stating that `toxic_labels` is required for that model
+- **THEN** flow validation fails with an error stating that `toxic_labels` is required for that model and directing the user to check the model's `id2label` in its `config.json` on Hugging Face for the available label names
 
 #### Scenario: Unknown toxic label
 - **WHEN** `toxic_labels` contains a name that is not one of the loaded model's class labels
@@ -135,10 +135,10 @@ The provider SHALL NOT write document text, span text or token values to logs at
 - **THEN** no log record contains any document or span text
 
 ### Requirement: Per-process model sharing
-Within one process the provider SHALL load each `(model_id, revision, device)` at most once and share it across operator instances, batches and threads. Concurrent detection on a shared model SHALL return the same results as sequential detection.
+Within one process the provider SHALL load each `(model_id, revision, device)` at most once and share it across operator instances, batches and threads. Concurrent detection on a shared model SHALL return the same results as sequential detection. This guarantee applies within a single process: when batches are distributed across separate worker processes (e.g. via the Prefect work-pool strategy), each worker process loads the model independently, once per that process.
 
 #### Scenario: Concurrent micro-batches
-- **WHEN** a flow with micro-batching runs several `pii_and_hap` batches concurrently with the same `huggingface` config
+- **WHEN** a flow with micro-batching runs several `pii_and_hap` batches concurrently with the same `huggingface` config using the default thread-pool strategy
 - **THEN** the model is loaded once in that process and every batch returns the same detections it would return if run alone
 
 #### Scenario: Different revisions

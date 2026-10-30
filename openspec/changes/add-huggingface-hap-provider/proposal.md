@@ -2,7 +2,7 @@
 
 ## Why
 
-#77 made PII and HAP detection independently selectable and added `presidio` as a local, PII-only provider, but HAP still has no local option: the only HAP providers are `watsonx` (remote API) and `litellm` (a prompted generative LLM). A `presidio` pipeline therefore still depends on a remote service, or on a slow, non-deterministic LLM call, for HAP. Compact Hugging Face text classifiers such as `ibm-granite/granite-guardian-hap-38m` (Apache 2.0, runs on CPU) give good HAP results when applied sentence by sentence, and `torch`, `transformers` and `nltk` are already core dependencies. Tracked in issue #504.
+#77 made PII and HAP detection independently selectable and added `presidio` as a local, PII-only provider, but HAP still has no local option: the only HAP providers are `watsonx` (remote API) and `litellm` (a prompted generative LLM). A `presidio` pipeline therefore still depends on a remote service, or on a slow, non-deterministic LLM call, for HAP. Compact Hugging Face text classifiers such as `ibm-granite/granite-guardian-hap-38m` (Apache 2.0, runs on CPU) give good HAP results when applied sentence by sentence, and `torch`, `transformers` and `nltk` are already core dependencies.
 
 ## What Changes
 

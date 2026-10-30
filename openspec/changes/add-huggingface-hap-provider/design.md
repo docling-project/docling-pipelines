@@ -82,7 +82,7 @@ Constants in `core/constants/constants.py` (`ServiceConstants`): `DEFAULT_HUGGIN
 - an empty `model_id` becomes the default model;
 - missing `toxic_labels` become the default labels only when the resolved model is the default model; otherwise the factory raises `ValueError`.
 
-The operator-side Pydantic `HuggingFaceHAPConfig` (with `extra="ignore"`, like Presidio's) applies the same `toxic_labels` rule in a model validator, so flow validation reports it statically. It uses the same constants, so the two checks cannot drift apart.
+The operator-side Pydantic `HuggingFaceHAPConfig` (with `extra="ignore"`, like Presidio's) applies the same `toxic_labels` rule in a model validator, so flow validation reports it statically. It uses the same constants, so the two checks cannot drift apart. The error message for a missing `toxic_labels` on a non-default model SHALL include a hint directing the user to the model's `id2label` field (e.g. `"Check the model's config.json id2label on Hugging Face for available label names."`), so users do not need to discover this manually.
 
 *Alternative considered:* always default `toxic_labels` to `LABEL_1`. Rejected because for many models `LABEL_1` is not the toxic class, or does not exist, and the model would silently score the wrong class.
 
