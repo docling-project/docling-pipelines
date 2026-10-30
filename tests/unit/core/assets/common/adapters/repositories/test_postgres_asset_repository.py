@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for PostgresAssetRepository and PostgresStorageUtils (no database needed).
 
 The SQLAlchemy engine is mocked; behaviour against a real server is covered by
@@ -36,7 +39,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     RepositoryConfigurationException,
 )
 
-DATABASE_MODULE = "docpipe.core.job_management.adapters.stores.postgres.database"
+DATABASE_MODULE = "docpipe.storage.postgres.connection"
 POSTGRES_ENV_VARS = (
     "DOCPIPE_POSTGRES_HOST",
     "DOCPIPE_POSTGRES_PORT",
