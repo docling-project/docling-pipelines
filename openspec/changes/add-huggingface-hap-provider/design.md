@@ -131,6 +131,7 @@ The operator-side Pydantic `HuggingFaceHAPConfig` (with `extra="ignore"`, like P
 - **[First run needs network]** → Documented offline workflow: pre-fetch with `huggingface-cli download <model> --revision <rev>`, then set `local_files_only: true` or `HF_HUB_OFFLINE=1`.
 - **[Memory per distinct model/revision/device]** → Each key loads once. The README notes that every distinct configuration keeps its own copy for the process lifetime.
 - **[Unpinned default revision]** → `revision` defaults to the Hub's default branch. The docs recommend pinning a commit for reproducible scores.
+- **[Toxic phrase dilution in long sentences]** A sequence-classification model scores the entire span as one unit. A short toxic phrase embedded in a long neutral sentence (e.g. a 200-word business sentence containing a 5-word slur) will have its score diluted by the surrounding clean context and may fall below `hap_threshold`. D3 mitigates this by splitting at sentence boundaries first, but cannot split *within* a sentence. → Users who need higher recall can lower `hap_threshold` at the cost of more false positives. Phrase-level detection would require a token-classification model — a different architecture and a non-goal of this change. The README documents this as a known limitation.
 
 ## Migration Plan
 
