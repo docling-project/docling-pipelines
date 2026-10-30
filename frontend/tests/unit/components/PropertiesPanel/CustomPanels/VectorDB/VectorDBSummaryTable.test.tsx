@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { VectorDBSummaryTable } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDBSummaryTable';
 
 const makeRows = () => [
@@ -9,14 +10,14 @@ const makeRows = () => [
 
 describe('VectorDBSummaryTable', () => {
   it('renders without crashing with empty rows', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBSummaryTable savedResourceName="my-index" rows={[]} onRemove={vi.fn()} onEdit={vi.fn()} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders feature names in the table', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -29,7 +30,7 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('renders resource name', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -41,14 +42,14 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('shows skeleton when loading is true', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBSummaryTable savedResourceName="" rows={[]} onRemove={vi.fn()} onEdit={vi.fn()} loading />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders a search input', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -60,7 +61,7 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('renders the Edit feature mappings button', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -73,7 +74,7 @@ describe('VectorDBSummaryTable', () => {
 
   it('calls onEdit when the edit button is clicked', () => {
     const onEdit = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -86,7 +87,7 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('renders column values in the table', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -99,7 +100,7 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('filters rows by feature name when search text is typed', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -115,7 +116,7 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('renders a select-all checkbox', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}
@@ -132,7 +133,7 @@ describe('VectorDBSummaryTable', () => {
   describe('VectorDBSummaryTable — extra branch coverage', () => {
     it('clicking select-all selects all non-mandatory rows', () => {
       const onRemove = vi.fn();
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -155,7 +156,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('cancel batch action clears selection (sets selectedRows to empty set)', () => {
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -186,7 +187,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('selecting a non-mandatory row then deselecting it toggles selection', () => {
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -211,7 +212,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('mandatory row checkbox click is a no-op (isMandatory guard)', () => {
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[{ feature: 'content', column: 'text', isMandatory: true }]}
@@ -231,7 +232,7 @@ describe('VectorDBSummaryTable', () => {
 
     it('handleRemove calls onRemove with selected feature names', () => {
       const onRemove = vi.fn();
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -260,7 +261,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('select-all when all already selected deselects all rows', () => {
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -284,7 +285,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('search filter matches by column value', () => {
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -302,7 +303,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('loading skeleton shows rowCount based on rows.length', () => {
-      const { container } = render(
+      const { container } = renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName=""
           rows={[
@@ -320,7 +321,7 @@ describe('VectorDBSummaryTable', () => {
     });
 
     it('indeterminate state when some (not all) selectable rows are selected', () => {
-      render(
+      renderWithProviders(
         <VectorDBSummaryTable
           savedResourceName="my-index"
           rows={[
@@ -345,7 +346,7 @@ describe('VectorDBSummaryTable', () => {
   });
 
   it('renders individual row select checkboxes', () => {
-    render(
+    renderWithProviders(
       <VectorDBSummaryTable
         savedResourceName="my-index"
         rows={makeRows()}

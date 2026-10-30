@@ -47,12 +47,6 @@ export const EXTRACTION_KEY = {
 export const TEXT_PROVIDERS = ['docling_library', 'docling_serve'] as const;
 export type TextProvider = typeof TEXT_PROVIDERS[number];
 
-/** Maps backend text extraction provider value → Readable label for the UI dropdown. */
-export const TEXT_PROVIDER_LABELS: Record<TextProvider, string> = {
-  docling_library: 'Docling Library',
-  docling_serve: 'Docling Serve',
-};
-
 // ── docling_library provider_config field keys ────────────────────────────────
 export const DOCLING_LIBRARY_CONFIG_KEY = {
   VLM_PIPELINE: 'vlm_pipeline',
@@ -91,29 +85,9 @@ export const VLM_ENGINES = [
 ] as const;
 export type VlmEngine = typeof VLM_ENGINES[number];
 
-/** Maps VLM engine value → user-friendly label. */
-export const VLM_ENGINE_LABELS: Record<VlmEngine, string> = {
-  transformers: 'Transformers',
-  mlx: 'MLX',
-  api: 'API',
-  api_ollama: 'API (Ollama)',
-  api_openai: 'API (OpenAI)',
-  api_watsonx: 'API (watsonx)',
-  api_lmstudio: 'API (LM Studio)',
-};
-
 /** Valid additional_formats values from the operator metadata. */
 export const ADDITIONAL_FORMATS = ['html', 'json', 'text', 'doctags', 'doclang'] as const;
 export type AdditionalFormat = typeof ADDITIONAL_FORMATS[number];
-
-/** Maps additional_formats value → user-friendly label. */
-export const ADDITIONAL_FORMAT_LABELS: Record<AdditionalFormat, string> = {
-  html: 'HTML',
-  json: 'JSON',
-  text: 'Plain text',
-  doctags: 'DocTags',
-  doclang: 'DocLang',
-};
 
 // ── docling_serve provider_config field keys ──────────────────────────────────
 export const DOCLING_SERVE_CONFIG_KEY = {
@@ -135,19 +109,9 @@ export const DOCLING_SERVE_CONFIG_KEY = {
 export const PDF_BACKENDS = ['dlparse_v2', 'pypdfium2'] as const;
 export type PdfBackend = typeof PDF_BACKENDS[number];
 
-export const PDF_BACKEND_LABELS: Record<PdfBackend, string> = {
-  dlparse_v2: 'dlparse_v2',
-  pypdfium2: 'pypdfium2',
-};
-
 /** Valid image_export_mode values from the operator metadata. */
 export const IMAGE_EXPORT_MODES = ['placeholder', 'embedded'] as const;
 export type ImageExportMode = typeof IMAGE_EXPORT_MODES[number];
-
-export const IMAGE_EXPORT_MODE_LABELS: Record<ImageExportMode, string> = {
-  placeholder: 'Placeholder',
-  embedded: 'Embedded',
-};
 
 export const ENTITY_PROVIDERS = ['none', 'litellm', 'watsonx', 'docling'] as const;
 export type EntityProvider = typeof ENTITY_PROVIDERS[number];
@@ -178,66 +142,4 @@ export type WatsonxContainerKind = typeof WATSONX_CONTAINER_KINDS[number];
 /** Key for the docling entity provider_config. */
 export const DOCLING_ENTITY_CONFIG_KEY = {
   VLM_PIPELINE: 'vlm_pipeline',
-} as const;
-
-/** Maps backend entity extraction provider value → Readable label for the UI dropdown. */
-export const ENTITY_PROVIDER_LABELS: Record<EntityProvider, string> = {
-  none: 'None',
-  litellm: 'LiteLLM',
-  watsonx: 'watsonx',
-  docling: 'Docling',
-};
-
-// ── Human-readable labels ─────────────────────────────────────────────────────
-export const EXTRACT_LABELS = {
-  PROVIDER_CONFIG: 'Provider configuration',
-  // Text extraction — common
-  TEXT_PROVIDER: 'Text extraction provider',
-  TEXT_DOC_COLUMN: 'Document content column',
-  // Text extraction — docling_library
-  VLM_PIPELINE: 'VLM pipeline',
-  VLM_PRESET: 'Preset',
-  VLM_ENGINE: 'Engine',
-  VLM_ENGINE_OPTIONS: 'Engine options (JSON)',
-  ASR_PIPELINE: 'ASR pipeline',
-  ASR_MODEL_ID: 'Model ID',
-  ADDITIONAL_FORMATS: 'Additional output formats',
-  STANDARD_PIPELINE: 'Standard pipeline (GPU acceleration)',
-  ACCELERATOR_DEVICE: 'Accelerator device',
-  ACCELERATOR_NUM_THREADS: 'Number of threads',
-  // Text extraction — docling_serve
-  SERVE_BASE_URL: 'Base URL',
-  SERVE_API_KEY: 'API key', // pragma: allowlist secret
-  SERVE_TIMEOUT: 'Timeout (seconds)',
-  SERVE_POLL_INTERVAL: 'Poll interval (seconds)',
-  SERVE_MAX_RETRIES: 'Maximum retries',
-  SERVE_VERIFY_SSL: 'Verify SSL',
-  SERVE_DO_OCR: 'Enable OCR',
-  SERVE_PDF_BACKEND: 'PDF backend',
-  SERVE_OCR_ENGINE: 'OCR engine',
-  SERVE_OCR_LANGUAGES: 'OCR languages',
-  SERVE_TABLE_MODE: 'Table mode',
-  SERVE_IMAGE_EXPORT_MODE: 'Image export mode',
-  // Entity extraction — common
-  ENTITY_PROVIDER: 'Entity extraction provider',
-  ENTITY_OUTPUT_COLUMN: 'Output column',
-  ENTITY_MAX_DOC_CHARS: 'Maximum document characters',
-  ENTITY_EXPAND_DATA: 'Expand entities into columns',
-  ENTITY_CUSTOM_SCHEMA: 'Custom schema (JSON)',
-  // Entity extraction — litellm / watsonx shared
-  ENTITY_MODEL_ID: 'Model ID',
-  ENTITY_API_BASE: 'API base URL',
-  ENTITY_API_KEY: 'API key', // pragma: allowlist secret
-  ENTITY_TEMPERATURE: 'Temperature',
-  ENTITY_MAX_TOKENS: 'Maximum tokens',
-  // Entity extraction — watsonx
-  ENTITY_WATSONX_URL: 'Watsonx URL',
-  ENTITY_CONTAINER_KIND: 'Container type',
-  ENTITY_CONTAINER_ID: 'Container ID',
-  ENTITY_PROJECT_ID: 'Project ID',
-  // Entity extraction — docling
-  ENTITY_VLM_PIPELINE: 'VLM pipeline configuration (JSON)',
-  // Top-level
-  MAX_WORKERS: 'Maximum workers',
-  USE_PROCESSES: 'Use processes',
 } as const;

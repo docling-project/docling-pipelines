@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { screen, fireEvent, act } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { MergingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Merging/Merging';
 
 // Mock enrichFlowFeatures - not needed for unit panel tests
@@ -25,7 +26,7 @@ describe('MergingPanelBody', () => {
   it('renders merge type radio buttons', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(document.getElementById('merge-rows')).not.toBeNull();
     expect(document.getElementById('merge-columns')).not.toBeNull();
@@ -34,7 +35,7 @@ describe('MergingPanelBody', () => {
   it('defaults to rows merge type', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const rowsRadio = document.getElementById('merge-rows') as HTMLInputElement;
     expect(rowsRadio.checked).toBe(true);
@@ -47,7 +48,7 @@ describe('MergingPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const colsRadio = document.getElementById('merge-columns') as HTMLInputElement;
     expect(colsRadio.checked).toBe(true);
@@ -57,7 +58,7 @@ describe('MergingPanelBody', () => {
     const update = vi.fn();
     const controller = makeController({ updatePropertyValue: update });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const colsRadio = document.getElementById('merge-columns') as HTMLElement;
     await act(async () => { fireEvent.click(colsRadio); });
@@ -71,7 +72,7 @@ describe('MergingPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(document.getElementById('merge-column-option')).not.toBeNull();
   });
@@ -79,7 +80,7 @@ describe('MergingPanelBody', () => {
   it('hides column option dropdown when merge type is rows', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(document.getElementById('merge-column-option')).toBeNull();
   });
@@ -87,7 +88,7 @@ describe('MergingPanelBody', () => {
   it('renders Preview with sample data button', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(screen.getByText('Preview with sample data')).toBeInTheDocument();
   });
@@ -95,7 +96,7 @@ describe('MergingPanelBody', () => {
   it('renders Merge type field label', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(screen.getAllByText('Merge type').length).toBeGreaterThan(0);
   });
@@ -109,7 +110,7 @@ describe('MergingPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const rowsRadio = document.getElementById('merge-rows') as HTMLElement;
     await act(async () => { fireEvent.click(rowsRadio); });
@@ -123,7 +124,7 @@ describe('MergingPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const dropdown = document.getElementById('merge-column-option');
     expect(dropdown).not.toBeNull();
@@ -132,7 +133,7 @@ describe('MergingPanelBody', () => {
   it('clicking Preview opens the preview tearsheet', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const previewBtn = screen.getByText('Preview with sample data');
     await act(async () => { fireEvent.click(previewBtn); });
@@ -149,7 +150,7 @@ describe('MergingPanelBody', () => {
       })),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(document.body).toBeInTheDocument();
   });
@@ -159,7 +160,7 @@ describe('MergingPanelBody', () => {
       getPropertyValue: vi.fn(() => null),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(document.body).toBeInTheDocument();
   });
@@ -169,7 +170,7 @@ describe('MergingPanelBody', () => {
     const update = vi.fn();
     const controller = makeController({ updatePropertyValue: update });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const colsRadio = document.getElementById('merge-columns') as HTMLElement;
     await act(async () => { fireEvent.click(colsRadio); });
@@ -187,7 +188,7 @@ describe('MergingPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     // Column option dropdown is visible
     const dropdown = document.getElementById('merge-column-option');
@@ -203,7 +204,7 @@ describe('MergingPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(screen.getByText(/common key column/i)).toBeInTheDocument();
   });
@@ -211,7 +212,7 @@ describe('MergingPanelBody', () => {
   it('preview tearsheet closes on close icon click', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const previewBtn = screen.getByText('Preview with sample data');
     await act(async () => { fireEvent.click(previewBtn); });
@@ -242,7 +243,7 @@ describe('MergingPanelBody', () => {
       })),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(screen.getByText('Incoming links')).toBeInTheDocument();
     expect(screen.getByText('My Source')).toBeInTheDocument();
@@ -272,7 +273,7 @@ describe('MergingPanelBody', () => {
       })),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(screen.getByText('UI Label Node')).toBeInTheDocument();
   });
@@ -294,7 +295,7 @@ describe('MergingPanelBody', () => {
 
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     // Trigger enrichment by changing merge type
     const colsRadio = document.getElementById('merge-columns') as HTMLElement;
@@ -310,7 +311,7 @@ describe('MergingPanelBody', () => {
 
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const colsRadio = document.getElementById('merge-columns') as HTMLElement;
     await act(async () => { fireEvent.click(colsRadio); });
@@ -322,7 +323,7 @@ describe('MergingPanelBody', () => {
   it('preview tearsheet shows merge-rows note text when previewType is MERGE_ROWS', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     const previewBtn = screen.getByText('Preview with sample data');
     await act(async () => { fireEvent.click(previewBtn); });
@@ -343,7 +344,7 @@ describe('MergingPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<MergingPanelBody controller={controller} />);
+      renderWithProviders(<MergingPanelBody controller={controller} />);
     });
     expect(document.getElementById('merge-column-option')).not.toBeNull();
     // Switch back to rows to trigger setSaveButtonDisable

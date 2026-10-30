@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { AddFeatureMappingModal } from '@/components/PropertiesPanel/CustomPanels/VectorDB/AddFeatureMappingModal';
 
 const makeAvailableFeatures = () => ({
@@ -10,7 +11,7 @@ const makeAvailableFeatures = () => ({
 
 describe('AddFeatureMappingModal', () => {
   it('renders nothing when open is false', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AddFeatureMappingModal
         open={false}
         availableFeatures={makeAvailableFeatures()}
@@ -23,7 +24,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders modal when open is true', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -36,7 +37,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('excludes already-mapped features from dropdown', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -49,7 +50,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders the column name TextInput when open', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -62,7 +63,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders the Add primary button when open', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -75,7 +76,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders the Cancel secondary button when open', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -88,7 +89,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders the modal heading when open', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -101,7 +102,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders the Feature dropdown label when open', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -114,7 +115,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('excludes already-mapped features so only unmapped ones appear in options', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -128,7 +129,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('renders with no available features (empty state)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{}}
@@ -142,7 +143,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('typing in column name updates the TextInput value', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -157,7 +158,7 @@ describe('AddFeatureMappingModal', () => {
   });
 
   it('Add button is disabled when no feature is selected', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -172,7 +173,7 @@ describe('AddFeatureMappingModal', () => {
 
   it('Cancel button calls onClose', () => {
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -188,7 +189,7 @@ describe('AddFeatureMappingModal', () => {
 
   it('Add button does not call onAdd when feature not selected (validation state)', () => {
     const onAdd = vi.fn();
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={makeAvailableFeatures()}
@@ -209,7 +210,7 @@ describe('AddFeatureMappingModal', () => {
 
 describe('AddFeatureMappingModal — handleFeatureChange & handleAdd', () => {
   it('handleFeatureChange pre-fills column from DEFAULT_COLUMN_MAPPINGS when feature is "content"', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{ content: { description: 'Doc content', data_type: 'string' } as any }}
@@ -235,7 +236,7 @@ describe('AddFeatureMappingModal — handleFeatureChange & handleAdd', () => {
   });
 
   it('handleFeatureChange pre-fills column with feature name when no default mapping exists', () => {
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{ custom_feat: { description: 'Custom', data_type: 'string' } as any }}
@@ -260,7 +261,7 @@ describe('AddFeatureMappingModal — handleFeatureChange & handleAdd', () => {
   it('handleAdd calls onAdd and resets state when feature and column are provided', () => {
     const onAdd = vi.fn();
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{ embedding: { description: 'Embedding', data_type: 'array' } as any }}
@@ -294,7 +295,7 @@ describe('AddFeatureMappingModal — handleFeatureChange & handleAdd', () => {
     // Primary button is disabled when no feature, so handleAdd is only
     // reachable via onRequestSubmit. Since we cannot bypass the disabled prop
     // in jsdom, verify state remains correct when no feature is selected.
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{ title: { description: 'Title', data_type: 'string' } as any }}
@@ -312,7 +313,7 @@ describe('AddFeatureMappingModal — handleFeatureChange & handleAdd', () => {
 
   it('handleAdd does not call onAdd when column is empty', () => {
     const onAdd = vi.fn();
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{ title: { description: 'Title', data_type: 'string' } as any }}
@@ -329,7 +330,7 @@ describe('AddFeatureMappingModal — handleFeatureChange & handleAdd', () => {
 
   it('handleClose resets selectedFeature and columnName state', () => {
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <AddFeatureMappingModal
         open
         availableFeatures={{ content: { description: 'Content', data_type: 'string' } as any }}

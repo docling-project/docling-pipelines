@@ -8,6 +8,7 @@
  */
 
 import React, { useState } from 'react';
+import { useIntl } from 'react-intl';
 import {
   Button,
   DataTableSkeleton,
@@ -28,7 +29,7 @@ import {
   TableToolbarSearch,
 } from '@carbon/react';
 import { TrashCan } from '@carbon/icons-react';
-import { VECTORDB_LABELS as LABEL } from './constants';
+import { messages } from './VectorDBSummaryTable.messages';
 import styles from './VectorDB.module.scss';
 
 export interface SummaryRow {
@@ -55,6 +56,7 @@ export function VectorDBSummaryTable({
   onEdit,
   loading = false,
 }: VectorDBSummaryTableProps): React.JSX.Element {
+  const intl = useIntl();
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
 
@@ -75,10 +77,12 @@ export function VectorDBSummaryTable({
     setSelectedRows(new Set());
   };
 
+  const featureMappingsConfigLabel = intl.formatMessage(messages.featureMappingsConfig);
+
   if (loading) {
     return (
       <div>
-        <FormLabel>{LABEL.FEATURE_MAPPINGS_CONFIG}</FormLabel>
+        <FormLabel>{featureMappingsConfigLabel}</FormLabel>
         <DataTableSkeleton
           columnCount={3}
           rowCount={rows.length || 3}
@@ -91,7 +95,7 @@ export function VectorDBSummaryTable({
 
   return (
     <div>
-      <FormLabel>{LABEL.FEATURE_MAPPINGS_CONFIG}</FormLabel>
+      <FormLabel>{featureMappingsConfigLabel}</FormLabel>
       <div className={styles.resourceTableSection}>
         <h5 className={styles.resourceNameSection}>{savedResourceName}</h5>
         <TableContainer>
@@ -103,13 +107,13 @@ export function VectorDBSummaryTable({
               onCancel={() => { setSelectedRows(new Set()); }}
             >
               <TableBatchAction renderIcon={TrashCan} onClick={handleRemove}>
-                Remove
+                {intl.formatMessage(messages.remove)}
               </TableBatchAction>
             </TableBatchActions>
             <TableToolbarContent>
               <TableToolbarSearch
                 persistent
-                placeholder="Search"
+                placeholder={intl.formatMessage(messages.searchPlaceholder)}
                 value={searchFilter}
                 onChange={(_e: unknown, value?: string) => { setSearchFilter(value ?? ''); }}
               />
@@ -117,10 +121,10 @@ export function VectorDBSummaryTable({
                 kind="ghost"
                 size="sm"
                 className={styles.editButton}
-                aria-label="Edit feature mappings for this index"
+                aria-label={intl.formatMessage(messages.editFeatureMappingsAria)}
                 onClick={onEdit}
               >
-                {LABEL.EDIT_FEATURE_MAPPINGS}
+                {intl.formatMessage(messages.editFeatureMappings)}
               </Button>
             </TableToolbarContent>
           </TableToolbar>
@@ -132,7 +136,7 @@ export function VectorDBSummaryTable({
                   name="summary-select-all"
                   checked={allSelected}
                   indeterminate={!allSelected && selectableRows.some((r) => selectedRows.has(r.feature))}
-                  aria-label="Select all non-mandatory feature mappings"
+                  aria-label={intl.formatMessage(messages.selectAllAria)}
                   onSelect={() => {
                     setSelectedRows(allSelected
                       ? new Set()
@@ -140,8 +144,8 @@ export function VectorDBSummaryTable({
                     );
                   }}
                 />
-                <TableHeader>Feature</TableHeader>
-                <TableHeader>Column</TableHeader>
+                <TableHeader>{intl.formatMessage(messages.featureHeader)}</TableHeader>
+                <TableHeader>{intl.formatMessage(messages.columnHeader)}</TableHeader>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -152,7 +156,7 @@ export function VectorDBSummaryTable({
                     name={`summary-select-${row.feature}`}
                     checked={selectedRows.has(row.feature)}
                     disabled={row.isMandatory}
-                    aria-label={`Select ${row.feature}`}
+                    aria-label={intl.formatMessage(messages.selectFeatureAria, { feature: row.feature })}
                     onSelect={() => {
                       if (row.isMandatory) { return; }
                       setSelectedRows((prev) => {
