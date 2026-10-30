@@ -119,7 +119,7 @@ describe('flowSlice', () => {
       retainRecordsForDeletedDocuments: true,
       validateFlow: false,
       enableNodeOutputPreview: true,
-      intermediateDataStorage: 'local' as const,
+      intermediateDataStorage: 'memory' as const,
     };
     const state = reducer(initialState, setFlowRunProperties(props));
     expect(state.flowRunProperties).toEqual(props);
@@ -137,7 +137,7 @@ describe('flowSlice', () => {
       retainRecordsForDeletedDocuments: true,
       validateFlow: false,
       enableNodeOutputPreview: true,
-      intermediateDataStorage: 'local',
+      intermediateDataStorage: 'memory',
     }));
     const reset = reducer(changed, resetFlowRunProperties());
     expect(reset.flowRunProperties).toEqual(initialState.flowRunProperties);

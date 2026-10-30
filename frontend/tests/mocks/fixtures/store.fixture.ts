@@ -1,4 +1,4 @@
-import { configureStore } from '@reduxjs/toolkit';
+import { combineReducers, configureStore, type Reducer } from '@reduxjs/toolkit';
 import operatorsReducer from '@/slices/operatorsSlice';
 import flowReducer from '@/slices/flowSlice';
 import jobRunReducer from '@/slices/jobRunSlice';
@@ -9,14 +9,14 @@ import type { RootState } from '@/store';
 import { flowFixture, flowRowFixture } from './flow.fixture';
 import { projectDomainFixture } from './project.fixture';
 
-export const rootReducer = {
+export const rootReducer = combineReducers({
   operators: operatorsReducer,
   flow: flowReducer,
   jobRun: jobRunReducer,
   assets: assetsReducer,
   projects: projectsReducer,
   notifications: notificationsReducer,
-};
+});
 
 /**
  * Creates a pre-configured store with optional preloaded state.
@@ -85,7 +85,7 @@ export function buildPreloadedState(
 
 export function createTestStore(preloadedState?: Partial<RootState>) {
   return configureStore({
-    reducer: rootReducer,
-    preloadedState,
+    reducer: rootReducer as Reducer<RootState>,
+    preloadedState: preloadedState as any,
   });
 }

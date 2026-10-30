@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import React from 'react';
+import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { CriteriaFullViewTearsheet } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/CriteriaFullViewTearsheet';
 import type { CriteriaDisplayRow } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/CriteriaFullViewTearsheet';
@@ -114,7 +113,6 @@ describe('CriteriaFullViewTearsheet', () => {
         logicalOperator="AND"
       />
     );
-    const badges = screen.queryAllByText('AND');
     // Advanced row content may contain AND in its text, but not the badge span
     expect(document.body).toBeInTheDocument();
   });

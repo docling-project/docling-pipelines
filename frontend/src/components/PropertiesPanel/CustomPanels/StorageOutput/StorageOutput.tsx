@@ -942,17 +942,17 @@ export function StorageOutputPanelBody({
             rows={4}
             value={credentialsStored}
             invalid={
-              !isVaultReference(credentialsStored) &&
               credentialsStored.trim() !== '' &&
+              !isVaultReference(credentialsStored) &&
               !isValidJsonObject(credentialsStored)
             }
             invalidText="Credentials must be a valid JSON object or a vault:// reference."
             onChange={(val: string) => {
               let parsedValue: unknown = val;
-              if (isVaultReference(val)) {
-                parsedValue = val;
-              } else if (val.trim() === '') {
+              if (val.trim() === '') {
                 parsedValue = {};
+              } else if (isVaultReference(val)) {
+                parsedValue = val;
               } else {
                 try {
                   parsedValue = JSON.parse(val);

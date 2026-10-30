@@ -252,18 +252,19 @@ const mockEnrich = vi.mocked(enrichFlowFeaturesForNode);
 /** A full enrichment result with available_resources, feature_mappings, available_features. */
 const enrichmentResult = {
   available_resources: ['my-index', 'other-index'],
+  selected_resource_schema: {} as Record<string, unknown>,
   feature_mappings: [
     { feature_name: 'content', mapped_column_name: 'text' },
     { feature_name: 'embedding', mapped_column_name: 'vector' },
   ],
   available_features: {
-    content: { description: 'Text content', mandatory_for_vector_db: true },
-    embedding: { description: 'Vector embedding', mandatory_for_vector_db: true },
-    score: { description: 'Quality score', mandatory_for_vector_db: false },
+    content: { name: 'content', type: 'string', description: 'Text content', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] as string[] },
+    embedding: { name: 'embedding', type: 'array', description: 'Vector embedding', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] as string[] },
+    score: { name: 'score', type: 'float', description: 'Quality score', available_for_filter: true, available_for_vector_db: false, mandatory_for_vector_db: false, node_id: 'node-1', tags: [] as string[] },
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result that makes the selected resource read-only (has stored similarity). */
 const enrichmentResultReadOnly = {
@@ -274,7 +275,7 @@ const enrichmentResultReadOnly = {
     dimension_size: 768,
   },
   is_docpipe_supported_resource: { supported: true },
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result that marks the resource as unsupported. */
 const enrichmentResultUnsupported = {
@@ -282,18 +283,19 @@ const enrichmentResultUnsupported = {
   available_resources: ['bad-index'],
   stored_resource_metadata: null,
   is_docpipe_supported_resource: { supported: false },
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result with only available_features (no feature_mappings). */
 const enrichmentResultFeaturesOnly = {
   available_resources: [],
+  selected_resource_schema: {} as Record<string, unknown>,
   feature_mappings: [],
   available_features: {
-    title: { description: 'Doc title', mandatory_for_vector_db: false },
+    title: { name: 'title', type: 'string', description: 'Doc title', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: false, node_id: 'node-1', tags: [] as string[] },
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   beforeEach(() => {
@@ -765,8 +767,9 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     if (embeddingCheckbox) {
       fireEvent.click(embeddingCheckbox);
       const removeBtns = screen.queryAllByText(/^Remove$/i);
-      if (removeBtns.length > 0) {
-        fireEvent.click(removeBtns[0]);
+      const firstRemove = removeBtns[0];
+      if (firstRemove) {
+        fireEvent.click(firstRemove);
         // Row removed — embedding no longer in table
         expect(document.body).toBeInTheDocument();
       } else {
@@ -1030,7 +1033,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_features: {
         unknown_feature: { description: 'Unknown', mandatory_for_vector_db: false },
       },
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     const mappingsWithEmpty = [
       { feature_name: 'unknown_feature', mapped_column_name: '', is_mandatory: false },
     ];
@@ -1056,14 +1059,15 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     // only available_features
     mockEnrich.mockResolvedValue({
       available_resources: [],
+      selected_resource_schema: {} as Record<string, unknown>,
       feature_mappings: [],
       available_features: {
-        sparse_vector: { description: 'Sparse vector field', mandatory_for_vector_db: true },
-        dense_vector: { description: 'Dense vector field', mandatory_for_vector_db: false },
+        sparse_vector: { name: 'sparse_vector', type: 'array', description: 'Sparse vector field', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] as string[] },
+        dense_vector: { name: 'dense_vector', type: 'array', description: 'Dense vector field', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: false, node_id: 'node-1', tags: [] as string[] },
       },
       stored_resource_metadata: null,
       is_docpipe_supported_resource: null,
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     render(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
@@ -1095,7 +1099,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_resources: ['my_existing_index'],
       stored_resource_metadata: null,
       is_docpipe_supported_resource: { supported: true },
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     render(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}

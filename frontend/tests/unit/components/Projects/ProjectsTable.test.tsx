@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { ProjectsTable } from '@/components/Projects/ProjectsTable/ProjectsTable';
 import type { ProjectRow } from '@/types';
@@ -155,8 +154,9 @@ describe('ProjectsTable', () => {
   it('clicking View project in overflow calls onOpenProject', async () => {
     const { onOpenProject } = renderTable();
     const menus = document.querySelectorAll('.cds--overflow-menu');
-    if (menus.length > 0) {
-      fireEvent.click(menus[0]);
+    const firstMenu = menus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const viewItem = screen.queryByText('View project') as HTMLElement | null;
         if (viewItem) {
@@ -186,8 +186,9 @@ describe('ProjectsTable', () => {
   it('clicking Delete in overflow opens DeleteModal', async () => {
     renderTable();
     const menus = document.querySelectorAll('.cds--overflow-menu');
-    if (menus.length > 0) {
-      fireEvent.click(menus[0]);
+    const firstMenu = menus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         // "Delete" may appear multiple times (overflow item + DeleteModal button)
         const deleteItems = screen.queryAllByText('Delete');
@@ -234,8 +235,9 @@ describe('ProjectsTable', () => {
   it('Edit project item opens EditDetailsModal', async () => {
     renderTable();
     const menus = document.querySelectorAll('.cds--overflow-menu');
-    if (menus.length > 0) {
-      fireEvent.click(menus[0]);
+    const firstMenu = menus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const editItem = screen.queryByText('Edit project') as HTMLElement | null;
         if (editItem) {
@@ -253,8 +255,9 @@ describe('ProjectsTable', () => {
   it('Clicking Edit project sets editTarget, modal shows correct initial values', async () => {
     renderTable();
     const menus = document.querySelectorAll('.cds--overflow-menu');
-    if (menus.length > 0) {
-      fireEvent.click(menus[0]);
+    const firstMenu = menus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const editItem = screen.queryByText('Edit project') as HTMLElement | null;
         if (editItem) {
@@ -273,8 +276,9 @@ describe('ProjectsTable', () => {
   it('handleDeleteCancel closes DeleteModal', async () => {
     renderTable();
     const menus = document.querySelectorAll('.cds--overflow-menu');
-    if (menus.length > 0) {
-      fireEvent.click(menus[0]);
+    const firstMenu = menus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const deleteItems = screen.queryAllByText('Delete');
         const menuDeleteItem = deleteItems.find((el) => el.closest('.cds--overflow-menu-options__option'));
@@ -311,8 +315,9 @@ describe('ProjectsTable', () => {
   it('handleDeleteConfirm calls onDeleteProject and closes modal', async () => {
     const { onDeleteProject } = renderTable();
     const menus = document.querySelectorAll('.cds--overflow-menu');
-    if (menus.length > 0) {
-      fireEvent.click(menus[0]);
+    const firstMenu = menus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const deleteItems = screen.queryAllByText('Delete');
         const menuDeleteItem = deleteItems.find((el) => el.closest('.cds--overflow-menu-options__option'));
@@ -369,14 +374,18 @@ describe('ProjectsTable', () => {
   });
 
   it('renderCell tags shows renderTagsCell output', () => {
-    renderTable({ rows: [SAMPLE_ROWS[1]] });
+    const row = SAMPLE_ROWS[1];
+    if (row) {
+      renderTable({ rows: [row] });
+    }
     expect(screen.getByText('Beta Project')).toBeInTheDocument();
     const tagsCell = document.querySelector('.cds--tag');
     expect(tagsCell).toBeNull();
   });
 
   it('View project calls onOpenProject with correct id', async () => {
-    const { onOpenProject } = renderTable({ rows: [SAMPLE_ROWS[1]] });
+    const row = SAMPLE_ROWS[1];
+    const { onOpenProject } = renderTable(row ? { rows: [row] } : {});
     const menu = document.querySelector('.cds--overflow-menu') as HTMLElement | null;
     if (menu) {
       fireEvent.click(menu);

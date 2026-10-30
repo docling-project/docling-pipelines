@@ -392,7 +392,7 @@ describe('VectorDBPanelBody', () => {
       if (removeBtn) {
         fireEvent.click(removeBtn);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
-      } else if (removeBtns.length > 0) {
+      } else if (removeBtns[0]) {
         fireEvent.click(removeBtns[0]);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
       } else {
@@ -424,7 +424,7 @@ describe('VectorDBPanelBody', () => {
       if (removeBtn) {
         fireEvent.click(removeBtn);
         expect(controller.updatePropertyValue.mock.calls.length).toBeGreaterThanOrEqual(2);
-      } else if (removeBtns.length > 0) {
+      } else if (removeBtns[0]) {
         fireEvent.click(removeBtns[0]);
         expect(controller.updatePropertyValue.mock.calls.length).toBeGreaterThanOrEqual(2);
       } else {
@@ -824,7 +824,7 @@ describe('VectorDBPanelBody', () => {
       if (removeBtn) {
         fireEvent.click(removeBtn);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
-      } else if (removeBtns.length > 0) {
+      } else if (removeBtns[0]) {
         fireEvent.click(removeBtns[0]);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
       } else {
@@ -1232,12 +1232,14 @@ describe('VectorDBPanelBody', () => {
       />
     );
     const addBtns = screen.queryAllByRole('button', { name: /add/i });
-    if (addBtns.length > 0) {
-      fireEvent.click(addBtns[0]);
+    const firstAddBtn = addBtns[0];
+    if (firstAddBtn) {
+      fireEvent.click(firstAddBtn);
     }
     const closeBtns = screen.queryAllByRole('button', { name: /cancel|close/i });
-    if (closeBtns.length > 0) {
-      fireEvent.click(closeBtns[0]);
+    const firstCloseBtn = closeBtns[0];
+    if (firstCloseBtn) {
+      fireEvent.click(firstCloseBtn);
     }
     expect(document.body).toBeInTheDocument();
   });

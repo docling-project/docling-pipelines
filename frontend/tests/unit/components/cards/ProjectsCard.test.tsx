@@ -216,7 +216,7 @@ describe('ProjectsCard', () => {
     });
     const metaSpans = document.querySelectorAll('[class*="itemMeta"]');
     expect(metaSpans.length).toBeGreaterThan(0);
-    expect(metaSpans[0].textContent).not.toBe('');
+    expect(metaSpans[0]?.textContent).not.toBe('');
   });
 
   // ── sort order ────────────────────────────────────────────────────────
@@ -525,7 +525,7 @@ describe('ProjectsCard', () => {
     await waitFor(() => {
       const state = store.getState();
       expect(state.projects.items['new-proj-id']).toBeDefined();
-      expect(state.projects.items['new-proj-id'].id).toBe('new-proj-id');
+      expect(state.projects.items['new-proj-id']?.id).toBe('new-proj-id');
     });
   });
 

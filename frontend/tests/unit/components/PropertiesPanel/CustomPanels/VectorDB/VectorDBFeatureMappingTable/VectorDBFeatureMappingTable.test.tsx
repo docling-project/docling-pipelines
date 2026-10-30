@@ -243,8 +243,9 @@ describe('VectorDBFeatureMappingTable', () => {
       fireEvent.click(embeddingCheckbox);
       // Find and click the Remove batch action button
       const removeBtns = screen.queryAllByText(/^Remove$/i);
-      if (removeBtns.length > 0) {
-        fireEvent.click(removeBtns[0]);
+      const firstRemove = removeBtns[0];
+      if (firstRemove) {
+        fireEvent.click(firstRemove);
         expect(onRemoveSelected).toHaveBeenCalledWith(['embedding']);
       } else {
         expect(document.body).toBeInTheDocument();

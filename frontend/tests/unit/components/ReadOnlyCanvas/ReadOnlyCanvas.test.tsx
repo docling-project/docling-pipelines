@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { ReadOnlyCanvas } from '@/components/ReadOnlyCanvas/ReadOnlyCanvas';
 import { buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
-import { jobRunStatusResponseFixture } from '../../../mocks/fixtures/jobRun.fixture';
+import { jobRunStatusResponseFixture, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
 import type { PipelineFlowDef } from '@elyra/canvas';
 import { CommonCanvas } from '@elyra/canvas';
 import { CANVAS_ACTIONS } from '@/constants/canvasActions';
@@ -252,7 +252,10 @@ describe('ReadOnlyCanvas', () => {
 
     const closeBtns = screen.getAllByTitle('Close');
     // Click the panel close button (last one)
-    fireEvent.click(closeBtns[closeBtns.length - 1]);
+    const lastCloseBtn = closeBtns[closeBtns.length - 1];
+    if (lastCloseBtn) {
+      fireEvent.click(lastCloseBtn);
+    }
 
     expect(screen.queryByText('Log Details')).toBeNull();
   });
@@ -559,7 +562,9 @@ describe('ReadOnlyCanvas', () => {
         ...jobRunStatusResponseFixture.job_stats,
         job_run_id: 'run-1',
         status: JOB_RUN_STATUS.COMPLETED,
-        node_stats: { 'node-1': { node_status: 'Completed', message: '' } },
+        node_stats: {
+          'node-1': createMockNodeStats({ id: 'node-1', name: 'node-1', node_status: 'Completed' }),
+        },
       },
       node_sequence: ['node-1'],
       'node-1': 'INFO: done',
@@ -627,7 +632,9 @@ describe('ReadOnlyCanvas', () => {
         ...jobRunStatusResponseFixture.job_stats,
         job_run_id: 'run-1',
         status: JOB_RUN_STATUS.RUNNING,
-        node_stats: { 'node-1': { node_status: 'Running', message: '' } },
+        node_stats: {
+          'node-1': createMockNodeStats({ id: 'node-1', name: 'node-1', node_status: 'Running' }),
+        },
       },
       node_sequence: ['node-1'],
       'node-1': 'INFO: running',
@@ -671,8 +678,8 @@ describe('ReadOnlyCanvas', () => {
         job_run_id: 'run-1',
         status: JOB_RUN_STATUS.RUNNING,
         node_stats: {
-          'node-1': { node_status: 'Completed', message: '' },
-          'node-2': { node_status: 'Running', message: '' },
+          'node-1': createMockNodeStats({ id: 'node-1', name: 'node-1', node_status: 'Completed' }),
+          'node-2': createMockNodeStats({ id: 'node-2', name: 'node-2', node_status: 'Running' }),
         },
       },
       node_sequence: ['node-1', 'node-2'],

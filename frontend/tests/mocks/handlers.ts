@@ -1,7 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import {
   flowFixture,
-  flowRowFixture,
   paginatedFlowResponseFixture,
 } from './fixtures/flow.fixture';
 import {

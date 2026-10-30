@@ -135,8 +135,8 @@ export function VectorDBFeatureMappingTable({
                     <th scope="col" />
                     {carbonHeaders.map((header) => (
                       <TableHeader
-                        key={header.key}
                         {...getHeaderProps({ header })}
+                        key={header.key}
                         className={header.key === 'required' ? styles.colActions : undefined}
                       >
                         {header.header}
@@ -150,7 +150,7 @@ export function VectorDBFeatureMappingTable({
                     const columnValue = tableRows.find((t) => t.id === row.id)?.column ?? '';
 
                     return (
-                      <TableRow key={row.id} {...getRowProps({ row })}>
+                      <TableRow {...getRowProps({ row })} key={row.id}>
                         {/* Mandatory rows get a disabled checkbox so the column aligns
                             with non-mandatory rows and the locked state is visible. */}
                         <TableSelectRow

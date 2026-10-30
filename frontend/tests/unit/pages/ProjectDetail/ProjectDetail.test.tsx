@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
-import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
@@ -189,7 +188,9 @@ describe('ProjectDetail page', () => {
       expect(screen.getAllByText(/create flow/i).length).toBeGreaterThan(0);
     });
     const createBtn = screen.getAllByText(/create flow/i)[0];
-    fireEvent.click(createBtn);
+    if (createBtn) {
+      fireEvent.click(createBtn);
+    }
     await waitFor(() => {
       expect(document.body).toBeInTheDocument();
     });
@@ -200,7 +201,10 @@ describe('ProjectDetail page', () => {
     await waitFor(() => {
       expect(screen.getAllByText(/create flow/i).length).toBeGreaterThan(0);
     });
-    fireEvent.click(screen.getAllByText(/create flow/i)[0]);
+    const createBtn = screen.getAllByText(/create flow/i)[0];
+    if (createBtn) {
+      fireEvent.click(createBtn);
+    }
     // Tearsheet should open — body is present
     expect(document.body).toBeInTheDocument();
   });
@@ -376,7 +380,10 @@ describe('ProjectDetail page', () => {
     await waitFor(() => {
       expect(screen.getAllByText(/create flow/i).length).toBeGreaterThan(0);
     });
-    fireEvent.click(screen.getAllByText(/create flow/i)[0]);
+    const createBtn = screen.getAllByText(/create flow/i)[0];
+    if (createBtn) {
+      fireEvent.click(createBtn);
+    }
     // Tearsheet is open — body is accessible
     expect(document.body).toBeInTheDocument();
   });
@@ -493,7 +500,10 @@ describe('ProjectDetail page', () => {
       expect(screen.getAllByText(/create flow/i).length).toBeGreaterThan(0);
     });
     // Open the tearsheet
-    fireEvent.click(screen.getAllByText(/create flow/i)[0]);
+    const createBtn = screen.getAllByText(/create flow/i)[0];
+    if (createBtn) {
+      fireEvent.click(createBtn);
+    }
     // Cancel button closes it (calls handleFlowTearsheetClose)
     await waitFor(() => {
       const cancelBtn = Array.from(document.querySelectorAll('button')).find(
@@ -543,7 +553,10 @@ describe('ProjectDetail page', () => {
       expect(screen.getAllByText(/create flow/i).length).toBeGreaterThan(0);
     });
     // Open the tearsheet
-    fireEvent.click(screen.getAllByText(/create flow/i)[0]);
+    const createBtn = screen.getAllByText(/create flow/i)[0];
+    if (createBtn) {
+      fireEvent.click(createBtn);
+    }
     // Fill in the name
     await waitFor(() => {
       const nameInput = document.querySelector('input#flow-name') as HTMLInputElement | null;
@@ -576,7 +589,10 @@ describe('ProjectDetail page', () => {
       expect(screen.getAllByText(/create flow/i).length).toBeGreaterThan(0);
     });
     // Open the tearsheet
-    fireEvent.click(screen.getAllByText(/create flow/i)[0]);
+    const createBtn = screen.getAllByText(/create flow/i)[0];
+    if (createBtn) {
+      fireEvent.click(createBtn);
+    }
     await waitFor(() => {
       const nameInput = document.querySelector('input#flow-name') as HTMLInputElement | null;
       expect(nameInput).toBeTruthy();

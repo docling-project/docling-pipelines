@@ -1,57 +1,63 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import React from 'react';
+import React, { useState } from 'react';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary/ErrorBoundary';
 import { ThemeProvider } from '@/contexts';
 
 // Component that throws on render
 function Bomb({ shouldThrow }: { shouldThrow: boolean }) {
-  if (shouldThrow) { throw new Error('Test explosion'); }
-  return React.createElement('div', { 'data-testid': 'child' }, 'Children OK');
+  if (shouldThrow) {
+    throw new Error('Test explosion');
+  }
+  return <div data-testid="child">Children OK</div>;
 }
 
 function Wrapper({ children }: { children: React.ReactNode }) {
-  return React.createElement(ThemeProvider, null, children);
+  return <ThemeProvider>{children}</ThemeProvider>;
 }
 
 // Suppress console.error for expected boundary catches
 const originalError = console.error;
-beforeEach(() => { console.error = vi.fn(); });
-afterEach(() => { console.error = originalError; });
+beforeEach(() => {
+  console.error = vi.fn();
+});
+afterEach(() => {
+  console.error = originalError;
+});
 
 describe('ErrorBoundary', () => {
   it('renders children when there is no error', () => {
     renderWithProviders(
-      React.createElement(Wrapper, null,
-        React.createElement(ErrorBoundary, null,
-          React.createElement(Bomb, { shouldThrow: false })
-        )
-      )
+      <Wrapper>
+        <ErrorBoundary>
+          <Bomb shouldThrow={false} />
+        </ErrorBoundary>
+      </Wrapper>
     );
     expect(screen.getByTestId('child')).toBeDefined();
   });
 
   it('renders fallback UI when a child throws', () => {
     renderWithProviders(
-      React.createElement(Wrapper, null,
-        React.createElement(ErrorBoundary, null,
-          React.createElement(Bomb, { shouldThrow: true })
-        )
-      )
+      <Wrapper>
+        <ErrorBoundary>
+          <Bomb shouldThrow={true} />
+        </ErrorBoundary>
+      </Wrapper>
     );
     // ErrorFallback renders "Something went wrong" as heading text
     expect(screen.getAllByText('Something went wrong').length).toBeGreaterThan(0);
   });
 
   it('renders custom fallback prop instead of default', () => {
-    const customFallback = React.createElement('div', { 'data-testid': 'custom-fallback' }, 'Custom error');
+    const customFallback = <div data-testid="custom-fallback">Custom error</div>;
     renderWithProviders(
-      React.createElement(Wrapper, null,
-        React.createElement(ErrorBoundary, { fallback: customFallback },
-          React.createElement(Bomb, { shouldThrow: true })
-        )
-      )
+      <Wrapper>
+        <ErrorBoundary fallback={customFallback}>
+          <Bomb shouldThrow={true} />
+        </ErrorBoundary>
+      </Wrapper>
     );
     expect(screen.getByTestId('custom-fallback')).toBeDefined();
     expect(screen.getByText('Custom error')).toBeDefined();
@@ -60,15 +66,17 @@ describe('ErrorBoundary', () => {
   it('Try again button resets state and shows children again', () => {
     // Use a stateful wrapper so we can control shouldThrow
     function ResettableTest() {
-      const [shouldThrow, setShouldThrow] = React.useState(true);
-      return React.createElement(Wrapper, null,
-        React.createElement(ErrorBoundary, null,
-          React.createElement(Bomb, { shouldThrow })
-        )
+      const [shouldThrow] = useState(true);
+      return (
+        <Wrapper>
+          <ErrorBoundary>
+            <Bomb shouldThrow={shouldThrow} />
+          </ErrorBoundary>
+        </Wrapper>
       );
     }
 
-    renderWithProviders(React.createElement(ResettableTest));
+    renderWithProviders(<ResettableTest />);
     expect(screen.getAllByText('Something went wrong').length).toBeGreaterThan(0);
 
     // Click Try again — ErrorFallback calls onReset which calls setState on the class

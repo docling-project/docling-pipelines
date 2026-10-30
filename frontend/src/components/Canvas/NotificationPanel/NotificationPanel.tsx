@@ -13,7 +13,7 @@ import type { FlowValidationResponse, ValidationActionType } from '@/services/ap
 
 // ── Module-level persistent store ────────────────────────────────────────────
 // Survives component re-mounts (e.g. flyout open/close cycles that unmount Canvas subtree).
-const panelState = {
+export const panelState = {
   isOpen: false,
   showTopBar: false,
   topBarDismissed: false,

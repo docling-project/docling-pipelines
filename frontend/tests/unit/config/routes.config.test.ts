@@ -70,7 +70,7 @@ describe('flattenRoutes', () => {
       { path: '/b', component: async () => ({ default: () => null }), meta: { title: 'B' } },
     ]);
     expect(flat.length).toBe(2);
-    expect(flat[0].path).toBe('/a');
+    expect(flat[0]?.path).toBe('/a');
   });
 
   it('flattens nested children routes', () => {
@@ -121,7 +121,7 @@ describe('findRouteByPath', () => {
     expect(projectDetailRoute).toBeDefined();
     // The regex-based matcher should handle the actual flat path
     if (projectDetailRoute) {
-      const result = findRouteByPath(projectDetailRoute.path.replace(':project_id', 'proj-abc'));
+      findRouteByPath(projectDetailRoute.path.replace(':project_id', 'proj-abc'));
       // May or may not resolve depending on separator — just verify flat route exists
       expect(projectDetailRoute.meta.title).toBe('Project');
     }
@@ -174,29 +174,29 @@ describe('buildBreadcrumbs', () => {
   it('returns single breadcrumb for /home', () => {
     const crumbs = buildBreadcrumbs('/home');
     expect(crumbs.length).toBe(1);
-    expect(crumbs[0].label).toBe('Home');
-    expect(crumbs[0].path).toBe('/home');
+    expect(crumbs[0]?.label).toBe('Home');
+    expect(crumbs[0]?.path).toBe('/home');
   });
 
   it('returns breadcrumbs for /projects', () => {
     const crumbs = buildBreadcrumbs('/projects');
     expect(crumbs.length).toBe(1);
-    expect(crumbs[0].label).toBe('Projects');
+    expect(crumbs[0]?.label).toBe('Projects');
   });
 
   it('builds multi-segment breadcrumbs for /projects/proj-1', () => {
     const crumbs = buildBreadcrumbs('/projects/proj-1');
     expect(crumbs.length).toBe(2);
     // First crumb: Projects
-    expect(crumbs[0].label).toBe('Projects');
+    expect(crumbs[0]?.label).toBe('Projects');
     // Second crumb: resolved via breadcrumbLabel fn → param value
-    expect(crumbs[1].path).toBe('/projects/proj-1');
+    expect(crumbs[1]?.path).toBe('/projects/proj-1');
   });
 
   it('uses segment as label when route is not matched', () => {
     const crumbs = buildBreadcrumbs('/unknown-page');
     expect(crumbs.length).toBe(1);
-    expect(crumbs[0].label).toBe('unknown-page');
+    expect(crumbs[0]?.label).toBe('unknown-page');
   });
 
   it('builds breadcrumbs for /flows/flow-1/canvas', () => {
@@ -204,7 +204,7 @@ describe('buildBreadcrumbs', () => {
     // /flows → /flows/flow-1 → /flows/flow-1/canvas
     expect(crumbs.length).toBeGreaterThanOrEqual(2);
     // The last crumb label is either 'Canvas' (route matched) or the raw 'canvas' segment
-    const lastLabel = crumbs[crumbs.length - 1].label;
+    const lastLabel = crumbs[crumbs.length - 1]?.label ?? '';
     expect(['Canvas', 'canvas'].some((s) => lastLabel.includes(s))).toBe(true);
   });
 
@@ -218,8 +218,8 @@ describe('buildBreadcrumbs', () => {
   it('project detail breadcrumb path ends at the project segment', () => {
     const crumbs = buildBreadcrumbs('/projects/my-project-id');
     expect(crumbs.length).toBe(2);
-    expect(crumbs[1].path).toBe('/projects/my-project-id');
-    expect(crumbs[1].label.length).toBeGreaterThan(0);
+    expect(crumbs[1]?.path).toBe('/projects/my-project-id');
+    expect((crumbs[1]?.label.length ?? 0)).toBeGreaterThan(0);
   });
 });
 
@@ -271,7 +271,7 @@ describe('buildBreadcrumbs — additional paths', () => {
     // buildBreadcrumbs falls back to the raw segment label for "canvas".
     const crumbs = buildBreadcrumbs('/flows/my-flow/canvas');
     expect(crumbs.length).toBeGreaterThanOrEqual(1);
-    const lastLabel = crumbs[crumbs.length - 1].label;
+    const lastLabel = crumbs[crumbs.length - 1]?.label;
     expect(lastLabel).toBe('canvas');
   });
 
@@ -282,7 +282,7 @@ describe('buildBreadcrumbs — additional paths', () => {
     expect(paths).toContain('/flows/my-flow');
     // Last segment is the run id, unmatched → raw label
     const lastCrumb = crumbs[crumbs.length - 1];
-    expect(lastCrumb.label).toBe('run-abc');
+    expect(lastCrumb?.label).toBe('run-abc');
   });
 
   it('extractParams exercised via buildBreadcrumbs: second breadcrumb label equals the project_id param', () => {
@@ -295,9 +295,9 @@ describe('buildBreadcrumbs — additional paths', () => {
     // Verify the fallback behaviour: crumbs[1].label is the raw segment 'my-proj'.
     const crumbs = buildBreadcrumbs('/projects/my-proj');
     expect(crumbs.length).toBe(2);
-    expect(crumbs[0].label).toBe('Projects');
+    expect(crumbs[0]?.label).toBe('Projects');
     // Raw segment fallback because route regex doesn't match (no slash before param)
-    expect(crumbs[1].label).toBe('my-proj');
+    expect(crumbs[1]?.label).toBe('my-proj');
   });
 });
 
@@ -335,7 +335,7 @@ describe('extractParams via buildBreadcrumbs — missing segment fallback', () =
     const crumbs = buildBreadcrumbs('/projects');
     // /projects has 1 segment — no child route is matched, crumb label is 'Projects'
     expect(crumbs.length).toBe(1);
-    expect(crumbs[0].label).toBe('Projects');
+    expect(crumbs[0]?.label).toBe('Projects');
   });
 
   it('breadcrumbLabel function receives params with empty string for missing segment', () => {
@@ -344,6 +344,6 @@ describe('extractParams via buildBreadcrumbs — missing segment fallback', () =
     // verifying breadcrumb label fn is called with params.
     const crumbs = buildBreadcrumbs('/flows');
     expect(crumbs.length).toBeGreaterThanOrEqual(1);
-    expect(crumbs[0].label).toBe('Flows');
+    expect(crumbs[0]?.label).toBe('Flows');
   });
 });

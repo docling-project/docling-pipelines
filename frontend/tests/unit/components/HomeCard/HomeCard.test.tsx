@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { HomeCard } from '@/components/HomeCard/HomeCard';
 import { Add } from '@carbon/icons-react';

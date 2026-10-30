@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
-import React from 'react';
 
 // SharedDataTable uses ResizeObserver + Carbon internals that are slow in jsdom
 // under full-suite parallel load — raise timeout for this file.
@@ -11,8 +10,8 @@ import { InputFeaturesTab } from '@/components/PropertiesPanel/FeatureTabs/Input
 import type { FeatureAttributes } from '@/types';
 
 const SAMPLE_FEATURES: Record<string, FeatureAttributes> = {
-  content: { name: 'content', type: 'string', description: 'Document content', node_id: 'node-1', tags: [] },
-  doc_id:  { name: 'doc_id',  type: 'string', description: 'Document ID',      node_id: 'node-1', tags: [] },
+  content: { name: 'content', type: 'string', description: 'Document content', node_id: 'node-1', tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
+  doc_id:  { name: 'doc_id',  type: 'string', description: 'Document ID',      node_id: 'node-1', tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
 };
 
 const SAMPLE_NODES = [
