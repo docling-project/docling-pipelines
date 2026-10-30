@@ -112,13 +112,14 @@ const mockEnrich = vi.mocked(enrichFlowFeaturesForNode);
 
 const enrichmentResult = {
   available_resources: ['my-index', 'other-index'],
+  selected_resource_schema: {} as Record<string, unknown>,
   feature_mappings: [
     { feature_name: 'content', mapped_column_name: 'text' },
     { feature_name: 'embedding', mapped_column_name: 'vector' },
   ],
   available_features: {
-    content: { description: 'Text content', mandatory_for_vector_db: true },
-    embedding: { description: 'Vector embedding', mandatory_for_vector_db: true },
+    content: { name: 'content', type: 'string', description: 'Text content', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] },
+    embedding: { name: 'embedding', type: 'array', description: 'Vector embedding', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] },
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
