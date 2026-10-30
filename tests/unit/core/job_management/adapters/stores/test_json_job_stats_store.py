@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JsonJobStatsStore - Phase 5 compatibility tests
 
@@ -442,6 +445,32 @@ class TestListJobRuns:
         returned_job_ids = {r.job_id for r in result}
         assert returned_job_ids == {"job-0", "job-1"}
 
+    def test_list_job_runs_ignores_locks_directory(self, *, store, sample_job_stats, temp_data_dir):
+        """list_job_runs ignores .locks directory and returns only valid job runs."""
+        store.store_job_stats(sample_job_stats)
+
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        assert locks_dir.exists()
+
+        results = store.list_job_runs()
+        assert len(results) == 1
+        assert results[0].job_run_id == sample_job_stats.job_run_id
+
+    def test_list_job_runs_includes_dot_prefixed_job_run_ids(self, *, store):
+        """list_job_runs does not filter out valid job runs whose ID starts with a dot."""
+        dot_job_run_id = f".run-{uuid.uuid4()}"
+        job_stats = JobStats(
+            job_id=str(uuid.uuid4()),
+            job_run_id=dot_job_run_id,
+            status=ExecutionStatus.COMPLETED,
+        )
+        store.store_job_stats(job_stats)
+
+        results = store.list_job_runs()
+        matching = [r for r in results if r.job_run_id == dot_job_run_id]
+        assert len(matching) == 1
+        assert dot_job_run_id in store.get_all_job_run_ids()
+
     def test_list_job_runs_raises_on_iterdir_error(self, store):
         """list_job_runs raises JobStatsStoreReadException when iterdir fails."""
         # Replace _base_dir with a mock whose exists() returns True
@@ -474,11 +503,78 @@ class TestDeleteOperations:
         # Directory should be removed
         assert not job_dir.exists()
 
-    def test_delete_nonexistent_job_succeeds_silently(self, *, store):
-        """Deleting nonexistent job should succeed silently (idempotent)."""
-        # JsonJobStatsStore doesn't raise on delete of nonexistent job
-        # It just logs and returns (idempotent delete)
-        store.delete_job_stats("nonexistent")  # Should not raise
+    def test_delete_nonexistent_job_raises_not_found(self, *, store):
+        """Deleting nonexistent job should raise JobStatsStoreDeleteException."""
+        with pytest.raises(JobStatsStoreDeleteException, match="Job run not found: nonexistent"):
+            store.delete_job_stats("nonexistent")
+
+    def test_delete_job_stats_cleans_up_lock_files_and_preserves_locks_dir(
+        self, *, store, sample_job_stats, sample_node_stats, temp_data_dir
+    ):
+        """delete_job_stats cleans up individual lock files while preserving .locks directory."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+        store.store_node_stats(job_run_id=job_run_id, node_stats=sample_node_stats)
+
+        job_dir = Path(temp_data_dir) / "job_stats" / job_run_id
+        assert job_dir.exists()
+
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        assert not (job_dir / ".locks").exists()
+
+        job_lock_path = store._get_job_stats_lock_path(job_run_id=job_run_id)
+        node_lock_path = store._get_node_stats_lock_path(job_run_id=job_run_id)
+        assert job_lock_path.exists()
+        assert node_lock_path.exists()
+
+        store.delete_job_stats(job_run_id)
+        assert not job_dir.exists()
+        assert locks_dir.exists()
+        assert not job_lock_path.exists()
+        assert not node_lock_path.exists()
+
+    def test_delete_job_stats_lock_cleanup_failure_is_suppressed(self, *, store, sample_job_stats):
+        """If unlinking lock files raises OSError, delete_job_stats still succeeds."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        orig_unlink = Path.unlink
+
+        def failing_unlink(path_obj, *args, **kwargs):
+            if str(path_obj).endswith(".lock"):
+                raise OSError("Simulated lock file unlink failure")
+            return orig_unlink(path_obj, *args, **kwargs)
+
+        with patch.object(Path, "unlink", side_effect=failing_unlink, autospec=True):
+            store.delete_job_stats(job_run_id)
+
+        job_dir = store._get_job_dir(job_run_id=job_run_id)
+        assert not job_dir.exists()
+
+    def test_concurrent_delete_job_stats_one_succeeds_one_raises(self, *, store, sample_job_stats):
+        """Concurrent deletion: exactly one thread succeeds, the other raises not found."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                store.delete_job_stats(job_run_id)
+                results.append("success")
+            except JobStatsStoreDeleteException as e:
+                errors.append(e)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(worker)
+            f2 = executor.submit(worker)
+            f1.result()
+            f2.result()
+
+        assert len(results) == 1
+        assert len(errors) == 1
+        assert f"Job run not found: {job_run_id}" in str(errors[0])
 
 
 class TestErrorHandling:
@@ -503,6 +599,19 @@ class TestErrorHandling:
         # Verify get_job_stats returns None for nonexistent job
         result = store.get_job_stats("nonexistent-job-id-12345678-1234-1234")
         assert result is None
+
+    def test_reads_on_unknown_job_do_not_create_job_directory(self, *, store, temp_data_dir):
+        """Reading an unknown job run must not create the job directory or locks inside it."""
+        unknown_id = f"unknown-{uuid.uuid4()}"
+        job_dir = Path(temp_data_dir) / "job_stats" / unknown_id
+
+        assert store.get_job_stats(unknown_id) is None
+        assert store.get_node_stats(job_run_id=unknown_id) == []
+        assert store.get_batch_node_stats(job_run_id=unknown_id) == {}
+        assert store.get_node_stats_by_batch_and_node(job_run_id=unknown_id, node_id="node1", batch_id="b1") is None
+        assert store.get_failed_docs_for_batch(job_run_id=unknown_id, batch_id="b1") == []
+
+        assert not job_dir.exists()
 
 
 class TestGetFailedDocsForBatch:
@@ -962,8 +1071,6 @@ class TestInitAndParseErrorPaths:
             with pytest.raises(JobStatsStoreReadException):
                 store.get_node_stats_by_batch_and_node(job_run_id, "n-parse-err", "b1")
 
-    # ── delete_job_stats: dir not found ──────────────────────────────────────
-
     # ── delete_job_stats: rmtree failure ─────────────────────────────────────
 
     def test_delete_job_stats_raises_on_rmtree_error(self, *, store, sample_job_stats):
@@ -1390,15 +1497,6 @@ class TestExceptionPaths:
             with pytest.raises(JobStatsStoreReadException, match="acquire lock for node stats read"):
                 store.get_node_stats_by_batch_and_node(job_run_id=str(uuid.uuid4()), node_id="n1", batch_id=None)
 
-    def test_delete_job_stats_is_noop_when_not_found(self, store):
-        """delete_job_stats is a no-op for an unknown job run.
-        _get_locks_dir creates the job dir as a side-effect of acquiring the lock,
-        so job_dir.exists() is True even for unknown IDs. Verify the method
-        completes without raising.
-        """
-        # Should not raise
-        store.delete_job_stats(str(uuid.uuid4()))
-
     def test_delete_job_stats_raises_on_rmtree_error(self, store):
         """delete_job_stats raises JobStatsStoreDeleteException when shutil.rmtree fails."""
         job_run_id = str(uuid.uuid4())
@@ -1431,3 +1529,67 @@ class TestExceptionPaths:
         store.store_job_stats(js)
         ids = store.get_all_job_run_ids()
         assert job_run_id in ids
+
+
+class TestLockLayoutAndSanitization:
+    """Tests for lock directory layout, lock path generation, and sanitization."""
+
+    def test_sanitize_lock_id(self):
+        """Test sanitization of job_run_id for lock filenames."""
+        # Standard UUID or alphanumeric string remains unchanged
+        valid_id = "job-run-123_abc"
+        assert JsonJobStatsStore._sanitize_lock_id(valid_id) == valid_id
+
+        # Path traversal characters must be replaced and hashed
+        traversal_id = "../../etc/passwd"
+        sanitized = JsonJobStatsStore._sanitize_lock_id(traversal_id)
+        assert "/" not in sanitized
+        assert ".." not in sanitized
+        assert len(sanitized) <= 85
+
+        # Excessively long job_run_id must be truncated and hashed
+        long_id = "a" * 300
+        sanitized_long = JsonJobStatsStore._sanitize_lock_id(long_id)
+        assert len(sanitized_long) <= 85
+        assert sanitized_long.startswith("a" * 64)
+
+    def test_lock_file_locations_in_locks_dir(self, *, store, temp_data_dir):
+        """Assert exact lock file locations inside .locks/ directory."""
+        job_run_id = "custom-run-456"
+        expected_locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+
+        assert store._get_locks_dir() == expected_locks_dir
+        assert (
+            store._get_job_stats_lock_path(job_run_id=job_run_id) == expected_locks_dir / f"{job_run_id}_job_stats.lock"
+        )
+        assert (
+            store._get_node_stats_lock_path(job_run_id=job_run_id)
+            == expected_locks_dir / f"{job_run_id}_node_stats.lock"
+        )
+
+
+class TestAtomicWriteErrorHandling:
+    """Tests for atomic write failure handling and cleanup behavior."""
+
+    def test_atomic_write_json_cleanup_failure_preserves_original_exception(self, *, store):
+        """When atomic write fails and cleanup also fails with OSError, original error is preserved."""
+        job_run_id = str(uuid.uuid4())
+        target_path = store._get_job_stats_path(job_run_id=job_run_id)
+
+        orig_unlink = Path.unlink
+
+        def scoped_unlink(path_obj, *args, **kwargs):
+            if str(path_obj).endswith(".tmp"):
+                raise OSError("Cleanup unlink failed")
+            return orig_unlink(path_obj, *args, **kwargs)
+
+        with (
+            patch("pathlib.Path.replace", side_effect=OSError("Primary replace failed")),
+            patch.object(Path, "unlink", side_effect=scoped_unlink, autospec=True),
+        ):
+            with pytest.raises(JobStatsStoreWriteException, match="Primary replace failed") as exc_info:
+                store._atomic_write_json(path=target_path, data={"key": "val"})
+
+            # The primary exception is preserved in __cause__
+            assert isinstance(exc_info.value.__cause__, OSError)
+            assert "Primary replace failed" in str(exc_info.value.__cause__)
