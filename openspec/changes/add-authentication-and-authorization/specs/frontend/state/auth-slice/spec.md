@@ -14,7 +14,7 @@ The `auth` Redux slice SHALL hold the current user, whether auth is enabled, the
 - **THEN** the auth status is `idle` and the user is empty
 
 ### Requirement: Bootstrap from the server
-On application start the slice SHALL load `GET /api/auth/config` and, when auth is enabled, `GET /api/auth/me`. A 401 from `/auth/me` SHALL set the status to `unauthenticated` without showing an error or redirecting from within the slice.
+On application start the slice SHALL load `GET /auth/config` and, when auth is enabled, `GET /auth/me`. A 401 from `/auth/me` SHALL set the status to `unauthenticated` without showing an error or redirecting from within the slice.
 
 #### Scenario: Signed-in user restored
 - **WHEN** the page loads with a valid session
@@ -29,7 +29,7 @@ On application start the slice SHALL load `GET /api/auth/config` and, when auth 
 - **THEN** the status becomes `authenticated` with administrator rights and no `/auth/me` request is made
 
 ### Requirement: Login and logout actions
-The slice SHALL provide a login action that posts credentials to `/api/auth/login` and stores only the returned `user` (ignoring any `access_token` field in the response body), and a logout action that posts to `/api/auth/logout`. A failed login SHALL store the server's message and keep the status `unauthenticated`. Logout SHALL clear the user regardless of the response.
+The slice SHALL provide a login action that posts credentials to `/auth/login` and stores only the returned `user` (ignoring any `access_token` field in the response body), and a logout action that posts to `/auth/logout`. A failed login SHALL store the server's message and keep the status `unauthenticated`. Logout SHALL clear the user regardless of the response.
 
 #### Scenario: Login success
 - **WHEN** valid credentials are submitted

@@ -33,7 +33,7 @@ The credential form SHALL be shown only when `/auth/config` reports credential l
 - **THEN** the form is hidden and only provider buttons are shown
 
 ### Requirement: OIDC sign-in
-One button per configured OIDC provider SHALL start the provider flow by navigating to `/api/auth/oauth2/authorize` with the provider name and the requested `return_to` path.
+One button per configured OIDC provider SHALL start the provider flow by navigating to the `authorize_url` that `GET /auth/config` returns for that provider, with the requested `return_to` path appended.
 
 #### Scenario: Provider button
 - **WHEN** the user selects a provider

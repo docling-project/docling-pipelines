@@ -7,7 +7,7 @@ The bff-proxy capability defines how the Node/Express backend-for-frontend relay
 ## ADDED Requirements
 
 ### Requirement: Credential and context header forwarding
-Every proxied request SHALL forward the `Cookie`, `Authorization`, `X-Requested-With`, `X-Transaction-ID`, `X-Forwarded-For` and `X-Forwarded-Proto` headers from the browser request to the REST API when present.
+Every proxied data request SHALL forward the `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` headers from the browser request to the REST API when present, including requests that set their own `Accept` header. The BFF SHALL NOT forward `X-Forwarded-For` or `X-Forwarded-Proto`.
 
 #### Scenario: Cookie reaches backend
 - **WHEN** the browser calls `GET /api/flows` with a session cookie
@@ -17,30 +17,23 @@ Every proxied request SHALL forward the `Cookie`, `Authorization`, `X-Requested-
 - **WHEN** the browser sends `X-Requested-With` on a mutation
 - **THEN** the REST API receives it
 
-### Requirement: Auth route proxy
-The BFF SHALL expose `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/api/auth/config`, `/api/auth/oauth2/providers`, `/api/auth/oauth2/authorize`, `/api/auth/oauth2/callback` and `/api/auth/oauth2/discovery/:provider`, mapped to the REST API's `/auth/*` routes. Redirect responses (3xx) SHALL be passed through to the browser without being followed server-side (`maxRedirects: 0`).
+#### Scenario: Cookie reaches backend on a custom Accept request
+- **WHEN** the browser downloads a job run report, which sends `Accept: text/csv`
+- **THEN** the REST API receives the `Cookie` header as well
 
-#### Scenario: Login proxied
-- **WHEN** the browser posts to `/api/auth/login`
-- **THEN** the BFF forwards it to `/auth/login` and returns the status and body unchanged
+#### Scenario: Client forwarding headers are dropped
+- **WHEN** the browser sends `X-Forwarded-For` to the BFF
+- **THEN** the REST API call does not carry that header
 
-#### Scenario: OIDC redirect passed through
-- **WHEN** the REST API answers the callback with a 302
-- **THEN** the BFF returns that 302 and its `Location` to the browser
+### Requirement: No authentication routes on the BFF
+The BFF SHALL NOT expose `/api/auth/*`. The SPA SHALL call the REST API's `/auth/*` routes on the origin that serves it. Deployments that put a custom ingress in front of the BFF MUST route `/ui` and `/auth` to the REST API.
 
-### Requirement: Set-Cookie relay
-All `Set-Cookie` headers returned by the REST API SHALL be relayed to the browser, including when more than one is present. The cookie SHALL NOT be readable or rewritten by the BFF's own scripts.
-
-#### Scenario: Session cookie relayed
-- **WHEN** the REST API responds to login with a `Set-Cookie`
-- **THEN** the browser receives that cookie with its attributes intact
-
-#### Scenario: Multiple cookies preserved
-- **WHEN** the REST API sets two cookies in one response
-- **THEN** both reach the browser
+#### Scenario: Auth path not served
+- **WHEN** a client calls `GET /api/auth/config` on the BFF
+- **THEN** the BFF answers 404
 
 ### Requirement: Authentication errors relayed unchanged
-The BFF SHALL return 401 and 403 responses from the REST API to the browser with the same status and body, without converting them to a generic error.
+The BFF SHALL return 401 and 403 responses from the REST API to the browser with the same status and a JSON body, without converting them to a generic error.
 
 #### Scenario: 401 relayed
 - **WHEN** the REST API answers a proxied call with 401
@@ -49,6 +42,17 @@ The BFF SHALL return 401 and 403 responses from the REST API to the browser with
 #### Scenario: 403 relayed
 - **WHEN** the REST API answers 403 with a message
 - **THEN** the browser receives 403 with that message
+
+### Requirement: Streamed download errors keep their status
+When a streamed download such as the job run report fails upstream, the BFF SHALL return the upstream status with a JSON body. If the upstream body cannot be read as JSON, the BFF SHALL return `{ "error": "Failed to download job run report" }`. It SHALL NOT leave the request unanswered.
+
+#### Scenario: Report download denied
+- **WHEN** the REST API answers the report download with 403
+- **THEN** the browser receives 403 with a JSON body
+
+#### Scenario: Expired session on download
+- **WHEN** the REST API answers the report download with 401
+- **THEN** the browser receives 401 within the normal request time
 
 ### Requirement: Loopback binding by default
 The BFF SHALL listen on `127.0.0.1` unless `BFF_HOST` is set. It SHALL NOT bundle backend addresses or secrets into browser JavaScript.
@@ -61,9 +65,13 @@ The BFF SHALL listen on `127.0.0.1` unless `BFF_HOST` is set. It SHALL NOT bundl
 - **WHEN** `BFF_HOST=0.0.0.0` is set
 - **THEN** it accepts connections on all interfaces
 
-### Requirement: Cookies survive the API reverse proxy
-When the REST API reverse-proxies browser requests to the BFF, every `Set-Cookie` header from the BFF SHALL be preserved as a separate header in the response.
+### Requirement: Container images listen on all interfaces
+The BFF container image SHALL set `BFF_HOST=0.0.0.0`, so the Compose `bff` service and the Kubernetes sidecar, whose probes use the pod address, can reach it. The sidecar that the REST API starts itself SHALL keep the loopback default.
 
-#### Scenario: Wheel deployment login
-- **WHEN** a user logs in through the REST API's reverse proxy to the BFF
-- **THEN** the session cookie reaches the browser
+#### Scenario: Compose reaches the BFF
+- **WHEN** the REST API container calls `http://bff:3001` in the Compose stack
+- **THEN** the BFF accepts the connection
+
+#### Scenario: Kubernetes probe reaches the BFF
+- **WHEN** the kubelet probes `/health` on the pod address
+- **THEN** the BFF answers 200
