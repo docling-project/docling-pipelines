@@ -122,7 +122,7 @@ const enrichmentResult = {
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 const baseProps = {
   open: true,

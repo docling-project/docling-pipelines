@@ -248,8 +248,9 @@ describe('VectorDBSummaryTable', () => {
         fireEvent.click(rowCheckbox);
         // Click remove button
         const removeBtns = screen.queryAllByText(/^Remove$/i);
-        if (removeBtns.length > 0) {
-          fireEvent.click(removeBtns[0]);
+        const firstRemove = removeBtns[0];
+        if (firstRemove) {
+          fireEvent.click(firstRemove);
           expect(onRemove).toHaveBeenCalledWith(expect.arrayContaining(['embedding']));
         } else {
           expect(document.body).toBeInTheDocument();

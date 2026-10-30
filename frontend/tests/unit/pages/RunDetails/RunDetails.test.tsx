@@ -285,7 +285,6 @@ describe('RunDetails page', () => {
 
   // ── Bootstrap respects cancelled flag ─────────────────────────────────────
   it('does not set error when component is unmounted before bootstrap resolves', async () => {
-    let resolveHandler: (value: Response) => void;
     server.use(
       http.get('/api/job_runs/:id/flow_definition', () => {
         // Return immediately with an error to trigger the catch path

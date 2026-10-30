@@ -1,4 +1,32 @@
-import type { JobRun, JobRunStatusResponse, JobStats } from '@/types';
+import type { JobRun, JobRunStatusResponse, JobStats, NodeStats } from '@/types';
+
+/**
+ * Factory function to create a mock NodeStats object with default values.
+ *
+ * @param partial Optional partial NodeStats properties to override defaults.
+ * @returns Complete NodeStats object.
+ */
+export function createMockNodeStats(partial?: Partial<NodeStats>): NodeStats {
+  return {
+    id: 'node-1',
+    name: 'Node 1',
+    node_status: 'Completed',
+    error: '',
+    start_time: 1705329000,
+    end_time: 1705329100,
+    time_taken: 100,
+    col_names: ['col1'],
+    total_docs: 10,
+    failed_docs: 0,
+    skipped_docs: 0,
+    docs_completed: 10,
+    docs_completed_count: 10,
+    node_metadata: null,
+    batch_id: null,
+    batch_num: null,
+    ...partial,
+  };
+}
 
 /**
  * Factory function to create a mock JobStats object with default values.

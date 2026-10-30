@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { server } from '../../../../mocks/server';
 import { http, HttpResponse } from 'msw';
 import {
@@ -11,7 +11,7 @@ import {
   deleteFlow,
   bulkDeleteFlows,
 } from '@/services/api/actions/flow-actions';
-import { flowFixture, paginatedFlowResponseFixture } from '../../../../mocks/fixtures/flow.fixture';
+import { paginatedFlowResponseFixture } from '../../../../mocks/fixtures/flow.fixture';
 
 describe('flow-actions', () => {
   // ─── createFlow ─────────────────────────────────────────────────────────────

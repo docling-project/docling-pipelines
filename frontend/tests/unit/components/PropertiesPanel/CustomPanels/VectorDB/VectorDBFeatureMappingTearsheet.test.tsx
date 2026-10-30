@@ -263,7 +263,7 @@ const enrichmentResult = {
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result that makes the selected resource read-only (has stored similarity). */
 const enrichmentResultReadOnly = {
@@ -274,7 +274,7 @@ const enrichmentResultReadOnly = {
     dimension_size: 768,
   },
   is_docpipe_supported_resource: { supported: true },
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result that marks the resource as unsupported. */
 const enrichmentResultUnsupported = {
@@ -282,7 +282,7 @@ const enrichmentResultUnsupported = {
   available_resources: ['bad-index'],
   stored_resource_metadata: null,
   is_docpipe_supported_resource: { supported: false },
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result with only available_features (no feature_mappings). */
 const enrichmentResultFeaturesOnly = {
@@ -293,7 +293,7 @@ const enrichmentResultFeaturesOnly = {
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   beforeEach(() => {
@@ -765,8 +765,9 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     if (embeddingCheckbox) {
       fireEvent.click(embeddingCheckbox);
       const removeBtns = screen.queryAllByText(/^Remove$/i);
-      if (removeBtns.length > 0) {
-        fireEvent.click(removeBtns[0]);
+      const firstRemove = removeBtns[0];
+      if (firstRemove) {
+        fireEvent.click(firstRemove);
         // Row removed — embedding no longer in table
         expect(document.body).toBeInTheDocument();
       } else {
@@ -1030,7 +1031,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_features: {
         unknown_feature: { description: 'Unknown', mandatory_for_vector_db: false },
       },
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     const mappingsWithEmpty = [
       { feature_name: 'unknown_feature', mapped_column_name: '', is_mandatory: false },
     ];
@@ -1063,7 +1064,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       },
       stored_resource_metadata: null,
       is_docpipe_supported_resource: null,
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     render(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
@@ -1095,7 +1096,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_resources: ['my_existing_index'],
       stored_resource_metadata: null,
       is_docpipe_supported_resource: { supported: true },
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     render(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}

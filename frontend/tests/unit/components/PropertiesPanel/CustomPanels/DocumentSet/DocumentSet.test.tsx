@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import React from 'react';
 import { DocumentSetPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocumentSet/DocumentSet';
 
 function makeController(values: Record<string, unknown> = {}, metadata: Record<string, unknown> = {}) {

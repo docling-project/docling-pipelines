@@ -1,49 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import React from 'react';
 import { NodeSummary } from '@/components/ReadOnlyCanvas/RunSidePanel/NodeSummary/NodeSummary';
 import type { NodeMetadataItem, JobStats } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 import { CELL_VALUE_MAX_LENGTH } from '@/constants/runSidePanel';
+import { createMockJobStats, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
 
 function makeJobStats(
   nodeId: string,
-  nodeStatus = JOB_RUN_STATUS.COMPLETED
+  nodeStatus: string = JOB_RUN_STATUS.COMPLETED
 ): JobStats {
-  return {
-    job_id: 'job-1',
-    job_run_id: 'run-1',
-    status: JOB_RUN_STATUS.COMPLETED,
-    message: '',
-    start_time: 0,
-    end_time: 0,
-    duration: 10,
-    heartbeat_timestamp: null,
-    total_docs: 5,
-    processed_docs: 5,
-    completed_docs: 5,
-    failed_docs: 0,
-    skipped_docs: 0,
-    deleted_doc_count: 0,
-    total_pages_processed: 0,
-    page_type_stats: null,
-    execution_time: null,
-    orchestrator: 'python',
-    container_kind: null,
-    container_id: null,
-    flow_id: null,
-    user_id: null,
-    account_id: null,
-    user_entitlements: null,
-    report_status: null,
-    report_generation_started_at: null,
-    report_generation_completed_at: null,
+  return createMockJobStats({
     node_stats: {
-      [nodeId]: { name: 'My Node', node_status: nodeStatus },
+      [nodeId]: createMockNodeStats({ id: nodeId, name: 'My Node', node_status: nodeStatus }),
     },
-    batch_node_stats: {},
-  };
+  });
 }
 
 function makeNodeMeta(

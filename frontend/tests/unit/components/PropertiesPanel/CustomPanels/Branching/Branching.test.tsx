@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen } from '@testing-library/react';
-import React from 'react';
 import { BranchingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Branching/Branching';
 import type { ElyraController } from '@/types';
 

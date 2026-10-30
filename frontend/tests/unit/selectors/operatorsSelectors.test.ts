@@ -16,6 +16,8 @@ function makeState(overrides: Partial<RootState['operators']> = {}): RootState {
       loading: false,
       error: null,
       featureOptions: {},
+      nodeFeatures: {},
+      featuresLoading: false,
       ...overrides,
     },
   }) as RootState;

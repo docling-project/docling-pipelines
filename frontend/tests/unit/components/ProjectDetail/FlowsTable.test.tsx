@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { FlowsTable } from '@/components/ProjectDetail/FlowsTable/FlowsTable';
 import type { FlowRow } from '@/types';
@@ -158,7 +157,10 @@ describe('FlowsTable', () => {
   });
 
   it('renders flows with null run_count showing em-dash', () => {
-    renderTable({ rows: [SAMPLE_FLOWS[2]] });
+    const flow = SAMPLE_FLOWS[2];
+    if (flow) {
+      renderTable({ rows: [flow] });
+    }
     // null run_count + null run_status each render "—" — both present
     expect(screen.queryAllByText('—').length).toBeGreaterThan(0);
   });
@@ -184,7 +186,10 @@ describe('FlowsTable', () => {
   });
 
   it('renders Needs review cell with warning icon for warning runs', () => {
-    renderTable({ rows: [SAMPLE_FLOWS[0]] });
+    const flow = SAMPLE_FLOWS[0];
+    if (flow) {
+      renderTable({ rows: [flow] });
+    }
     // flow-1 has warnings:1 — renders the count "1" in the Needs review cell
     const cells = document.querySelectorAll('td');
     const needsReviewCell = Array.from(cells).find((c) => c.textContent?.includes('1') && c.querySelector('svg'));
@@ -192,13 +197,19 @@ describe('FlowsTable', () => {
   });
 
   it('renders Needs review cell with error and running icons for flow-2', () => {
-    renderTable({ rows: [SAMPLE_FLOWS[1]] });
+    const flow = SAMPLE_FLOWS[1];
+    if (flow) {
+      renderTable({ rows: [flow] });
+    }
     // flow-2: errors:2, running:1 — both counts visible
     expect(screen.getAllByText('2').length).toBeGreaterThan(0);
   });
 
   it('renders em-dash for Needs review when run_count is null', () => {
-    renderTable({ rows: [SAMPLE_FLOWS[2]] });
+    const flow = SAMPLE_FLOWS[2];
+    if (flow) {
+      renderTable({ rows: [flow] });
+    }
     // No runs at all — Needs review shows "—"
     const dashes = screen.getAllByText('—');
     expect(dashes.length).toBeGreaterThan(0);
@@ -212,8 +223,9 @@ describe('FlowsTable', () => {
   it('View flow overflow item calls onOpenFlow', async () => {
     const { onOpenFlow } = renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
-    if (overflowMenus.length > 0) {
-      fireEvent.click(overflowMenus[0]);
+    const firstMenu = overflowMenus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const viewItem = screen.queryByText('View flow');
         if (viewItem) {
@@ -333,8 +345,9 @@ describe('FlowsTable', () => {
   it('Edit details overflow item opens EditDetailsModal with title', async () => {
     renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
-    if (overflowMenus.length > 0) {
-      fireEvent.click(overflowMenus[0]);
+    const firstMenu = overflowMenus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const editItem = screen.queryByText('Edit details');
         if (editItem) {
@@ -353,8 +366,9 @@ describe('FlowsTable', () => {
   it('Delete overflow item opens DeleteModal and confirming calls onDeleteFlow', async () => {
     const { onDeleteFlow } = renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
-    if (overflowMenus.length > 0) {
-      fireEvent.click(overflowMenus[0]);
+    const firstMenu = overflowMenus[0];
+    if (firstMenu) {
+      fireEvent.click(firstMenu);
       await waitFor(() => {
         const deleteItems = screen.queryAllByText('Delete');
         // The overflow menu item "Delete"

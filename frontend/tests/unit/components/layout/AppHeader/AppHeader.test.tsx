@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { AppHeader } from '@/components/layout/AppHeader/AppHeader';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';

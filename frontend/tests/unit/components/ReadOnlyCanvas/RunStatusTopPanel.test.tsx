@@ -1,42 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { RunStatusTopPanel } from '@/components/ReadOnlyCanvas/RunStatusTopPanel/RunStatusTopPanel';
 import type { JobStats } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
+import { createMockJobStats, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
 
-const BASE_STATS: JobStats = {
+const BASE_STATS: JobStats = createMockJobStats({
   job_id: 'job-1',
   job_run_id: 'run-1',
   status: JOB_RUN_STATUS.RUNNING,
-  message: '',
-  start_time: 0,
-  end_time: 0,
   duration: 90,
-  heartbeat_timestamp: null,
   total_docs: 100,
   processed_docs: 50,
   completed_docs: 50,
   failed_docs: 2,
   skipped_docs: 0,
-  deleted_doc_count: 0,
-  total_pages_processed: 0,
-  page_type_stats: null,
-  execution_time: null,
-  orchestrator: 'python',
-  container_kind: null,
-  container_id: null,
-  flow_id: null,
-  user_id: null,
-  account_id: null,
-  user_entitlements: null,
-  report_status: null,
-  report_generation_started_at: null,
-  report_generation_completed_at: null,
-  node_stats: {},
-  batch_node_stats: {},
-};
+});
 
 function renderPanel(overrides: Partial<Parameters<typeof RunStatusTopPanel>[0]> = {}) {
   const defaults = {
@@ -145,8 +125,8 @@ describe('RunStatusTopPanel', () => {
     const statsWithNodes: typeof BASE_STATS = {
       ...BASE_STATS,
       node_stats: {
-        'n1': { name: 'N1', node_status: JOB_RUN_STATUS.COMPLETED },
-        'n2': { name: 'N2', node_status: JOB_RUN_STATUS.FAILED },
+        'n1': createMockNodeStats({ id: 'n1', name: 'N1', node_status: JOB_RUN_STATUS.COMPLETED }),
+        'n2': createMockNodeStats({ id: 'n2', name: 'N2', node_status: JOB_RUN_STATUS.FAILED }),
       },
     };
     renderPanel({ jobStats: statsWithNodes });
