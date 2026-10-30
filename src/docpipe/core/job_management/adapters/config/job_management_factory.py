@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobManagementFactory - Dependency injection and wiring
 
@@ -15,11 +18,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from docpipe.core.assets.flows.application.services import FlowService
 from docpipe.core.constants import DocpipeConfigKeys, EnvironmentVariables
-from docpipe.core.constants.constants import _find_project_root
 from docpipe.core.job_management.adapters.frameworks import DefaultJobRunManager
 from docpipe.core.job_management.adapters.services import JobTrackerService
 from docpipe.core.job_management.adapters.stores import (
@@ -40,6 +40,7 @@ from docpipe.core.job_management.domain.ports import (
     JobStatsService,
     JobStatsStore,
 )
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -61,8 +62,6 @@ class FrameworkType(StrEnum):
     # User can add there custom framework here
 
 
-DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
-ENV_CONFIG_PATH_KEY = EnvironmentVariables.DOCPIPE_CONFIG_PATH
 ENV_JOB_STATS_BASE_DIR_KEY = EnvironmentVariables.DOCPIPE_JOB_STATS_BASE_DIR
 
 
@@ -113,7 +112,7 @@ class JobManagementFactory:
         self._job_stats_service: JobStatsService | None = None
         self._job_management_service: JobManagementService | None = None
 
-        logger.info(f"JobManagementFactory initialized: storage={storage_backend}, framework={framework_type}")
+        logger.info("JobManagementFactory initialized: storage=%s, framework=%s", storage_backend, framework_type)
 
     def initialize_storage(self) -> None:
         """
@@ -244,10 +243,10 @@ class JobManagementFactory:
                     lock_timeout=lock_timeout,
                 )
                 logger.info(
-                    "Created JsonJobStatsStore: "
-                    f"base_dir={resolved_base_dir}, "
-                    f"base_dir_source={'env' if base_dir_override else 'config' if configured_base_dir else 'default'}, "
-                    f"lock_timeout={lock_timeout}s"
+                    "Created JsonJobStatsStore: base_dir=%s, base_dir_source=%s, lock_timeout=%ss",
+                    resolved_base_dir,
+                    "env" if base_dir_override else "config" if configured_base_dir else "default",
+                    lock_timeout,
                 )
 
             case StorageBackend.POSTGRESQL:
@@ -348,208 +347,42 @@ class JobManagementFactory:
         return self._job_management_service
 
     @classmethod
-    def from_config_file(cls, config_path: str) -> "JobManagementFactory":
-        """
-        Create factory from YAML configuration file.
-
-        Args:
-            config_path: Path to YAML configuration file
-
-        Returns:
-            JobManagementFactory instance
-
-        Raises:
-            FileNotFoundError: If config file doesn't exist
-            ValueError: If config is invalid
-        """
-        config_file = Path(config_path)
-
-        if not config_file.exists():
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    def create_default_factory(cls) -> "JobManagementFactory":
+        # Job stats default to in-memory when nothing is configured (unchanged from before DocpipeConfigLoader)
+        storage_type, storage_config = DocpipeConfigLoader.get_storage(
+            key=DocpipeConfigKeys.JOB_MANAGEMENT, default_type=StorageBackend.IN_MEMORY.value
+        )
+        job_mgmt_config = DocpipeConfigLoader.get(key=DocpipeConfigKeys.JOB_MANAGEMENT, default={})
+        framework_config = job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK, {})
 
         try:
-            with Path(config_file).open() as f:
-                yaml_config = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            raise ValueError(f"Invalid YAML configuration: {e}") from e
-
-        if not yaml_config:
-            logger.warning(f"Empty configuration file: {config_path}, using defaults")
-            return cls()
-
-        global_storage_config = yaml_config.get(DocpipeConfigKeys.GLOBAL_STORAGE, {})
-        job_mgmt_config = yaml_config.get(DocpipeConfigKeys.JOB_MANAGEMENT, {})
-        framework_config = job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK, {}) or {}
-        store_config = job_mgmt_config.get(DocpipeConfigKeys.STORE, {}) or {}
-
-        storage_backend = cls._resolve_storage_backend(
-            store_config=store_config, job_mgmt_config=job_mgmt_config, global_storage_config=global_storage_config
-        )
-        framework_type = cls._resolve_framework_type(framework_config=framework_config, job_mgmt_config=job_mgmt_config)
-        merged_config = cls._merge_config_dict(
-            global_storage_config=global_storage_config,
-            job_mgmt_config=job_mgmt_config,
-            store_config=store_config,
-            framework_config=framework_config,
-        )
-
-        config_source = (
-            "service-specific"
-            if store_config.get(DocpipeConfigKeys.TYPE)
-            else ("global_storage" if global_storage_config else "defaults")
-        )
-        logger.info(
-            "Loaded job management configuration from %s: storage=%s (source: %s), framework=%s",
-            config_path,
-            storage_backend,
-            config_source,
-            framework_type,
-        )
-
-        return cls(storage_backend=storage_backend, framework_type=framework_type, config=merged_config)
-
-    @classmethod
-    def _resolve_storage_backend(
-        cls,
-        *,
-        store_config: dict[str, Any],
-        job_mgmt_config: dict[str, Any],
-        global_storage_config: dict[str, Any],
-    ) -> StorageBackend:
-        """Determine storage backend with precedence: service-specific > global_storage > defaults."""
-        storage_str = (
-            store_config.get(DocpipeConfigKeys.TYPE)
-            or job_mgmt_config.get(DocpipeConfigKeys.STORAGE_BACKEND)
-            or (global_storage_config.get(DocpipeConfigKeys.TYPE) if global_storage_config else None)
-            or StorageBackend.IN_MEMORY.value
-        )
-        try:
-            return StorageBackend(storage_str)
+            storage_backend = StorageBackend(storage_type)
         except ValueError:
+            # Fail fast on invalid backend
             supported = [e.value for e in StorageBackend]
             raise ValueError(
-                f"Invalid storage backend '{storage_str}' for job management. Supported backends: {supported}"
+                f"Invalid storage backend '{storage_type}' for job management. Supported backends: {supported}"
             ) from None
-
-    @classmethod
-    def _resolve_framework_type(
-        cls,
-        *,
-        framework_config: dict[str, Any],
-        job_mgmt_config: dict[str, Any],
-    ) -> FrameworkType:
-        """Determine framework type from config."""
         framework_str = framework_config.get(
             DocpipeConfigKeys.TYPE,
             job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK_TYPE, FrameworkType.DEFAULT.value),
         )
         try:
-            return FrameworkType(framework_str)
+            framework_type = FrameworkType(framework_str)
         except ValueError as e:
-            supported = [e.value for e in FrameworkType]
-            raise ValueError(f"Invalid framework type: {framework_str}. Supported: {supported}") from e
+            raise ValueError(
+                f"Invalid framework type: {framework_str}. Supported: {[e.value for e in FrameworkType]}"
+            ) from e
 
-    @classmethod
-    def _merge_config_dict(
-        cls,
-        *,
-        global_storage_config: dict[str, Any],
-        job_mgmt_config: dict[str, Any],
-        store_config: dict[str, Any],
-        framework_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Merge configuration with precedence: service-specific > global_storage > defaults."""
-        merged_config: dict[str, Any] = {}
-        if global_storage_config:
-            merged_config.update(global_storage_config.get(DocpipeConfigKeys.CONFIG, {}) or {})
-            if DocpipeConfigKeys.POSTGRES in global_storage_config:
-                merged_config[DocpipeConfigKeys.POSTGRES] = global_storage_config[DocpipeConfigKeys.POSTGRES]
-
-        merged_config.update(job_mgmt_config.get(DocpipeConfigKeys.STORAGE_CONFIG, {}) or {})
-        merged_config.update(store_config.get(DocpipeConfigKeys.CONFIG, {}) or {})
-
+        # Keep storage settings flat: the store factories read base_dir, lock_timeout and postgres
+        # from the top level of self.config.
+        merged_config: dict[str, Any] = dict(storage_config or {})
         if DocpipeConfigKeys.POSTGRES in job_mgmt_config:
             merged_config[DocpipeConfigKeys.POSTGRES] = job_mgmt_config[DocpipeConfigKeys.POSTGRES]
-
         merged_config.update(job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK_CONFIG, {}) or {})
         merged_config.update(framework_config.get(DocpipeConfigKeys.CONFIG, {}) or {})
-        return merged_config
 
-    @classmethod
-    def from_environment(cls) -> "JobManagementFactory":
-        """
-        Create factory from environment variables only.
-
-        Environment variables:
-        - DOCPIPE_STORAGE_BACKEND: Storage backend (default: inmemory)
-        - DOCPIPE_FRAMEWORK_TYPE: Framework type (default: default)
-
-        Returns:
-            JobManagementFactory instance
-        """
-        storage_raw = os.getenv(EnvironmentVariables.DOCPIPE_STORAGE_BACKEND, StorageBackend.IN_MEMORY.value)
-        framework_raw = os.getenv(EnvironmentVariables.DOCPIPE_FRAMEWORK_TYPE, FrameworkType.DEFAULT.value)
-
-        try:
-            storage_backend = StorageBackend(storage_raw)
-        except ValueError as e:
-            raise ValueError(
-                f"Invalid {EnvironmentVariables.DOCPIPE_STORAGE_BACKEND}: {storage_raw}. Supported: {[e.value for e in StorageBackend]}"
-            ) from e
-
-        try:
-            framework_type = FrameworkType(framework_raw)
-        except ValueError as e:
-            raise ValueError(
-                f"Invalid {EnvironmentVariables.DOCPIPE_FRAMEWORK_TYPE}: {framework_raw}. Supported: {[e.value for e in FrameworkType]}"
-            ) from e
-
-        logger.info(f"Creating factory from environment: storage={storage_backend}, framework={framework_type}")
-
-        return cls(storage_backend=storage_backend, framework_type=framework_type)
-
-    @classmethod
-    def from_default_sources(cls) -> "JobManagementFactory":
-        """
-        Create factory from default YAML config with environment overrides.
-
-        Precedence:
-        1. Environment variables for explicit overrides
-        2. YAML config file
-        3. Built-in defaults
-        """
-        config_path = Path(os.getenv(ENV_CONFIG_PATH_KEY, str(DEFAULT_CONFIG_PATH)))
-
-        if config_path.exists():
-            factory = cls.from_config_file(str(config_path))
-        else:
-            logger.warning(f"Config file not found at {config_path}. Falling back to defaults/environment.")
-            factory = cls()
-
-        storage_override = os.getenv(EnvironmentVariables.DOCPIPE_STORAGE_BACKEND)
-        framework_override = os.getenv(EnvironmentVariables.DOCPIPE_FRAMEWORK_TYPE)
-
-        if storage_override:
-            try:
-                factory.storage_backend = StorageBackend(storage_override)
-            except ValueError:
-                logger.warning(
-                    f"Invalid DOCPIPE_STORAGE_BACKEND '{storage_override}', keeping {factory.storage_backend.value}"
-                )
-
-        if framework_override:
-            try:
-                factory.framework_type = FrameworkType(framework_override)
-            except ValueError:
-                logger.warning(
-                    f"Invalid DOCPIPE_FRAMEWORK_TYPE '{framework_override}', keeping {factory.framework_type.value}"
-                )
-
-        logger.info(
-            f"Created factory from default sources: config_path={config_path}, "
-            f"storage={factory.storage_backend}, framework={factory.framework_type}"
-        )
-        return factory
+        return cls(storage_backend=storage_backend, framework_type=framework_type, config=merged_config)
 
 
 # Singleton factory instance for convenience
@@ -566,7 +399,7 @@ def get_default_factory() -> JobManagementFactory:
     global _default_factory
 
     if _default_factory is None:
-        _default_factory = JobManagementFactory.from_default_sources()
+        _default_factory = JobManagementFactory.create_default_factory()
 
     return _default_factory
 

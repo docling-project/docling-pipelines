@@ -144,7 +144,7 @@ DocumentSetOperator
     └── DocumentSetService                       (application layer)
             ├── DataStoreFactory                 → DuckDBDocumentSetStorage
             │                                      └── DuckDBTableStorage    (columnar storage)
-            ├── RepositoryFactory                → DuckDBAssetRepository[DocumentSet]
+            ├── AssetRepositoryFactory           → DuckDBAssetRepository[DocumentSet]
             │                                      └── DuckDBKeyValueStorage (document set registry)
             └── AttachmentRepositoryFactory      → DuckDBAttachmentRepository
                                                    └── DuckDBKeyValueStorage (attachment coordinates)
