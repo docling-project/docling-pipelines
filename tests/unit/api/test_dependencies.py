@@ -214,6 +214,30 @@ class TestGetDocumentSetDataStore:
         assert call_kwargs["adapter_name"] == "duckdb"
         assert call_kwargs["config"]["database_path"] == "/custom/path/ds.duckdb"
 
+    def test_forwards_postgres_settings_to_the_data_store(self):
+        """content_schema and the postgres block reach a postgres data store."""
+        mock_store = MagicMock()
+        repo_config = {
+            "storage_adapter": "postgres",
+            "content_schema": "doc_set_content",
+            "postgres": {"host": "db", "schema": "docpipe_assets"},
+        }
+
+        with (
+            patch(
+                "docpipe.api.dependencies.RepositoryFactory.get_repository_config",
+                return_value=("postgres", repo_config),
+            ),
+            patch("docpipe.api.dependencies.DataStoreFactory.create", return_value=mock_store) as mock_create,
+        ):
+            result = get_document_set_data_store()
+
+        assert result is mock_store
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs["adapter_name"] == "postgres"
+        assert call_kwargs["config"]["content_schema"] == "doc_set_content"
+        assert call_kwargs["config"]["postgres"] == {"host": "db", "schema": "docpipe_assets"}
+
 
 # ---------------------------------------------------------------------------
 # get_document_set_attachment_repository

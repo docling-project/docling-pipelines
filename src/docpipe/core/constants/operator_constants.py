@@ -1139,6 +1139,10 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
 
         # Configuration Keys
         DATABASE_PATH: Final[str] = "database_path"
+        CONTENT_SCHEMA: Final[str] = "content_schema"
+        DEFAULT_CONTENT_SCHEMA: Final[str] = "docpipe_document_sets"
+        POSTGRES: Final[str] = "postgres"
+        SCHEMA: Final[str] = "schema"
         DATA_BACKEND: Final[str] = "data_backend"
         DEFAULT_DATA_BACKEND: Final[str] = "duckdb"
         METADATA_CONFIG: Final[str] = "metadata_config"

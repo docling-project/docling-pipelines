@@ -2395,7 +2395,7 @@ Using a schema template:
 | `description`       | string |       No | `null`                             | Description of the document set                          |
 | `metadata`          | object |       No | `null`                             | Additional metadata payload stored with the document set |
 | `document_set_id`   | string |       No | `null`                             | Existing document set UUID for update flows              |
-| `data_backend`      | string |       No | `duckdb`                           | Data store backend for PyArrow table data                |
+| `data_backend`      | string |       No | `duckdb`                           | Data store backend for PyArrow table data (`duckdb` or `postgres`) |
 | `database_path`     | string |       No | `data/duckdb/document_sets.duckdb` | Database file path used by DuckDB-backed adapters        |
 
 **Description**
@@ -2410,7 +2410,7 @@ The operator creates concrete adapters through:
 - `MetadataRepositoryFactory`
 - `DataStoreFactory`
 
-The metadata backend is controlled by `global_config.metadata_storage_type` (default: `duckdb`). The data backend is controlled per-operator via `data_backend`. Current production support is DuckDB for both. The operator returns the input table unchanged, so it can be placed mid-pipeline without breaking downstream processing.
+The metadata backend is controlled by `global_config.metadata_storage_type` (default: `duckdb`). The data backend is controlled per-operator via `data_backend`: `duckdb` (default) or `postgres`, which writes the data tables to the `content_schema` of the `documentset_repository` config. The operator returns the input table unchanged, so it can be placed mid-pipeline without breaking downstream processing.
 
 **Architecture**
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DuckDB adapters implementing hexagonal architecture ports."""
 
 import types
@@ -396,6 +399,18 @@ class TestDuckDBDocumentSetStorage:
         assert metrics["total_documents"] == 0
         assert metrics["total_size_bytes"] == 0
         assert metrics["total_pages"] == 0
+
+    def test_get_metrics_ignores_a_table_with_the_same_name_in_another_schema(self, *, data_store):
+        """get_metrics() reads only the columns of the document set's own table."""
+        ref = data_store.store(doc_set_name="Shared Name", data=pa.table({"id": ["1", "2"]}))
+        data_store._storage.execute_query(query="CREATE SCHEMA other")
+        data_store._storage.execute_query(
+            query="CREATE TABLE other.shared_name (id VARCHAR, size BIGINT, pages_processed BIGINT)"
+        )
+
+        metrics = data_store.get_metrics(attachment_ref=ref)
+
+        assert metrics == {"total_documents": 2, "total_size_bytes": 0, "total_pages": 0}
 
     def test_get_metrics_nonexistent_table_raises_error(self, *, data_store, temp_db_path):
         """Test get_metrics() raises error for nonexistent table."""
