@@ -5,7 +5,11 @@ from unittest.mock import Mock, patch
 import pytest
 
 from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus
+from docpipe.core.job_management.adapters.frameworks.default_job_run_manager import DefaultJobRunManager
+from docpipe.core.job_management.adapters.services.job_tracker_service import JobTrackerService
+from docpipe.core.job_management.adapters.stores.inmemory.inmemory_job_stats_store import InMemoryJobStatsStore
 from docpipe.core.job_management.application.services.job_management_service import JobManagementService
+from docpipe.core.job_management.application.services.node_stats_aggregator import NodeStatsAggregator
 from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
@@ -726,3 +730,96 @@ class TestFlowIdentityAPIPath:
 
         self.flow_service.get_flow.assert_not_called()
         assert result["list"][0][DocpipeConstants.FLOW_NAME] is None
+
+    def test_list_job_runs_total_equals_count_on_short_page(self):
+        """A short page sets total to count and lists runs once."""
+        runs = [_dummy_run(job_run_id=f"run-{index}") for index in range(3)]
+        self.job_stats_service.list_job_runs.return_value = runs
+
+        result = self.service.list_job_runs(job_id="flow-1", limit=10)
+
+        assert result["count"] == 3
+        assert result["total"] == 3
+        assert len(result["list"]) == 3
+        self.job_stats_service.list_job_runs.assert_called_once_with(job_id="flow-1", status=None, limit=10)
+        self.job_stats_service.count_job_runs.assert_not_called()
+
+    def test_list_job_runs_total_comes_from_count_when_page_is_full(self):
+        """A full page reads total from count_job_runs, including matches past any list cap."""
+        page = [_dummy_run(job_run_id=f"run-{index}") for index in range(5)]
+        self.job_stats_service.list_job_runs.return_value = page
+        self.job_stats_service.count_job_runs.return_value = 100_001
+
+        result = self.service.list_job_runs(job_id="flow-1", status=ExecutionStatus.RUNNING, limit=5)
+
+        assert result["count"] == 5
+        assert result["total"] == 100_001
+        assert [item[DocpipeConstants.JOB_RUN_ID] for item in result["list"]] == [f"run-{index}" for index in range(5)]
+        self.job_stats_service.list_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+            limit=5,
+        )
+        self.job_stats_service.count_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+        )
+
+    def test_list_job_runs_total_equals_count_when_page_fills_limit(self):
+        """A page that fills the limit still takes total from count_job_runs."""
+        page = [_dummy_run(job_run_id=f"run-{index}") for index in range(5)]
+        self.job_stats_service.list_job_runs.return_value = page
+        self.job_stats_service.count_job_runs.return_value = 5
+
+        result = self.service.list_job_runs(job_id="flow-1", status=ExecutionStatus.RUNNING, limit=5)
+
+        assert result["count"] == 5
+        assert result["total"] == 5
+        assert len(result["list"]) == 5
+        self.job_stats_service.list_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+            limit=5,
+        )
+        self.job_stats_service.count_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+        )
+
+
+def _dummy_run(*, job_run_id: str, job_id: str = "flow-1") -> DummyJobRunItem:
+    item = DummyJobRunItem(
+        {
+            DocpipeConstants.JOB_RUN_ID: job_run_id,
+            DocpipeConstants.JOB_ID: job_id,
+            DocpipeConstants.STATUS: ExecutionStatus.RUNNING.value,
+            DocpipeConstants.MESSAGE: "",
+        }
+    )
+    item.flow_name = "Flow One"
+    return item
+
+
+def test_list_job_runs_total_counts_matches_beyond_the_page():
+    """OpenSpec job-runs list. limit 5 with 20 stored runs returns count 5 and total 20."""
+    store = InMemoryJobStatsStore()
+    aggregator = NodeStatsAggregator(job_stats_store=store)
+    tracker = JobTrackerService(job_stats_store=store, node_stats_aggregator=aggregator)
+    for index in range(20):
+        tracker.start_tracking_job(
+            job_id="flow-1",
+            job_run_id=f"{index:08x}-0000-4000-8000-000000000000",
+            flow_id="flow-1",
+            flow_name="Flow One",
+        )
+    service = JobManagementService(
+        job_stats_service=tracker,
+        job_run_manager=DefaultJobRunManager(job_stats_service=tracker),
+        flow_service=Mock(),
+    )
+
+    result = service.list_job_runs(job_id="flow-1", limit=5)
+
+    assert result["count"] == 5
+    assert result["total"] == 20
+    assert len(result["list"]) == 5

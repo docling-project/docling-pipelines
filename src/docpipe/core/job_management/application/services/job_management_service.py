@@ -332,10 +332,18 @@ class JobManagementService:
             item[DocpipeConstants.FLOW_NAME] = flow_name
             list_items.append(item)
 
+        # OpenSpec total is every match. A short page already has them all.
+        # A full page may hide later rows, so count with the same filters and no limit.
+        count = len(list_items)
+        if count < limit:
+            total = count
+        else:
+            total = self.job_stats_service.count_job_runs(job_id=job_id, status=status)
+
         return {
             "list": list_items,
-            "count": len(list_items),
-            "total": len(list_items),
+            "count": count,
+            "total": total,
         }
 
     def _execute_flow_async(

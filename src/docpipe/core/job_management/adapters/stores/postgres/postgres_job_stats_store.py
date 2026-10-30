@@ -437,3 +437,36 @@ class PostgresJobStatsStore(JobStatsStore):
             raise JobStatsStoreReadException(
                 message=f"Failed to list jobs: {e}", job_run_id=None, operation="list_job_runs"
             ) from e
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+
+        Raises:
+            JobStatsStoreReadException: If the count operation fails
+        """
+        try:
+            return self._job_stats_dal.count_job_runs(
+                job_id=job_id,
+                job_ids=job_ids,
+                status=status.value if isinstance(status, ExecutionStatus) else status,
+            )
+        except Exception as e:
+            logger.error("Failed to count jobs: %s", e)
+            raise JobStatsStoreReadException(
+                message=f"Failed to count jobs: {e}", job_run_id=None, operation="count_job_runs"
+            ) from e

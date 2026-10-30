@@ -239,3 +239,27 @@ class JobStatsStore(ABC):
             JobStatsStoreReadException: If list operation fails
         """
         ...
+
+    @abstractmethod
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+
+        Raises:
+            JobStatsStoreReadException: If the count operation fails
+        """
+        ...

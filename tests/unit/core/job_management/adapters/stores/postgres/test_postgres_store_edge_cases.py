@@ -246,6 +246,30 @@ class TestJobStatsDAL:
         assert sql.endswith(f"{where}ORDER BY job_run_stats.start_time DESC \n LIMIT %(param_1)s".lstrip())
 
     @pytest.mark.parametrize(
+        ("filters", "where"),
+        [
+            ({}, ""),
+            (
+                {"job_id": "job-a", "job_ids": ["job-a", "job-b"], "status": "RUNNING"},
+                "WHERE job_run_stats.job_id = %(job_id_1)s AND job_run_stats.job_id IN "
+                "(__[POSTCOMPILE_job_id_2]) AND job_run_stats.status = %(status_1)s",
+            ),
+        ],
+        ids=["no-filters", "all-filters"],
+    )
+    def test_count_job_runs_builds_the_query(self, filters, where):
+        dal, session = _dal()
+        session.execute.return_value.scalar_one.return_value = 42
+
+        assert dal.count_job_runs(**filters) == 42
+
+        sql = _sql(session.execute.call_args.args[0])
+        expected = "SELECT count(*) AS count_1 \nFROM job_run_stats"
+        if where:
+            expected = f"{expected} \n{where}"
+        assert sql == expected
+
+    @pytest.mark.parametrize(
         ("call", "message", "operation"),
         [
             (
@@ -261,8 +285,9 @@ class TestJobStatsDAL:
                 "atomic_increment",
             ),
             (lambda d: d.list_job_runs(), "list jobs", "list"),
+            (lambda d: d.count_job_runs(), "count jobs", "count"),
         ],
-        ids=["upsert", "get", "delete", "atomic", "list"],
+        ids=["upsert", "get", "delete", "atomic", "list", "count"],
     )
     def test_database_errors_are_wrapped(self, call, message, operation):
         dal, session = _dal()
