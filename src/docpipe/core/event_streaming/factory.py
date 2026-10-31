@@ -7,18 +7,15 @@ from typing import Any
 import yaml
 
 from docpipe.core.constants import DocpipeConfigKeys, EnvironmentVariables
-from docpipe.core.constants.constants import _find_project_root
 from docpipe.core.event_streaming.dispatch_service import EventDispatchService
 from docpipe.core.event_streaming.kafka_listener import KafkaEventListener
 from docpipe.core.event_streaming.mapping_service import EventMappingService
 from docpipe.storage.factory import StorageFactory
+from docpipe.utils.infrastructure.config_utils import DEFAULT_CONFIG_PATH, DEFAULT_STORAGE_BACKEND
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
-
-DEFAULT_STORAGE_BACKEND = "filesystem"
-DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
 
 
 class EventStreamingFactory:
@@ -59,7 +56,7 @@ class EventStreamingFactory:
     @staticmethod
     def _resolve_storage_configuration() -> tuple[str, dict[str, Any]]:
         """Resolve backend as environment override, global YAML setting, then filesystem default."""
-        config_path = Path(os.getenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(DEFAULT_CONFIG_PATH)))
+        config_path = Path(os.environ.get(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(DEFAULT_CONFIG_PATH)))
         yaml_config: dict[str, Any] = {}
         if config_path.exists():
             try:

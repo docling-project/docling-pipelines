@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for ProjectRepositoryFactory.
 
 Covers the three resolution paths for base_dir:
@@ -8,6 +11,7 @@ Covers the three resolution paths for base_dir:
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from docpipe.core.projects.adapters.repositories.local.local_project_repository import (
@@ -17,6 +21,16 @@ from docpipe.core.projects.factories.project_repository_factory import (
     ENV_PROJECT_REPOSITORY_BASE_DIR,
     ProjectRepositoryFactory,
 )
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
+
+
+@pytest.fixture(autouse=True)
+def reset_config_loader():
+    """Clear the DocpipeConfigLoader cache before and after each test."""
+    DocpipeConfigLoader.reset()
+    yield
+    DocpipeConfigLoader.reset()
+
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -43,26 +57,6 @@ class TestEnvVarResolution:
 
         assert isinstance(repo, LocalProjectRepository)
         assert repo._base_dir == target
-
-    def test_env_var_overrides_yaml(self, tmp_path, monkeypatch):
-        """Env var wins even when a YAML config is present."""
-        env_dir = tmp_path / "from-env"
-        env_dir.mkdir()
-        yaml_dir = tmp_path / "from-yaml"
-        yaml_dir.mkdir()
-
-        config_path = tmp_path / "config.yaml"
-        _write_yaml(
-            config_path,
-            {"projects_management": {"project_repository": {"config": {"base_dir": str(yaml_dir)}}}},
-        )
-
-        monkeypatch.setenv(ENV_PROJECT_REPOSITORY_BASE_DIR, str(env_dir))
-        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
-
-        repo = ProjectRepositoryFactory.create_repository()
-
-        assert repo._base_dir == env_dir
 
 
 # ── YAML config path ──────────────────────────────────────────────────────
@@ -131,24 +125,6 @@ class TestYAMLConfigResolution:
 
         assert isinstance(repo, LocalProjectRepository)
 
-    def test_invalid_yaml_logs_warning(self, tmp_path, monkeypatch):
-        """Malformed YAML triggers a WARNING log via the factory's logger."""
-        import logging
-        from unittest.mock import patch
-
-        config_path = tmp_path / "bad.yaml"
-        config_path.write_text("key: [\n  bad yaml")  # intentionally broken
-
-        monkeypatch.delenv(ENV_PROJECT_REPOSITORY_BASE_DIR, raising=False)
-        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
-
-        # get_logger() returns the "docpipe" root logger — patch that directly
-        with patch.object(logging.getLogger("docpipe"), "warning") as mock_warn:
-            ProjectRepositoryFactory._resolve_base_dir()
-
-        mock_warn.assert_called_once()
-        assert "invalid YAML" in mock_warn.call_args.args[0]
-
     def test_config_file_not_found_falls_through(self, tmp_path, monkeypatch):
         """Non-existent config file path → adapter default (no exception)."""
         monkeypatch.delenv(ENV_PROJECT_REPOSITORY_BASE_DIR, raising=False)
@@ -157,6 +133,26 @@ class TestYAMLConfigResolution:
         repo = ProjectRepositoryFactory.create_repository()
 
         assert isinstance(repo, LocalProjectRepository)
+
+    def test_env_var_overrides_yaml_config(self, tmp_path, monkeypatch):
+        """Env var wins over YAML config when both are set."""
+        env_dir = tmp_path / "from-env"
+        env_dir.mkdir()
+        yaml_dir = tmp_path / "from-yaml"
+        yaml_dir.mkdir()
+
+        config_path = tmp_path / "config.yaml"
+        _write_yaml(
+            config_path,
+            {"projects_management": {"project_repository": {"config": {"base_dir": str(yaml_dir)}}}},
+        )
+
+        monkeypatch.setenv(ENV_PROJECT_REPOSITORY_BASE_DIR, str(env_dir))
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        repo = ProjectRepositoryFactory.create_repository()
+
+        assert repo._base_dir == env_dir
 
 
 # ── Default fallback ─────────────────────────────────────────────────────

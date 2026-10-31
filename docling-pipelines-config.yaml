@@ -62,7 +62,7 @@ job_management:
   framework:
     type: default
     config: {}
-  store:
+  storage:
     # Storage backend options: inmemory, json, duckdb, postgresql
     # Current active: json (file-based storage)
     type: filesystem

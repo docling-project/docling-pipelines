@@ -28,7 +28,7 @@ from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils imp
     RECORDS_NAME_UNIQUE_CONSTRAINT,
     PostgresStorageUtils,
 )
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory, RepositoryType
+from docpipe.core.assets.common.factories import AssetRepositoryFactory, RepositoryType
 from docpipe.core.assets.document_libraries.domain.models.document_library import DocumentLibrary
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
 from docpipe.exceptions.docpipe_exceptions import (
@@ -489,26 +489,26 @@ class TestFromConfig:
 
 class TestRepositoryFactoryPostgres:
     def test_postgres_is_registered(self):
-        available = RepositoryFactory.get_available_repository_types()
+        available = AssetRepositoryFactory.get_available_repository_types()
         assert available[RepositoryType.POSTGRES] is PostgresAssetRepository
-        assert "postgres" in RepositoryFactory._get_valid_types()
+        assert "postgres" in AssetRepositoryFactory._get_valid_types()
 
     def test_missing_password_surfaces_as_repository_configuration_exception(self):
         with pytest.raises(RepositoryConfigurationException, match="DOCPIPE_POSTGRES_PASSWORD"):
-            RepositoryFactory.create_repository(asset_type=DocumentSet, adapter_name="postgres")
+            AssetRepositoryFactory.create_repository(asset_type=DocumentSet, adapter_name="postgres")
 
     def test_env_var_selects_postgres(self, monkeypatch):
         monkeypatch.setenv("DOCUMENTSET_REPOSITORY_TYPE", "POSTGRES")
         sentinel = MagicMock(spec=PostgresAssetRepository)
         with patch.object(PostgresAssetRepository, "from_config", return_value=sentinel) as from_config:
-            repo = RepositoryFactory.create_repository(asset_type=DocumentSet)
+            repo = AssetRepositoryFactory.create_repository(asset_type=DocumentSet)
         assert repo is sentinel
         assert from_config.call_args.kwargs["asset_type"] is DocumentSet
 
     def test_connection_failure_is_wrapped(self):
         with patch.object(PostgresStorageUtils, "get_engine", side_effect=RuntimeError("connection refused")):
             with pytest.raises(RepositoryConfigurationException, match="connection refused") as exc_info:
-                RepositoryFactory.create_repository(
+                AssetRepositoryFactory.create_repository(
                     asset_type=DocumentSet,
                     adapter_name="postgres",
                     config_override={"postgres": {"password": "p"}},  # pragma: allowlist secret

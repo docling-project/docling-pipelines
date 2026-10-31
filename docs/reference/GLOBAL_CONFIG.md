@@ -249,14 +249,14 @@ global_storage:
    config:
       base_dir: "./data"
       lock_timeout: 30.0
-   # PostgreSQL configuration (only needed if type is "postgres")
-   postgres:
-      host: "localhost"
-      port: 5432
-      database: "docpipe"
-      user: "docpipe_user"
-      password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
-      schema: "incremental_metadata"
+      # PostgreSQL configuration (only needed if type is "postgres")
+      postgres:
+         host: "localhost"
+         port: 5432
+         database: "docpipe"
+         user: "docpipe_user"
+         password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
+         schema: "incremental_metadata"
 
 incremental_metadata: {} # inherit from global_storage
 ```
@@ -295,27 +295,25 @@ Docling Pipelines supports two storage types for incremental metadata:
 
 #### Environment Variables :
 
-You can override configuration using environment variables:
+The storage backend is selected only from `docling-pipelines-config.yaml`; there is no environment override for it. The following variable is supported:
 
-- `DOCPIPE_INCREMENTAL_BASE_DIR`: Override the base directory for incremental metadata
-- `DOCPIPE_INCREMENTAL_STORAGE_BACKEND`: Override the storage backend (filesystem, postgresql)
 - `DOCPIPE_CONFIG_PATH`: Specify a custom path to docling-pipelines-config.yaml
 
 **Example**:
 ```bash
-export DOCPIPE_INCREMENTAL_BASE_DIR="/data/incremental"
-export DOCPIPE_INCREMENTAL_STORAGE_BACKEND="filesystem"
+export DOCPIPE_CONFIG_PATH="/etc/docpipe/docling-pipelines-config.yaml"
 docling-pipelines --flow-file my_flow.json
 ```
+
+`global_storage.config` and `global_storage.postgres` are not merged into a service block. See [Breaking Changes from the Central Config Loader](../guides/ADVANCED_CONFIGURATION.md#breaking-changes-from-the-central-config-loader).
 
 #### Configuration Precedence :
 
 Configuration is resolved in the following order (highest to lowest priority):
 
-1. **Environment variables** (`DOCPIPE_INCREMENTAL_BASE_DIR`, `DOCPIPE_INCREMENTAL_STORAGE_BACKEND`)
-2. **Service-specific configuration** (e.g., `incremental_metadata.storage` in docling-pipelines-config.yaml)
-3. **Global storage configuration** (e.g., `global_storage` in docling-pipelines-config.yaml)
-4. **System defaults** (Filesystem backend with `./data`)
+1. **Service-specific configuration** (e.g., `incremental_metadata.storage` in docling-pipelines-config.yaml)
+2. **Global storage configuration** (e.g., `global_storage` in docling-pipelines-config.yaml)
+3. **System defaults** (Filesystem backend with `./data`)
 
 #### Flow JSON Configuration :
 
@@ -787,13 +785,13 @@ incremental_metadata:
          base_dir: "./incremental_data"
          lock_timeout: 60.0
 #  PostgreSQL configuration (only needed if type is "postgres")
-#  postgres:
-#    host: "localhost"
-#    port: 5432
-#    database: "docpipe"
-#    user: "docpipe_user"
-#    password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
-#    schema: "incremental_metadata"
+#        postgres:
+#        host: "localhost"
+#        port: 5432
+#        database: "docpipe"
+#        user: "docpipe_user"
+#        password: "${POSTGRES_PASSWORD}" # pragma: allowlist secret
+#        schema: "incremental_metadata"
 ```
 
 ### Execution

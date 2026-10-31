@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Integration tests for the PostgreSQL asset and attachment repositories.
 
 Runs against a real PostgreSQL server (see ``conftest.py`` for the environment
@@ -37,8 +40,8 @@ from docpipe.core.assets.common.adapters.repositories.postgres_attachment_reposi
 from docpipe.core.assets.common.adapters.repositories.postgres_storage_utils import PostgresStorageUtils
 from docpipe.core.assets.common.domain.models.asset import Asset
 from docpipe.core.assets.common.domain.models.attachment_ref import AttachmentRef
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory, RepositoryType
 from docpipe.core.assets.common.factories.attachment_repository_factory import AttachmentRepositoryFactory
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory, RepositoryType
 from docpipe.core.assets.document_libraries.domain.models.document_library import DocumentLibrary
 from docpipe.core.assets.document_sets.application.services.document_set_service import DocumentSetService
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
@@ -50,6 +53,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     AssetNotFoundException,
     DocpipeException,
 )
+from docpipe.utils.infrastructure import DocpipeConfigLoader
 
 pytestmark = pytest.mark.integration
 
@@ -86,8 +90,16 @@ ASSET_CASES = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def reset_config_loader():
+    """Clear the DocpipeConfigLoader cache before and after each test."""
+    DocpipeConfigLoader.reset()
+    yield
+    DocpipeConfigLoader.reset()
+
+
 def _create_repo(*, asset_type: type[Asset], repo_config: dict[str, Any]) -> PostgresAssetRepository:
-    repo = RepositoryFactory.create_repository(
+    repo = AssetRepositoryFactory.create_repository(
         asset_type=asset_type,
         adapter_name=RepositoryType.POSTGRES.value,
         config_override=repo_config,

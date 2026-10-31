@@ -50,7 +50,7 @@ dependencies = [
     "lxml==6.1.0",
     "mako==1.4.3",
     "milvus-lite==3.2.1",
-    "mlx==0.32.3; sys_platform == 'darwin'",
+    "mlx==0.32.4; sys_platform == 'darwin'",
     "msal==1.37.0",
     "nltk==3.10.4",
     "numpy>=2.0.0,<3.0.0",
@@ -62,7 +62,7 @@ dependencies = [
     "pandas==2.3.3",
     "passlib[bcrypt]==1.7.4",
     "pillow==13.0.0",
-    "polars==1.32.3",
+    "polars==2.1.0",
     "prefect==3.8.4",
     "psycopg2-binary==2.9.12",
     "pyarrow==26.0.0",
@@ -111,8 +111,8 @@ dev = [
     "pre-commit==4.5.1",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "pytest-cov==7.0.0",
-    "pytest-mock==3.15.1",
+    "pytest-cov==7.1.0",
+    "pytest-mock==3.17.0",
     "pytest-timeout==2.3.1",
     "pytest-xdist==3.8.0",
     "ruff==0.15.20",
@@ -365,7 +365,7 @@ exclude_lines = [
 [dependency-groups]
 dev = [
     "mypy>=1.19.1",
-    "types-boto3==1.43.0",
+    "types-boto3==1.43.119",
     "types-python-dateutil==2.9.0.20260807",
     "types-requests==2.33.0.20260408",
 ]
