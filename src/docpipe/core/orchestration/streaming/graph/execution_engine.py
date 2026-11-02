@@ -7,13 +7,15 @@ from uuid import UUID
 
 import pyarrow as pa
 
-from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, OrchestratorType
+from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, Metrics, OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.operators.functional.merge import MergeOperator
+from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.orchestration.operator_factory import OperatorFactory, OperatorFactoryProvider
 from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph, Node
 from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOutput, OutputBuffer
+from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -51,6 +53,7 @@ class GraphExecutionEngine:
                     else:
                         input_table = None
                     operator_output = self._execute_simple_node(node=node, input_table=input_table)
+                self._raise_if_node_failed(node=node, metadata=operator_output.metadata)
                 self.output_buffer.put_output(node_id=node_id, output=operator_output)
 
             terminal_ids = [
@@ -75,7 +78,7 @@ class GraphExecutionEngine:
             )
         return output.tables[result_index]
 
-    def _get_merge_tables(self, node: Node) -> dict[str, pa.Table]:
+    def _get_merge_tables(self, *, node: Node) -> dict[str, pa.Table]:
         """Resolve merge input tables under their configured input names."""
         input_tables: dict[str, pa.Table] = {}
         for input_link in node.operator_config[OperatorConstants.Merge.INPUT_LINKS]:
@@ -99,7 +102,7 @@ class GraphExecutionEngine:
         """Run the merge operator with its resolved input tables."""
         operator = MergeOperator(config=node.operator_config)
         output_tables, metadata = operator.transform(table=pa.table({}), tables=input_tables)
-        return OperatorOutput(tables=output_tables, metadata=metadata)
+        return GraphExecutionEngine._prepare_output(operator=operator, tables=output_tables, metadata=metadata)
 
     def _execute_simple_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run a linear node or pass its empty input through."""
@@ -112,7 +115,7 @@ class GraphExecutionEngine:
         return self._execute_node(node=node, input_table=input_table)
 
     def _execute_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
-        """Run one operator and return its first output table with execution metadata."""
+        """Run one operator and prepare its output tables and execution metadata."""
         operator_class: type[AbstractOperator] | None = self.operator_factory.get_operator(
             operator_name=node.operator_name
         )
@@ -120,4 +123,33 @@ class GraphExecutionEngine:
             raise ValueError(f"Operator:{node.operator_name} not found.")
         operator: AbstractOperator = operator_class(config=node.operator_config)
         output_tables, metadata = operator.transform(table=input_table)
-        return OperatorOutput(tables=output_tables, metadata=metadata)
+        return self._prepare_output(operator=operator, tables=output_tables, metadata=metadata)
+
+    @staticmethod
+    def _prepare_output(*, operator: AbstractOperator, tables: list[pa.Table], metadata: dict) -> OperatorOutput:
+        """Apply configured column drops and then renames to every output table."""
+        for index, table in enumerate(tables):
+            if operator.output_features_to_drop:
+                table = OperatorUtils.drop_features_from_table(operator.output_features_to_drop, table)
+            if operator.updated_features and table.num_columns:
+                if table.num_rows:
+                    table = OperatorUtils.rename_features_and_save_original(
+                        updated_features=operator.updated_features, input_features=table
+                    )
+                else:
+                    # Preserve empty branch tables while renaming their column schemas.
+                    renames = {
+                        feature[OperatorConstants.Misc.OLD_FEATURE]: feature[OperatorConstants.Misc.NEW_FEATURE]
+                        for feature in operator.updated_features
+                    }
+                    table = table.rename_columns([renames.get(name, name) for name in table.column_names])
+            tables[index] = table
+        return OperatorOutput(tables=tables, metadata=metadata)
+
+    @staticmethod
+    def _raise_if_node_failed(*, node: Node, metadata: dict) -> None:
+        """Raise when an operator reports failure so event dispatch cannot report success."""
+        if metadata.get(Metrics.External.NODE_STATUS) == ExecutionStatus.FAILED.value:
+            raise FlowExecutionFailedException(
+                f"Operator '{node.name}' ({node.operator_name}) reported a failed execution."
+            )
