@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for MilvusIndexManager
 """
 
-from unittest.mock import MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pyarrow as pa
@@ -948,3 +952,128 @@ class TestCreateSchemaFieldsSkipBranches:
         fields = manager._create_schema_fields(dimension_mapping={})
         field_names = [f.name for f in fields]
         assert field_names.count(OperatorConstants.VectorDB.DENSE_VECTOR_FIELD_NAME) == 0
+
+
+GPU_DETECT = (
+    "docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager.MilvusIndexManager.detect_gpu_available"
+)
+
+
+class TestGpuFallback:
+    """GPU detection and graceful CPU fallback."""
+
+    @pytest.mark.parametrize(
+        ("gpu_type", "cpu_type"),
+        [
+            ("GPU_CAGRA", "HNSW"),
+            ("GPU_IVF_FLAT", "IVF_FLAT"),
+            ("GPU_IVF_PQ", "IVF_PQ"),
+            ("GPU_FLAT", "FLAT"),
+            ("GPU_BRUTE_FORCE", "FLAT"),
+        ],
+    )
+    def test_falls_back_to_cpu_when_no_gpu(self, mock_client, gpu_type, cpu_type):
+        with patch(GPU_DETECT, return_value=False):
+            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type)
+        assert manager.index_type == cpu_type
+        assert manager.requested_index_type == gpu_type
+        assert manager.gpu_fallback_triggered is True
+        assert manager.gpu_fallback_reason
+
+    def test_keeps_gpu_index_when_gpu_available(self, mock_client):
+        with patch(GPU_DETECT, return_value=True):
+            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA")
+        assert manager.index_type == "GPU_CAGRA"
+        assert manager.gpu_fallback_triggered is False
+
+    def test_fallback_drops_cagra_only_parameters(self, mock_client):
+        with patch(GPU_DETECT, return_value=False):
+            manager = MilvusIndexManager(
+                client=mock_client,
+                collection_name="c",
+                index_type="GPU_CAGRA",
+                index_parameters={"graph_degree": 32, "M": 24},
+            )
+        params = manager._get_index_parameters()
+        assert "graph_degree" not in params
+        assert params["M"] == 24
+
+    def test_gpu_index_rejected_on_lite(self, mock_client):
+        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
+            MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA", is_lite=True)
+
+    def test_use_gpu_true_upgrades_cpu_index(self, mock_client):
+        with patch(GPU_DETECT, return_value=True):
+            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", use_gpu=True)
+        assert manager.index_type == "GPU_CAGRA"
+
+    def test_use_gpu_true_without_gpu_falls_back(self, mock_client):
+        with patch(GPU_DETECT, return_value=False):
+            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", use_gpu=True)
+        assert manager.index_type == "HNSW"
+        assert manager.gpu_fallback_triggered is True
+
+    def test_use_gpu_false_downgrades_gpu_index(self, mock_client):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_IVF_FLAT", use_gpu=False)
+        assert manager.index_type == "IVF_FLAT"
+        assert manager.gpu_fallback_triggered is False
+
+    def test_gpu_device_id_passed_to_detection(self, mock_client):
+        with patch(GPU_DETECT, return_value=True) as detect:
+            MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_FLAT", gpu_device_id=2)
+        detect.assert_called_once_with(device_id=2)
+
+
+class TestDetectGpuAvailable:
+    def test_disable_env_wins(self, monkeypatch):
+        monkeypatch.setenv("DOCPIPE_FORCE_GPU", "1")
+        monkeypatch.setenv("DOCPIPE_DISABLE_GPU", "1")
+        assert MilvusIndexManager.detect_gpu_available() is False
+
+    def test_force_env(self, monkeypatch):
+        monkeypatch.delenv("DOCPIPE_DISABLE_GPU", raising=False)
+        monkeypatch.setenv("DOCPIPE_FORCE_GPU", "true")
+        assert MilvusIndexManager.detect_gpu_available() is True
+
+    def test_returns_false_when_nothing_detected(self, monkeypatch):
+        monkeypatch.delenv("DOCPIPE_DISABLE_GPU", raising=False)
+        monkeypatch.delenv("DOCPIPE_FORCE_GPU", raising=False)
+        monkeypatch.setitem(sys.modules, "torch", None)
+        monkeypatch.setitem(sys.modules, "pynvml", None)
+        with patch("shutil.which", return_value=None):
+            assert MilvusIndexManager.detect_gpu_available() is False
+
+
+class TestQuantization:
+    @pytest.mark.parametrize(
+        ("base", "quant", "expected"),
+        [
+            ("HNSW", "SQ8", "HNSW_SQ"),
+            ("HNSW", "PQ", "HNSW_PQ"),
+            ("HNSW", "PRQ", "HNSW_PRQ"),
+            ("IVF_FLAT", "SQ8", "IVF_SQ8"),
+            ("IVF_FLAT", "PQ", "IVF_PQ"),
+            ("FLAT", "PQ", "IVF_PQ"),
+            ("GPU_IVF_FLAT", "PQ", "GPU_IVF_PQ"),
+            ("HNSW", "NONE", "HNSW"),
+            ("HNSW", None, "HNSW"),
+            ("DISKANN", "PQ", "DISKANN"),
+        ],
+    )
+    def test_resolve_quantized_index_type(self, base, quant, expected):
+        assert MilvusIndexManager.resolve_quantized_index_type(base_index_type=base, quantization=quant) == expected
+
+    def test_manager_applies_quantization_and_parameters(self, mock_client):
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            index_type="HNSW",
+            quantization="PQ",
+            quantization_parameters={"m": 32},
+        )
+        assert manager.index_type == "HNSW_PQ"
+        assert manager._get_index_parameters()["m"] == 32
+
+    def test_search_parameters_stored(self, mock_client):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", search_parameters={"ef": 64})
+        assert manager.search_parameters == {"ef": 64}

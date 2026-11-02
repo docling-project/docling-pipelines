@@ -10,6 +10,8 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 
 ### Core Capabilities
 - **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX
+- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_FLAT, GPU_BRUTE_FORCE with automatic GPU detection and CPU fallback
+- **Quantization**: SQ8, PQ and PRQ variants to reduce memory
 - **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE
 - **Hybrid Search**: Dense + sparse vector support with BM25
 - **Multi-Model Embeddings**: Multiple embedding models with different dimensions in same collection
@@ -62,9 +64,14 @@ Connection and index-specific parameters are configured inside the `provider_con
 | `password` | string | No | `"Milvus"` | Password/API key for authentication |
 | `database` | string | No | `"default"` | Database name (not used for `lite`) |
 | `secure` | boolean | No | false | Enable TLS/SSL (not used for `lite`) |
-| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, etc.; only `FLAT` is supported for `lite`) |
+| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, GPU_CAGRA, etc.; only `FLAT` is supported for `lite`) |
 | `metric_type` | string | No | `"L2"` | Similarity metric (L2, IP, COSINE) |
 | `index_parameters` | object | No | {} | Custom index-specific parameters |
+| `quantization` | string | No | - | `SQ8`, `PQ`, `PRQ` or `NONE`; see [GPU Indexes and Quantization](#gpu-indexes-and-quantization) |
+| `quantization_parameters` | object | No | {} | Quantization tuning parameters (e.g. `m`, `nbits`) |
+| `search_parameters` | object | No | {} | Search-time parameters (e.g. `ef`, `nprobe`, `itopk_size`) |
+| `use_gpu` | boolean | No | - | `true` upgrades to a GPU index, `false` forces CPU, unset follows `index_type` |
+| `gpu_device_id` | integer | No | - | GPU device index used for detection |
 | `add_sparse_vector` | boolean | No | false | Enable hybrid search with BM25 sparse vectors (not supported for `lite`) |
 
 ### Index Parameters

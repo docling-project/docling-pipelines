@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Milvus adapter for vector database operations.
 
 This adapter implements the VectorStorePort interface for Milvus.
@@ -77,6 +80,11 @@ class MilvusAdapter(VectorStorePort):
                 - index_type: Vector index algorithm (FLAT, IVF_FLAT, HNSW, etc.)
                 - metric_type: Similarity metric (L2, IP, COSINE)
                 - index_parameters: Index-specific parameters
+                - quantization: Quantization method (SQ8, PQ, PRQ, NONE) to reduce memory
+                - quantization_parameters: Quantization tuning parameters
+                - search_parameters: Search-time parameters (e.g. nprobe, ef, search_width)
+                - use_gpu: Explicit GPU acceleration flag (None = decided by index_type)
+                - gpu_device_id: Target GPU device index
         """
         # collection_name is now part of provider_config — read it from config
         self.collection_name = adapter_config.get(OperatorConstants.VectorDB.COLLECTION_NAME)
@@ -113,6 +121,11 @@ class MilvusAdapter(VectorStorePort):
         index_type = adapter_config.get(OperatorConstants.VectorDB.INDEX_TYPE, DEFAULT_INDEX_TYPE)
         metric_type = adapter_config.get(OperatorConstants.VectorDB.METRIC_TYPE, DEFAULT_METRIC_TYPE)
         index_parameters = adapter_config.get(OperatorConstants.VectorDB.INDEX_PARAMETERS, {})
+        quantization = adapter_config.get(OperatorConstants.VectorDB.QUANTIZATION)
+        quantization_parameters = adapter_config.get(OperatorConstants.VectorDB.QUANTIZATION_PARAMETERS, {})
+        search_parameters = adapter_config.get(OperatorConstants.VectorDB.SEARCH_PARAMETERS, {})
+        use_gpu = adapter_config.get(OperatorConstants.VectorDB.USE_GPU)
+        gpu_device_id = adapter_config.get(OperatorConstants.VectorDB.GPU_DEVICE_ID)
 
         # Note: Sparse vector mode uses hardcoded index configuration in MilvusIndexManager
         # The index_type and metric_type parameters here are only used for dense vectors
@@ -148,6 +161,11 @@ class MilvusAdapter(VectorStorePort):
             auto_id=False,
             add_sparse_vector=self.add_sparse_vector,
             is_lite=is_lite,
+            quantization=quantization,
+            quantization_parameters=quantization_parameters,
+            search_parameters=search_parameters,
+            use_gpu=use_gpu,
+            gpu_device_id=gpu_device_id,
         )
 
         # Initialize batch processor

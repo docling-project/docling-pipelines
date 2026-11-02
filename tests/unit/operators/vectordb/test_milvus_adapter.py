@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for MilvusAdapter."""
 
 from unittest.mock import MagicMock, patch
@@ -228,3 +231,48 @@ class TestMilvusAdapterMissingCollectionName:
 
         with pytest.raises(ValueError, match="collection_name is required for the Milvus adapter"):
             MilvusAdapter(host="localhost", port=19530)
+
+
+class TestMilvusAdapterGpuQuantizationWiring:
+    """The adapter must forward GPU / quantization / search options to MilvusIndexManager."""
+
+    @staticmethod
+    def _build(extra_config):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.adapter import MilvusAdapter
+
+        base = "docpipe.core.operators.vectordb.adapters.outbound.milvus"
+        with (
+            patch(f"{base}.client.MilvusClient.__init__", return_value=None),
+            patch(f"{base}.client.MilvusClient.get_client", return_value=MagicMock()),
+            patch(f"{base}.adapter.MilvusIndexManager") as mock_manager,
+            patch(f"{base}.batch_processor.MilvusBatchProcessor.__init__", return_value=None),
+        ):
+            MilvusAdapter(collection_name="c", **extra_config)
+        return mock_manager
+
+    def test_options_are_forwarded(self):
+        mock_manager = self._build(
+            {
+                "index_type": "GPU_CAGRA",
+                "quantization": "PQ",
+                "quantization_parameters": {"m": 8},
+                "search_parameters": {"itopk_size": 64},
+                "use_gpu": True,
+                "gpu_device_id": 1,
+            }
+        )
+        kwargs = mock_manager.call_args.kwargs
+        assert kwargs["index_type"] == "GPU_CAGRA"
+        assert kwargs["quantization"] == "PQ"
+        assert kwargs["quantization_parameters"] == {"m": 8}
+        assert kwargs["search_parameters"] == {"itopk_size": 64}
+        assert kwargs["use_gpu"] is True
+        assert kwargs["gpu_device_id"] == 1
+
+    def test_defaults_when_options_absent(self):
+        kwargs = self._build({}).call_args.kwargs
+        assert kwargs["quantization"] is None
+        assert kwargs["quantization_parameters"] == {}
+        assert kwargs["search_parameters"] == {}
+        assert kwargs["use_gpu"] is None
+        assert kwargs["gpu_device_id"] is None
