@@ -692,8 +692,7 @@ class ChunkerOperator(AbstractOperator):
                     base_url=api_base,
                 )
                 logger.info(
-                    f"Initialized docling-serve chunking client for {api_base}",
-                    extra=self.common_log_arguments,
+                    "Initialized docling-serve chunking client for %s", api_base, extra=self.common_log_arguments
                 )
             except Exception as e:
                 raise DocpipeException(f"Failed to initialize docling-serve HTTP client: {e!s}") from e
@@ -752,7 +751,8 @@ class ChunkerOperator(AbstractOperator):
 
             # Make request to docling-serve
             logger.info(
-                f"Sending chunking request to docling-serve for document: {doc_name or 'unnamed'}",
+                "Sending chunking request to docling-serve for document: %s",
+                doc_name or "unnamed",
                 extra=self.common_log_arguments,
             )
             response = client.call_rest_json(
@@ -768,7 +768,9 @@ class ChunkerOperator(AbstractOperator):
 
             # Debug: Log the full response to understand structure
             logger.info(
-                f"Docling-serve response keys: {list(response.keys())}, content length: {len(content)}",
+                "Docling-serve response keys: %s, content length: %s",
+                list(response.keys()),
+                len(content),
                 extra=self.common_log_arguments,
             )
 
@@ -776,7 +778,8 @@ class ChunkerOperator(AbstractOperator):
 
             if not chunks_data:
                 logger.warning(
-                    f"Docling-serve returned no chunks for content of length {len(content)}",
+                    "Docling-serve returned no chunks for content of length %s",
+                    len(content),
                     extra=self.common_log_arguments,
                 )
                 return []
@@ -805,10 +808,7 @@ class ChunkerOperator(AbstractOperator):
                     )
                     documents.append(doc)
 
-            logger.info(
-                f"Docling-serve chunking produced {len(documents)} chunks",
-                extra=self.common_log_arguments,
-            )
+            logger.info("Docling-serve chunking produced %s chunks", len(documents), extra=self.common_log_arguments)
             return documents
 
         except Exception as e:
@@ -885,7 +885,8 @@ class ChunkerOperator(AbstractOperator):
                     validate_model=True,
                 )
                 logger.info(
-                    f"Initialized OllamaClient with model: {self.semantic_embeddings_model}",
+                    "Initialized OllamaClient with model: %s",
+                    self.semantic_embeddings_model,
                     extra=self.common_log_arguments,
                 )
             except Exception as e:
@@ -934,8 +935,10 @@ class ChunkerOperator(AbstractOperator):
         docs = text_splitter.create_documents([content])
 
         logger.debug(
-            f"Semantic chunking created {len(docs)} chunks using OllamaClient "
-            f"(threshold_type={self.breakpoint_threshold_type}, threshold_amount={self.breakpoint_threshold_amount})",
+            "Semantic chunking created %s chunks using OllamaClient (threshold_type=%s, threshold_amount=%s)",
+            len(docs),
+            self.breakpoint_threshold_type,
+            self.breakpoint_threshold_amount,
             extra=self.common_log_arguments,
         )
 
@@ -1020,7 +1023,9 @@ class ChunkerOperator(AbstractOperator):
                     merge_peers=True,  # Merge chunks at the same hierarchy level
                 )
                 logger.info(
-                    f"Initialized Docling HybridChunker with tokenizer: {self.docling_tokenizer}, max_tokens: {self.chunk_size}",
+                    "Initialized Docling HybridChunker with tokenizer: %s, max_tokens: %s",
+                    self.docling_tokenizer,
+                    self.chunk_size,
                     extra=self.common_log_arguments,
                 )
             except Exception as e:
@@ -1251,15 +1256,17 @@ class ChunkerOperator(AbstractOperator):
             )
 
             logger.info(
-                f"Initialized summarization with provider={self.summarization_provider}, "
-                f"model={self.summarization_model}",
+                "Initialized summarization with provider=%s, model=%s",
+                self.summarization_provider,
+                self.summarization_model,
                 extra=self.common_log_arguments,
             )
             return True
 
         except Exception as e:
             logger.warning(
-                f"Summarization initialization failed, skipping summary generation: {e!s}",
+                "Summarization initialization failed, skipping summary generation: %s",
+                e,
                 exc_info=True,
                 extra=self.common_log_arguments,
             )
@@ -1302,7 +1309,9 @@ class ChunkerOperator(AbstractOperator):
             self._summarization_service.generate_summary_for_chunked_content(chunked_content=chunked_content)
         except Exception as e:
             logger.warning(
-                f"Summary generation failed for document {doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID))}: {e}",
+                "Summary generation failed for document %s: %s",
+                doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID)),
+                e,
                 extra=self.common_log_arguments,
             )
             metadata[Metrics.External.PROCESSING_MESSAGE] = "Failed to generate summary for some or all documents"
@@ -1314,7 +1323,7 @@ class ChunkerOperator(AbstractOperator):
 
     def _process_single_document(
         self, doc: dict[str, Any], idx: int, metadata: dict[str, Any]
-    ) -> tuple[list[dict[str, Any]] | None, bool]:
+    ) -> list[dict[str, Any]] | None:
         """
         Process a single document to create chunks.
 
@@ -1324,15 +1333,16 @@ class ChunkerOperator(AbstractOperator):
             metadata: Metadata dictionary to update with processing results
 
         Returns:
-            Tuple of (chunked_content list, should_remove_row boolean)
-            Returns (None, True) if processing fails
+            The chunked_content list, or None if processing failed and the row should be removed
 
         Note:
             Updates metadata with error information if processing fails
         """
         try:
             logger.debug(
-                f"Creating chunks for the document {doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID))} with {self.chunk_type.lower()} chunk type",
+                "Creating chunks for the document %s with %s chunk type",
+                doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID)),
+                self.chunk_type.lower(),
                 extra=self.common_log_arguments,
             )
 
@@ -1354,9 +1364,10 @@ class ChunkerOperator(AbstractOperator):
             doc_name = str(doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID, "")))
             chunks: list[Document] = self._split_text(content=content, doc_name=doc_name)
         except Exception as exc:
-            logger.error(
-                f"An error occurred while creating chunking for the document {doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID))} : \n {exc!s}",
-                exc_info=True,
+            logger.exception(
+                "An error occurred while creating chunking for the document %s : \n %s",
+                doc.get(OperatorConstants.Misc.NAME, doc.get(OperatorConstants.Columns.ID)),
+                exc,
                 stack_info=True,
             )
             self.record_failed_document(
@@ -1370,11 +1381,11 @@ class ChunkerOperator(AbstractOperator):
                 current_status if isinstance(current_status, ExecutionStatus) else ExecutionStatus(current_status),
                 ExecutionStatus.COMPLETED_WITH_ERRORS,
             ).value
-            return None, True
+            return None
 
         chunked_content = self._build_chunk_dicts(chunks=chunks)
         self._apply_summarization(doc=doc, chunked_content=chunked_content, metadata=metadata)
-        return chunked_content, False
+        return chunked_content
 
     def _finalize_table(
         self, table: pa.Table, chunked_content_column: list[list[dict[str, Any]]], total_chunks: int
@@ -1434,7 +1445,9 @@ class ChunkerOperator(AbstractOperator):
                     chunks_column_data.append({DocpipeConstants.CHUNKS_MEMMAP_FILE: chunks_filepath})
 
                     logger.debug(
-                        f"Wrote {len(chunks_list)} chunks to binary file: {chunks_filepath}",
+                        "Wrote %s chunks to binary file: %s",
+                        len(chunks_list),
+                        chunks_filepath,
                         extra=self.common_log_arguments,
                     )
 
@@ -1452,26 +1465,19 @@ class ChunkerOperator(AbstractOperator):
                     content=chunked_content_column,
                 )
             logger.info(
-                f"Added chunked_content column with {total_chunks} total chunks",
-                extra=self.common_log_arguments,
+                "Added chunked_content column with %s total chunks", total_chunks, extra=self.common_log_arguments
             )
 
         # If original content is not to be retained then drop the content column.
-        if table.columns and not self.retain_original_content:
+        if self.doc_column in table.column_names and not self.retain_original_content:
             table = table.drop_columns([self.doc_column])
-            logger.info(
-                f"Dropped original content column: {self.doc_column}",
-                extra=self.common_log_arguments,
-            )
+            logger.info("Dropped original content column: %s", self.doc_column, extra=self.common_log_arguments)
 
         return table
 
     def transform(self, table: pa.Table) -> tuple[list[pa.Table], dict[str, Any]]:
         """Transform."""
-        logger.info(
-            f"Using {self.chunk_type} for generating chunks",
-            extra=self.common_log_arguments,
-        )
+        logger.info("Using %s for generating chunks", self.chunk_type, extra=self.common_log_arguments)
 
         input_doc_data: list[dict[str, Any]] = table.to_pylist()
         chunked_content_column: list[list[dict[str, Any]]] = []
@@ -1484,17 +1490,15 @@ class ChunkerOperator(AbstractOperator):
         total_chunks: int = 0
         remove_row_idx: list[int] = []
         for idx, doc in enumerate(input_doc_data):
-            chunked_content, should_remove = self._process_single_document(doc, idx, metadata)
+            chunked_content = self._process_single_document(doc, idx, metadata)
 
-            if should_remove:
+            if chunked_content is None:
                 remove_row_idx.append(idx)
                 continue
 
-            # Type checker: chunked_content is guaranteed to be list here (not None)
-            if chunked_content is not None:
-                chunked_content_column.append(chunked_content)
-                metadata[Metrics.External.PROCESSED_DOCS] += 1
-                total_chunks += len(chunked_content)
+            chunked_content_column.append(chunked_content)
+            metadata[Metrics.External.PROCESSED_DOCS] += 1
+            total_chunks += len(chunked_content)
 
         # Add total_chunks to metadata
         metadata[Metrics.External.TOTAL_CHUNKS] = total_chunks

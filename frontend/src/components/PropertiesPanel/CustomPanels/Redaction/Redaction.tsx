@@ -18,9 +18,13 @@ import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { TextInput } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import { REDACTION_ATTRIBUTE as ATTR, REDACTION_LABELS as LABEL } from './constants';
+import { REDACTION_ATTRIBUTE as ATTR } from './constants';
+import { messages } from './Redaction.messages';
+
+const REDACTION_REGEX_EXAMPLE = '\\b\\d{3}-\\d{2}-\\d{4}\\b';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface RedactionPanelBodyProps {
@@ -29,6 +33,7 @@ interface RedactionPanelBodyProps {
 
 /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 export function RedactionPanelBody({ controller }: RedactionPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   // ── Read operator attribute metadata from Redux (passed via Canvas.tsx) ──
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
   const nodeAttributes: Record<string, OperatorFeature> = operatorMetadata[NodeOperator.REDACTION]?.attributes ?? {};
@@ -56,16 +61,17 @@ export function RedactionPanelBody({ controller }: RedactionPanelBodyProps): Rea
           <RequiredParamTooltip
             paramId={ATTR.REDACTION_REGEX}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.REDACTION_REGEX]?.description ?? 'The pattern or word to be masked/redacted.'}
+            definition={nodeAttributes[ATTR.REDACTION_REGEX]?.description
+              ?? intl.formatMessage(messages.redactionRegexDescription)}
           >
-            {LABEL.REDACTION_REGEX}
+            {intl.formatMessage(messages.redactionRegex)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="redaction_regex"
-          labelText={LABEL.REDACTION_REGEX}
+          labelText={intl.formatMessage(messages.redactionRegex)}
           hideLabel
-          placeholder="e.g. \b\d{3}-\d{2}-\d{4}\b"
+          placeholder={intl.formatMessage(messages.redactionRegexPlaceholder, { pattern: REDACTION_REGEX_EXAMPLE })}
           value={redactionRegex}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             controller?.updatePropertyValue?.({ name: ATTR.REDACTION_REGEX }, e.target.value);
@@ -81,14 +87,15 @@ export function RedactionPanelBody({ controller }: RedactionPanelBodyProps): Rea
           <RequiredParamTooltip
             paramId={ATTR.REDACTION_MASKING_CHARACTER}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.REDACTION_MASKING_CHARACTER]?.description ?? 'Single character used to replace each matched character.'}
+            definition={nodeAttributes[ATTR.REDACTION_MASKING_CHARACTER]?.description
+              ?? intl.formatMessage(messages.maskingCharacterDescription)}
           >
-            {LABEL.REDACTION_MASKING_CHARACTER}
+            {intl.formatMessage(messages.maskingCharacter)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="redaction_masking_character"
-          labelText={LABEL.REDACTION_MASKING_CHARACTER}
+          labelText={intl.formatMessage(messages.maskingCharacter)}
           hideLabel
           placeholder="*"
           maxLength={1}

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, act, fireEvent } from '@testing-library/react';
+import { screen, act, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { EmbeddingsPanelBody } from '@/components/PropertiesPanel/CustomPanels/Embeddings/Embeddings';
 
 // Mock the provider models API
@@ -19,28 +20,28 @@ function makeController(overrides: Record<string, unknown> = {}) {
 describe('EmbeddingsPanelBody', () => {
   it('renders the provider dropdown', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('embeddings-provider')).not.toBeNull();
   });
 
   it('renders the api_base input', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('embeddings-api-base')).not.toBeNull();
   });
 
   it('renders the overlap_ratio number input', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('embeddings-overlap-ratio')).not.toBeNull();
   });
 
   it('renders the token_limit number input', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('embeddings-token-limit')).not.toBeNull();
   });
@@ -52,21 +53,21 @@ describe('EmbeddingsPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     expect(document.getElementById('embeddings-provider')).not.toBeNull();
   });
 
   it('renders provider label', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     expect(screen.getAllByText(/Provider/i).length).toBeGreaterThan(0);
   });
 
   it('renders model_id text input when no models are available', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     // No models loaded → TextInput with id embeddings-model-id
     expect(document.getElementById('embeddings-model-id')).not.toBeNull();
@@ -74,7 +75,7 @@ describe('EmbeddingsPanelBody', () => {
 
   it('renders api_key vault input', async () => {
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('embeddings-api-key')).not.toBeNull();
   });
@@ -82,7 +83,7 @@ describe('EmbeddingsPanelBody', () => {
   it('calls updatePropertyValue when api_base changes', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     const input = document.getElementById('embeddings-api-base') as HTMLInputElement | null;
     if (input) {
@@ -96,7 +97,7 @@ describe('EmbeddingsPanelBody', () => {
   it('calls updatePropertyValue when model_id changes', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     const input = document.getElementById('embeddings-model-id') as HTMLInputElement | null;
     if (input) {
@@ -115,7 +116,7 @@ describe('EmbeddingsPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     const input = document.getElementById('embeddings-api-base') as HTMLInputElement | null;
     if (input) {
@@ -134,7 +135,7 @@ describe('EmbeddingsPanelBody', () => {
     } as any);
 
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
 
     // After models load, the dropdown appears
@@ -146,7 +147,7 @@ describe('EmbeddingsPanelBody', () => {
     vi.mocked(getProviderModels).mockRejectedValueOnce(new Error('Network error'));
 
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
 
     // After error, modelsError is set — component still renders
@@ -158,7 +159,7 @@ describe('EmbeddingsPanelBody', () => {
     const controller = makeController();
 
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
 
     const input = document.getElementById('embeddings-api-base') as HTMLInputElement | null;
@@ -173,7 +174,7 @@ describe('EmbeddingsPanelBody', () => {
   it('calls updatePropertyValue when provider changes via dropdown', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     // Provider dropdown is rendered; just verify updatePropertyValue is callable
     expect(document.getElementById('embeddings-provider')).not.toBeNull();
@@ -196,7 +197,7 @@ describe('EmbeddingsPanelBody', () => {
     });
 
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
 
     // After models load the model dropdown replaces the text input
@@ -216,7 +217,7 @@ describe('EmbeddingsPanelBody', () => {
     const controller = makeController();
 
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
 
     await act(async () => {
@@ -233,7 +234,7 @@ describe('EmbeddingsPanelBody', () => {
     vi.mocked(getProviderModels).mockRejectedValueOnce(new Error('Server error'));
 
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={makeController()} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={makeController()} />);
     });
 
     await act(async () => {
@@ -252,7 +253,7 @@ describe('EmbeddingsPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     expect(document.getElementById('embeddings-api-key')).not.toBeNull();
   });
@@ -264,7 +265,7 @@ describe('EmbeddingsPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     expect(document.getElementById('embeddings-model-id')).not.toBeNull();
   });
@@ -276,7 +277,7 @@ describe('EmbeddingsPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     const modelInput = document.getElementById('embeddings-model-id') as HTMLInputElement | null;
     if (modelInput) {
@@ -289,7 +290,7 @@ describe('EmbeddingsPanelBody', () => {
   it('overlap_ratio onChange calls update with numeric value', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     // NumberInput renders a wrapping element — verify it exists and that update is wired
     const input = document.getElementById('embeddings-overlap-ratio');
@@ -301,7 +302,7 @@ describe('EmbeddingsPanelBody', () => {
   it('token_limit onChange calls update with numeric value', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     const input = document.getElementById('embeddings-token-limit') as HTMLInputElement | null;
     if (input) {
@@ -320,7 +321,7 @@ describe('EmbeddingsPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<EmbeddingsPanelBody controller={controller} />);
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
     });
     // apiBase and apiKey both fall back to '' — component still renders
     const input = document.getElementById('embeddings-api-base') as HTMLInputElement | null;

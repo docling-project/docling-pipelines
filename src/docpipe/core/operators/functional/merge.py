@@ -166,10 +166,6 @@ class MergeOperator(AbstractOperator):
         if self.merge_type != OperatorConstants.Merge.COLUMNS:
             return
 
-        # Check if field should be validated
-        if not self.should_validate_field(field_value=self.column_option):
-            return
-
         # Validate column_option is provided
         if not self.column_option:
             errors.append(
@@ -284,8 +280,7 @@ class MergeOperator(AbstractOperator):
             FlowExecutionFailedException: If duplicate document IDs are found
         """
         logger.info(
-            f"Merging {len(tables)} tables using merge type '{self.merge_type}'.",
-            extra=self.common_log_arguments,
+            "Merging %s tables using merge type '%s'.", len(tables), self.merge_type, extra=self.common_log_arguments
         )
 
         id_column: str = OperatorConstants.Columns.ID
@@ -294,11 +289,7 @@ class MergeOperator(AbstractOperator):
         # Convert ChunkedArray to Array using combine_chunks()
         id_arrays: list[pa.Array] = []
         for table in tables.values():
-            id_col = table.column(id_column)
-            if isinstance(id_col, pa.ChunkedArray):
-                id_arrays.append(id_col.combine_chunks())
-            else:
-                id_arrays.append(id_col)
+            id_arrays.append(table.column(id_column).combine_chunks())
 
         # Concatenate all ID arrays efficiently using PyArrow
         all_ids_array: pa.Array = pa.concat_arrays(id_arrays)
@@ -319,7 +310,9 @@ class MergeOperator(AbstractOperator):
 
         merged_table: pa.Table = pa.concat_tables(list(tables.values()), promote_options="default")
         logger.info(
-            f"Merged {len(tables)} tables with row counts: {[t.num_rows for t in tables.values()]}",
+            "Merged %s tables with row counts: %s",
+            len(tables),
+            [t.num_rows for t in tables.values()],
             extra=self.common_log_arguments,
         )
 
@@ -336,8 +329,10 @@ class MergeOperator(AbstractOperator):
             Joined PyArrow table
         """
         logger.info(
-            f"Merging {len(tables)} tables using merge type '{self.merge_type}' "
-            f"with column option '{self.column_option}'.",
+            "Merging %s tables using merge type '%s' with column option '%s'.",
+            len(tables),
+            self.merge_type,
+            self.column_option,
             extra=self.common_log_arguments,
         )
 
@@ -361,11 +356,7 @@ class MergeOperator(AbstractOperator):
 
         if first_unsupported.num_columns > 0:
             # Hoist the ID array once — same for every column in this table
-            first_id_arr: pa.Array = (
-                first_table[join_key].combine_chunks()
-                if isinstance(first_table[join_key], pa.ChunkedArray)
-                else first_table[join_key]
-            )
+            first_id_arr: pa.Array = first_table[join_key].combine_chunks()
             for col in first_unsupported.column_names:
                 unsupported_columns[col] = (
                     first_unsupported[col].combine_chunks(),
@@ -388,11 +379,7 @@ class MergeOperator(AbstractOperator):
             # Process unsupported fields
             if table_unsupported.num_columns > 0:
                 # Hoist the ID array once — same for every column in this table
-                table_id_arr: pa.Array = (
-                    table[join_key].combine_chunks()
-                    if isinstance(table[join_key], pa.ChunkedArray)
-                    else table[join_key]
-                )
+                table_id_arr: pa.Array = table[join_key].combine_chunks()
 
                 for col in table_unsupported.column_names:
                     proposed_col_name: str = col
@@ -409,10 +396,7 @@ class MergeOperator(AbstractOperator):
 
         # STEP 3: REATTACH UNSUPPORTED COLUMNS USING ID-MATCHING
         # Get the merged ID column as a flat array once — used for all remap operations.
-        merged_ids_raw = merged_table[join_key]
-        merged_ids_array: pa.Array = (
-            merged_ids_raw.combine_chunks() if isinstance(merged_ids_raw, pa.ChunkedArray) else merged_ids_raw
-        )
+        merged_ids_array: pa.Array = merged_table[join_key].combine_chunks()
 
         for col_name, (arr, arr_id) in unsupported_columns.items():
             # Build a position-lookup dict: source_id → row index in arr.
@@ -435,7 +419,9 @@ class MergeOperator(AbstractOperator):
         merged_table = merged_table.drop([c for c in temp_id_cols if c in merged_table.column_names])
 
         logger.info(
-            f"Merged {len(merged_table)} tables with row counts: {[t.num_rows for t in tables.values()]}",
+            "Merged %s tables with row counts: %s",
+            len(merged_table),
+            [t.num_rows for t in tables.values()],
             extra=self.common_log_arguments,
         )
 

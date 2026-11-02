@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { NoopPanelBody } from '@/components/PropertiesPanel/CustomPanels/Noop/Noop';
 
@@ -16,7 +17,7 @@ function makeController(overrides: Record<string, unknown> = {}) {
 describe('NoopPanelBody', () => {
   it('renders the sleep duration field', () => {
     const controller = makeController();
-    render(<NoopPanelBody controller={controller} />);
+    renderWithProviders(<NoopPanelBody controller={controller} />);
     // Label text appears multiple times (tooltip button + label span) — use getAllByText
     const labels = screen.getAllByText('Sleep duration (seconds)');
     expect(labels.length).toBeGreaterThan(0);
@@ -26,7 +27,7 @@ describe('NoopPanelBody', () => {
     const controller = makeController({
       getPropertyValue: vi.fn().mockReturnValue(undefined),
     });
-    render(<NoopPanelBody controller={controller} />);
+    renderWithProviders(<NoopPanelBody controller={controller} />);
     const input = document.querySelector('input#sleep_sec') as HTMLInputElement;
     expect(input).toBeTruthy();
     expect(Number(input.value)).toBe(0);
@@ -36,14 +37,14 @@ describe('NoopPanelBody', () => {
     const controller = makeController({
       getPropertyValue: vi.fn().mockReturnValue(5),
     });
-    render(<NoopPanelBody controller={controller} />);
+    renderWithProviders(<NoopPanelBody controller={controller} />);
     const input = document.querySelector('input#sleep_sec') as HTMLInputElement;
     expect(Number(input.value)).toBe(5);
   });
 
   it('number input is present and interactive', () => {
     const controller = makeController();
-    render(<NoopPanelBody controller={controller} />);
+    renderWithProviders(<NoopPanelBody controller={controller} />);
     const input = document.querySelector('input#sleep_sec') as HTMLInputElement;
     expect(input).toBeTruthy();
     fireEvent.change(input, { target: { value: '3' } });
@@ -63,7 +64,7 @@ describe('NoopPanelBody', () => {
         },
       }),
     });
-    render(<NoopPanelBody controller={controller} />);
+    renderWithProviders(<NoopPanelBody controller={controller} />);
     const input = document.querySelector('input#sleep_sec') as HTMLInputElement;
     expect(Number(input.value)).toBe(10);
   });

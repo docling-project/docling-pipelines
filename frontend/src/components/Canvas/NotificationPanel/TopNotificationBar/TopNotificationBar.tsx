@@ -5,6 +5,8 @@
 
 import React from 'react';
 import { ErrorFilled, WarningAlt, Close } from '@carbon/react/icons';
+import { useIntl } from 'react-intl';
+import { messages } from './TopNotificationBar.messages';
 import styles from './TopNotificationBar.module.scss';
 
 interface TopNotificationBarProps {
@@ -20,6 +22,7 @@ const TopNotificationBar: React.FC<TopNotificationBarProps> = ({
   onViewClick,
   onClose,
 }) => {
+  const intl = useIntl();
   const totalCount = errorCount + warningCount;
 
   if (totalCount === 0) {
@@ -32,19 +35,27 @@ const TopNotificationBar: React.FC<TopNotificationBarProps> = ({
     const parts: string[] = [];
 
     if (errorCount > 0) {
-      parts.push(errorCount === 1 ? '1 validation error' : `${errorCount} validation errors`);
+      parts.push(errorCount === 1
+        ? intl.formatMessage(messages.errorSingular)
+        : intl.formatMessage(messages.errorPlural, { count: errorCount }));
     }
 
     if (warningCount > 0) {
-      parts.push(warningCount === 1 ? '1 warning' : `${warningCount} warnings`);
+      parts.push(warningCount === 1
+        ? intl.formatMessage(messages.warningSingular)
+        : intl.formatMessage(messages.warningPlural, { count: warningCount }));
     }
 
     const allSingular = (errorCount === 0 || errorCount === 1) && (warningCount === 0 || warningCount === 1);
-    const verb = allSingular ? 'there is' : 'there are';
-    return `${verb} ${parts.join(' and ')}`;
+    const joined = parts.join(' and ');
+    return allSingular
+      ? intl.formatMessage(messages.messageSingularIs, { parts: joined })
+      : intl.formatMessage(messages.messagePluralAre, { parts: joined });
   };
 
-  const getTitle = (): string => (hasOnlyWarnings ? 'Validation warning' : 'Validation failed');
+  const getTitle = (): string => (hasOnlyWarnings
+    ? intl.formatMessage(messages.validationWarningTitle)
+    : intl.formatMessage(messages.validationFailedTitle));
 
   const barClassName = hasOnlyWarnings
     ? `${styles.topNotificationBar} ${styles.warningBar}`
@@ -63,13 +74,13 @@ const TopNotificationBar: React.FC<TopNotificationBarProps> = ({
       </div>
       <div className={styles.actions}>
         <button type="button" className={styles.viewLink} onClick={onViewClick}>
-          View
+          {intl.formatMessage(messages.view)}
         </button>
         <button
           type="button"
           className={styles.closeButton}
           onClick={onClose}
-          aria-label="Close notification"
+          aria-label={intl.formatMessage(messages.closeNotification)}
         >
           <Close size={16} />
         </button>

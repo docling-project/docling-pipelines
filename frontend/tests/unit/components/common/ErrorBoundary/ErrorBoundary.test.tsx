@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import React from 'react';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary/ErrorBoundary';
 import { ThemeProvider } from '@/contexts';
@@ -21,7 +22,7 @@ afterEach(() => { console.error = originalError; });
 
 describe('ErrorBoundary', () => {
   it('renders children when there is no error', () => {
-    render(
+    renderWithProviders(
       React.createElement(Wrapper, null,
         React.createElement(ErrorBoundary, null,
           React.createElement(Bomb, { shouldThrow: false })
@@ -32,7 +33,7 @@ describe('ErrorBoundary', () => {
   });
 
   it('renders fallback UI when a child throws', () => {
-    render(
+    renderWithProviders(
       React.createElement(Wrapper, null,
         React.createElement(ErrorBoundary, null,
           React.createElement(Bomb, { shouldThrow: true })
@@ -45,7 +46,7 @@ describe('ErrorBoundary', () => {
 
   it('renders custom fallback prop instead of default', () => {
     const customFallback = React.createElement('div', { 'data-testid': 'custom-fallback' }, 'Custom error');
-    render(
+    renderWithProviders(
       React.createElement(Wrapper, null,
         React.createElement(ErrorBoundary, { fallback: customFallback },
           React.createElement(Bomb, { shouldThrow: true })
@@ -67,7 +68,7 @@ describe('ErrorBoundary', () => {
       );
     }
 
-    render(React.createElement(ResettableTest));
+    renderWithProviders(React.createElement(ResettableTest));
     expect(screen.getAllByText('Something went wrong').length).toBeGreaterThan(0);
 
     // Click Try again — ErrorFallback calls onReset which calls setState on the class

@@ -10,6 +10,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useDispatch } from 'react-redux';
+import { useIntl } from 'react-intl';
 import { useAppSelector } from '@/hooks';
 import type { PipelineFlowDef, CanvasController, CanvasConfig } from '@elyra/canvas';
 import { applyAllLinkDecorations } from '@/utils/linkDecorations';
@@ -40,14 +41,12 @@ import {
 import {
   CANVAS_ACTIONS,
   JOB_ASSET_REF_TYPE,
-  LABEL_BACK,
-  LABEL_NODE_SUMMARY,
-  LABEL_READ_ONLY_MODE,
   NODE_DECORATION_POS,
   WARNING_NODE_STATUSES,
 } from '@/constants/canvasActions';
 import type { AppDispatch } from '@/store';
 import type { JobStats } from '@/types';
+import { messages } from './ReadOnlyCanvas.messages';
 import styles from './ReadOnlyCanvas.module.scss';
 
 interface ReadOnlyCanvasProps {
@@ -69,6 +68,7 @@ export function ReadOnlyCanvas({
   onRunAgain,
   onStop,
 }: ReadOnlyCanvasProps): React.JSX.Element {
+  const intl = useIntl();
   const dispatch = useDispatch<AppDispatch>();
   const executionLogs = useAppSelector(selectExecutionLogs);
   const isRunning = useAppSelector(selectIsRunning);
@@ -293,7 +293,7 @@ export function ReadOnlyCanvas({
       return [
         {
           action: CANVAS_ACTIONS.TOGGLE_RIGHT_PANEL,
-          label: LABEL_NODE_SUMMARY,
+          label: intl.formatMessage(messages.nodeSummary),
           enable: true,
           toolbarItem: true,
           icon: <OpenPanelFilledRight size={32} />,
@@ -301,7 +301,7 @@ export function ReadOnlyCanvas({
       ];
     }
     return [];
-  }, []);
+  }, [intl]);
 
   const handleEditAction = useCallback((data: { editType?: string; [key: string]: unknown }) => {
     if (data.editType === CANVAS_ACTIONS.TOGGLE_RIGHT_PANEL) {
@@ -367,7 +367,7 @@ export function ReadOnlyCanvas({
           <div className={styles.toolbarBackButtonParent}>
             <div className={styles.toolbarBackButtonChildDiv} onClick={onExit}>
               <ArrowLeft size={20} />
-              <span className={styles.toolbarBackButtonChildSpan}>{LABEL_BACK}</span>
+              <span className={styles.toolbarBackButtonChildSpan}>{intl.formatMessage(messages.back)}</span>
             </div>
           </div>
         ),
@@ -378,7 +378,7 @@ export function ReadOnlyCanvas({
           <div className={styles.toolbarReadonlyParent}>
             <div className={styles.toolbarReadonlyChildDiv}>
               <EditOff />
-              <span className={styles.toolbarBackButtonChildSpan}>{LABEL_READ_ONLY_MODE}</span>
+              <span className={styles.toolbarBackButtonChildSpan}>{intl.formatMessage(messages.readOnlyMode)}</span>
             </div>
           </div>
         ),
@@ -388,22 +388,22 @@ export function ReadOnlyCanvas({
       { divider: true },
       {
         action: CANVAS_ACTIONS.ZOOM_IN,
-        label: 'Zoom In',
+        label: intl.formatMessage(messages.zoomIn),
         enable: true,
       },
       {
         action: CANVAS_ACTIONS.ZOOM_OUT,
-        label: 'Zoom Out',
+        label: intl.formatMessage(messages.zoomOut),
         enable: true,
       },
       {
         action: CANVAS_ACTIONS.ZOOM_TO_FIT,
-        label: 'Zoom to fit',
+        label: intl.formatMessage(messages.zoomToFit),
         enable: true,
       },
       {
         action: CANVAS_ACTIONS.TOGGLE_RIGHT_PANEL,
-        label: logsPanelVisible ? 'Close logs' : 'Open logs',
+        label: intl.formatMessage(logsPanelVisible ? messages.closeLogs : messages.openLogs),
         enable: true,
         iconEnabled: logsPanelVisible ? (
           <RightPanelCloseFilled size={32} />
@@ -414,7 +414,7 @@ export function ReadOnlyCanvas({
       { divider: true },
     ],
     overrideAutoEnableDisable: true,
-  }), [logsPanelVisible, onExit]);
+  }), [logsPanelVisible, onExit, intl]);
 
   return (
     <div className={styles.readOnlyCanvasContainer}>

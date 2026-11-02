@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { NodeSummary } from '@/components/ReadOnlyCanvas/RunSidePanel/NodeSummary/NodeSummary';
 import type { NodeMetadataItem, JobStats } from '@/types';
 
@@ -24,28 +25,28 @@ const makeNodeMetadata = (overrides: Partial<NodeMetadataItem> = {}): NodeMetada
 
 describe('NodeSummary', () => {
   it('renders node name from job_stats', () => {
-    render(
+    renderWithProviders(
       <NodeSummary nodeMetadata={makeNodeMetadata()} jobStats={makeJobStats()} />
     );
     expect(screen.getByText('Extract Node')).toBeInTheDocument();
   });
 
   it('renders operator type', () => {
-    render(
+    renderWithProviders(
       <NodeSummary nodeMetadata={makeNodeMetadata()} jobStats={makeJobStats()} />
     );
     expect(screen.getAllByText('extract_operator').length).toBeGreaterThan(0);
   });
 
   it('renders node status badge', () => {
-    render(
+    renderWithProviders(
       <NodeSummary nodeMetadata={makeNodeMetadata()} jobStats={makeJobStats()} />
     );
     expect(screen.getByText('completed')).toBeInTheDocument();
   });
 
   it('renders metadata rows in the table', () => {
-    render(
+    renderWithProviders(
       <NodeSummary nodeMetadata={makeNodeMetadata()} jobStats={makeJobStats()} />
     );
     expect(screen.getByText('Documents Processed')).toBeInTheDocument();
@@ -53,7 +54,7 @@ describe('NodeSummary', () => {
   });
 
   it('shows fallback message when no stats and no metadata', () => {
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMetadata({ node_metadata: undefined })}
         jobStats={{ status: 'completed', message: '', node_stats: {} } as unknown as JobStats}

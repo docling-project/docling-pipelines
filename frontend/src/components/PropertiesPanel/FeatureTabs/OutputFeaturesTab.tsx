@@ -12,12 +12,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, DefinitionTooltip } from '@carbon/react';
 import { Maximize } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { NoDataEmptyState } from '@carbon/ibm-products';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
 import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
 import { SharedTearsheet } from '@/components/common/SharedTearsheet';
 import type { FeatureAttributes } from '@/types';
 import styles from './FeaturesTab.module.scss';
+import { messages } from './OutputFeaturesTab.messages';
 
 interface OutputFeaturesTabProps {
   nodeId: string;
@@ -28,44 +30,6 @@ interface OutputFeaturesTabProps {
   controller: any;
 }
 
-// Downstream use column header — shared between panel and tearsheet headers
-const downstreamHeader = (
-  <DefinitionTooltip
-    definition="Unselect features if you don't want them to be used by downstream nodes in the flow."
-    openOnHover
-    align="bottom"
-  >
-    <span className={styles.downstreamColumnLabel}>
-      Downstream use
-    </span>
-  </DefinitionTooltip>
-);
-
-const OUTPUT_EMPTY_STATE = (
-  <NoDataEmptyState
-    title="No output features available"
-    subtitle="There are currently no output features for this node."
-    size="sm"
-  />
-);
-
-// Compact panel headers (no Description)
-const PANEL_HEADERS: SharedDataTableHeader[] = [
-  { key: 'name', header: 'Output feature' },
-  { key: 'columnName', header: 'Column name' },
-  { key: 'type', header: 'Type' },
-  { key: 'downstreamUse', header: downstreamHeader },
-];
-
-// Expanded tearsheet headers — adds Description
-const EXPANDED_HEADERS: SharedDataTableHeader[] = [
-  { key: 'name', header: 'Output feature' },
-  { key: 'columnName', header: 'Column name' },
-  { key: 'description', header: 'Description' },
-  { key: 'type', header: 'Type' },
-  { key: 'downstreamUse', header: downstreamHeader },
-];
-
 export function OutputFeaturesTab({
   nodeId,
   outputFeatures,
@@ -73,8 +37,47 @@ export function OutputFeaturesTab({
   isLoading,
   controller,
 }: OutputFeaturesTabProps): React.JSX.Element {
+  const intl = useIntl();
   const [featureSelections, setFeatureSelections] = useState<Record<string, boolean>>({});
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Downstream use column header — shared between panel and tearsheet headers
+  const downstreamHeader = useMemo(() => (
+    <DefinitionTooltip
+      definition={intl.formatMessage(messages.downstreamTooltip)}
+      openOnHover
+      align="bottom"
+    >
+      <span className={styles.downstreamColumnLabel}>
+        {intl.formatMessage(messages.downstreamUse)}
+      </span>
+    </DefinitionTooltip>
+  ), [intl]);
+
+  const emptyState = useMemo(() => (
+    <NoDataEmptyState
+      title={intl.formatMessage(messages.emptyTitle)}
+      subtitle={intl.formatMessage(messages.emptySubtitle)}
+      size="sm"
+    />
+  ), [intl]);
+
+  // Compact panel headers (no Description)
+  const panelHeaders = useMemo((): SharedDataTableHeader[] => [
+    { key: 'name', header: intl.formatMessage(messages.outputFeature) },
+    { key: 'columnName', header: intl.formatMessage(messages.columnName) },
+    { key: 'type', header: intl.formatMessage(messages.type) },
+    { key: 'downstreamUse', header: downstreamHeader },
+  ], [intl, downstreamHeader]);
+
+  // Expanded tearsheet headers — adds Description
+  const expandedHeaders = useMemo((): SharedDataTableHeader[] => [
+    { key: 'name', header: intl.formatMessage(messages.outputFeature) },
+    { key: 'columnName', header: intl.formatMessage(messages.columnName) },
+    { key: 'description', header: intl.formatMessage(messages.description) },
+    { key: 'type', header: intl.formatMessage(messages.type) },
+    { key: 'downstreamUse', header: downstreamHeader },
+  ], [intl, downstreamHeader]);
 
   // Seed featureSelections from persisted output_features_to_drop whenever
   // the feature list or the selected node changes.
@@ -180,7 +183,7 @@ export function OutputFeaturesTab({
       return (
         <Checkbox
           id={`downstream-panel-${row.id}`}
-          labelText={`Enable downstream use for ${featureName}`}
+          labelText={intl.formatMessage(messages.enableDownstreamUse, { name: featureName })}
           hideLabel
           checked={isMandatory || (featureSelections[featureName] ?? true)}
           disabled={isMandatory}
@@ -190,7 +193,7 @@ export function OutputFeaturesTab({
     }
     return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featureSelections, outputFeatures]);
+  }, [featureSelections, outputFeatures, intl]);
 
   // Stable renderCell for the expanded tearsheet — idPrefix 'modal' keeps checkbox IDs unique
   const renderCellTearsheet = useCallback((
@@ -210,7 +213,7 @@ export function OutputFeaturesTab({
       return (
         <Checkbox
           id={`downstream-tearsheet-${row.id}`}
-          labelText={`Enable downstream use for ${featureName}`}
+          labelText={intl.formatMessage(messages.enableDownstreamUse, { name: featureName })}
           hideLabel
           checked={isMandatory || (featureSelections[featureName] ?? true)}
           disabled={isMandatory}
@@ -220,21 +223,21 @@ export function OutputFeaturesTab({
     }
     return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featureSelections, outputFeatures]);
+  }, [featureSelections, outputFeatures, intl]);
 
   return (
     <div className={styles.featuresTab}>
       <p className={styles.tabDescription}>
-        Review features produced by this node. Unchecked features will not be passed to downstream nodes.
+        {intl.formatMessage(messages.tabDescription)}
       </p>
       <SharedDataTable
-        headers={PANEL_HEADERS}
+        headers={panelHeaders}
         rows={rows}
         searchable
         searchKeys={['name', '_nodeName']}
-        searchPlaceholder="Search features"
+        searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
         loading={isLoading}
-        emptyState={OUTPUT_EMPTY_STATE}
+        emptyState={emptyState}
         size="lg"
         horizontalScroll
         renderCell={renderCellPanel}
@@ -243,7 +246,7 @@ export function OutputFeaturesTab({
             kind="ghost"
             size="md"
             renderIcon={Maximize}
-            iconDescription="Expand table"
+            iconDescription={intl.formatMessage(messages.expandTable)}
             hasIconOnly
             data-testid="expand-output-table"
             onClick={() => { setIsExpanded(true); }}
@@ -255,22 +258,22 @@ export function OutputFeaturesTab({
       <SharedTearsheet
         open={isExpanded}
         onClose={() => { setIsExpanded(false); }}
-        title="Output features"
-        primaryActionLabel="Save"
+        title={intl.formatMessage(messages.tearsheetTitle)}
+        primaryActionLabel={intl.formatMessage(messages.save)}
         onPrimaryAction={() => { setIsExpanded(false); }}
-        secondaryActionLabel="Cancel"
+        secondaryActionLabel={intl.formatMessage(messages.cancel)}
         onSecondaryAction={() => { setIsExpanded(false); }}
       >
         <div className={styles.tearsheetTableWrapper}>
           <SharedDataTable
             key={String(isExpanded)}
-            headers={EXPANDED_HEADERS}
+            headers={expandedHeaders}
             rows={rows}
             searchable
             searchKeys={['name', '_nodeName']}
-            searchPlaceholder="Search features"
+            searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
             loading={isLoading}
-            emptyState={OUTPUT_EMPTY_STATE}
+            emptyState={emptyState}
             size="lg"
             horizontalScroll
             renderCell={renderCellTearsheet}

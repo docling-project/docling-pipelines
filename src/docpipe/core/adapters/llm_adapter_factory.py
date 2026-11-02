@@ -10,17 +10,19 @@ Supports two providers:
 - LiteLLM: Unified interface for 100+ LLM providers including Ollama, HuggingFace, OpenAI, etc.
 """
 
-import logging
 from typing import Any, ClassVar
 
 from docpipe.core.adapters.huggingface import HuggingFaceAdapter
 from docpipe.core.adapters.litellm import LiteLLMAdapter
 from docpipe.core.adapters.watsonx import WatsonXAdapter
+from docpipe.core.constants.constants import ServiceConstants
+from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
 from docpipe.core.ports.text_detection_port import TextDetectionPort
+from docpipe.utils.infrastructure.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LLMAdapterFactory:
@@ -45,6 +47,27 @@ class LLMAdapterFactory:
 
     # Supported providers for text detection
     TEXT_DETECTION_PROVIDERS: ClassVar[set[str]] = {"watsonx"}
+
+    @staticmethod
+    def _positive_int_option(*, provider_config: dict[str, Any], key: str, default: int) -> int:
+        """Read a positive integer option from provider_config, falling back to ``default``.
+
+        Missing values use the default silently. Invalid values (non-integers, booleans,
+        zero or negative numbers) are reported by the operator's validate(); here they fall
+        back to the default with a warning so adapter construction never fails on them.
+        """
+        value = provider_config.get(key)
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            logger.warning(
+                "Ignoring invalid provider_config.%s=%r; using default %s",
+                key,
+                value,
+                default,
+            )
+            return default
+        return value
 
     @staticmethod
     def create_inference_adapter(
@@ -195,12 +218,32 @@ class LLMAdapterFactory:
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
                 timeout=provider_config.get("timeout", 120),
+                embedding_batch_size=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.BATCH_SIZE,
+                    default=ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE,
+                ),
+                embedding_max_concurrent_requests=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.MAX_CONCURRENT_REQUESTS,
+                    default=ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS,
+                ),
             )
         if provider == "litellm":
             return LiteLLMAdapter(
                 model_name=model_id,
                 api_key=provider_config.get("api_key"),
                 api_base=provider_config.get("api_base"),
+                batch_size=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.BATCH_SIZE,
+                    default=ServiceConstants.DEFAULT_EMBEDDINGS_BATCH_SIZE,
+                ),
+                max_concurrent_requests=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.MAX_CONCURRENT_REQUESTS,
+                    default=ServiceConstants.DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS,
+                ),
             )
         if provider == "huggingface":
             return HuggingFaceAdapter(
@@ -208,7 +251,11 @@ class LLMAdapterFactory:
                 use_local=provider_config.get("use_local", True),
                 api_token=provider_config.get("api_token") or provider_config.get("api_key"),
                 device=provider_config.get("device"),
-                batch_size=provider_config.get("batch_size", 32),
+                batch_size=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.BATCH_SIZE,
+                    default=ServiceConstants.DEFAULT_EMBEDDINGS_BATCH_SIZE,
+                ),
             )
         raise ValueError(f"Provider '{provider}' not yet implemented for embeddings")
 

@@ -34,7 +34,12 @@ class SharePointSourceConfig(BaseModel):
 
     file_path: str | None = Field(
         None,
-        description="Specific SharePoint file path or URL to ingest. Can be a direct path or a SharePoint URL. If provided, only this file is processed.",
+        description=(
+            "SharePoint item to ingest on its own. A non-URL value is a Microsoft Graph drive item id. "
+            "An http(s) value is a SharePoint file URL with an id or sourcedoc query parameter. "
+            "If provided, only this file is processed. "
+            "File events for the sharepoint provider set this from file_reference."
+        ),
     )
 
     # Behavior configuration

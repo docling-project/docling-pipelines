@@ -219,7 +219,7 @@ class TextExtractionAdapterFactory:
             if accelerator and gpu_device is None:
                 gpu_device = TextExtractionAdapterFactory._auto_detect_device()
                 if gpu_device is not None:
-                    logger.info("No accelerator device specified — auto-detected: %s", gpu_device)
+                    logger.info("No accelerator device specified - auto-detected: %s", gpu_device)
                 else:
                     logger.warning(
                         "Accelerator block present but no GPU device found via torch. "

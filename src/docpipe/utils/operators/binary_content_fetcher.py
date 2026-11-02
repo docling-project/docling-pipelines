@@ -19,6 +19,7 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import (
     SourceAdapterFactory,
 )
+from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.archive import read_archive_uri
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -136,7 +137,7 @@ def get_adapter_for_provider(
         return SourceAdapterFactory.create(provider)
 
     except Exception as e:
-        logger.error("Failed to create adapter for provider '%s': %s", provider, e, exc_info=True)
+        logger.exception("Failed to create adapter for provider '%s': %s", provider, e)
         return None
 
 
@@ -229,6 +230,9 @@ def _read_from_local_file(
 
     if not file_path:
         raise ValueError("Document metadata missing 'path', 'source', or 'source_id' for local file reading")
+
+    if isinstance(file_path, str) and file_path.startswith("zip://"):
+        return read_archive_uri(file_path)
 
     # Parse file:// URLs to extract actual path
     if isinstance(file_path, str) and file_path.startswith("file://"):

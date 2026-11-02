@@ -4,7 +4,7 @@ This package contains middleware components for request/response processing,
 including payload validation, authentication, rate limiting, and logging.
 """
 
-from docpipe.api.middleware.payload_validation import validate_payload_size
+from docpipe.api.middleware.payload_validation import PayloadValidationMiddleware
 from docpipe.api.middleware.security_headers import SecurityHeadersMiddleware
 
-__all__ = ["SecurityHeadersMiddleware", "validate_payload_size"]
+__all__ = ["PayloadValidationMiddleware", "SecurityHeadersMiddleware"]

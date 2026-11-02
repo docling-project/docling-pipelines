@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { screen, fireEvent, act } from '@testing-library/react';
+import { renderWithProviders } from '../../../utils/renderWithProviders';
 import React from 'react';
 import { JobRunLogs } from '@/components/ReadOnlyCanvas/RunSidePanel/JobRunLogs/JobRunLogs';
 import type { JobRunStatusResponse } from '@/types';
@@ -74,7 +75,7 @@ describe('JobRunLogs', () => {
   // ── 1. Renders without crashing ───────────────────────────────────────────
   it('renders without crashing with an empty node_sequence', () => {
     const logs = makeLogs([]);
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -87,7 +88,7 @@ describe('JobRunLogs', () => {
   // ── 2. Renders an accordion item per valid GUID node ──────────────────────
   it('renders an accordion item per valid GUID node', () => {
     const logs = makeLogs([NODE_ID]);
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -100,7 +101,7 @@ describe('JobRunLogs', () => {
   // ── 3. Renders two accordion items for two nodes ──────────────────────────
   it('renders two accordion items for two nodes', () => {
     const logs = makeLogs([NODE_ID, NODE_ID_2]);
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -117,7 +118,7 @@ describe('JobRunLogs', () => {
       ...makeLogs([NODE_ID]),
       node_sequence: [NODE_ID, 'error_logs', 'not-a-guid'],
     } as unknown as JobRunStatusResponse;
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -131,7 +132,7 @@ describe('JobRunLogs', () => {
   // ── 5. Shows log text content for a node ─────────────────────────────────
   it('shows log text content for a node', () => {
     const logs = makeLogs([NODE_ID], { [NODE_ID]: 'some log text here' });
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -145,7 +146,7 @@ describe('JobRunLogs', () => {
   it('shows "Show detailed log" button when log exceeds threshold', () => {
     const longLog = 'x'.repeat(600);
     const logs = makeLogs([NODE_ID], { [NODE_ID]: longLog });
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -160,7 +161,7 @@ describe('JobRunLogs', () => {
     const onShowFullLog = vi.fn();
     const longLog = 'a'.repeat(600);
     const logs = makeLogs([NODE_ID], { [NODE_ID]: longLog });
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -175,7 +176,7 @@ describe('JobRunLogs', () => {
   // ── 8. Does not show "Show detailed log" for short logs ───────────────────
   it('does not show "Show detailed log" for short logs', () => {
     const logs = makeLogs([NODE_ID], { [NODE_ID]: 'short log' });
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -194,7 +195,7 @@ describe('JobRunLogs', () => {
         message: 'Pipeline execution failed',
       },
     } as unknown as JobRunStatusResponse;
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={failedLogs}
         selectedNodeId={null}
@@ -213,7 +214,7 @@ describe('JobRunLogs', () => {
         message: 'Something went wrong',
       },
     } as unknown as JobRunStatusResponse;
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={failedLogs}
         selectedNodeId={null}
@@ -226,7 +227,7 @@ describe('JobRunLogs', () => {
   // ── 11. Renders normally when selectedNodeId is set ───────────────────────
   it('renders normally when selectedNodeId is set to a known node', () => {
     const logs = makeLogs([NODE_ID]);
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={NODE_ID}
@@ -245,7 +246,7 @@ describe('JobRunLogs', () => {
         message: '',
       },
     } as unknown as JobRunStatusResponse;
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={failedLogs}
         selectedNodeId={null}
@@ -275,7 +276,7 @@ describe('JobRunLogs', () => {
     const closestSpy = vi.spyOn(Element.prototype, 'closest').mockReturnValue(mockContainer as unknown as Element);
 
     const logs = makeLogs([NODE_ID]);
-    const { rerender } = render(
+    const { rerender } = renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -313,7 +314,7 @@ describe('JobRunLogs', () => {
       },
       [NODE_ID]: 'log content',
     } as unknown as JobRunStatusResponse;
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -332,7 +333,7 @@ describe('JobRunLogs', () => {
       job_stats: makeJobStats([NODE_ID]),
       // intentionally no [NODE_ID] key — logText will be undefined
     } as unknown as JobRunStatusResponse;
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -349,7 +350,7 @@ describe('JobRunLogs', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     const logs = makeLogs([NODE_ID], { [NODE_ID]: 'test log content' });
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}
@@ -371,7 +372,7 @@ describe('JobRunLogs', () => {
   it('cleans up scroll timer on unmount without errors', () => {
     vi.useFakeTimers();
     const logs = makeLogs([NODE_ID]);
-    const { unmount } = render(
+    const { unmount } = renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={NODE_ID}
@@ -411,7 +412,7 @@ describe('JobRunLogs', () => {
     } as DOMRect);
 
     const logs = makeLogs([NODE_ID]);
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={NODE_ID}
@@ -458,7 +459,7 @@ describe('JobRunLogs', () => {
     } as DOMRect);
 
     const logs = makeLogs([NODE_ID]);
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={NODE_ID}
@@ -483,7 +484,7 @@ describe('JobRunLogs', () => {
       node_sequence: null,
       job_stats: makeJobStats([]),
     } as unknown as JobRunStatusResponse;
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={logs}
         selectedNodeId={null}

@@ -3,7 +3,8 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -83,7 +84,7 @@ def verify_token(token: str, config: JWTConfig) -> dict | None:
             token,
             config.jwt_secret_key,
             algorithms=[config.jwt_algorithm],
-            options={"require_exp": True},
+            options={"require": ["exp"]},
         )
         username: Any | None = payload.get(JWTClaims.USERNAME)
         if username is None:
@@ -91,7 +92,7 @@ def verify_token(token: str, config: JWTConfig) -> dict | None:
             return None
         logger.debug("Token verified for user: %s", username)
         return payload
-    except JWTError as e:
+    except PyJWTError as e:
         logger.warning("JWT verification failed: %s", e)
         return None
     except Exception as e:

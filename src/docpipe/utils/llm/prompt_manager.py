@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Reusable prompt management utilities.
 
@@ -86,13 +86,13 @@ class PromptManager:
             with Path(self.prompt_file).open(encoding="utf-8") as f:
                 data = json.load(f)
         except FileNotFoundError as exc:
-            logger.error(f"Prompt file not found: {self.prompt_file}")
+            logger.error("Prompt file not found: %s", self.prompt_file)
             raise DocpipeException(
                 message=f"Prompt file not found: {self.prompt_file}. Ensure the file exists and the path is correct.",
                 error_code=ErrorCode.INVALID_CONFIGURATION,
             ) from exc
         except json.JSONDecodeError as exc:
-            logger.error(f"Invalid JSON in prompt file: {self.prompt_file}")
+            logger.error("Invalid JSON in prompt file: %s", self.prompt_file)
             raise DocpipeException(
                 message=f"Invalid JSON in prompt file: {self.prompt_file}",
                 error_code=ErrorCode.INVALID_CONFIGURATION,
@@ -125,7 +125,7 @@ class PromptManager:
             prompt = prompt.rstrip()
 
         self._cached_prompt = prompt
-        logger.info(f"Loaded and cached prompt from {self.prompt_file}")
+        logger.info("Loaded and cached prompt from %s", self.prompt_file)
         return prompt
 
     def format_prompt(self, **kwargs: Any) -> str:
@@ -156,10 +156,10 @@ class PromptManager:
         try:
             return base_prompt.format(**kwargs)
         except KeyError as exc:
-            logger.error(f"Missing required format variable: {exc}")
+            logger.error("Missing required format variable: %s", exc)
             raise KeyError(f"Missing required format variable in prompt template: {exc}") from exc
         except ValueError as exc:
-            logger.error(f"Invalid format string in prompt: {exc}")
+            logger.error("Invalid format string in prompt: %s", exc)
             raise ValueError(f"Invalid format string in prompt template: {exc}") from exc
 
     def clear_cache(self) -> None:
@@ -176,7 +176,7 @@ class PromptManager:
             >>> manager.load_prompt()  # Reloads from file
         """
         self._cached_prompt = None
-        logger.debug(f"Cleared prompt cache for {self.prompt_file}")
+        logger.debug("Cleared prompt cache for %s", self.prompt_file)
 
     @property
     def is_cached(self) -> bool:

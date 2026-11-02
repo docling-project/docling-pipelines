@@ -4,7 +4,6 @@ This service coordinates the discovery and loading of custom operators from
 multiple sources.
 """
 
-import inspect
 from typing import Any
 
 from docpipe.core.operators.abstract_operator import AbstractOperator
@@ -102,7 +101,9 @@ class CustomOperatorLoader:
                     source = OperatorSourceFactory.create("package", package_name=path)
                     sources.append(source)
                 except ImportError:
-                    logger.warning(f"Skipping path '{path}': not a valid filesystem path, S3 URI, or installed package")
+                    logger.warning(
+                        "Skipping path '%s': not a valid filesystem path, S3 URI, or installed package", path
+                    )
 
         return cls(sources)
 
@@ -134,14 +135,15 @@ class CustomOperatorLoader:
         for source in self.sources:
             try:
                 operators = source.list_operators()
-                logger.info(f"Discovered {len(operators)} operators from {source.ADAPTER_DISPLAY_NAME}")
+                logger.info("Discovered %s operators from %s", len(operators), source.ADAPTER_DISPLAY_NAME)
 
                 for op_info in operators:
                     if op_info.short_name in discovered:
                         logger.warning(
-                            f"Operator '{op_info.short_name}' already discovered from "
-                            f"{discovered[op_info.short_name].source_location}. "
-                            f"Skipping duplicate from {op_info.source_location}"
+                            "Operator '%s' already discovered from %s. Skipping duplicate from %s",
+                            op_info.short_name,
+                            discovered[op_info.short_name].source_location,
+                            op_info.source_location,
                         )
                         continue
 
@@ -149,10 +151,7 @@ class CustomOperatorLoader:
                     source_map[op_info.source_location] = source
 
             except Exception as e:
-                logger.error(
-                    f"Failed to discover operators from {source.ADAPTER_DISPLAY_NAME}: {e}",
-                    exc_info=True,
-                )
+                logger.exception("Failed to discover operators from %s: %s", source.ADAPTER_DISPLAY_NAME, e)
 
         return discovered, source_map
 
@@ -179,27 +178,24 @@ class CustomOperatorLoader:
 
             # Log warnings
             for warning in validation_result.warnings:
-                logger.warning(f"Operator '{op_info.short_name}': {warning}")
+                logger.warning("Operator '%s': %s", op_info.short_name, warning)
 
             # Check for errors
             if not validation_result.valid:
                 for error in validation_result.errors:
-                    logger.error(f"Operator '{op_info.short_name}': {error}")
+                    logger.error("Operator '%s': %s", op_info.short_name, error)
                 return None
 
             # Extract operator class from module
             operator_class = self._extract_operator_class(module, op_info)
             if operator_class is None:
-                logger.error(f"Could not extract operator class from module {op_info.module_path}")
+                logger.error("Could not extract operator class from module %s", op_info.module_path)
                 return None
 
             return operator_class
 
         except Exception as e:
-            logger.error(
-                f"Failed to load operator '{op_info.short_name}' from {op_info.source_location}: {e}",
-                exc_info=True,
-            )
+            logger.exception("Failed to load operator '%s' from %s: %s", op_info.short_name, op_info.source_location, e)
             return None
 
     def _extract_operator_class(
@@ -216,16 +212,7 @@ class CustomOperatorLoader:
         Returns:
             Operator class if found, None otherwise
         """
-        for _, obj in inspect.getmembers(module):
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, AbstractOperator)
-                and obj is not AbstractOperator
-                and obj.__module__ == module.__name__
-            ):
-                return obj
-
-        return None
+        return OperatorValidator.select_operator_class(module=module, operator_info=op_info)
 
     def validate_and_load(
         self,
@@ -249,27 +236,21 @@ class CustomOperatorLoader:
             logger.info("No custom operators discovered")
             return {}
 
-        logger.info(f"Discovered {len(discovered)} custom operators")
+        logger.info("Discovered %s custom operators", len(discovered))
 
         # Load and validate each operator
         loaded: dict[str, type[AbstractOperator]] = {}
 
+        # discover_operators() already keeps one operator per short_name, so the keys are unique.
         for short_name, op_info in discovered.items():
-            # Check for duplicates in current batch
-            duplicate_validation = OperatorValidator.validate_no_duplicate_in_batch(short_name, loaded)
-
-            if not duplicate_validation.valid:
-                for error in duplicate_validation.errors:
-                    logger.warning(f"Skipping custom operator '{short_name}': {error}")
-                continue
-
             # Get the source that provided this operator from the mapping
             source = source_map.get(op_info.source_location)
 
             if source is None:
                 logger.error(
-                    f"Could not find source for operator '{short_name}' "
-                    f"with source_location '{op_info.source_location}'"
+                    "Could not find source for operator '%s' with source_location '%s'",
+                    short_name,
+                    op_info.source_location,
                 )
                 continue
 
@@ -279,11 +260,13 @@ class CustomOperatorLoader:
             if operator_class is not None:
                 loaded[short_name] = operator_class
                 logger.info(
-                    f"Successfully loaded custom operator: {short_name} "
-                    f"({operator_class.__name__}) from {op_info.source_location}"
+                    "Successfully loaded custom operator: %s (%s) from %s",
+                    short_name,
+                    operator_class.__name__,
+                    op_info.source_location,
                 )
 
         self.loaded_operators = loaded
-        logger.info(f"Loaded {len(loaded)} custom operators successfully")
+        logger.info("Loaded %s custom operators successfully", len(loaded))
 
         return loaded

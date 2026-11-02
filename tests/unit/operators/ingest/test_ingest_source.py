@@ -1209,13 +1209,13 @@ class TestIngestSourceOperatorAdditionalCoverage:
         warnings: list[str] = []
 
         with patch.object(operator, "_build_adapter_config", side_effect=ValueError("validation error: bad field")):
-            operator.validate(errors, warnings, [])
+            operator.validate(errors=errors, warnings=warnings, available_features=[])
 
         assert "Configuration validation failed" in errors[0]
 
         errors.clear()
         with patch.object(operator, "_build_adapter_config", side_effect=RuntimeError("bad config")):
-            operator.validate(errors, warnings, [])
+            operator.validate(errors=errors, warnings=warnings, available_features=[])
 
         assert "Invalid configuration" in errors[0]
 

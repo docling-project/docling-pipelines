@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { ChunkerPanelBody } from '@/components/PropertiesPanel/CustomPanels/Chunker/Chunker';
 
 const makeController = (overrides: Record<string, unknown> = {}) => ({
@@ -13,12 +14,12 @@ describe('ChunkerPanelBody', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('renders without crashing', () => {
-    const { container } = render(<ChunkerPanelBody controller={makeController()} />);
+    const { container } = renderWithProviders(<ChunkerPanelBody controller={makeController()} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders when chunk_type is simple', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -31,7 +32,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders when chunk_type is semantic', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -44,7 +45,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders when chunk_type is hybrid', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -57,7 +58,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders when docling_serve provider is active', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -70,7 +71,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders when summarization is enabled (non-null object)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -84,7 +85,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders when summarization is disabled (null)', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -98,7 +99,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders with chunk_size and chunk_overlap values', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -114,7 +115,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders with retain_original_content enabled', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -128,7 +129,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders with operator metadata attributes', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getAppData: vi.fn(() => ({
@@ -148,22 +149,22 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders Use Docling Serve toggle', () => {
-    render(<ChunkerPanelBody controller={makeController()} />);
+    renderWithProviders(<ChunkerPanelBody controller={makeController()} />);
     expect(document.getElementById('chunker-use-docling-serve')).not.toBeNull();
   });
 
   it('renders Chunk type dropdown', () => {
-    render(<ChunkerPanelBody controller={makeController()} />);
+    renderWithProviders(<ChunkerPanelBody controller={makeController()} />);
     expect(document.getElementById('chunker-chunk-type')).not.toBeNull();
   });
 
   it('renders Retain original content toggle', () => {
-    render(<ChunkerPanelBody controller={makeController()} />);
+    renderWithProviders(<ChunkerPanelBody controller={makeController()} />);
     expect(document.getElementById('chunker-retain-original-content')).not.toBeNull();
   });
 
   it('renders chunk_size number input when chunk_type is simple', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -176,7 +177,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders chunk_size number input when chunk_type is hybrid', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -189,7 +190,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('does NOT render chunk_size when chunk_type is semantic', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -202,7 +203,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders semantic-specific fields when chunk_type is semantic', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -215,7 +216,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders provider_config textarea when docling_serve is enabled', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) =>
@@ -229,7 +230,7 @@ describe('ChunkerPanelBody', () => {
 
   it('docling-serve toggle calls updatePropertyValue on click', () => {
     const controller = makeController();
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const toggle = document.getElementById('chunker-use-docling-serve') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -240,7 +241,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('summarization accordion section is rendered', () => {
-    render(<ChunkerPanelBody controller={makeController()} />);
+    renderWithProviders(<ChunkerPanelBody controller={makeController()} />);
     // Summarization label from CHUNKER_LABELS
     expect(screen.queryAllByText(/summarization/i).length).toBeGreaterThan(0);
   });
@@ -251,7 +252,7 @@ describe('ChunkerPanelBody', () => {
         p.name === 'provider' ? 'docling_serve' : undefined
       ),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const textarea = document.getElementById('chunker-provider-config') as HTMLTextAreaElement | null;
     if (textarea) {
       fireEvent.change(textarea, { target: { value: '{"api_base": "http://localhost:9999"}' } });
@@ -263,7 +264,7 @@ describe('ChunkerPanelBody', () => {
 
   it('retain_original_content toggle calls updatePropertyValue', () => {
     const controller = makeController();
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const toggle = document.getElementById('chunker-retain-original-content') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -274,7 +275,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('renders semantic breakpoint fields when chunk_type is semantic', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -297,7 +298,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const input = document.getElementById('chunker-semantic-embeddings-model') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'nomic-embed-text' } });
@@ -311,7 +312,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('semantic: empty semantic_embeddings_model shows invalid state', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -334,7 +335,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const dropdown = document.getElementById('chunker-breakpoint-threshold-type');
     if (dropdown) {
       fireEvent.click(dropdown);
@@ -354,7 +355,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const numberInput = document.getElementById('chunker-breakpoint-threshold-amount');
     if (numberInput) {
       // Carbon NumberInput onChange receives (event, { value })
@@ -369,7 +370,7 @@ describe('ChunkerPanelBody', () => {
   });
 
   it('summarization enabled: textarea appears when summarization is non-null', () => {
-    render(
+    renderWithProviders(
       <ChunkerPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((p: { name: string }) => {
@@ -389,7 +390,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const textarea = document.getElementById('chunker-summarization-config') as HTMLTextAreaElement | null;
     if (textarea) {
       const validJson = JSON.stringify({ provider: 'litellm', provider_config: { model_id: 'ollama/llama3.2' } });
@@ -410,7 +411,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const textarea = document.getElementById('chunker-summarization-config') as HTMLTextAreaElement | null;
     if (textarea) {
       fireEvent.change(textarea, { target: { value: '{ invalid json' } });
@@ -427,7 +428,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const textarea = document.getElementById('chunker-summarization-config') as HTMLTextAreaElement | null;
     if (textarea) {
       const validJson = JSON.stringify({ provider: 'litellm', provider_config: { model_id: 'ollama/llama3.2' } });
@@ -448,7 +449,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const toggle = document.getElementById('chunker-use-docling-serve') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -463,7 +464,7 @@ describe('ChunkerPanelBody', () => {
 
   it('chunk type dropdown onChange: selecting semantic calls updatePropertyValue', () => {
     const controller = makeController();
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const dropdown = document.getElementById('chunker-chunk-type');
     if (dropdown) {
       // Simulate the onChange handler being called with semantic
@@ -482,7 +483,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const toggle = document.getElementById('chunker-summarization-toggle') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -502,7 +503,7 @@ describe('ChunkerPanelBody', () => {
         return undefined;
       }),
     });
-    render(<ChunkerPanelBody controller={controller} />);
+    renderWithProviders(<ChunkerPanelBody controller={controller} />);
     const toggle = document.getElementById('chunker-summarization-toggle') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);

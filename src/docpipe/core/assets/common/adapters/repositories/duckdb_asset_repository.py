@@ -1,7 +1,7 @@
-"""Generic DuckDB-based repository for all asset types using KeyValueStorage.
+"""Generic DuckDB-based repository for all asset types using KeyValueStoragePort.
 
 This module provides a unified DuckDB implementation that works for any asset type
-(DocumentSet, DocumentLibrary, etc.) using the KeyValueStorage abstraction layer.
+(DocumentSet, DocumentLibrary, etc.) using the KeyValueStoragePort abstraction layer.
 """
 
 from datetime import UTC, datetime
@@ -24,17 +24,17 @@ logger = get_logger(__name__)
 
 
 class DuckDBAssetRepository[T: Asset](AssetRepository[T]):
-    """Generic DuckDB-based repository using KeyValueStorage for all asset types.
+    """Generic DuckDB-based repository using KeyValueStoragePort for all asset types.
 
     This repository provides a unified implementation for storing and retrieving
-    any asset type (DocumentSet, DocumentLibrary, etc.) using DuckDB's KeyValueStorage.
+    any asset type (DocumentSet, DocumentLibrary, etc.) using DuckDB's KeyValueStoragePort implementation.
 
     The repository is completely generic - it works with any Asset subclass that
     implements to_dict() and from_dict() methods.
 
     Attributes:
         _asset_type: The asset type class (DocumentSet, DocumentLibrary, etc.)
-        _storage: KeyValueStorage backend for database operations
+        _storage: KeyValueStoragePort backend for database operations
         _collection: Collection name derived from asset type
         _database_path: Path to database for health check reporting
 
@@ -65,13 +65,9 @@ class DuckDBAssetRepository[T: Asset](AssetRepository[T]):
         """
         self._asset_type = asset_type
         self._storage = key_value_storage
-        # Use the asset class's own collection name if available, otherwise fall back
-        # to the auto-generated name. Subclasses or factories may still override
-        # _collection after construction for backward compatibility.
-        if hasattr(asset_type, "get_collection_name"):
-            self._collection = asset_type.get_collection_name()
-        else:
-            self._collection = f"{asset_type.__name__.lower()}s"
+        # Every Asset subclass defines get_collection_name(). Subclasses or factories may
+        # still override _collection after construction for backward compatibility.
+        self._collection = asset_type.get_collection_name()
         self._database_path = database_path
         logger.info(
             "DuckDBAssetRepository initialized for %s with collection '%s'",
@@ -423,7 +419,7 @@ class DuckDBAssetRepository[T: Asset](AssetRepository[T]):
     def from_config(cls, *, asset_type: type[T], config: dict[str, Any]) -> "DuckDBAssetRepository[T]":
         """Create a DuckDBAssetRepository from a config dict.
 
-        Validates config, creates the KeyValueStorage, and pins _collection
+        Validates config, creates the KeyValueStoragePort, and pins _collection
         via asset_type.get_collection_name().
 
         Args:

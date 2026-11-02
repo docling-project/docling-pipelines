@@ -63,7 +63,7 @@ class OpenSearchResourceMetadata:
         from docpipe.core.operators.vectordb.adapters.outbound.opensearch.client import OpenSearchClient
 
         if not provider_config.get(OperatorConstants.VectorDB.HOST):
-            logger.debug("OpenSearch provider_config missing host — skipping metadata fetch")
+            logger.debug("OpenSearch provider_config missing host - skipping metadata fetch")
             return empty_result()
 
         try:

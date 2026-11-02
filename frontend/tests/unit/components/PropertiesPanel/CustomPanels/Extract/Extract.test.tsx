@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import React from 'react';
 import { ExtractPanelBody } from '@/components/PropertiesPanel/CustomPanels/Extract/Extract';
 
@@ -37,22 +38,22 @@ describe('ExtractPanelBody', () => {
   // ── Basic rendering ───────────────────────────────────────────────────────
 
   it('renders without crashing with empty controller', () => {
-    const { container } = render(<ExtractPanelBody controller={makeController()} />);
+    const { container } = renderWithProviders(<ExtractPanelBody controller={makeController()} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders the Text Extraction accordion section', () => {
-    render(<ExtractPanelBody controller={makeController()} />);
+    renderWithProviders(<ExtractPanelBody controller={makeController()} />);
     expect(screen.getByText('Text Extraction')).toBeDefined();
   });
 
   it('renders the Entity Extraction accordion section', () => {
-    render(<ExtractPanelBody controller={makeController()} />);
+    renderWithProviders(<ExtractPanelBody controller={makeController()} />);
     expect(screen.getByText('Entity Extraction')).toBeDefined();
   });
 
   it('renders the Advanced accordion section', () => {
-    render(<ExtractPanelBody controller={makeController()} />);
+    renderWithProviders(<ExtractPanelBody controller={makeController()} />);
     const matches = screen.queryAllByText('Advanced');
     expect(matches.length).toBeGreaterThan(0);
   });
@@ -60,19 +61,19 @@ describe('ExtractPanelBody', () => {
   // ── Text provider: docling_library ────────────────────────────────────────
 
   it('renders docling_library provider config fields', () => {
-    render(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
+    renderWithProviders(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
     const matches = screen.queryAllByText('VLM pipeline');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders VLM pipeline toggle when docling_library is selected', () => {
-    render(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
+    renderWithProviders(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders VLM preset dropdown when VLM pipeline is enabled', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_library', {
           vlm_pipeline: { preset: 'granite_docling', engine: 'transformers' },
@@ -84,14 +85,14 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders ASR pipeline toggle when docling_library is selected', () => {
-    render(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
+    renderWithProviders(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
     const matches = screen.queryAllByText('ASR pipeline');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders ASR model ID field when ASR pipeline is enabled', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_library', {
           asr_pipeline: { model_id: 'whisper-base' },
@@ -102,14 +103,14 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders standard pipeline toggle when docling_library is selected', () => {
-    render(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
+    renderWithProviders(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
     const matches = screen.queryAllByText('Standard pipeline');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders accelerator device dropdown when standard pipeline is enabled', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_library', {
           standard_pipeline: { accelerator: { device: 'cpu' } },
@@ -120,7 +121,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders additional formats multi-select when docling_library is selected', () => {
-    render(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
+    renderWithProviders(<ExtractPanelBody controller={withTextProvider('docling_library')} />);
     const matches = screen.queryAllByText('Additional formats');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
@@ -129,14 +130,14 @@ describe('ExtractPanelBody', () => {
   // ── Text provider: docling_serve ──────────────────────────────────────────
 
   it('renders docling_serve base URL field', () => {
-    render(<ExtractPanelBody controller={withTextProvider('docling_serve')} />);
+    renderWithProviders(<ExtractPanelBody controller={withTextProvider('docling_serve')} />);
     const matches = screen.queryAllByText('Base URL');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders docling_serve API key field', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_serve', {
           base_url: 'http://localhost:5001',
@@ -148,7 +149,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders docling_serve timeout and poll interval fields', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_serve', { timeout: 60, poll_interval: 5 })}
       />
@@ -157,7 +158,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders docling_serve OCR and PDF backend fields', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_serve', {
           do_ocr: true,
@@ -170,7 +171,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders docling_serve image export mode dropdown', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withTextProvider('docling_serve', { image_export_mode: 'embedded' })}
       />
@@ -181,7 +182,7 @@ describe('ExtractPanelBody', () => {
   // ── Text extraction doc_column ────────────────────────────────────────────
 
   it('renders doc_column field', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({
           text_extraction: { provider: 'docling_library', doc_column: 'content' },
@@ -194,21 +195,21 @@ describe('ExtractPanelBody', () => {
   // ── Entity provider: none (default) ──────────────────────────────────────
 
   it('renders entity extraction provider dropdown with none selected', () => {
-    render(<ExtractPanelBody controller={withEntityProvider('none')} />);
+    renderWithProviders(<ExtractPanelBody controller={withEntityProvider('none')} />);
     expect(document.body).toBeInTheDocument();
   });
 
   // ── Entity provider: litellm ──────────────────────────────────────────────
 
   it('renders litellm entity config fields when provider is litellm', () => {
-    render(<ExtractPanelBody controller={withEntityProvider('litellm')} />);
+    renderWithProviders(<ExtractPanelBody controller={withEntityProvider('litellm')} />);
     const matches = screen.queryAllByText('Model ID');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders litellm model_id field with a value', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withEntityProvider('litellm', {
           model_id: 'gpt-4o',
@@ -220,7 +221,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders litellm temperature and max_tokens fields', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withEntityProvider('litellm', {
           temperature: 0.7,
@@ -234,14 +235,14 @@ describe('ExtractPanelBody', () => {
   // ── Entity provider: watsonx ──────────────────────────────────────────────
 
   it('renders watsonx entity config fields when provider is watsonx', () => {
-    render(<ExtractPanelBody controller={withEntityProvider('watsonx')} />);
+    renderWithProviders(<ExtractPanelBody controller={withEntityProvider('watsonx')} />);
     const matches = screen.queryAllByText('Model ID');
     expect(matches.length).toBeGreaterThanOrEqual(0);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders watsonx URL and container kind fields', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={withEntityProvider('watsonx', {
           url: 'https://us-south.ml.cloud.ibm.com',
@@ -256,14 +257,14 @@ describe('ExtractPanelBody', () => {
   // ── Entity provider: docling ──────────────────────────────────────────────
 
   it('renders docling entity provider fields', () => {
-    render(<ExtractPanelBody controller={withEntityProvider('docling')} />);
+    renderWithProviders(<ExtractPanelBody controller={withEntityProvider('docling')} />);
     expect(document.body).toBeInTheDocument();
   });
 
   // ── Entity extraction common fields ───────────────────────────────────────
 
   it('renders entity output_column field when entity provider is active', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({
           entity_extraction: { provider: 'litellm', output_column: 'entities' },
@@ -274,7 +275,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders entity max_doc_chars field when entity provider is active', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({
           entity_extraction: {
@@ -288,7 +289,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders entity expand_extracted_data toggle when entity provider is active', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({
           entity_extraction: { provider: 'litellm', expand_extracted_data: true },
@@ -299,7 +300,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders entity custom_schema textarea when entity provider is active', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({
           entity_extraction: {
@@ -315,7 +316,7 @@ describe('ExtractPanelBody', () => {
   // ── General section ───────────────────────────────────────────────────────
 
   it('renders max_workers field', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({ max_workers: 4 })}
       />
@@ -324,7 +325,7 @@ describe('ExtractPanelBody', () => {
   });
 
   it('renders use_processes toggle', () => {
-    render(
+    renderWithProviders(
       <ExtractPanelBody
         controller={makeController({ use_processes: true })}
       />
@@ -336,7 +337,7 @@ describe('ExtractPanelBody', () => {
 
   it('calls updatePropertyValue when text_provider dropdown changes', () => {
     const controller = makeController();
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     // Verify component renders — the Dropdown's onChange fires updatePropertyValue
     expect(controller.updatePropertyValue).not.toHaveBeenCalled();
     expect(document.body).toBeInTheDocument();
@@ -371,7 +372,7 @@ describe('ExtractPanelBody', () => {
         },
       }
     );
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     expect(document.body).toBeInTheDocument();
   });
 
@@ -379,7 +380,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles VLM pipeline on (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_library');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('vlm_pipeline_enabled');
     if (toggle) {
       fireEvent.click(toggle);
@@ -391,7 +392,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       vlm_pipeline: { preset: 'granite_docling', engine: 'transformers' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('vlm_pipeline_enabled');
     if (toggle) {
       fireEvent.click(toggle);
@@ -403,7 +404,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       vlm_pipeline: { preset: 'granite_docling', engine: 'transformers' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('vlm_preset') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'fast' } });
@@ -415,7 +416,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       vlm_pipeline: { preset: 'granite_docling', engine: 'transformers' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('vlm_engine_options') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{"api_base":"http://localhost"}' } });
@@ -427,7 +428,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       vlm_pipeline: { preset: 'granite_docling', engine: 'transformers' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('vlm_engine_options') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{invalid' } });
@@ -439,7 +440,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       vlm_pipeline: { preset: 'granite_docling', engine: 'transformers' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('vlm_engine_options') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{"x":1}' } });
@@ -450,7 +451,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles ASR pipeline on (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_library');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('asr_pipeline_enabled');
     if (toggle) {
       fireEvent.click(toggle);
@@ -462,7 +463,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       asr_pipeline: { model_id: 'whisper-base' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('asr_pipeline_enabled');
     if (toggle) {
       fireEvent.click(toggle);
@@ -474,7 +475,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       asr_pipeline: { model_id: 'whisper-base' },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('asr_model_id') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'whisper-turbo' } });
@@ -484,7 +485,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles standard_pipeline on (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_library');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('standard_pipeline_enabled');
     if (toggle) {
       fireEvent.click(toggle);
@@ -496,7 +497,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       standard_pipeline: { accelerator: { device: 'cuda' } },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('standard_pipeline_enabled');
     if (toggle) {
       fireEvent.click(toggle);
@@ -508,7 +509,7 @@ describe('ExtractPanelBody', () => {
     const controller = withTextProvider('docling_library', {
       standard_pipeline: { accelerator: {} },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('accelerator_device') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'cuda:0' } });
@@ -518,7 +519,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes text_doc_column input (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_library');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('text_doc_column') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'raw_text' } });
@@ -528,7 +529,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes serve_base_url input (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_serve');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('serve_base_url') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'http://localhost:5001' } });
@@ -538,7 +539,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles serve_verify_ssl (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_serve');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('serve_verify_ssl');
     if (toggle) {
       fireEvent.click(toggle);
@@ -548,7 +549,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles serve_do_ocr on and reveals ocr_engine input (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_serve');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('serve_do_ocr');
     if (toggle) {
       fireEvent.click(toggle);
@@ -558,7 +559,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes serve_ocr_engine input when do_ocr is on (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_serve', { do_ocr: true });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('serve_ocr_engine') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'tesseract' } });
@@ -568,7 +569,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes serve_table_mode input (calls updatePropertyValue)', () => {
     const controller = withTextProvider('docling_serve');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('serve_table_mode') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'fast' } });
@@ -578,7 +579,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_output_column input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('litellm');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_output_column') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'my_entities' } });
@@ -588,7 +589,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_litellm_model_id input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('litellm');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_litellm_model_id') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'gpt-4o' } });
@@ -598,7 +599,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_litellm_api_base input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('litellm');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_litellm_api_base') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'http://localhost:11434/v1' } });
@@ -608,7 +609,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_watsonx_model_id input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('watsonx');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_watsonx_model_id') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'ibm/granite-3-8b-instruct' } });
@@ -618,7 +619,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_watsonx_url input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('watsonx');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_watsonx_url') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'https://us-south.ml.cloud.ibm.com' } });
@@ -628,7 +629,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_watsonx_container_id input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('watsonx');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_watsonx_container_id') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'my-project-id' } });
@@ -638,7 +639,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_watsonx_project_id input (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('watsonx');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const input = document.getElementById('entity_watsonx_project_id') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'proj-123' } });
@@ -648,7 +649,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_docling_vlm_pipeline textarea with valid JSON (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('docling');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('entity_docling_vlm_pipeline') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{"model_type":"inline"}' } });
@@ -658,7 +659,7 @@ describe('ExtractPanelBody', () => {
 
   it('blurs entity_docling_vlm_pipeline with valid JSON clears raw state', () => {
     const controller = withEntityProvider('docling');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('entity_docling_vlm_pipeline') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{"x":1}' } });
@@ -669,7 +670,7 @@ describe('ExtractPanelBody', () => {
 
   it('changes entity_custom_schema textarea with valid JSON (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('litellm');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('entity_custom_schema') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{"type":"object"}' } });
@@ -679,7 +680,7 @@ describe('ExtractPanelBody', () => {
 
   it('blurs entity_custom_schema with valid JSON clears raw state', () => {
     const controller = withEntityProvider('litellm');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const area = document.getElementById('entity_custom_schema') as HTMLTextAreaElement | null;
     if (area) {
       fireEvent.change(area, { target: { value: '{"type":"object"}' } });
@@ -690,7 +691,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles entity_expand_data toggle (calls updatePropertyValue)', () => {
     const controller = withEntityProvider('litellm');
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('entity_expand_data');
     if (toggle) {
       fireEvent.click(toggle);
@@ -700,7 +701,7 @@ describe('ExtractPanelBody', () => {
 
   it('toggles use_processes toggle (calls updatePropertyValue)', () => {
     const controller = makeController({ use_processes: false });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const toggle = document.getElementById('use_processes');
     if (toggle) {
       fireEvent.click(toggle);
@@ -714,7 +715,7 @@ describe('ExtractPanelBody', () => {
     const controller = makeController({
       entity_extraction: { provider: 'litellm', entity_max_doc_chars: 10000 },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     // Try the increment button first (Carbon NumberInput pattern)
     const incrementBtns = document.querySelectorAll('button.cds--number__control-btn.up-icon');
     if (incrementBtns.length > 0) {
@@ -747,7 +748,7 @@ describe('ExtractPanelBody', () => {
     const controller = makeController({
       entity_extraction: { provider: 'litellm', entity_max_doc_chars: 10000 },
     });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const entityMaxInput = document.getElementById('entity_max_doc_chars') as HTMLInputElement | null;
     if (entityMaxInput) {
       const wrapper = entityMaxInput.closest('.cds--number');
@@ -769,7 +770,7 @@ describe('ExtractPanelBody', () => {
 
   it('increments max_workers NumberInput via up button (covers lines 1483-1484)', () => {
     const controller = makeController({ max_workers: 4 });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const maxWorkersInput = document.getElementById('max_workers') as HTMLInputElement | null;
     if (maxWorkersInput) {
       const wrapper = maxWorkersInput.closest('.cds--number');
@@ -788,7 +789,7 @@ describe('ExtractPanelBody', () => {
 
   it('decrements max_workers NumberInput to zero/invalid (covers line 1484 undefined branch)', () => {
     const controller = makeController({ max_workers: 1 });
-    render(<ExtractPanelBody controller={controller} />);
+    renderWithProviders(<ExtractPanelBody controller={controller} />);
     const maxWorkersInput = document.getElementById('max_workers') as HTMLInputElement | null;
     if (maxWorkersInput) {
       const wrapper = maxWorkersInput.closest('.cds--number');

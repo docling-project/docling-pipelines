@@ -64,7 +64,7 @@ class MilvusResourceMetadata:
         has_host = bool(provider_config.get(OperatorConstants.VectorDB.HOST))
         has_uri = bool(provider_config.get(OperatorConstants.VectorDB.URI))
         if not (has_host or has_uri):
-            logger.debug("Milvus provider_config missing host/uri — skipping metadata fetch")
+            logger.debug("Milvus provider_config missing host/uri - skipping metadata fetch")
             return empty_result()
 
         try:
