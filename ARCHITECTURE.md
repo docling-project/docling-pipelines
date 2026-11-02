@@ -3275,11 +3275,11 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
   - **DuckDBDocumentSetStorage**: Data persistence using `TableStorage`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
 - **Common adapters** (`common/adapters/repositories/`):
   - **DuckDBAttachmentRepository**: Persists `AttachmentRef` records in the `document_set_attachments` KV collection. Registered via `@AttachmentRepositoryFactory.register(name="duckdb")` and self-wires via its `create(*, config)` classmethod.
-- `DuckDBAssetRepository` is registered in `RepositoryFactory.get_available_repository_types()` as a dict entry (not a decorator). `DuckDBAttachmentRepository` uses the `@AttachmentRepositoryFactory.register()` decorator.
+- `DuckDBAssetRepository` is registered in `AssetRepositoryFactory.get_available_repository_types()` as a dict entry (not a decorator). `DuckDBAttachmentRepository` uses the `@AttachmentRepositoryFactory.register()` decorator.
 
 **4. Factory Layer**
 
-- **RepositoryFactory** (`common/factories/`): Creates `AssetRepository[DocumentSet]` adapters; reads backend type from `assets_management.document_set_repository.type` in `docling-pipelines-config.yaml`
+- **AssetRepositoryFactory** (`common/factories/asset_repository_factory.py`): Creates `AssetRepository[DocumentSet]` adapters; reads backend type from `assets_management.document_set_repository.type` in `docling-pipelines-config.yaml` via `DocpipeConfigLoader`
 - **DataStoreFactory** (`document_sets/factories/`): Creates data store adapters
 - **AttachmentRepositoryFactory** (`common/factories/`): Decorator-registry factory for attachment repository adapters; adapter is selected by name matching `document_set_repository.type` in `docling-pipelines-config.yaml`
 
@@ -4267,6 +4267,17 @@ docpipe/
 - **Structured Exception Hierarchy**: Comprehensive error handling
 - **Error Codes**: Standardized error code system
 - **Error Messages**: Centralized error message management
+
+#### Configuration Loader (`utils/infrastructure/config_utils.py`)
+
+[`DocpipeConfigLoader`](src/docpipe/utils/infrastructure/config_utils.py) is the single entry point for reading `docling-pipelines-config.yaml`. Factories (asset repositories, job management, report storage, flow definition snapshots, incremental metadata, projects) and the Vault initializer use it instead of parsing the YAML file themselves.
+
+- **Thread-safe singleton**: The file is read at most once per process and cached; `DocpipeConfigLoader.reset()` clears the cache (intended for tests)
+- **Path resolution**: `DOCPIPE_CONFIG_PATH` environment variable, otherwise `<project_root>/docling-pipelines-config.yaml`
+- **Fault tolerant**: A missing file or invalid YAML returns an empty dict (with a log message), so callers fall back to their own defaults
+- **API**: `get_config()` returns the full dict; `get(key=..., default=...)` returns a top-level section; `get_storage(key, default, *, default_type)` returns a `(storage_type, config)` tuple
+- **Storage precedence** in `get_storage()`: service-specific `storage` section, then `global_storage`, then the built-in default. The built-in default is `filesystem` unless the caller passes `default_type`
+- **Per-service defaults**: incremental metadata, job run reports and flow definition snapshots use the `filesystem` default. Job management passes `default_type="inmemory"`, so job stats are not persisted unless `job_management.storage` or `global_storage` is configured
 
 #### Document Classes (`common/document_classes/`)
 #### Constants (`core/constants/`)

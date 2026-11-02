@@ -151,4 +151,4 @@ class TableStoragePort(ABC):
         ...
 
     def close(self) -> None:
-        """Release the resources held by the storage, such as a connection pool."""
+        """Release the resources held by the storage. A connection pool shared with other components stays open."""

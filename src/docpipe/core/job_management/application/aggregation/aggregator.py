@@ -127,9 +127,6 @@ class MetadataAggregator:
 
         This is the core aggregation logic that applies strategies to individual fields.
         """
-        if not metadata_list:
-            return {}
-
         all_keys: set[str] = set()
         for metadata in metadata_list:
             all_keys.update(metadata.keys())
@@ -138,8 +135,6 @@ class MetadataAggregator:
         for key in all_keys:
             strategy = self.strategies.get(key, AggregationStrategy.LAST)
             values = [metadata.get(key) for metadata in metadata_list if key in metadata]
-            if not values:
-                continue
             result[key] = self._apply_strategy(field_name=key, values=values, strategy=strategy)
 
         return result
@@ -163,7 +158,7 @@ class MetadataAggregator:
         for value in values:
             if isinstance(value, list):
                 result.extend(value)
-            elif value is not None:
+            else:
                 result.append(value)
         return result
 

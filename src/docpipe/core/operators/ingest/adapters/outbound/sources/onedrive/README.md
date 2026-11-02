@@ -160,6 +160,7 @@ async for document in adapter.fetch_documents(config):
 | `tenant_id` | str | Yes | - | Azure AD tenant (directory) ID |
 | `drive_id` | str | No | None | Specific OneDrive drive ID (None = default) |
 | `folder_path` | str | No | None | Folder path to start from (None = root) |
+| `file_path` | str | No | None | Graph drive item id or OneDrive/SharePoint file URL to ingest on its own. When set, only this item is fetched. File events for `onedrive` set this from `file_reference`. A URL must include an `id` or `sourcedoc` query parameter. |
 | `recursive` | bool | No | True | Traverse subdirectories |
 | `file_extensions` | List[str] | No | [] | File extensions to include (empty = all) |
 | `exclude_patterns` | List[str] | No | [] | Glob patterns to exclude |
