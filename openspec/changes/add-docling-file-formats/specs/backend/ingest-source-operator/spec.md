@@ -3,6 +3,8 @@
 ## Purpose
 The ingest-source-operator capability discovers, filters, and ingests documents from local filesystem, web, and cloud storage providers into a canonical PyArrow table (`id`, `name`, `document_format`, `metadata`, `source_id`, `path`, `modified_time`) with execution metadata (`total_docs_count`, `processed_docs_count`, `skipped_docs_count`, `skipped_docs`, `failed_docs_count`, `failed_docs`, `node_status`).
 
+In this specification, **Tier 1** means pure-Python Docling formats that require no extra packages or external binaries, and **Tier 4** means audio/video formats that require ASR dependencies and `ffmpeg`.
+
 ## ADDED Requirements
 
 ### Requirement: Immutable supported file extension discovery across Tier 1 and Tier 4 formats

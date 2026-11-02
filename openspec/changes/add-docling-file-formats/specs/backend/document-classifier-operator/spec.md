@@ -3,6 +3,8 @@
 ## Purpose
 The document-classifier-operator capability classifies documents by fetching or reusing extracted content, validating file extensions up front, and recording unsupported documents as skipped in transform metadata.
 
+In this specification, **Tier 1** means pure-Python Docling formats that require no extra packages or external binaries, and **Tier 4** means audio/video formats that require ASR dependencies and `ffmpeg`.
+
 ## ADDED Requirements
 
 ### Requirement: Classification accepts Tier 1 document formats

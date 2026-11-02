@@ -4,6 +4,8 @@
 
 See `proposal.md` for motivation and scope.
 
+Tier definitions: **Tier 1** is pure-Python Docling formats that require no extra packages or external binaries; **Tier 4** is audio/video formats that require ASR dependencies and `ffmpeg`. Tiers 2, 3 and 5 are out of scope (see `proposal.md`).
+
 Currently, file format eligibility across ingestion, extraction, classification, and UI configuration is anchored by static lists in `OperatorConstants.FileExtensions` (`src/docpipe/core/constants/operator_constants.py`) and mirrored in `SUPPORTED_FILE_EXTENSIONS` (`frontend/src/components/PropertiesPanel/CustomPanels/IngestSource/constants.ts`):
 
 1. **Extension registry (`OperatorConstants.FileExtensions`)**:
@@ -63,26 +65,9 @@ Currently, file format eligibility across ingestion, extraction, classification,
   - `WebPageSourceAdapter` maps HTTP `Content-Type` headers to canonical `OperatorConstants.FileExtensions`.
   - `DoclingServeAdapter` is unchanged and continues to use the original 16 extensions.
 
-### Frontend Component Hierarchy & Interaction Mapping
+### Frontend
 
-```text
-CommonProperties (Elyra Canvas right-flyout container)
-└── PropertiesPanel
-    └── Tabs / TabList / Tab / TabPanels / TabPanel (@carbon/react)
-        └── IngestSourcePanelBody (frontend/src/components/PropertiesPanel/CustomPanels/IngestSource/IngestSource.tsx)
-            ├── RequiredParamTooltip + Dropdown (@carbon/react) [#provider]
-            └── Accordion (@carbon/react)
-                ├── AccordionItem ("Provider configuration")
-                │   ├── ProviderFieldsForm
-                │   └── JsonTextArea
-                └── AccordionItem ("Ingestion settings")
-                    ├── RequiredParamTooltip + NumberInput (@carbon/react) [#max_files]
-                    ├── RequiredParamTooltip + FilterableMultiSelect (@carbon/react) [#include_filter]
-                    ├── RequiredParamTooltip + FilterableMultiSelect (@carbon/react) [#exclude_filter]
-                    └── RequiredParamTooltip + Toggle (@carbon/react) [#ignore_hidden_files]
-```
-
-- Only the `SUPPORTED_FILE_EXTENSIONS` array in `constants.ts` changes; `items={[...SUPPORTED_FILE_EXTENSIONS]}` in `IngestSource.tsx` picks it up with no component, state, or SCSS changes. The array is manually mirrored from the backend and has no automatic sync.
+- Only the `SUPPORTED_FILE_EXTENSIONS` array in `frontend/src/components/PropertiesPanel/CustomPanels/IngestSource/constants.ts` changes; `items={[...SUPPORTED_FILE_EXTENSIONS]}` in `IngestSource.tsx` picks it up with no component, state, or SCSS changes. The array is manually mirrored from the backend and has no automatic sync.
 
 ## Decisions
 
@@ -105,6 +90,7 @@ CommonProperties (Elyra Canvas right-flyout container)
   1. Build `audio_video_suffixes` from both `FormatToExtensions[InputFormat.AUDIO]` and `FormatToExtensions[InputFormat.VIDEO]` using `.lstrip(".")` normalization so entries normalize to `.mp4`, `.mkv`, etc.
   2. Replace `Path.cwd() / doc_name` with a file named `Path(doc_name).name` inside `tempfile.TemporaryDirectory()`. The directory is removed on exit, giving each call its own namespace and dropping any path components in `doc_name`.
 - **Rationale**: The current working directory is shared by all worker threads, so identical names collide, and a crafted `doc_name` could write outside the intended directory. The spec requirement is "temporary file", which this satisfies. Docling's media backends select the demuxer from the suffix, so the filename suffix is preserved.
+- **Extensionless media is out of scope**: the temp-file path is selected from the suffix of `file_path` (or the suffix detected from magic bytes). Magic-byte detection is extended only for `.epub` and `.webp`, not for audio/video signatures. A media document whose name has no suffix and no `document_format` is therefore skipped by `ExtractOperator._validate_extensions`, and if it reaches `extract_content()` it is not written to a temp file, so no resolved extension is appended. Adding audio/video signatures to `detect_extension_from_bytes()` is a separate change.
 
 ### Decision 5: Configure `VideoFormatOption` in `DoclingAdapter`
 - **Choice**: In `_build_gpu_converter()` and `extract_single_document()`, when `self.use_asr_pipeline and _asr_available()` is true, additionally import `VideoFormatOption`, `VideoPipeline`, and `VideoPipelineOptions` and set `format_options[InputFormat.VIDEO] = VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=VideoPipelineOptions(...))`, where:

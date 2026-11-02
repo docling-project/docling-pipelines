@@ -7,6 +7,13 @@ Docling `2.142.1` natively supports a much broader set of pure-Python document f
 ## What Changes
 
 - **Affected layers**: **Full-stack** (backend operator constants, ingestion/extraction/classification operators, and frontend `IngestSource` constants).
+- **Format tiers** (used throughout this change):
+  - **Tier 1**: pure-Python Docling formats that require no extra Python packages or external binaries.
+  - **Tier 2**: formats that require new third-party Python packages (`odfdo`, `arelle`).
+  - **Tier 3**: legacy Office formats that require a system-level LibreOffice (`soffice`) binary.
+  - **Tier 4**: audio/video formats that require ASR dependencies and `ffmpeg`.
+  - **Tier 5**: compound-extension archive formats and ambiguous raw extensions that need schema-specific disambiguation.
+  - Only Tier 1 and Tier 4 are in scope.
 - **Tier 1 pure-Python format support**:
   - Expand `OperatorConstants.FileExtensions.BASE_EXTENSIONS` (propagating to `DOCLING_LIBRARY_BASE_EXTENSIONS`) with Docling's pure-Python supported extensions that require no extra Python packages or external `soffice` binaries:
     - Tabular/Data: `.csv`
@@ -43,6 +50,8 @@ Docling `2.142.1` natively supports a much broader set of pure-Python document f
 ## Capabilities
 
 ### New Capabilities
+These capabilities have no spec under `openspec/specs/` yet, so their requirements are ADDED here. Several of the functions they cover already exist and are modified by this change (`get_supported_file_extensions()`, `OperatorUtils.extract_content()`, `OperatorUtils.detect_extension_from_bytes()`, `OperatorUtils.detect_extension_zip_based_office_formats()`); only the constant entries and the `text/csv` / `message/rfc822` MIME mappings are new code.
+
 - `backend/extract-operator`: Tier 1 / Tier 4 extension validation in `docling_library` mode (`docling_serve` unchanged), magic-byte extension detection, temporary-directory routing for `InputFormat.AUDIO` and `InputFormat.VIDEO`, and ASR pipeline format option binding for both audio and video inputs.
 - `backend/ingest-source-operator`: Supported file extension discovery (`get_supported_file_extensions()` without mutating `BASE_EXTENSIONS`), widened default `include_filter`, `include_filter` / `exclude_filter` validation against Tier 1 and Tier 4 extensions, and `text/csv` / `message/rfc822` MIME mapping in `WebPageSourceAdapter`.
 - `backend/document-classifier-operator`: Classification extension validation covering Tier 1 formats.

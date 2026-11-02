@@ -3,6 +3,8 @@
 ## Purpose
 The extract-operator capability validates incoming document formats, converts supported binary documents into text and structured representations via Docling local or remote adapters, and emits PyArrow tables with extracted content columns and execution metadata.
 
+In this specification, **Tier 1** means pure-Python Docling formats that require no extra packages or external binaries, and **Tier 4** means audio/video formats that require ASR dependencies and `ffmpeg`.
+
 ## ADDED Requirements
 
 ### Requirement: Tier 1 pure-Python format support in docling_library extraction
@@ -56,6 +58,10 @@ During `docling_library` extraction, all audio and video extensions from both `I
 #### Scenario: Temporary directory is removed when conversion fails
 - **WHEN** `DocumentConverter.convert()` raises while processing a media document
 - **THEN** the temporary directory is removed and the failure is reported through the normal extraction error result
+
+#### Scenario: Media document without a recognizable suffix is not routed to a temporary file
+- **WHEN** an audio or video document has a `name` with no file suffix, no `document_format`, and magic-byte detection cannot identify it (audio/video signatures are not detected)
+- **THEN** the document is skipped during extension validation and recorded in `skipped_docs` metadata, and no temporary file is created; if such a stream reaches `extract_content`, it is not written to a temporary file and no extension is appended to its name
 
 ### Requirement: ASR pipeline configuration for video formats
 Enabling `use_asr_pipeline` on `docling_library` SHALL configure `InputFormat.VIDEO` alongside `InputFormat.AUDIO`, in both the standard converter path and the GPU converter path, applying the selected ASR model to both.
