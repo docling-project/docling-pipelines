@@ -180,8 +180,8 @@ for gpu_type in MilvusIndexTypes.ALL_GPU_TYPES:
 print()
 if errors:
     print(f"\033[31m{len(errors)} check(s) FAILED:\033[0m")
-    for e in errors:
-        print(f"  - {e}")
+    for err in errors:
+        print(f"  - {err}")
     sys.exit(1)
 else:
     total = 10 + len(cases) + len(MilvusIndexTypes.ALL_GPU_TYPES) + 8

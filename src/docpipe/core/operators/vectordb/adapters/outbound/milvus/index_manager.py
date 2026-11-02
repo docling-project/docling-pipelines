@@ -174,7 +174,7 @@ class MilvusIndexManager:
 
         # 2. Probe pynvml if installed
         try:
-            import pynvml
+            import pynvml  # type: ignore[import-not-found]
 
             pynvml.nvmlInit()
             count = pynvml.nvmlDeviceGetCount()
