@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """HashiCorp Vault provider initializer.
 
 Reads the ``secrets.vault`` section from docling-pipelines-config.yaml to decide
@@ -15,19 +18,15 @@ completely unaffected — the function is a no-op for them.
 """
 
 import os
-from pathlib import Path
 
-import yaml
-
-from docpipe.core.constants.constants import EnvironmentVariables, _find_project_root
+from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
 from docpipe.integrations.secrets.hashicorp_vault import HashiCorpVaultProvider
 from docpipe.integrations.secrets.secret_provider import register_provider
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
-
-_DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
 
 
 def initialize_secret_providers() -> None:
@@ -64,19 +63,12 @@ def _initialize_secret_providers() -> None:
         return
     env_force_enabled = env_override in ("true", "1", "yes")
 
-    # 2. Load YAML config — same pattern used by JobManagementFactory and others
-    config_path = Path(os.environ.get(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(_DEFAULT_CONFIG_PATH)))
-    yaml_config: dict = {}
-    if config_path.exists():
-        try:
-            with Path(config_path).open() as fh:
-                yaml_config = yaml.safe_load(fh) or {}
-        except Exception as exc:
-            logger.warning("Could not read config file %s: %s", config_path, exc)
+    # 2. Load YAML config via shared loader (reads the file at most once per process)
+    secrets_config = DocpipeConfigLoader.get(key="secrets", default={})
 
     # 3. Read secrets.vault section — absent or enabled=false means disabled
     #    unless DOCPIPE_VAULT_ENABLED=true overrides it
-    vault_section: dict = yaml_config.get("secrets", {}).get("vault", {})
+    vault_section: dict = secrets_config.get("vault", {})
     if not env_force_enabled and not vault_section.get("enabled", False):
         logger.debug("Vault integration disabled (secrets.vault.enabled is not true in config)")
         return

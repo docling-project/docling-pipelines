@@ -15,6 +15,9 @@ Before starting, verify you have:
 python3.12 --version
 # Expected: Python 3.12.x
 
+# Check Node.js 22.15.1 and npm (required to build the bundled frontend)
+node --version && npm --version
+
 # Check available disk space (need ~5GB)
 df -h .
 ```
@@ -23,6 +26,19 @@ df -h .
 - **macOS**: `brew install python@3.12`
 - **Ubuntu/Debian**: `sudo apt install python3.12 python3.12-venv`
 - **Fedora/RHEL**: `sudo dnf install python3.12`
+
+**Don't have Node.js 22.15.1?**
+
+`uv sync` builds the React frontend as part of the package install, so it fails with `npm not found` if Node.js is missing. The repo pins Node.js 22.15.1 in `frontend/.nvmrc`; a version manager such as [nvm](https://github.com/nvm-sh/nvm) installs the pinned version:
+
+```bash
+cd frontend
+nvm install   # reads frontend/.nvmrc
+nvm use
+cd ..
+```
+
+On macOS you can install nvm with `brew install nvm`. Run `uv sync` from the same shell so `npm` is on `PATH`.
 
 ---
 

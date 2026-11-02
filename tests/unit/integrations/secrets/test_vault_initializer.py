@@ -224,7 +224,7 @@ class TestInitializeSecretProviders:
         assert get_provider(name="hashicorp") is None
         provider.is_available.assert_not_called()
         assert "Vault integration disabled" in caplog.text
-        assert "Could not read config file" not in caplog.text
+        assert "Invalid YAML in config file" not in caplog.text
         assert _UNEXPECTED_WARNING not in caplog.text
 
     def test_env_enable_registers_when_config_file_is_missing(self, caplog):
@@ -233,7 +233,7 @@ class TestInitializeSecretProviders:
         provider = _run(env={"DOCPIPE_VAULT_ENABLED": "true"}, exists=False)
         assert get_provider(name="hashicorp") is provider
         assert "HashiCorp Vault provider registered as 'hashicorp'" in caplog.text
-        assert "Could not read config file" not in caplog.text
+        assert "Invalid YAML in config file" not in caplog.text
 
     def test_empty_config_document_disables_vault(self, caplog):
         """An empty config document is treated as Vault disabled, not as a startup failure."""
@@ -242,7 +242,7 @@ class TestInitializeSecretProviders:
         assert get_provider(name="hashicorp") is None
         provider.is_available.assert_not_called()
         assert "Vault integration disabled" in caplog.text
-        assert "Could not read config file" not in caplog.text
+        assert "Invalid YAML in config file" not in caplog.text
         assert _UNEXPECTED_WARNING not in caplog.text
 
     def test_unreadable_config_disables_vault(self, caplog):
@@ -251,7 +251,7 @@ class TestInitializeSecretProviders:
         provider = _run(yaml_content=":\n")
         assert get_provider(name="hashicorp") is None
         provider.is_available.assert_not_called()
-        assert "Could not read config file" in caplog.text
+        assert "Invalid YAML in config file" in caplog.text
         assert "docling-pipelines-config.yaml" in caplog.text
         assert _UNEXPECTED_WARNING not in caplog.text
 
@@ -260,7 +260,7 @@ class TestInitializeSecretProviders:
         caplog.set_level(logging.INFO, logger="docpipe")
         provider = _run(env={"DOCPIPE_VAULT_ENABLED": "true"}, yaml_content=":\n")
         assert get_provider(name="hashicorp") is provider
-        assert "Could not read config file" in caplog.text
+        assert "Invalid YAML in config file" in caplog.text
         assert "docling-pipelines-config.yaml" in caplog.text
 
     def test_docpipe_config_path_selects_config_file(self, tmp_path):

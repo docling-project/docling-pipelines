@@ -166,8 +166,6 @@ class JobManagementService:
         from docpipe.utils.orchestration.elyra_converter import ElyraConverter
 
         flow = self.flow_service.get_flow(flow_id)
-        if flow is None:
-            raise FlowNotFoundException(f"Flow not found for flow_id: {flow_id}")
 
         if hasattr(flow, DocpipeConstants.JOB_ID) and flow.job_id:
             flow_config[DocpipeConstants.JOB_ID] = flow.job_id
@@ -378,14 +376,13 @@ class JobManagementService:
             ):
                 params[DocpipeConstants.ENABLE_MICRO_BATCHING] = True
 
-            if self.job_run_manager and job_run_id:
-                try:
-                    self.job_run_manager.update_job_run_status(
-                        job_run_id=job_run_id,
-                        status=ExecutionStatus.STARTING.value,
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to update job run status to STARTING: %s", exc)
+            try:
+                self.job_run_manager.update_job_run_status(
+                    job_run_id=job_run_id,
+                    status=ExecutionStatus.STARTING.value,
+                )
+            except Exception as exc:
+                logger.warning("Failed to update job run status to STARTING: %s", exc)
 
             flow_executor.execute(orchestrator=orchestrator, params=params)
             logger.info("Completed async flow execution for job_run_id=%s", job_run_id)

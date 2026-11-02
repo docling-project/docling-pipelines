@@ -10,7 +10,7 @@ from docpipe.api.auth.models import User
 from docpipe.api.dependencies import get_job_management_service, get_job_stats_service
 from docpipe.api.main import app
 from docpipe.core.constants.constants import ExecutionStatus
-from docpipe.exceptions.docpipe_exceptions import JobRunOperationFailedException
+from docpipe.exceptions.docpipe_exceptions import JobRunNotFoundException, JobRunOperationFailedException
 
 
 @pytest.fixture
@@ -397,3 +397,43 @@ class TestErrorHandling:
             assert error_data["errors"]
             assert "code" in error_data["errors"][0]
             assert "message" in error_data["errors"][0]
+
+
+class TestReportAndFlowDefinition:
+    """GET /job_runs/{id}/report and /job_runs/{id}/flow_definition."""
+
+    _JOB_RUN_ID = "33333333-3333-4333-8333-333333333333"
+
+    def test_report_for_unknown_job_run_returns_404(self, client, mock_job_stats_service):
+        mock_job_stats_service.get_job.return_value = None
+
+        response = client.get(f"/api/v1/job_runs/{self._JOB_RUN_ID}/report")
+
+        assert response.status_code == 404
+        mock_job_stats_service.get_job.assert_called_once_with(job_run_id=self._JOB_RUN_ID, include_node_stats=False)
+
+    def test_report_for_running_job_returns_425(self, client, mock_job_stats_service):
+        mock_job_stats_service.get_job.return_value = Mock(status=ExecutionStatus.RUNNING.value, job_id="job-1")
+
+        response = client.get(f"/api/v1/job_runs/{self._JOB_RUN_ID}/report")
+
+        assert response.status_code == 425
+
+    def test_flow_definition_is_returned_as_json(self, client, mock_job_stats_service):
+        definition = {"flow_name": "snapshot", "flow": [{"type": "ingest_source", "name": "ingest"}]}
+        mock_job_stats_service.get_flow_definition.return_value = definition
+
+        response = client.get(f"/api/v1/job_runs/{self._JOB_RUN_ID}/flow_definition")
+
+        assert response.status_code == 200
+        assert response.json() == definition
+        mock_job_stats_service.get_flow_definition.assert_called_once_with(job_run_id=self._JOB_RUN_ID)
+
+    def test_flow_definition_for_unknown_job_run_returns_404(self, client, mock_job_stats_service):
+        mock_job_stats_service.get_flow_definition.side_effect = JobRunNotFoundException(
+            message="Job run not found", job_run_id=self._JOB_RUN_ID
+        )
+
+        response = client.get(f"/api/v1/job_runs/{self._JOB_RUN_ID}/flow_definition")
+
+        assert response.status_code == 404
