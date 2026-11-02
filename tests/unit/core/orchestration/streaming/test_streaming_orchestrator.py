@@ -261,7 +261,8 @@ def _branching_transform(self, table, *args, **kwargs):
     branches = {}
     for index, (branch_id, branch) in enumerate(self.branch_criteria.items()):
         criteria = branch["criteria_json"]
-        rows = table.filter(pc.equal(table[criteria["variable"]], criteria["value"]))
+        # PyArrow exposes generated compute kernels at runtime, but Mypy does not see them in its module stub.
+        rows = table.filter(pc.equal(table[criteria["variable"]], criteria["value"]))  # type: ignore[attr-defined]
         tables.append(rows)
         branches[branch_id] = {"result_index": index, "processed_docs": rows.num_rows}
     return tables, {"branches": branches}
