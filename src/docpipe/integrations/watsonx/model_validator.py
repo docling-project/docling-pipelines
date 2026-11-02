@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
 Watsonx.ai Model Validator.
@@ -60,11 +60,11 @@ def get_available_foundation_models(*, api_key: str, url: str) -> list[dict]:
         if not available_models:
             logger.warning("No models found in API response")
         else:
-            logger.info(f"Found {len(available_models)} available models")
+            logger.info("Found %s available models", len(available_models))
 
         return available_models
     except Exception as e:
-        logger.error(f"Failed to fetch foundation models: {e}")
+        logger.error("Failed to fetch foundation models: %s", e)
         raise ExternalServiceError(f"Failed to fetch foundation models from watsonx.ai: {e}") from e
 
 
@@ -91,15 +91,15 @@ def get_model_dimension(*, model_id: str, api_key: str, url: str) -> int:
                 # Extract embedding_dimension from the spec
                 dimension = spec.get("embedding_dimension", 0)
                 if dimension:
-                    logger.info(f"Found embedding dimension {dimension} for model '{model_id}'")
+                    logger.info("Found embedding dimension %s for model '%s'", dimension, model_id)
                     return dimension
-                logger.warning(f"Model '{model_id}' found but embedding_dimension not available in spec")
+                logger.warning("Model '%s' found but embedding_dimension not available in spec", model_id)
                 return 0
 
-        logger.warning(f"Model '{model_id}' not found in available models")
+        logger.warning("Model '%s' not found in available models", model_id)
         return 0
     except Exception as e:
-        logger.error(f"Failed to get model dimension for '{model_id}': {e}")
+        logger.error("Failed to get model dimension for '%s': %s", model_id, e)
         return 0
 
 
@@ -125,10 +125,12 @@ def validate_model_id(*, model_id: str, api_key: str, url: str) -> bool:
     is_valid = model_id in available_model_ids
 
     if is_valid:
-        logger.info(f"Model '{model_id}' validated successfully")
+        logger.info("Model '%s' validated successfully", model_id)
     else:
         logger.warning(
-            f"Model '{model_id}' not found in available models. Available models: {available_model_ids[:5]}..."
+            "Model '%s' not found in available models. Available models: %s...",
+            model_id,
+            available_model_ids[:5],
         )
 
     return is_valid

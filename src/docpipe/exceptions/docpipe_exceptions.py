@@ -6,8 +6,8 @@ from typing import Any, ClassVar
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.exceptions.error_messages import ValidationMessage
 
-TROUBLESHOOTING_DOCS_URL = "https://github.com/IBM/docling-pipelines/tree/main/TROUBLESHOOTING.md"
-DOCLING_PIPELINES_DOCS_URL = "https://github.com/IBM/docling-pipelines/tree/main/docs"
+TROUBLESHOOTING_DOCS_URL = "https://github.com/docling-project/docling-pipelines/tree/main/TROUBLESHOOTING.md"
+DOCLING_PIPELINES_DOCS_URL = "https://github.com/docling-project/docling-pipelines/tree/main/docs"
 
 
 class DocpipeException(Exception):
@@ -71,7 +71,7 @@ class ValidationAlert(dict):
                 from docpipe.utils.infrastructure.logging import get_logger
 
                 logger = get_logger()
-                logger.warning(msg=f"Invalid attribute name: {key}", stack_info=True)
+                logger.warning("Invalid attribute name: %s", key, stack_info=True)
                 continue
             setattr(self, key, value)
 
@@ -145,18 +145,22 @@ class FlowValidationException(DocpipeException):
         full_traceback = "".join(tb_lines)
         context = f" for job_run_id={job_run_id}" if job_run_id else ""
         logger.error(
-            f"Flow validation failed{context}: {full_traceback}",
+            "Flow validation failed%s: %s",
+            context,
+            full_traceback,
             exc_info=True,
         )
 
         # Log detailed errors and warnings
         if self.errors:
             logger.error(
-                f"Validation errors: {json.dumps([vars(e) if hasattr(e, '__dict__') else e for e in self.errors])}"
+                "Validation errors: %s",
+                json.dumps([vars(e) if hasattr(e, "__dict__") else e for e in self.errors]),
             )
         if self.warnings:
             logger.warning(
-                f"Validation warnings: {json.dumps([vars(w) if hasattr(w, '__dict__') else w for w in self.warnings])}"
+                "Validation warnings: %s",
+                json.dumps([vars(w) if hasattr(w, "__dict__") else w for w in self.warnings]),
             )
 
 

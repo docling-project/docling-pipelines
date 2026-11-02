@@ -408,8 +408,12 @@ src/docpipe/core/operators/quality/classification/document_classifier.py
 
 ```text
 DocumentClassifierOperator
-    ↓
-ClassificationService  (src/docpipe/core/operators/quality/classification/classification_service.py)
+    ↓ depends on
+ClassificationPort  (src/docpipe/core/operators/quality/classification/ports/outbound/classification_port.py)
+    ↑ resolved by
+ClassificationAdapterFactory  (registry + provider aliases)
+    ↓ from_config()
+StandardLLMClassificationAdapter  (src/docpipe/core/operators/quality/classification/adapters/outbound/standard_llm_adapter.py)
     ↓ calls LLMAdapterFactory.create_inference_adapter()
     ↓ holds
 LLMInferencePort
@@ -417,31 +421,21 @@ LLMInferencePort
 WatsonXAdapter / LiteLLMAdapter
 ```
 
-## ClassificationService
+## StandardLLMClassificationAdapter
 
 **File**
 
 ```text
-src/docpipe/core/operators/quality/classification/classification_service.py
+src/docpipe/core/operators/quality/classification/adapters/outbound/standard_llm_adapter.py
 ```
 
-**Responsibilities**: prompt building, LLM call, response parsing, validation.
+**Responsibilities**: config validation, `LLMInferencePort` construction (in `from_config()`),
+prompt building, LLM call, response parsing.
 
-**Actual constructor signature**:
-
-```python
-ClassificationService(
-    *,
-    model_id: str,
-    provider_name: str,
-    provider_config: dict[str, Any] | None = None,
-    temperature: float = 0.0,
-    max_tokens: int = 500,
-)
-```
-
-`provider_config` is passed directly to `LLMAdapterFactory`. `temperature` and `max_tokens`
-are separate parameters, not fields inside `provider_config`.
+`provider_config` is passed directly to `LLMAdapterFactory`. It is required for `litellm` and
+optional for `watsonx` (which falls back to `WATSONX_*` environment variables). `temperature` and
+`max_tokens` are read from `provider_config`, defaulting to
+`OperatorConstants.Classification.DEFAULT_TEMPERATURE` / `DEFAULT_MAX_TOKENS`.
 
 ## Flow JSON example
 

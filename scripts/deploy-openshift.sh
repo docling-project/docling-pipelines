@@ -5,7 +5,7 @@ set -e
 # Usage: ./deploy-openshift.sh [project-name] [git-repo-url]
 
 PROJECT_NAME=${1:-docpipe}
-GIT_REPO=${2:-https://github.com/IBM/docling-pipelines.git}
+GIT_REPO=${2:-https://github.com/docling-project/docling-pipelines.git}
 GIT_BRANCH=${3:-main}
 GIT_USERNAME=${GIT_USERNAME:-}
 GIT_TOKEN=${GIT_TOKEN:-}

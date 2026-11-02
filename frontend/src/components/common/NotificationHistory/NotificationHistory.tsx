@@ -18,11 +18,13 @@ import {
   WarningAltFilled,
   InformationFilled,
 } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { useAppSelector } from '@/hooks/useAppSelector';
 import { useAppDispatch } from '@/hooks/useAppDispatch';
 import { clearHistory, markHistoryRead } from '@/slices/notificationsSlice';
 import { selectNotificationHistory } from '@/selectors';
 import type { Notification } from '@/types/notifications';
+import { messages } from './NotificationHistory.messages';
 import styles from './NotificationHistory.module.scss';
 
 interface NotificationHistoryProps {
@@ -62,6 +64,7 @@ export function NotificationHistory({
   open,
   onClose,
 }: NotificationHistoryProps): React.JSX.Element | null {
+  const intl = useIntl();
   const dispatch = useAppDispatch();
   const history = useAppSelector(selectNotificationHistory);
 
@@ -77,32 +80,32 @@ export function NotificationHistory({
     <>
       <div className={styles.overlay} onClick={onClose} aria-hidden="true" />
 
-      <aside className={styles.panel} aria-label="Notification history" role="complementary">
+      <aside className={styles.panel} aria-label={intl.formatMessage(messages.panelAriaLabel)} role="complementary">
         {/* Header */}
         <div className={styles.header}>
-          <h2 className={styles.title}>Notifications</h2>
+          <h2 className={styles.title}>{intl.formatMessage(messages.panelTitle)}</h2>
           <div className={styles.headerActions}>
             {history.length > 0 && (
               <Button
                 kind="ghost"
                 size="sm"
                 renderIcon={TrashCan}
-                iconDescription="Clear all notifications"
+                iconDescription={intl.formatMessage(messages.clearAll)}
                 hasIconOnly
                 tooltipPosition="bottom"
                 onClick={() => { dispatch(clearHistory()); }}
-                aria-label="Clear all notifications"
+                aria-label={intl.formatMessage(messages.clearAll)}
               />
             )}
             <Button
               kind="ghost"
               size="sm"
               renderIcon={Close}
-              iconDescription="Close notification history"
+              iconDescription={intl.formatMessage(messages.closePanel)}
               hasIconOnly
               tooltipPosition="bottom"
               onClick={onClose}
-              aria-label="Close notification history"
+              aria-label={intl.formatMessage(messages.closePanel)}
             />
           </div>
         </div>
@@ -110,9 +113,9 @@ export function NotificationHistory({
         {/* Body */}
         <div className={styles.body}>
           {history.length === 0 ? (
-            <p className={styles.empty}>No notifications yet.</p>
+            <p className={styles.empty}>{intl.formatMessage(messages.empty)}</p>
           ) : (
-            <ul className={styles.list} aria-label="Notification history list">
+            <ul className={styles.list} aria-label={intl.formatMessage(messages.historyListLabel)}>
               {history.map((notification) => {
                 const { Icon, iconClass } = KIND_META[notification.kind];
                 return (

@@ -16,7 +16,7 @@ def create_lineage_observer() -> ExecutionLifecycleObserverPort | None:
     - DOCPIPE_LINEAGE_ENABLED  — must be "true" to activate (default: "false")
     - DOCPIPE_LINEAGE_MODE     — "flow" or "operator" (default: "flow")
     - DOCPIPE_LINEAGE_NAMESPACE — job namespace (default: "docpipe://local")
-    - DOCPIPE_LINEAGE_PRODUCER  — producer URI (default: IBM/docling-pipelines URL)
+    - DOCPIPE_LINEAGE_PRODUCER  — producer URI (default: docling-project/docling-pipelines URL)
 
     Returns:
         Configured OpenLineageExecutionObserver, or None if lineage is disabled
@@ -63,5 +63,5 @@ def create_lineage_observer() -> ExecutionLifecycleObserverPort | None:
         return observer
 
     except Exception as exc:
-        logger.warning("Failed to create lineage observer — lineage will not be emitted: %s", exc)
+        logger.warning("Failed to create lineage observer - lineage will not be emitted: %s", exc)
         return None

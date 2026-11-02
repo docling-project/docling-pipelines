@@ -52,9 +52,9 @@ class FastTextAdapter(LanguageServicePort):
         try:
             self.fasttext_model = self.model_manager.acquire_model()
             ref_count = self.model_manager.get_ref_count()
-            logger.info(f"FastText model acquired successfully. Reference count: {ref_count}")
+            logger.info("FastText model acquired successfully. Reference count: %s", ref_count)
         except Exception as e:
-            logger.error(f"Failed to acquire FastText model: {e}")
+            logger.error("Failed to acquire FastText model: %s", e)
             self.fasttext_model = None
             raise ExternalServiceError(f"Failed to initialize FastText model: {e}") from e
 
@@ -68,10 +68,10 @@ class FastTextAdapter(LanguageServicePort):
             try:
                 self.model_manager.release_model()
                 ref_count = self.model_manager.get_ref_count()
-                logger.info(f"FastText model released. Reference count: {ref_count}")
+                logger.info("FastText model released. Reference count: %s", ref_count)
                 self.fasttext_model = None
             except Exception as e:
-                logger.warning(f"Error releasing FastText model: {e}")
+                logger.warning("Error releasing FastText model: %s", e)
 
     def detect_language(self, text: str) -> LanguageDetectionResult:
         """Detect language using FastText model.
@@ -111,5 +111,5 @@ class FastTextAdapter(LanguageServicePort):
             # Re-raise ValueError as-is
             raise
         except Exception as e:
-            logger.error(f"FastText language detection failed: {e}")
+            logger.error("FastText language detection failed: %s", e)
             raise ExternalServiceError(f"FastText language detection failed: {e}") from e

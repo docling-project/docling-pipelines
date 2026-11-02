@@ -36,7 +36,6 @@ class TestVectorDBMetrics:
             "provider": "opensearch",
             "doc_id_column": "doc_id_hash",
             "embeddings_column": "embeddings",
-            "create_index": False,
             "vector_dimension": 2,
             "available_features": {
                 "doc_id_hash": {

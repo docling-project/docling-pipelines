@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
+from docpipe.utils.infrastructure import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -252,3 +253,4 @@ def resolve_value(value: Any) -> Any:
 def clear_providers() -> None:
     """Remove all registered providers. Primarily for testing."""
     _providers.clear()
+    DocpipeConfigLoader.reset()

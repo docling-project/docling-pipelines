@@ -12,9 +12,11 @@
 
 import React, { useMemo, useEffect, useRef, useCallback } from 'react';
 import { Accordion, AccordionItem, CopyButton, InlineNotification } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { JobRunStatusResponse } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 import { LOG_SCROLL_DELAY_MS, LOG_PREVIEW_THRESHOLD } from '@/constants/runSidePanel';
+import { messages } from './JobRunLogs.messages';
 import styles from './JobRunLogs.module.scss';
 
 interface JobRunLogsProps {
@@ -31,6 +33,7 @@ export function JobRunLogs({
   selectedNodeId,
   onShowFullLog,
 }: JobRunLogsProps): React.JSX.Element {
+  const intl = useIntl();
   const { node_sequence, job_stats } = executionLogs;
   const isFailedNoSequence =
     (!node_sequence || node_sequence.length === 0) &&
@@ -81,8 +84,8 @@ export function JobRunLogs({
       <div className={styles.logsContainer}>
         <InlineNotification
           kind="error"
-          title="Run job failed"
-          subtitle="Check your configuration and try again"
+          title={intl.formatMessage(messages.errorTitle)}
+          subtitle={intl.formatMessage(messages.errorSubtitle)}
           lowContrast
           hideCloseButton
           className={styles.inlineNotification}
@@ -133,14 +136,14 @@ export function JobRunLogs({
                   {isTruncated && (
                     <div className={styles.showMoreLink}>
                       <button
-                        type="button"
-                        className={styles.showMoreButton}
-                        onClick={() => {
-                          onShowFullLog(fullLog, nodeName);
-                        }}
-                      >
-                        Show detailed log
-                      </button>
+                          type="button"
+                          className={styles.showMoreButton}
+                          onClick={() => {
+                            onShowFullLog(fullLog, nodeName);
+                          }}
+                        >
+                          {intl.formatMessage(messages.showDetailedLog)}
+                        </button>
                     </div>
                   )}
                 </div>

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { render } from '@testing-library/react';
+import { renderWithProviders } from '../../../utils/renderWithProviders';
 import NodeSuggestion from '@/components/Canvas/NodeSuggestion/NodeSuggestion';
 import type { NodeSuggestionProps } from '@/components/Canvas/NodeSuggestion/NodeSuggestion';
 import type { PaletteData } from '@/types/palette';
@@ -35,7 +35,7 @@ function renderSuggestion(props: Partial<NodeSuggestionProps> = {}) {
     paletteData: SAMPLE_PALETTE,
     ...props,
   };
-  return { ...render(<NodeSuggestion {...defaults} />), ...defaults };
+  return { ...renderWithProviders(<NodeSuggestion {...defaults} />), ...defaults };
 }
 
 describe('NodeSuggestion', () => {

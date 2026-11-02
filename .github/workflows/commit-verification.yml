@@ -1,0 +1,292 @@
+name: Commit Verification Comment Bot
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  post-comment:
+    name: Post Verification Comment
+    # A cancelled run (e.g. superseded by a newer push) has no results to report.
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      # The artifact is produced by the unprivileged pull_request run and must be
+      # treated as untrusted input. Extract outside the workspace.
+      - name: Download Verification Results Artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: commit-verification-results
+          path: ${{ runner.temp }}/verification-results
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post Consolidated Comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const { owner, repo } = context.repo;
+            const workflowRun = context.payload.workflow_run;
+            const headSha = workflowRun.head_sha;
+            const headBranch = workflowRun.head_branch;
+            const headRepoOwner = workflowRun.head_repository?.owner?.login;
+            const headRepoFullName = workflowRun.head_repository?.full_name;
+
+            console.log("HEAD SHA:", headSha);
+            console.log("Workflow run conclusion:", workflowRun.conclusion);
+
+            if (!headBranch || !headRepoOwner || !headRepoFullName) {
+              console.log(`Workflow run for ${headSha} has no head repository or branch; skipping comment.`);
+              return;
+            }
+
+            // Find the PR from the workflow run's head repository owner and branch.
+            // repos.listPullRequestsAssociatedWithCommit cannot be used: for fork PRs the
+            // head SHA does not exist in this repository, so it returns no PRs and the
+            // comment would be silently skipped. The "owner:branch" head filter works for
+            // both fork and same-repository PRs. These values come from the workflow_run
+            // payload set by GitHub, never from the artifact. The head SHA and head
+            // repository checks below ensure the PR matches this exact run.
+            const { data: prs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              base: "main",
+              head: `${headRepoOwner}:${headBranch}`
+            });
+
+            const pr = prs.find(candidate =>
+              candidate.state === "open" &&
+              candidate.base.ref === "main" &&
+              candidate.base.repo.full_name === `${owner}/${repo}` &&
+              candidate.head.repo?.full_name === headRepoFullName &&
+              candidate.head.sha === headSha
+            );
+
+            if (!pr) {
+              console.log(`No matching PR found for ${headSha} (head ${headRepoOwner}:${headBranch}).`);
+              return;
+            }
+
+            // PR author and base branch come from the API, never from the artifact.
+            const prNumber = pr.number;
+            const prAuthor = pr.user.login;
+            const baseRef = pr.base.ref;
+
+            // Read the results written by the verify-commits job in ci.yml.
+            const resultsPath = path.join(process.env.RUNNER_TEMP, 'verification-results', 'results.json');
+            if (!fs.existsSync(resultsPath)) {
+              console.log('Verification results artifact not found; skipping comment.');
+              return;
+            }
+
+            let raw;
+            try {
+              raw = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+            } catch (e) {
+              console.log('Verification results file is not valid JSON; skipping comment.');
+              return;
+            }
+
+            // The artifact is untrusted (fork PRs control ci.yml); validate its shape.
+            const isCount = v => Number.isInteger(v) && v >= 0;
+            const isFailedList = v => Array.isArray(v) && v.length <= 250;
+            if (
+              !raw ||
+              !isFailedList(raw.dco_failed) ||
+              !isFailedList(raw.gpg_failed) ||
+              !isFailedList(raw.template_failed) ||
+              !isCount(raw.dco_passed) ||
+              !isCount(raw.gpg_passed) ||
+              !isCount(raw.template_passed)
+            ) {
+              console.log('Verification results file has an unexpected shape; skipping comment.');
+              return;
+            }
+
+            // Neutralise markdown/HTML/mention syntax in untrusted text rendered
+            // outside a code span. Truncate first so entities are never cut in half.
+            const TABLE_ESCAPES = {
+              '&': '&amp;', '|': '&#124;', '\\': '&#92;', '`': '&#96;',
+              '<': '&lt;', '>': '&gt;', '[': '&#91;', ']': '&#93;',
+              '(': '&#40;', ')': '&#41;', '!': '&#33;'
+            };
+            function sanitizeForTable(str) {
+              return String(str)
+                .replace(/[\r\n]+/g, ' ')
+                .slice(0, 100)
+                .replace(/[&|\\`<>[\]()!]/g, ch => TABLE_ESCAPES[ch])
+                // Zero-width space after @ prevents user/team mentions
+                .replace(/@/g, '@\u200b');
+            }
+
+            // Untrusted text rendered inside an inline code span: only backticks
+            // and line breaks can break out of it.
+            function sanitizeForCode(str) {
+              return String(str)
+                .replace(/[\r\n]+/g, ' ')
+                .replace(/`/g, '')
+                .slice(0, 100);
+            }
+
+            function sanitizeSha(str) {
+              const sha = String(str).toLowerCase();
+              return /^[0-9a-f]{7,40}$/.test(sha) ? sha : 'invalid-sha';
+            }
+
+            function normalizeCommit(c) {
+              const entry = c && typeof c === 'object' ? c : {};
+              return {
+                sha: sanitizeSha(entry.sha),
+                author: String(entry.author ?? ''),
+                email: String(entry.email ?? ''),
+                message: String(entry.message ?? ''),
+                reason: String(entry.reason ?? 'unsigned')
+              };
+            }
+
+            const dcoFailed = raw.dco_failed.map(normalizeCommit);
+            const gpgFailed = raw.gpg_failed.map(normalizeCommit);
+            const templateFailed = raw.template_failed.map(s => sanitizeForCode(s));
+            const dcoPassed = raw.dco_passed;
+            const gpgPassed = raw.gpg_passed;
+            const templatePassed = raw.template_passed;
+            const allPassed =
+              dcoFailed.length === 0 && gpgFailed.length === 0 && templateFailed.length === 0;
+
+            // Absolute URL: relative links do not resolve inside PR comments.
+            const repoUrl = `${context.serverUrl}/${owner}/${repo}`;
+
+            const commentHeader = "<!-- commit-verification-bot -->";
+
+            let body = "";
+
+            if (allPassed) {
+              body = [
+                commentHeader,
+                "✅ **Commit Verification Passed**",
+                "",
+                `Thanks @${prAuthor}! All commits have valid DCO sign-off and GPG signatures, and the PR template is complete. 🎉`,
+                "",
+                "**Summary:**",
+                `- DCO (Signed-off-by): ${dcoPassed} commit(s) ✅`,
+                `- GPG Verification: ${gpgPassed} commit(s) ✅`,
+                `- PR Template: ${templatePassed} required section(s) ✅`
+              ].join("\n");
+            } else {
+              body = [
+                commentHeader,
+                "❌ **Commit Verification Failed**",
+                "",
+                `Hi @${prAuthor}, your pull request has validation failures that must be resolved before merging.`,
+                "",
+                "This repository requires **all three**:",
+                "1. **DCO Sign-off** — Every commit must have a `Signed-off-by` trailer (`git commit -s`)",
+                "2. **GPG Verification** — Every commit must be GPG-signed and show **Verified** on GitHub",
+                "3. **PR Template** — All required sections must be filled out",
+                "",
+                "---"
+              ].join("\n");
+
+              if (dcoFailed.length > 0) {
+                body += "\n### 📝 DCO Sign-off Failures (" + dcoFailed.length + " commit(s))\n";
+                body += "These commits are missing `Signed-off-by`:\n\n";
+                body += "| Commit | Author | Message |\n";
+                body += "|--------|--------|---------|\n";
+                for (const c of dcoFailed) {
+                  body += `| \`${c.sha.slice(0,7)}\` | ${sanitizeForTable(c.author)} &lt;${sanitizeForTable(c.email)}&gt; | ${sanitizeForTable(c.message)} |\n`;
+                }
+                body += "\n**Fix:** Every commit needs its own `Signed-off-by` trailer. A separate remediation commit does **not** satisfy this check; re-sign the commits instead:\n";
+                body += "```bash\n";
+                body += `git rebase --signoff origin/${baseRef}\n`;
+                body += "git push --force-with-lease\n```\n";
+              }
+
+              if (gpgFailed.length > 0) {
+                body += "\n### 🔐 GPG Verification Failures (" + gpgFailed.length + " commit(s))\n";
+                body += "These commits are **not GPG-verified** on GitHub:\n\n";
+                body += "| Commit | Author | Reason | Message |\n";
+                body += "|--------|--------|--------|---------|\n";
+                for (const c of gpgFailed) {
+                  const reason = c.reason || 'unsigned';
+                  body += `| \`${c.sha.slice(0,7)}\` | ${sanitizeForTable(c.author)} &lt;${sanitizeForTable(c.email)}&gt; | ${sanitizeForTable(reason)} | ${sanitizeForTable(c.message)} |\n`;
+                }
+                body += `\n**Fix:** You must GPG-sign all commits. See [Verified Commits setup guide](${repoUrl}/blob/${baseRef}/CONTRIBUTING.md#verified-commits).\n\n`;
+                body += "**Single commit:**\n";
+                body += "```bash\n";
+                body += "git commit --amend --signoff -S\n";
+                body += "git push --force-with-lease\n";
+                body += "```\n\n";
+                body += "**Multiple commits:**\n";
+                body += "```bash\n";
+                body += `git rebase --exec 'git commit --amend --signoff -S --no-edit' origin/${baseRef}\n`;
+                body += "git push --force-with-lease\n";
+                body += "```\n\n";
+                body += "> **Note:** GPG signing (`-S`) is separate from DCO sign-off (`-s`). **Both are required.**\n";
+              }
+
+              if (templateFailed.length > 0) {
+                body += "\n### 📋 PR Template Validation Failures\n";
+                body += "Missing or incomplete required section(s):\n\n";
+                for (const section of templateFailed) {
+                  body += `- \`${section}\`\n`;
+                }
+                body += "\nPlease fill out all sections of the PR template before requesting review.\n";
+                body += `See the [PR template](${repoUrl}/blob/${baseRef}/.github/pull_request_template.md) for reference.\n`;
+              }
+
+              body += "\n---\n";
+              body += `**Summary:** DCO: ${dcoPassed} passed, ${dcoFailed.length} failed | GPG: ${gpgPassed} passed, ${gpgFailed.length} failed | Template: ${templatePassed} passed, ${templateFailed.length} failed`;
+            }
+
+            // Upsert bot comment (fetch all pages to find existing comment on busy PRs)
+            let existingComment = null;
+            let page = 1;
+            const perPage = 100;
+
+            while (true) {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: prNumber,
+                per_page: perPage,
+                page: page
+              });
+
+              if (comments.length === 0) break;
+
+              existingComment = comments.find(c => c.body.includes(commentHeader));
+              if (existingComment) break;
+
+              if (comments.length < perPage) break;
+              page++;
+            }
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body
+              });
+            }

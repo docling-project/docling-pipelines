@@ -2,16 +2,34 @@
 
 This directory contains curated sample flows demonstrating docling-pipelines capabilities, organized by complexity and use case.
 
+## Table of Contents
+
+- [Directory Structure](#directory-structure)
+- [Quick Start](#quick-start)
+- [Flows by Category](#flows-by-category)
+- [Provider Coverage](#provider-coverage)
+- [Prerequisites](#prerequisites)
+- [How to Run a Flow](#how-to-run-a-flow)
+- [Flow Structure](#flow-structure)
+- [Customization Guide](#customization-guide)
+- [Troubleshooting](#troubleshooting)
+- [Next Steps](#next-steps)
+- [Additional Resources](#additional-resources)
+- [Flow Selection Guide](#flow-selection-guide)
+- [Feedback and Support](#feedback-and-support)
+
+---
+
 ## Directory Structure
 
-```
+```text
 sample_flows/
 ├── quickstart/          # Start here for beginners
 ├── operators/           # Individual operator demonstrations
 ├── use_cases/           # Real-world use case examples
 ├── advanced/            # Complex workflows and patterns
 ├── vectordb/            # Vector database integrations
-├── vault/               # HashiCorp Vault secret reference examples
+├── storage_output/      # Original and processed content exports
 └── custom_operators/    # Custom operator examples
 ```
 
@@ -26,12 +44,17 @@ sample_flows/
    docling-pipelines --flow-file sample_flows/quickstart/basic_ingest_extract.json
    ```
 
-2. **Try a complete pipeline:**
+2. **Try a complete local pipeline (zero external services):**
+   ```bash
+   docling-pipelines --flow-file sample_flows/quickstart/milvus_lite_integration.json
+   ```
+
+3. **Try a complete pipeline with Ollama and OpenSearch:**
    ```bash
    docling-pipelines --flow-file sample_flows/quickstart/complete_pipeline_ollama.json
    ```
 
-3. **Explore advanced patterns:**
+4. **Explore advanced patterns:**
    ```bash
    docling-pipelines --flow-file sample_flows/advanced/branching_dual_embeddings_with_ingest_report.json
    ```
@@ -47,8 +70,10 @@ Perfect for beginners - simple, well-documented examples to get started.
 | Flow | Description | Prerequisites |
 |------|-------------|---------------|
 | `basic_ingest_extract.json` | Minimal 2-operator pipeline: ingest → extract | Docling |
+| [milvus_lite_integration.json](quickstart/milvus_lite_integration.json) | Container-free local pipeline: ingest → extract → chunk → local HuggingFace embeddings → Milvus Lite (`.db` file) | Docling, Sentence-Transformers, Milvus Lite (all included by default) |
 | `complete_pipeline_ollama.json` | Full local pipeline: ingest → extract → chunk → embed → OpenSearch | Ollama, OpenSearch |
 | `complete_pipeline_watsonx.json` | Full cloud pipeline with Watsonx provider | Watsonx API, OpenSearch |
+| [docker_e2e_ollama_opensearch.json](quickstart/docker_e2e_ollama_opensearch.json) | PDFs to Docling extraction, Ollama embeddings, OpenSearch | Docker stack, `/documents` PDF mount, Ollama embedding model, OpenSearch credentials |
 
 **Start here if:** You're new to docling-pipelines or want to understand basic flow structure.
 
@@ -92,6 +117,7 @@ Complex workflows demonstrating advanced patterns and operator combinations.
 | Flow | Pattern | Description |
 |------|---------|-------------|
 | `branching_dual_embeddings_with_ingest_report.json` | Branching | Parallel processing with dual embedding models and ingest report |
+| [branching_dual_embeddings.json](advanced/branching_dual_embeddings.json) | Dual embeddings | Two LiteLLM embedding branches merge into document set and OpenSearch; requires embedding models and OpenSearch |
 | `branching_quality_routing.json` | Quality Routing | Route documents based on quality metrics |
 | `quality_branching_merge_pipeline.json` | Branching + Merge | 3-way branching with dedup, quality checks, and row-based merging |
 | `multi_stage_enrichment.json` | Multi-Stage | Classification → Entity Extraction → PII Detection → Chunking |
@@ -115,29 +141,19 @@ Complete pipelines demonstrating vector database integrations.
 
 ---
 
-### Vault
+### Storage Output
 
-Flows demonstrating HashiCorp Vault secret references in operator configs.
+Export processed text, original documents, and metadata.
 
-| Flow | Description |
-|------|-------------|
-| `opensearch_with_vault.json` | Full OpenSearch pipeline where credentials are resolved from Vault at runtime using `vault://` references |
+| Flow | Description | Prerequisites |
+| --- | --- | --- |
+| [comprehensive_export_box.json](storage_output/comprehensive_export_box.json) | Archive Box documents, extracted content, and metadata to Box | `BOX_CONFIG_PATH` and Box source/destination folder IDs |
+| [comprehensive_export_google_drive.json](storage_output/comprehensive_export_google_drive.json) | Archive local documents, extracted content, and metadata to Google Drive | Local input paths and `GDRIVE_DRIVE_ID`, `GDRIVE_FOLDER_ID`, `GDRIVE_SA_JSON_PATH` |
+| [comprehensive_export_sharepoint.json](storage_output/comprehensive_export_sharepoint.json) | Archive local documents, extracted content, and metadata to SharePoint | Local input paths, SharePoint drive ID, tenant/client ID and secret |
+| [processed_content_s3.json](storage_output/processed_content_s3.json) | Extract PDFs from S3 and export processed text to S3 | Source and destination S3 buckets and access credentials |
+| [refetch_original_filesystem.json](storage_output/refetch_original_filesystem.json) | Archive original files to a local filesystem directory | Existing source and writable destination paths |
 
-**Start here if:** You need to manage secrets centrally and keep credentials out of flow JSON files.
-
-**Prerequisites:**
-```bash
-# Enable Vault in docling-pipelines-config.yaml
-secrets:
-  vault:
-    enabled: true
-    provider: hashicorp
-
-# Set Vault credentials as environment variables
-export VAULT_ADDR=https://vault.your-org.com
-export VAULT_ROLE_ID=<your-approle-role-id>
-export VAULT_SECRET_ID=<your-approle-secret-id>
-```
+**Start here if:** You need processed-content export, document archiving, or compliance handoff.
 
 ---
 
@@ -222,21 +238,6 @@ export WATSONX_API_BASE=https://us-south.ml.cloud.ibm.com
 export WATSONX_CONTAINER_ID=your_project_id
 ```
 
-### For Vault Flows
-```bash
-# Enable in docling-pipelines-config.yaml (secrets.vault.enabled: true)
-# Then set AppRole credentials
-export VAULT_ADDR=https://vault.your-org.com
-export VAULT_ROLE_ID=your-approle-role-id
-export VAULT_SECRET_ID=your-approle-secret-id
-
-# Optional: use file-backed secrets (Docker/Kubernetes pattern)
-export VAULT_ROLE_ID_FILE=/run/secrets/vault_role_id
-export VAULT_SECRET_ID_FILE=/run/secrets/vault_secret_id
-```
-
----
-
 ## How to Run a Flow
 
 ### Basic Execution
@@ -307,7 +308,7 @@ All flows follow this JSON structure:
   "type": "ingest_source",
   "config": {
     "provider": "filesystem",
-    "connection_params": {"paths": ["./your/documents/path"]},
+    "provider_config": {"paths": ["./your/documents/path"]},
     "include_filter": "pdf,txt,docx"
   }
 }
@@ -449,7 +450,9 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | If you want to... | Start with... |
 |-------------------|---------------|
 | Learn the basics | `quickstart/basic_ingest_extract.json` |
-| Set up RAG pipeline | `quickstart/complete_pipeline_ollama.json` |
+| Run a zero-container local RAG pipeline | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
+| Set up RAG pipeline with Ollama & OpenSearch | `quickstart/complete_pipeline_ollama.json` |
+| Run the Docker Ollama/OpenSearch pipeline | [quickstart/docker_e2e_ollama_opensearch.json](quickstart/docker_e2e_ollama_opensearch.json) |
 | Use cloud LLMs | `quickstart/complete_pipeline_watsonx.json` |
 | Classify documents | `operators/classification_ollama.json` |
 | Extract entities | `operators/entity_extraction_litellm.json` |
@@ -460,9 +463,16 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | Ingest from S3 | `use_cases/s3_to_opensearch.json` |
 | Route by quality | `advanced/branching_quality_routing.json` |
 | Parallel processing | `advanced/branching_dual_embeddings_with_ingest_report.json` |
+| Generate and merge dual embeddings | [advanced/branching_dual_embeddings.json](advanced/branching_dual_embeddings.json) |
 | Complex pipeline | `advanced/multi_stage_enrichment.json` |
 | Use OpenSearch | `vectordb/opensearch_integration.json` |
 | Use Milvus | `vectordb/milvus_integration.json` |
+| Use serverless Milvus Lite | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
+| Export original files to Box | [storage_output/comprehensive_export_box.json](storage_output/comprehensive_export_box.json) |
+| Export original files to Google Drive | [storage_output/comprehensive_export_google_drive.json](storage_output/comprehensive_export_google_drive.json) |
+| Export original files to SharePoint | [storage_output/comprehensive_export_sharepoint.json](storage_output/comprehensive_export_sharepoint.json) |
+| Export processed text to S3 | [storage_output/processed_content_s3.json](storage_output/processed_content_s3.json) |
+| Archive originals to the filesystem | [storage_output/refetch_original_filesystem.json](storage_output/refetch_original_filesystem.json) |
 | Create custom operators | `custom_operators/hello_operator.json` |
 
 ---

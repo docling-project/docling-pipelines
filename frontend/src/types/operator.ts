@@ -38,6 +38,10 @@ export interface ModelsResponse {
 export interface OperatorFeature {
   type: string;
   name?: string;
+  /**
+   * Human-readable description served by the backend operator metadata. It is
+   * English-only and not part of the react-intl catalog.
+   */
   description?: string | null;
   required?: boolean | null;
   default?: unknown;

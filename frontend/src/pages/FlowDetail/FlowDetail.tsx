@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { go } from '@/utils';
 import {
@@ -26,6 +27,7 @@ import { formatEpochToDisplay, formatElapsedTime } from '@/utils/dateTimeUtils';
 import { FlowInfoPanel } from '@/components/common/FlowInfoPanel';
 import { FlowMetrics, FlowRunsTable } from '@/components/FlowDetail';
 import type { RunMetrics, RunRow } from '@/components/FlowDetail';
+import { messages } from './FlowDetail.messages';
 import styles from './FlowDetail.module.scss';
 
 // ─── Local helpers ─────────────────────────────────────────────────────────────
@@ -56,6 +58,7 @@ function toRunStatus(apiStatus: string): RunRow['status'] {
  * - {@link FlowInfoPanel} — "About flow" sliding panel (conditionally rendered)
  */
 export function FlowDetail(): React.JSX.Element | null {
+  const intl = useIntl();
   const { flow_id: flowId } = useParams<{ flow_id: string }>();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project_id') ?? '';
@@ -119,10 +122,14 @@ export function FlowDetail(): React.JSX.Element | null {
         removeEntry(`flow-${flowId}`);
         const axiosErr = err as { response?: { status?: number } };
         if (axiosErr?.response?.status === 404) {
-          go(navigate, ROUTES.ERROR, { state: { message: 'Flow not found.', statusCode: 404 }, replace: true });
+          go(navigate, ROUTES.ERROR, {
+            state: { message: intl.formatMessage(messages.flowNotFound), statusCode: 404 },
+            replace: true,
+          });
         } else {
-          dispatch(setError('Failed to load flow. Please try again.'));
-          go(navigate, ROUTES.ERROR, { state: { message: 'Failed to load flow. Please try again.', statusCode: 500 }, replace: true });
+          const loadErrorMessage = intl.formatMessage(messages.flowLoadError);
+          dispatch(setError(loadErrorMessage));
+          go(navigate, ROUTES.ERROR, { state: { message: loadErrorMessage, statusCode: 500 }, replace: true });
         }
       })
       .finally(() => {
@@ -166,12 +173,12 @@ export function FlowDetail(): React.JSX.Element | null {
         setRuns(rows);
       })
       .catch(() => {
-        setRunsError('Failed to load runs. Please try again.');
+        setRunsError(intl.formatMessage(messages.runsLoadError));
       })
       .finally(() => {
         setRunsLoading(false);
       });
-  }, []);
+  }, [intl]);
 
   useEffect(() => {
     if (flowId) { fetchRuns(flowId); }
@@ -185,7 +192,7 @@ export function FlowDetail(): React.JSX.Element | null {
       <IconButton
         kind="ghost"
         size="sm"
-        label="About flow"
+        label={intl.formatMessage(messages.aboutFlow)}
         align="bottom-end"
         isSelected={panelOpen}
         onClick={() => { setPanelOpen((prev) => !prev); }}
@@ -194,7 +201,7 @@ export function FlowDetail(): React.JSX.Element | null {
       </IconButton>
     );
     return () => { setActions(null); };
-  }, [panelOpen, setActions]);
+  }, [panelOpen, setActions, intl]);
 
   // ── Derive RunMetrics from local run state ───────────────────────────────
   // Re-computed only when runs changes — each status is a single filter pass.
@@ -266,10 +273,12 @@ export function FlowDetail(): React.JSX.Element | null {
       await deleteJobRun(deleteTarget.run_id);
       setRuns((prev) => prev.filter((r) => r.run_id !== deleteTarget.run_id));
       setDeleteTarget(null);
-      notify.success(`Run ${deleteTarget.run_id} deleted successfully.`);
+      notify.success(intl.formatMessage(messages.deleteRunSuccess, { id: deleteTarget.run_id }));
     } catch {
       setDeleteTarget(null);
-      notify.error('Failed to delete run', { subtitle: 'Could not delete run. Please try again.' });
+      notify.error(intl.formatMessage(messages.deleteRunError), {
+        subtitle: intl.formatMessage(messages.deleteRunErrorSubtitle),
+      });
     }
   };
 
@@ -278,7 +287,7 @@ export function FlowDetail(): React.JSX.Element | null {
     return (
       <PageLayout fullBleed>
         <div className={styles.page}>
-          <InlineLoading description="Loading flow..." className={styles.loading} />
+          <InlineLoading description={intl.formatMessage(messages.loading)} className={styles.loading} />
         </div>
       </PageLayout>
     );
@@ -303,9 +312,9 @@ export function FlowDetail(): React.JSX.Element | null {
         {/* White header */}
         <div className={panelOpen ? `${styles.headerZone} ${styles.headerZoneWithPanel}` : styles.headerZone}>
           <div className={styles.titleRow}>
-            <h1 className={styles.flowName}>{flowRow.name} runs</h1>
+            <h1 className={styles.flowName}>{intl.formatMessage(messages.runsTitle, { name: flowRow.name })}</h1>
             <Button kind="tertiary" size="sm" renderIcon={View} onClick={handleViewFlow}>
-              View flow
+              {intl.formatMessage(messages.viewFlow)}
             </Button>
           </div>
         </div>
@@ -316,10 +325,10 @@ export function FlowDetail(): React.JSX.Element | null {
             <div className={styles.centeredState}>
               <ErrorEmptyState
                 illustrationTheme={isDarkMode ? 'dark' : 'light'}
-                title="Failed to load runs"
+                title={intl.formatMessage(messages.runsErrorTitle)}
                 subtitle={runsError}
                 action={{
-                  text: 'Try again',
+                  text: intl.formatMessage(messages.tryAgain),
                   onClick: () => { if (flowId) { fetchRuns(flowId); } },
                   renderIcon: RenewIcon,
                   kind: 'tertiary',
@@ -332,8 +341,8 @@ export function FlowDetail(): React.JSX.Element | null {
                 illustrationTheme={isDarkMode ? 'dark' : 'light'}
                 illustrationPosition="top"
                 size="sm"
-                title="No runs yet"
-                subtitle="Run this flow from the canvas to see execution history here."
+                title={intl.formatMessage(messages.emptyTitle)}
+                subtitle={intl.formatMessage(messages.emptySubtitle)}
               />
             </div>
           ) : (
@@ -366,7 +375,7 @@ export function FlowDetail(): React.JSX.Element | null {
 
       <EditDetailsModal
         open={editOpen}
-        title="Edit flow details"
+        title={intl.formatMessage(messages.editModalTitle)}
         initialValues={{ name: flowRow.name, description: flowRow.description, tags: flowRow.tags }}
         onCancel={() => { setEditOpen(false); }}
         onEdit={(updates) => handleEditSave(flowRow.flow_id, updates)}
@@ -374,7 +383,7 @@ export function FlowDetail(): React.JSX.Element | null {
 
       <DeleteModal
         open={deleteTarget !== null}
-        assetType="Run"
+        assetType={intl.formatMessage(messages.deleteAssetType)}
         assetName={deleteTarget?.start_time ?? ''}
         onCancel={() => { setDeleteTarget(null); }}
         onDelete={handleDeleteRunConfirm}

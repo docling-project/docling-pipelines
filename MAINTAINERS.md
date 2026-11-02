@@ -15,6 +15,5 @@
 - Remya P - remya.p@ibm.com
 - Sahil Berwal - Sahil.Berwal@ibm.com
 - Sanchit Rote - Sanchit.Rote@ibm.com
-- Yash Bopardikar - ybopard@us.ibm.com
 
-Maintainers can be contacted at [docling_pipeline_team-dg@ibm.com](mailto:docling_pipeline_team-dg@ibm.com).
+Maintainers can be contacted at [docling_pipeline_team@wwpdl.vnet.ibm.com](mailto:docling_pipeline_team@wwpdl.vnet.ibm.com).

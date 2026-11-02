@@ -6,6 +6,8 @@ import {
   ErrorFilled,
   Misuse,
 } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
+import { messages } from './FlowMetrics.messages';
 import styles from './FlowMetrics.module.scss';
 
 /**
@@ -38,39 +40,40 @@ interface FlowMetricsProps {
  * {@link FlowDetail}. Has no state, makes no API calls.
  */
 export function FlowMetrics({ metrics }: FlowMetricsProps): React.JSX.Element {
+  const intl = useIntl();
   return (
     <div className={styles.metricsSection}>
-      <p className={styles.metricsTitle}>Run metrics ({metrics.total})</p>
+      <p className={styles.metricsTitle}>{intl.formatMessage(messages.metricsTitle, { total: metrics.total })}</p>
       <div className={styles.metricsTiles}>
         <div className={styles.metricTile}>
           <span className={styles.metricValue}>
             {metrics.run}<CheckmarkFilled size={16} className={styles.iconRun} />
           </span>
-          <span className={styles.metricLabel}>Run</span>
+          <span className={styles.metricLabel}>{intl.formatMessage(messages.labelRun)}</span>
         </div>
         <div className={styles.metricTile}>
           <span className={styles.metricValue}>
             {metrics.in_progress}<InProgress size={16} className={styles.iconProgress} />
           </span>
-          <span className={styles.metricLabel}>In progress</span>
+          <span className={styles.metricLabel}>{intl.formatMessage(messages.labelInProgress)}</span>
         </div>
         <div className={styles.metricTile}>
           <span className={styles.metricValue}>
             {metrics.run_with_issues}<WarningFilled size={16} className={styles.iconWarning} />
           </span>
-          <span className={styles.metricLabel}>Run with issues</span>
+          <span className={styles.metricLabel}>{intl.formatMessage(messages.labelRunWithIssues)}</span>
         </div>
         <div className={styles.metricTile}>
           <span className={styles.metricValue}>
             {metrics.failed}<ErrorFilled size={16} className={styles.iconFailed} />
           </span>
-          <span className={styles.metricLabel}>Failed</span>
+          <span className={styles.metricLabel}>{intl.formatMessage(messages.labelFailed)}</span>
         </div>
         <div className={styles.metricTile}>
           <span className={styles.metricValue}>
             {metrics.cancelled}<Misuse size={16} className={styles.iconCancelled} />
           </span>
-          <span className={styles.metricLabel}>Cancelled</span>
+          <span className={styles.metricLabel}>{intl.formatMessage(messages.labelCancelled)}</span>
         </div>
       </div>
     </div>

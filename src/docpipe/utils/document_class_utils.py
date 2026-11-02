@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import Any, ClassVar
 
+import re2 as re
+
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -35,8 +37,6 @@ class DocumentClassUtils:
     @staticmethod
     def normalize_filename(name: str) -> str:
         """Normalize document type name to filename."""
-        import re
-
         name = name.lower()
         name = re.sub(r"[^a-z0-9]+", "_", name)
         name = re.sub(r"_+", "_", name)
@@ -158,7 +158,7 @@ class DocumentClassUtils:
                     template[field_name] = docling_type
                 else:
                     # Default to string if type not found
-                    logger.warning(f"Type not found for field {'.'.join(field_path)}, defaulting to string")
+                    logger.warning("Type not found for field %s, defaulting to string", ".".join(field_path))
                     template[field_name] = "string"
 
         return template
@@ -213,7 +213,7 @@ class DocumentClassUtils:
             return {}
 
         if not target_tables:
-            logger.warning(f"No target_tables found in document class: {doc_class_path}")
+            logger.warning("No target_tables found in document class: %s", doc_class_path)
             return {}
 
         # Build template
@@ -225,11 +225,11 @@ class DocumentClassUtils:
 
         # Limit number of fields if requested
         if max_fields and len(template) > max_fields:
-            logger.info(f"Limiting template to {max_fields} fields (from {len(template)})")
+            logger.info("Limiting template to %s fields (from %s)", max_fields, len(template))
             # Keep first max_fields items
             template = dict(list(template.items())[:max_fields])
 
-        logger.info(f"Generated Docling template with {len(template)} fields from {Path(doc_class_path).name}")
+        logger.info("Generated Docling template with %s fields from %s", len(template), Path(doc_class_path).name)
 
         return template
 
@@ -458,9 +458,9 @@ class DocumentClassUtils:
 
                     if doc_type and doc_description:
                         document_types[doc_type] = doc_description
-                        logger.debug(f"Loaded document type '{doc_type}' from {json_file.name}")
+                        logger.debug("Loaded document type '%s' from %s", doc_type, json_file.name)
                     else:
-                        logger.warning(f"Skipping {json_file.name}: missing document_type or document_description")
+                        logger.warning("Skipping %s: missing document_type or document_description", json_file.name)
 
                 except (OSError, json.JSONDecodeError) as e:
                     logger.warning("Failed to load %s: %s", json_file.name, str(e))
@@ -503,7 +503,7 @@ class DocumentClassUtils:
                     else:
                         logger.warning("No valid schema found in %s", file_name)
             except (OSError, json.JSONDecodeError) as exc:
-                logger.warning(f"Failed to load schema for '{document_type}' from {file_name}: {exc}")
+                logger.warning("Failed to load schema for '%s' from %s: %s", document_type, file_name, exc)
 
         return schema_templates
 
@@ -543,7 +543,7 @@ class DocumentClassUtils:
                 doc_class_path = doc_classes_dir / f"{normalized_name}.json"
 
                 if not doc_class_path.exists():
-                    logger.warning(f"Document class file not found for type '{doc_type}': {doc_class_path}")
+                    logger.warning("Document class file not found for type '%s': %s", doc_type, doc_class_path)
                     continue
 
                 # Generate Docling template from document class
@@ -556,6 +556,6 @@ class DocumentClassUtils:
                 logger.info("Generated Docling template for '%s' with %s fields", doc_type, len(template))
 
             except Exception as e:
-                logger.warning(f"Failed to generate Docling template for '{doc_type}': {e}")
+                logger.warning("Failed to generate Docling template for '%s': %s", doc_type, e)
 
         return schema_templates

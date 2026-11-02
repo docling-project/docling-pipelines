@@ -400,4 +400,4 @@ or link to `docs/internals/OPERATOR_ARCHITECTURE_<name>.md` for long content.
 
 ---
 
-*Questions about this guide? Open a [GitHub Discussion](https://github.com/IBM/docling-pipelines/discussions) or propose a change via pull request.*
+*Questions about this guide? Open a [GitHub Discussion](https://github.com/docling-project/docling-pipelines/discussions) or propose a change via pull request.*

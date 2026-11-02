@@ -49,12 +49,14 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/core/adapters/` | LLM adapters: `HuggingFaceAdapter`, `LiteLLMAdapter`, `WatsonxAdapter`; factory: `llm_adapter_factory.py` |
 | `src/docpipe/core/ports/` | Port interfaces: `LLMInferencePort`, `LLMEmbeddingPort`, `TextDetectionPort` |
 | `src/docpipe/core/incremental_metadata/` | Tracks previously processed docs for incremental/delta runs |
+| `src/docpipe/core/lineage/` | Optional OpenLineage support (hexagonal): `domain/` (models, ports), `application/` (`LineageService`, `lineage_factory`), `adapters/` (`openlineage/` observer + publisher, `noop/`), `dataset_naming.py` (provider config to dataset namespace/name); disabled unless `DOCPIPE_LINEAGE_ENABLED=true` |
 | `src/docpipe/core/models/session_info.py` | `SessionInfo` — thread-local context: `job_id`, `job_run_id`; use `get_session_info()` / `set_session_info()` |
 | `src/docpipe/core/data_access/` | Wraps `data_processing.DataAccess` — parquet-based document table IO |
 | `src/docpipe/core/document_classes/` | YAML schema definitions for document column structures |
 | `src/docpipe/integrations/` | External service clients: AWS, Docling, HuggingFace, LiteLLM, Ollama, WatsonX |
 | `src/docpipe/storage/` | Storage abstraction: DuckDB + filesystem; interfaces `TableStorage`, `KeyValueStorage` in `storage/interfaces/`; default DuckDB paths: `data/duckdb/job_stats.duckdb`, `data/duckdb/document_sets.duckdb` |
 | `src/docpipe/utils/infrastructure/logging.py` | `get_logger()` — always use this, never `logging.getLogger()` directly |
+| `src/docpipe/utils/infrastructure/config_utils.py` | `DocpipeConfigLoader` — reads `docling-pipelines-config.yaml` once (cached singleton); use `get(key=...)` / `get_storage()` in factories, never parse the YAML file directly |
 | `src/docpipe/utils/` | Shared: logging, pyarrow handlers (`utils/data/pyarrow_handler.py`), flow_utils, duckdb helpers, llm utils |
 | `src/docpipe/exceptions/` | `DocpipeException`, `FlowValidationException`, `FlowExecutionFailedException` |
 | `tests/` | pytest — mirrors `src/docpipe/` structure; unit tests under `tests/unit/`, integration under `tests/integration/` |
@@ -210,7 +212,7 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
     - Factory/constructor alternatives that use `cls` → `@classmethod`
     - `transform()`, `__init__`, lifecycle hooks, anything reading `self.*` → instance method
     - Never add `self` to a method signature just to satisfy a linter or to match surrounding style
-    - Known violations being tracked in [#127](https://github.com/IBM/docling-pipelines/issues/127)
+    - Known violations being tracked in [#127](https://github.com/docling-project/docling-pipelines/issues/127)
 
 16. **Use `_` and `__` name prefixes correctly** — they have distinct meanings and must not be used interchangeably:
     - `_name` (single underscore) — **internal by convention**: accessible from outside the class but signals "do not use directly". Use for private helpers, internal state, and implementation details that subclasses may legitimately access.
@@ -229,10 +231,19 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `true` (default) \| `false` |
 | `DOCPIPE_CUSTOM_OPERATORS` | Comma-separated package paths injected as operator providers |
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
-| `DOCPIPE_STORAGE_BACKEND` | `duckdb` (default) \| `postgres` |
-| `DOCPIPE_FRAMEWORK_TYPE` | `local` (default) \| `prefect` |
-| `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres) |
+| `DOCPIPE_STORAGE_BACKEND` | Forwarded to workers only; no longer overrides `job_management.storage` in the config file |
+| `DOCPIPE_FRAMEWORK_TYPE` | Forwarded to workers only; no longer overrides `job_management.framework` in the config file |
+| `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres; also the fallback for asset repositories of type `postgres`) |
+| `DOCUMENTSET_REPOSITORY_TYPE` / `DOCUMENTLIBRARY_REPOSITORY_TYPE` | Asset metadata backend: `duckdb` (default) \| `postgres` (overrides `assets_management.<asset>_repository.type`) |
+| `DOCPIPE_LINEAGE_ENABLED` | `false` (default) \| `true` — emit OpenLineage events (requires the `lineage` extra) |
+| `DOCPIPE_LINEAGE_MODE` | `flow` (default) \| `operator` — add per-node events |
+| `DOCPIPE_LINEAGE_NAMESPACE` | OpenLineage namespace, default `docpipe://local` |
+| `DOCPIPE_LINEAGE_PRODUCER` | Producer URI embedded in facets, default `https://github.com/docling-project/docling-pipelines` |
+| `DOCPIPE_LINEAGE_STRICT` | `false` (default) \| `true` — re-raise observer errors instead of logging a warning |
+| `OPENLINEAGE__TRANSPORT__*` | OpenLineage SDK transport settings (`console` default, `file`, `http`); read by the SDK, not by docpipe |
 | `CORS_ORIGINS` | Comma-separated allowed origins, default `http://localhost:3000` |
+| `DOCPIPE_DOCLING_CONVERTER_POOL_SIZE` | Max pooled Docling converters/extractors per process, default `min(2*cpu, 16)`; overrides `docling.converter_pool.size` in the config file |
+| `DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS` | Idle pooled converter lifetime, default `600`; `0` = keep until exit; overrides `docling.converter_pool.idle_ttl_seconds` |
 
 ## Commands
 
@@ -286,3 +297,59 @@ Full style guide: [`docs/guides/DOCUMENTATION_STYLE_GUIDE.md`](docs/guides/DOCUM
 **Mermaid:** validate every diagram at [mermaid.live](https://mermaid.live) before committing; use `graph LR` for pipelines, `graph TD` for hierarchy
 
 **Changelog:** maintainers manually update `CHANGELOG.md` at release time. Agents must not update it during PR or commit work unless explicitly requested.
+
+## OpenSpec
+
+This repo uses [OpenSpec](https://openspec.dev) for spec-driven development. Live specs in `openspec/specs/` describe the current observable behavior of every major API surface and engine capability. Read the relevant spec before modifying any capability it covers.
+
+**Spec index** — `openspec list --specs` (requires `openspec` CLI, Node ≥20.19):
+
+| Namespace | Coverage |
+|---|---|
+| `backend/flows-api` | Flow CRUD REST API (incl. cascade delete of job runs) |
+| `backend/projects-api` | Project CRUD REST API |
+| `backend/job-runs-api` | Job run lifecycle REST API |
+| `backend/operators-api` | Operator metadata + flow validation REST API |
+| `backend/document-sets-api` | Document set REST API |
+| `backend/document-libraries-api` | Document library REST API |
+| `backend/documents-api` | Document REST API |
+| `backend/providers-api` | LLM/embedding provider model listing (ollama, watsonx) |
+| `backend/custom-operators-api` | Custom operator upload, CRUD, directory tree |
+| `backend/document-classes-api` | Document type definitions REST API |
+| `backend/flow-execution-engine` | FlowExecutor, orchestration, micro-batching |
+| `frontend/canvas-page` | Pipeline editor page |
+| `frontend/properties-panel` + custom panels | Operator config side panel |
+| `frontend/elyra-canvas`, `frontend/read-only-canvas` | Canvas components |
+| `frontend/home-page`, `projects-page`, `project-detail-page`, `flow-detail-page`, `run-details-page` | UI pages |
+| `frontend/state/assets-slice` | Shared flow + job run navigation asset maps |
+| `frontend/state/notifications-slice` | Global toast / history / unread-counter notification system |
+| `frontend/state/flows-slice`, `job-runs-slice`, `operators-slice`, `projects-slice` | Domain entity Redux slices |
+| `frontend/common/*` | Shared UI components |
+
+**Pre-commit Workflow** — OpenSpec operations:
+
+```bash
+# Before starting new feature or behavior change
+openspec list --specs                             # read what's already specified
+
+# Start a change
+openspec new change <descriptive-name>
+# → write openspec/changes/<name>/proposal.md
+# → write openspec/changes/<name>/specs/<capability>/spec.md
+# → write openspec/changes/<name>/design.md
+# → write openspec/changes/<name>/tasks.md
+
+# Validate before implementing
+openspec validate <name> --strict
+
+# After code review and tests pass
+openspec archive <name>
+```
+
+**Rules:**
+- Never modify `openspec/specs/` directly — only `openspec archive` writes there.
+- Do not implement code before the change's `proposal.md` and spec delta are written and reviewed.
+- Scope implementation strictly to the declared change — no opportunistic refactors.
+- Run `openspec validate <name> --strict` before handing off for implementation.
+- The `openspec/changes/archive/` directory is the historical record — do not edit archived changes.
+- New capabilities must use `backend/*` for Python API/engine/operator work, or `frontend/*` for React page and component work.

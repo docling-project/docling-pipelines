@@ -186,7 +186,6 @@ def test_schema_evolution():
         {
             "provider": "opensearch",
             "vector_dimension": 128,
-            "create_index": True,
         }
     )
 
@@ -240,7 +239,6 @@ def test_schema_evolution():
         # Step 2: Add new field to existing index
         print("\nStep 2: Adding new field 'category' to existing index")
         config2 = base_config.copy()
-        config2["create_index"] = False  # Don't recreate
         config2["available_features"] = {
             "doc_id_hash": {
                 "available_for_vector_db": True,
@@ -301,7 +299,6 @@ def test_error_handling():
         {
             "provider": "opensearch",
             "vector_dimension": 128,
-            "create_index": True,
             "available_features": {
                 "doc_id_hash": {
                     "available_for_vector_db": True,

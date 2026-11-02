@@ -1,9 +1,9 @@
 """Branching operator that splits a document table into multiple sub-flows."""
 
-import re
 from typing import Any
 
 import pyarrow as pa
+import re2 as re
 import sqlglot
 from sqlglot import expressions as exp
 
@@ -71,17 +71,13 @@ class BranchingOperator(AbstractOperator):
         if is_unconditional:
             return
 
-        should_validate_criteria: bool = self.should_validate_field(field_value=criteria_list)
-        should_validate_json: bool = self.should_validate_field(field_value=criteria_json)
-
-        if should_validate_criteria and should_validate_json:
-            criteria_valid, json_valid = OperatorUtils.validate_filter_criteria(
-                criteria_list=criteria_list, criteria_json=criteria_json
+        criteria_valid, json_valid = OperatorUtils.validate_filter_criteria(
+            criteria_list=criteria_list, criteria_json=criteria_json
+        )
+        if not (criteria_valid or json_valid):
+            warnings.append(
+                f"Filter criteria must have at least one condition for conditional branch '{link_name or 'unnamed'}'"
             )
-            if not (criteria_valid or json_valid):
-                warnings.append(
-                    f"Filter criteria must have at least one condition for conditional branch '{link_name or 'unnamed'}'"
-                )
 
         if criteria_json:
             criteria_columns: set[str] = extract_columns(criteria_json)
@@ -266,7 +262,7 @@ class BranchingOperator(AbstractOperator):
             filter_operator: Any = SQLFilterOperator(config=config)
 
             branch_tables: list[pa.Table]
-            metadata_filter_transform: dict[str, Any] | None
+            metadata_filter_transform: dict[str, Any]
             branch_tables, metadata_filter_transform = filter_operator.transform(table)
             filtered_table: pa.Table = branch_tables[0]
 
@@ -275,9 +271,8 @@ class BranchingOperator(AbstractOperator):
                 doc_ids = filtered_table.column(OperatorConstants.Misc.ID).to_pylist()
                 processed_doc_ids.update(doc_ids)
 
-            if metadata_filter_transform is not None:
-                skipped_docs = self.get_skipped_doc(skipped_docs, metadata_filter_transform, idx=idx)
-                failed_docs = self.get_failed_doc(failed_docs, metadata_filter_transform, idx=idx)
+            skipped_docs = self.get_skipped_doc(skipped_docs, metadata_filter_transform, idx=idx)
+            failed_docs = self.get_failed_doc(failed_docs, metadata_filter_transform, idx=idx)
 
             self._update_metadata(
                 idx=idx,
@@ -345,22 +340,16 @@ class BranchingOperator(AbstractOperator):
 
     def validate_expression(self, *, expr: str, available_features: list[str], errors: list[str]) -> None:
         """Validate expression."""
-        try:
-            is_valid: bool
-            columns: list[str]
-            is_valid, columns = self.analyze_where_clause(clause_str=expr)
-            invalid_columns: set[str] = set(columns) - set(available_features)
-            if not is_valid or len(invalid_columns) > 0:
-                if invalid_columns:
-                    errors.append(
-                        f"Invalid branching criteria expression: {expr}, invalid features found: {invalid_columns}, Please use valid features in criteria expression"
-                    )
-                else:
-                    errors.append(
-                        f"Invalid branching criteria expression: {expr}, Please use valid criteria expression"
-                    )
-        except Exception as exc:
-            errors.append(f"Unexpected error while validating branching criteria: {expr}, Error: {exc!s}")
+        is_valid: bool
+        columns: list[str]
+        is_valid, columns = self.analyze_where_clause(clause_str=expr)
+        invalid_columns: set[str] = set(columns) - set(available_features)
+        if invalid_columns:
+            errors.append(
+                f"Invalid branching criteria expression: {expr}, invalid features found: {invalid_columns}, Please use valid features in criteria expression"
+            )
+        elif not is_valid:
+            errors.append(f"Invalid branching criteria expression: {expr}, Please use valid criteria expression")
 
     def analyze_where_clause(self, *, clause_str: str) -> tuple[bool, list[str]]:
         """Analyze where clause."""
@@ -375,10 +364,8 @@ class BranchingOperator(AbstractOperator):
 
         sql: str = f"SELECT * FROM dummy_table WHERE {clause_str}"  # nosec B608 - not executed, parsed by sqlglot for AST extraction only
         try:
-            parsed: Any = sqlglot.parse_one(sql)
-            where: Any | None = parsed.find(exp.Where)
-            if not where:
-                return False, []
+            # The statement always has a WHERE clause; a clause that cannot be parsed raises
+            where: Any = sqlglot.parse_one(sql).find(exp.Where)
             columns: list[str] = []
 
             for col in where.find_all(exp.Column):
@@ -391,7 +378,7 @@ class BranchingOperator(AbstractOperator):
                     unique_cols.append(c)
             return True, unique_cols
         except Exception as e:
-            logger.error(f"Error while parsing sql statement: {e!s}")
+            logger.error("Error while parsing sql statement: %s", e)
             return False, []
 
     def _is_valid_column_name(self, column_name: str) -> bool:
@@ -404,8 +391,6 @@ class BranchingOperator(AbstractOperator):
         Returns:
             bool: True if valid column name format
         """
-        import re
-
         if not column_name or len(column_name) > 128:  # Max column name length
             return False
 

@@ -12,7 +12,7 @@ import logging
 from typing import Any
 from urllib.parse import urljoin
 
-from docpipe.core.constants.constants import LLMConstants
+from docpipe.core.constants.constants import LLMConstants, ServiceConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
@@ -50,6 +50,8 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
         timeout: int = 120,
         model_name: str | None = None,
         project_id: str | None = None,
+        embedding_batch_size: int = ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE,
+        embedding_max_concurrent_requests: int = ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS,
     ):
         """Initialize unified WatsonX adapter.
 
@@ -61,6 +63,9 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
             timeout: Request timeout in seconds
             model_name: Default model name (optional, can be overridden per method)
             project_id: Alias for container_id (for backward compatibility)
+            embedding_batch_size: Maximum number of texts per embeddings request (default: 800)
+            embedding_max_concurrent_requests: Maximum number of embeddings requests a caller may
+                keep in flight at once (default: 1; watsonx.ai enforces 8 req/s per instance)
         """
         self.api_key = api_key
         self.api_base = api_base
@@ -94,6 +99,8 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
             "container_kind": container_kind,
             "timeout": timeout,
         }
+        self._embedding_batch_size = embedding_batch_size
+        self._embedding_max_concurrent_requests = embedding_max_concurrent_requests
 
         self.model_name = model_name
         self._dimension: int | None = None
@@ -209,8 +216,9 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
                 container_kind=self._embedding_client_params["container_kind"],
                 model_name=self.model_name or "",
                 timeout=self._embedding_client_params.get("timeout", 120),
+                batch_size=self._embedding_batch_size,
             )
-            logger.info(f"Initialized WatsonX embedding client for model '{self.model_name}'")
+            logger.info("Initialized WatsonX embedding client for model '%s'", self.model_name)
 
         return self._embedding_client
 
@@ -277,6 +285,14 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
             self.embedding_client.model_name = effective_model
 
         return self.embedding_client.generate_embeddings_batch(texts=texts)
+
+    def get_embedding_batch_size(self) -> int:
+        """Return the number of texts the embedding client sends per request."""
+        return self._embedding_batch_size
+
+    def get_max_concurrent_requests(self) -> int:
+        """Return how many embedding requests callers may keep in flight concurrently."""
+        return self._embedding_max_concurrent_requests
 
     def get_embedding_dimension(self, *, model_name: str | None = None) -> int:
         """Get embedding dimension for WatsonX model.
@@ -348,7 +364,7 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
                 "error": None,
             }
         except Exception as e:
-            logger.error(f"Text detection failed: {e}")
+            logger.error("Text detection failed: %s", e)
             return {
                 "success": False,
                 "detections": [],
@@ -408,7 +424,7 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
             }
 
         except Exception as e:
-            logger.error(f"Entity detection failed: {e}")
+            logger.error("Entity detection failed: %s", e)
             raise ValueError(f"Entity detection failed: {e}") from e
 
     def detect_entities_batch(
@@ -442,7 +458,7 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
                 result = self.detect_entities(text=text, prompt=prompt, model_name=model_name)
                 results.append(result)
             except Exception as e:
-                logger.warning(f"Failed to detect entities in text: {e}")
+                logger.warning("Failed to detect entities in text: %s", e)
                 # Return empty result for failed detection
                 results.append(
                     {

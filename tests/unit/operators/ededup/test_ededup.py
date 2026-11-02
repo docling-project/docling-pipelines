@@ -1,7 +1,15 @@
+"""Ededup operator, shared admission, and storage configuration unit tests."""
+
+import ast
+import inspect
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
 import pyarrow as pa
+import pytest
+import yaml
 from data_processing.test_support import get_tables_in_folder
 from data_processing.test_support.transform import AbstractTableTransformTest
 from dpk_ededup import (
@@ -13,10 +21,25 @@ from dpk_ededup import (
 
 from docpipe.core.constants.constants import Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.incremental_metadata import FilesystemIncrementalMetadataStore
+from docpipe.core.models.session_info import SessionInfo, session_info_var
+from docpipe.core.operators.quality import ededup
+from docpipe.core.operators.quality.ededup import EdedupOperator
+from docpipe.core.operators.quality.ededup_storage import factory
+from docpipe.core.operators.quality.ededup_storage.adapters.filesystem_store import FilesystemEdedupStore
+from docpipe.core.operators.quality.ededup_storage.factory import EdedupStoreFactory
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException
 
 # from dpk_ededup.transform_python import EdedupTransform
 # from docpipe_core.operators.quality.ededup import EdedupOperator
-from docpipe.core.operators.quality.ededup import EdedupOperator
+
+
+@pytest.fixture(autouse=True)
+def isolate_session_info():
+    """Prevent job/run context from leaking in from other test modules."""
+    token = session_info_var.set(SessionInfo())
+    yield
+    session_info_var.reset(token)
 
 
 class TestEdedupTransformFromParquetFile(AbstractTableTransformTest):
@@ -91,7 +114,7 @@ class TestDocpipeEdedupOperator(unittest.TestCase):
         }
         input_table = pa.table(data)
 
-        # 2. Using the output of local ingest into the ededup_input for the edudep transform
+        # 2. Using the output of local ingest into the ededup_input for the ededup transform
         ededup_operator = EdedupOperator(
             {
                 OperatorConstants.Columns.DOC_COLUMN: OperatorConstants.Columns.DOC_COLUMN_DEFAULT,
@@ -400,7 +423,7 @@ class TestEdedupOperatorEdgeCases(unittest.TestCase):
         self.assertEqual(metadata[Metrics.External.REMOVED_DOCUMENTS], 2)
 
     def test_cross_batch_deduplication(self):
-        """Test that duplicates are detected across multiple transform() calls (cross-batch dedup).
+        """Test that duplicates are detected across multiple transform() calls (cross-batch ededup).
         This verifies that _ededup_transform is reused across calls and hash state is preserved.
         """
         operator = EdedupOperator(
@@ -450,10 +473,9 @@ class TestEdedupOperatorEdgeCases(unittest.TestCase):
         self.assertEqual(metadata3[Metrics.External.SKIPPED_DOCS_COUNT], 1)
         self.assertEqual(metadata3[Metrics.External.REMOVED_DOCUMENTS], 1)
 
-    def test_ededup_transform_instance_is_reused(self):
-        """Test that the same _ededup_transform instance is used across calls (not recreated)."""
+    def test_standalone_instances_do_not_share_hashes(self):
+        """Context-free library callers must not collide in a shared null run."""
         operator = EdedupOperator({})
-        first_instance = operator._ededup_transform
 
         batch = pa.table(
             {
@@ -463,10 +485,342 @@ class TestEdedupOperatorEdgeCases(unittest.TestCase):
                 OperatorConstants.Columns.NAME: ["Name 1"],
             }
         )
-        operator.transform(batch)
+        assert operator.transform(batch)[0][0].num_rows == 1
+        assert operator.transform(batch)[0][0].num_rows == 0
+        assert EdedupOperator({}).transform(batch)[0][0].num_rows == 1
 
-        self.assertIs(
-            operator._ededup_transform,
-            first_instance,
-            "_ededup_transform must be the same instance after transform() is called",
+
+def _table(*, ids, contents):
+    return pa.table({"id": ids, "name": ids, "doc_id_hash": ids, "content": contents})
+
+
+def _operator(*, run="run-a", node="ededup-a", job="job"):
+    return EdedupOperator({"job_id": job, "job_run_id": run, "id": node})
+
+
+@pytest.fixture
+def shared_store(tmp_path, monkeypatch):
+    store = FilesystemEdedupStore(config={"base_dir": str(tmp_path)})
+    factory = Mock()
+    factory.get_store.return_value = store
+    monkeypatch.setattr("docpipe.core.operators.quality.ededup.get_default_ededup_factory", lambda: factory)
+    return store
+
+
+def test_independent_batches_and_scopes(shared_store):
+    first = _table(ids=["old.txt", "copy.txt"], contents=["Hello, world!", "hello world"])
+    assert _operator().transform(first)[0][0]["id"].to_pylist() == ["old.txt"]
+    renamed = _table(ids=["new.txt"], contents=["Hello, world!"])
+    assert _operator().transform(renamed)[0][0].num_rows == 0
+    assert _operator(run="run-b").transform(renamed)[0][0].num_rows == 1
+    # A later batch in A remains a duplicate even after B has admitted the hash.
+    assert _operator().transform(renamed)[0][0].num_rows == 0
+    assert _operator(node="ededup-b").transform(renamed)[0][0].num_rows == 1
+    assert _operator(job="another-job").transform(renamed)[0][0].num_rows == 1
+
+
+def test_parallel_instances_admit_one_representative(shared_store):
+    def execute(index):
+        return _operator().transform(_table(ids=[str(index)], contents=["same"]))[0][0].num_rows
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert sum(pool.map(execute, range(16))) == 1
+
+
+def test_repeated_document_ids_use_row_identity(shared_store):
+    result, metadata = _operator().transform(_table(ids=["same-id"] * 3, contents=["a", "a", "b"]))
+    assert result[0]["content"].to_pylist() == ["a", "b"]
+    assert metadata[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+    assert len(metadata[Metrics.External.SKIPPED_DOCS]) == 1
+
+
+def test_store_error_propagates(shared_store, monkeypatch):
+    def fail(**kwargs):
+        raise RuntimeError("storage unavailable")
+
+    monkeypatch.setattr(shared_store, "check_and_register_hashes", fail)
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        _operator().transform(_table(ids=["a"], contents=["a"]))
+
+
+def test_partial_scope_fails_instead_of_falling_back():
+    operator = EdedupOperator({"job_id": "job", "job_run_id": "run"})
+    with pytest.raises(ValueError, match="flow node id"):
+        operator.transform(_table(ids=["a"], contents=["a"]))
+
+
+def test_local_duplicates_are_sent_as_one_bulk_call(shared_store, monkeypatch):
+    register = Mock(wraps=shared_store.check_and_register_hashes)
+    monkeypatch.setattr(shared_store, "check_and_register_hashes", register)
+    _operator().transform(_table(ids=["a", "b", "c"], contents=["one", "one", "two"]))
+    register.assert_called_once()
+    assert len(register.call_args.kwargs["records"]) == 2
+
+
+def test_invalid_backend_configuration_is_not_silently_local(tmp_path, monkeypatch):
+    from docpipe.core.operators.quality.ededup_storage.factory import EdedupStoreFactory
+    from docpipe.exceptions.docpipe_exceptions import DocpipeException
+
+    config = tmp_path / "config.yaml"
+    config.write_text("ededup:\n  storage:\n    type: misspelled-postgres\n")
+    monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config))
+    with pytest.raises(DocpipeException, match="Invalid storage backend"):
+        EdedupStoreFactory.from_default_sources()
+
+
+@pytest.mark.parametrize("config", [{"job_id": "job", "id": "node"}, {"job_run_id": "run", "id": "node"}])
+def test_incomplete_job_run_context(config):
+    with pytest.raises(ValueError, match="Shared ededup requires"):
+        EdedupOperator(config).transform(_table(ids=["a"], contents=["a"]))
+
+
+def test_empty_shared_batch_does_not_register(shared_store, monkeypatch):
+    register = Mock(wraps=shared_store.check_and_register_hashes)
+    monkeypatch.setattr(shared_store, "check_and_register_hashes", register)
+    table = _table(ids=[], contents=[])
+    result, metadata = _operator().transform(table)
+    assert result[0].equals(table)
+    assert metadata[Metrics.External.REMOVED_DOCUMENTS] == 0
+    register.assert_not_called()
+
+
+def test_output_order_schema_and_skipped_source_metadata(shared_store):
+    table = _table(ids=["first", "copy", "last"], contents=["Hello!", "hello", "other"])
+    table = table.append_column("path", pa.array(["/first", "/copy", "/last"]))
+    result, metadata = _operator().transform(table)
+    assert result[0].equals(table.take([0, 2]))
+    assert metadata[Metrics.External.TOTAL_DOCS] == 3
+    assert metadata[Metrics.External.PROCESSED_DOCS] == 2
+    assert metadata[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+    skipped = metadata[Metrics.External.SKIPPED_DOCS][0]
+    assert skipped["document_url"] == "/copy"
+
+
+def test_downstream_failure_does_not_release_admission(shared_store):
+    table = _table(ids=["a"], contents=["content"])
+    with pytest.raises(RuntimeError, match="downstream"):
+        assert _operator().transform(table)[0][0].num_rows == 1
+        raise RuntimeError("downstream failed after admission")
+    assert _operator().transform(table)[0][0].num_rows == 0
+    assert _operator(run="retry-run").transform(table)[0][0].num_rows == 1
+
+
+def test_filesystem_reopen_retains_branch_run_and_job_records(tmp_path):
+    import pyarrow.parquet as pq
+
+    config = {"base_dir": str(tmp_path)}
+    store = FilesystemEdedupStore(config=config)
+    scopes = [
+        {"job_id": "job", "node_id": "branch-a", "job_run_id": "run-a"},
+        {"job_id": "job", "node_id": "branch-b", "job_run_id": "run-a"},
+        {"job_id": "job", "node_id": "branch-a", "job_run_id": "run-b"},
+        {"job_id": "other", "node_id": "branch-a", "job_run_id": "run-a"},
+    ]
+    for index, scope in enumerate(scopes):
+        assert store.check_and_register_hashes(**scope, records={"h": f"original-{index}"}) == {"h"}
+    reopened = FilesystemEdedupStore(config=config)
+    for scope in scopes:
+        assert reopened.check_and_register_hashes(**scope, records={"h": "renamed"}) == set()
+    records = [
+        row for path in tmp_path.glob("ededup_registry/hashes_*.parquet") for row in pq.read_table(path).to_pylist()
+    ]
+    assert len(records) == 4
+    assert {row["doc_id"] for row in records} == {f"original-{index}" for index in range(4)}
+    assert reopened.check_and_register_hashes(
+        job_id="job", node_id="branch-b", job_run_id="run-b", records={"h": "renamed"}
+    ) == {"h"}
+
+
+def test_config_precedence_and_nested_defaults(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "global_storage": {"type": "postgresql", "config": {"postgres": {"host": "shared", "schema": "old"}}},
+                "ededup": {"storage": {"config": {"postgres": {"schema": "ededup"}}}},
+                "incremental_metadata": {"storage": {"type": "invalid"}},
+            }
         )
+    )
+    selected = EdedupStoreFactory.from_config_file(str(path))
+    assert selected.backend == "postgresql"
+    assert selected.config == {"postgres": {"host": "shared", "schema": "ededup"}}
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "global_storage": {"type": "postgresql"},
+                "ededup": {"storage": {"type": "filesystem", "config": {"base_dir": str(tmp_path / "ededup")}}},
+            }
+        )
+    )
+    selected = EdedupStoreFactory.from_config_file(str(path))
+    assert isinstance(selected.get_store(), FilesystemEdedupStore)
+
+
+@pytest.mark.parametrize("content", ["", "{}", "incremental_metadata:\n  storage:\n    type: invalid"])
+def test_defaults_ignore_incremental_settings(tmp_path, content):
+    path = tmp_path / "config.yaml"
+    path.write_text(content)
+    assert EdedupStoreFactory.from_config_file(str(path)).backend == "filesystem"
+    assert EdedupStoreFactory.from_config_file(str(tmp_path / "missing")).backend == "filesystem"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[",
+        "[]",
+        "ededup: false",
+        "ededup:\n  storage: []",
+        "ededup:\n  storage:\n    type: unknown",
+        "ededup:\n  storage:\n    type: null",
+        "ededup:\n  storage:\n    config:\n      postgres: nope",
+    ],
+)
+def test_invalid_configuration_fails(tmp_path, content):
+    path = tmp_path / "config.yaml"
+    path.write_text(content)
+    with pytest.raises(DocpipeException):
+        EdedupStoreFactory.from_config_file(str(path))
+
+
+def test_default_sources_and_lazy_thread_safe_store(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({"ededup": {"storage": {"config": {"base_dir": str(tmp_path)}}}}))
+    monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(path))
+    selected = EdedupStoreFactory.from_default_sources()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        stores = list(pool.map(lambda _: selected.get_store(), range(16)))
+    assert all(store is stores[0] for store in stores)
+
+
+def test_filesystem_lifecycles_do_not_create_each_others_records(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCPIPE_INCREMENTAL_BASE_DIR", str(tmp_path / "incremental"))
+    store = FilesystemEdedupStore(config={"base_dir": str(tmp_path / "ededup")})
+    assert store.check_and_register_hashes(job_id="j", node_id="n", job_run_id="r", records={"h": "d"}) == {"h"}
+    assert not (tmp_path / "incremental").exists()
+    assert [p.name for p in (tmp_path / "ededup").iterdir()] == ["ededup_registry"]
+    incremental = FilesystemIncrementalMetadataStore()
+    assert not hasattr(incremental, "check_and_register_hashes")
+    assert not (tmp_path / "incremental" / "ededup_registry").exists()
+
+
+def test_ededup_modules_do_not_import_incremental_metadata():
+    paths = [Path(inspect.getfile(ededup)), *Path(inspect.getfile(factory)).parent.rglob("*.py")]
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom):
+                assert "incremental_metadata" not in (node.module or ""), path
+            elif isinstance(node, ast.Import):
+                assert all("incremental_metadata" not in alias.name for alias in node.names), path
+
+
+def test_postgres_common_environment_and_ededup_override(monkeypatch):
+    from docpipe.core.operators.quality.ededup_storage.adapters import postgres_store
+
+    for key, value in {
+        "HOST": "envhost",
+        "PORT": "5544",
+        "DB": "envdb",
+        "USER": "envuser",
+        "PASSWORD": "testpass",  # pragma: allowlist secret - dummy test credential
+    }.items():
+        monkeypatch.setenv("DOCPIPE_POSTGRES_" + key, value)
+    engine = Mock()
+    engine.begin.return_value.__enter__ = Mock(return_value=Mock())
+    engine.begin.return_value.__exit__ = Mock(return_value=False)
+    with patch.object(postgres_store, "create_postgres_engine", return_value=engine) as create:
+        with patch.object(postgres_store.MetaData, "__init__", side_effect=RuntimeError("stop before DDL")):
+            with pytest.raises(RuntimeError, match="stop before DDL"):
+                postgres_store.PostgresEdedupStore(config={"postgres": {"host": "deduphost"}})
+    assert create.call_args.kwargs["connection_string"] == (
+        "postgresql+psycopg2://envuser:testpass@deduphost:5544/envdb"  # pragma: allowlist secret - dummy test URL
+    )
+    engine.dispose.assert_called_once()
+
+
+@pytest.fixture
+def mocked_postgres_store(monkeypatch):
+    """Construct a PostgreSQL ededup store with a mocked SQLAlchemy engine."""
+    from docpipe.core.operators.quality.ededup_storage.adapters import postgres_store
+
+    engine = MagicMock()
+    connection = MagicMock()
+    engine.begin.return_value.__enter__.return_value = connection
+    engine.dialect.identifier_preparer.quote_schema.return_value = '"test_schema"'
+    monkeypatch.setattr(postgres_store, "get_postgres_connection_string", lambda *, config: "postgresql://test")
+    monkeypatch.setattr(postgres_store, "create_postgres_engine", lambda *, connection_string, config: engine)
+    monkeypatch.setattr(postgres_store.Table, "create", Mock())
+    store = postgres_store.PostgresEdedupStore(config={"schema": "test_schema"})
+    return store, engine, connection
+
+
+def test_postgres_store_requires_connection(monkeypatch):
+    from docpipe.core.operators.quality.ededup_storage.adapters import postgres_store
+
+    monkeypatch.setattr(postgres_store, "get_postgres_connection_string", lambda *, config: None)
+    create_engine = Mock()
+    monkeypatch.setattr(postgres_store, "create_postgres_engine", create_engine)
+    with pytest.raises(DocpipeException, match="connection not configured"):
+        postgres_store.PostgresEdedupStore()
+    create_engine.assert_not_called()
+
+
+def test_postgres_store_initialization_creates_schema_and_table(mocked_postgres_store):
+    store, engine, connection = mocked_postgres_store
+    assert store._ededup_table.schema == "test_schema"
+    assert connection.execute.call_count == 2
+    assert connection.execute.call_args_list[0].args[0].text == "SELECT pg_advisory_xact_lock(hashtext(:key))"
+    assert connection.execute.call_args_list[0].args[1] == {"key": "test_schema.hashes"}
+    assert "CREATE SCHEMA IF NOT EXISTS" in connection.execute.call_args_list[1].args[0].text
+    store.close()
+    engine.dispose.assert_called_once()
+
+
+def test_postgres_store_disposes_engine_when_initialization_fails(monkeypatch):
+    from docpipe.core.operators.quality.ededup_storage.adapters import postgres_store
+
+    engine = MagicMock()
+    engine.begin.return_value.__enter__.return_value = MagicMock()
+    monkeypatch.setattr(postgres_store, "get_postgres_connection_string", lambda *, config: "postgresql://test")
+    monkeypatch.setattr(postgres_store, "create_postgres_engine", lambda *, connection_string, config: engine)
+    monkeypatch.setattr(postgres_store.Table, "create", Mock(side_effect=RuntimeError("DDL failed")))
+    with pytest.raises(RuntimeError, match="DDL failed"):
+        postgres_store.PostgresEdedupStore(config={"schema": "test_schema"})
+    engine.dispose.assert_called_once()
+
+
+def test_postgres_store_bulk_registers_in_chunks_and_returns_inserted_hashes(mocked_postgres_store):
+    store, _, connection = mocked_postgres_store
+    records = {f"hash-{index:04}": f"doc-{index}" for index in range(1001)}
+    execute_result = Mock()
+    execute_result.scalars.return_value.all.side_effect = [list(sorted(records)[:1000]), [sorted(records)[1000]]]
+    connection.execute.return_value = execute_result
+    accepted = store.check_and_register_hashes(job_id="job", node_id="node", job_run_id="run", records=records)
+    assert accepted == set(records)
+    assert connection.execute.call_count == 4  # lock, schema, and two insert chunks
+
+
+def test_postgres_store_empty_registration_skips_transaction(mocked_postgres_store):
+    store, engine, _ = mocked_postgres_store
+    assert store.check_and_register_hashes(job_id="job", node_id="node", job_run_id="run", records={}) == set()
+    engine.begin.assert_called_once()  # Only initialization opened a transaction.
+
+
+def test_postgres_store_wraps_registration_errors(mocked_postgres_store):
+    store, _, connection = mocked_postgres_store
+    connection.execute.side_effect = RuntimeError("database unavailable")
+    with pytest.raises(FlowExecutionFailedException, match="Failed to register deduplication hashes"):
+        store.check_and_register_hashes(job_id="job", node_id="node", job_run_id="run", records={"hash": "doc"})
+
+
+@pytest.mark.parametrize("schema", [None, "existing_registry"])
+def test_postgres_schema_default_and_override(*, mocked_postgres_store, schema):
+    from docpipe.core.operators.quality.ededup_storage.adapters.postgres_store import PostgresEdedupStore
+
+    config = {} if schema is None else {"schema": schema}
+    store = PostgresEdedupStore(config=config)
+    try:
+        assert store._ededup_table.schema == (schema or "ededup_registry")
+    finally:
+        store.close()

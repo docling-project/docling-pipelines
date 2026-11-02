@@ -54,7 +54,7 @@ export function FlowsCard(): React.JSX.Element {
       .finally(() => {
         dispatch(setLoading(false));
       });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   // Fetch on mount
   useEffect(() => {

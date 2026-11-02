@@ -28,60 +28,24 @@ export const INGEST_SOURCE_ATTRIBUTE = {
 export const CUSTOM_PROVIDER = 'custom';
 
 /**
- * Maps backend provider keys to user-friendly display labels.
- * Keys match the `valid_values` returned by the operator metadata.
+ * Brand-name display labels for third-party providers, keyed by backend
+ * provider value. Brand names are intentionally not translated; generic
+ * providers (filesystem, web, custom) use message descriptors instead.
  */
-export const PROVIDER_DISPLAY_LABELS: Record<string, string> = {
+export const PROVIDER_BRAND_LABELS: Record<string, string> = {
   s3: 'Amazon S3',
   ibm_cos: 'IBM Cloud Object Storage',
   sharepoint: 'Microsoft SharePoint',
   onedrive: 'Microsoft OneDrive',
   google_drive: 'Google Drive',
   box_driver: 'Box',
-  filesystem: 'Local filesystem',
-  web: 'Web',
-  custom: 'Custom loader',
 };
-
-/**
- * User-friendly descriptions shown under the Provider configuration accordion
- * for each provider.
- */
-export const PROVIDER_DESCRIPTIONS: Record<string, string> = {
-  s3: 'Connect to an Amazon S3 bucket or any S3-compatible storage such as MinIO.',
-  ibm_cos: 'Connect to an IBM Cloud Object Storage bucket using S3-compatible credentials.',
-  sharepoint: 'Ingest documents from a Microsoft SharePoint document library using Azure AD app authentication.',
-  onedrive: 'Ingest documents from a Microsoft OneDrive drive using Azure AD app authentication.',
-  google_drive: 'Ingest documents from a Google Drive folder using a service account or OAuth credentials.',
-  box_driver: 'Ingest documents from a Box folder using a Box JWT service account credentials file.',
-  filesystem: 'Ingest documents from one or more paths on the local filesystem.',
-  web: 'Crawl and ingest documents from one or more web URLs.',
-  custom: 'Use a custom LangChain-compatible loader class. Provide the class path and any required parameters.',
-};
-
-/**
- * Description shown under the Ingestion settings accordion.
- */
-export const INGESTION_SETTINGS_DESCRIPTION =
-  'Control how many files are ingested and which file types are included or excluded.';
 
 /**
  * Union type of all valid `ingest_source` attribute key strings.
  */
 export type IngestSourceAttributeKey =
   typeof INGEST_SOURCE_ATTRIBUTE[keyof typeof INGEST_SOURCE_ATTRIBUTE];
-
-/**
- * Human-readable labels for every field in the IngestSource panel.
- */
-export const INGEST_SOURCE_LABELS = {
-  PROVIDER: 'Provider',
-  PROVIDER_CONFIG: 'Provider configuration',
-  MAX_FILES: 'Maximum files',
-  INCLUDE_FILTER: 'Include file types',
-  EXCLUDE_FILTER: 'Exclude file types',
-  IGNORE_HIDDEN_FILES: 'Ignore hidden files',
-} as const;
 
 /**
  * Supported file extensions for `include_filter` and `exclude_filter`.

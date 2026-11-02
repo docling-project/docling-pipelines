@@ -1,10 +1,11 @@
-"""Tests for LiteLLM inference adapter."""
+"""Tests for LiteLLM unified adapter (inference, embeddings, and validation)."""
 
 from unittest.mock import Mock, patch
 
 import pytest
 
 from docpipe.core.adapters.litellm import LiteLLMAdapter
+from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
 
 
@@ -229,6 +230,7 @@ class TestLiteLLMInferenceAdapter:
                 model_name="gpt-4",
                 api_key="test-api-key",  # pragma: allowlist secret
                 api_base="https://api.test.com",
+                batch_size=32,
             )
 
     def test_multiple_chat_calls(self, adapter, mock_litellm_client):
@@ -275,7 +277,7 @@ class TestLiteLLMInferenceAdapter:
 
     def test_chat_empty_messages(self, adapter, mock_litellm_client):
         """Test chat with empty messages list."""
-        messages = []
+        messages: list[dict[str, str]] = []
         mock_litellm_client.chat.return_value = "{}"
 
         result = adapter.chat(messages=messages)
@@ -318,3 +320,158 @@ class TestLiteLLMInferenceAdapter:
         call_kwargs = mock_litellm_client.generate.call_args[1]
         assert "response_format" in call_kwargs
         assert call_kwargs["response_format"] == {"type": "json_object"}
+
+
+class TestLiteLLMEmbeddingAdapter:
+    """Test suite for LiteLLMAdapter embedding capabilities."""
+
+    @pytest.fixture
+    def mock_litellm_client(self):
+        """Create a mock LiteLLM client whose model matches the adapter default."""
+        with patch("docpipe.core.adapters.litellm.litellm_adapter.LiteLLMLLMClient") as mock_client_class:
+            mock_client = Mock()
+            mock_client.model_name = "openai/text-embedding-3-small"
+            mock_client_class.return_value = mock_client
+            yield mock_client
+
+    @pytest.fixture
+    def adapter(self, mock_litellm_client):
+        """Create a LiteLLM adapter configured for embeddings."""
+        return LiteLLMAdapter(
+            model_name="openai/text-embedding-3-small",
+            api_key="test-key",  # pragma: allowlist secret
+            batch_size=16,
+            max_concurrent_requests=3,
+        )
+
+    def test_implements_llm_embedding_port(self, adapter):
+        """Test that adapter implements LLMEmbeddingPort interface."""
+        assert isinstance(adapter, LLMEmbeddingPort)
+
+    def test_generate_embeddings_uses_default_model(self, adapter, mock_litellm_client):
+        """Single-text embedding delegates to the client without switching model."""
+        mock_litellm_client.generate_embeddings.return_value = [0.1, 0.2]
+
+        result = adapter.generate_embeddings(text="hello")
+
+        assert result == [0.1, 0.2]
+        assert mock_litellm_client.model_name == "openai/text-embedding-3-small"
+        mock_litellm_client.generate_embeddings.assert_called_once_with(text="hello")
+
+    def test_generate_embeddings_overrides_model(self, adapter, mock_litellm_client):
+        """An explicit model_name is applied to the client before embedding."""
+        mock_litellm_client.generate_embeddings.return_value = [0.5]
+
+        result = adapter.generate_embeddings(model_name="openai/nomic-embed-text", text="hello")
+
+        assert result == [0.5]
+        assert mock_litellm_client.model_name == "openai/nomic-embed-text"
+        mock_litellm_client.generate_embeddings.assert_called_once_with(text="hello")
+
+    def test_generate_embeddings_batch_uses_default_model(self, adapter, mock_litellm_client):
+        """Batch embedding delegates to the client without switching model."""
+        mock_litellm_client.generate_embeddings_batch.return_value = [[0.1], [0.2]]
+
+        result = adapter.generate_embeddings_batch(texts=["a", "b"])
+
+        assert result == [[0.1], [0.2]]
+        assert mock_litellm_client.model_name == "openai/text-embedding-3-small"
+        mock_litellm_client.generate_embeddings_batch.assert_called_once_with(texts=["a", "b"])
+
+    def test_generate_embeddings_batch_overrides_model(self, adapter, mock_litellm_client):
+        """An explicit model_name is applied to the client before batch embedding."""
+        mock_litellm_client.generate_embeddings_batch.return_value = [[1.0]]
+
+        adapter.generate_embeddings_batch(model_name="openai/other-embed", texts=["a"])
+
+        assert mock_litellm_client.model_name == "openai/other-embed"
+        mock_litellm_client.generate_embeddings_batch.assert_called_once_with(texts=["a"])
+
+    def test_generate_embeddings_batch_propagates_errors(self, adapter, mock_litellm_client):
+        """Client errors during batch embedding are propagated."""
+        mock_litellm_client.generate_embeddings_batch.side_effect = RuntimeError("rate limited")
+
+        with pytest.raises(RuntimeError, match="rate limited"):
+            adapter.generate_embeddings_batch(texts=["a"])
+
+    def test_batch_size_and_concurrency(self, adapter, mock_litellm_client):
+        """Batch size comes from the client; concurrency from the constructor."""
+        mock_litellm_client.batch_size = 16
+
+        assert adapter.get_embedding_batch_size() == 16
+        assert adapter.get_max_concurrent_requests() == 3
+
+    def test_get_embedding_dimension_is_detected_and_cached(self, adapter, mock_litellm_client):
+        """Dimension is detected from a sample embedding once and then cached."""
+        mock_litellm_client.generate_embeddings.return_value = [0.0] * 768
+
+        assert adapter.get_embedding_dimension() == 768
+        assert adapter.get_embedding_dimension() == 768
+        mock_litellm_client.generate_embeddings.assert_called_once_with(text="test")
+
+
+class TestLiteLLMValidation:
+    """Test suite for LiteLLMAdapter configuration validation."""
+
+    @pytest.fixture
+    def mock_litellm_client(self):
+        """Create a mock LiteLLM client with provider detection."""
+        with patch("docpipe.core.adapters.litellm.litellm_adapter.LiteLLMLLMClient") as mock_client_class:
+            mock_client = Mock()
+            mock_client._get_provider_from_model.return_value = "openai"
+            mock_client_class.return_value = mock_client
+            yield mock_client
+
+    def test_validate_inference_valid(self, mock_litellm_client):
+        """Valid configuration yields no errors and reports the provider."""
+        adapter = LiteLLMAdapter(model_name="gpt-4", api_key="test-key")  # pragma: allowlist secret
+
+        result = adapter.validate_inference()
+
+        assert result == {
+            "valid": True,
+            "context": "inference",
+            "provider": "openai",
+            "errors": [],
+            "warnings": [],
+        }
+        mock_litellm_client._get_provider_from_model.assert_called_once_with("gpt-4")
+
+    def test_validate_embedding_valid(self, mock_litellm_client):
+        """Embedding validation uses the embedding context."""
+        adapter = LiteLLMAdapter(model_name="openai/text-embedding-3-small")
+
+        result = adapter.validate_embedding()
+
+        assert result["valid"] is True
+        assert result["context"] == "embedding"
+
+    @pytest.mark.parametrize("model_name", ["", "   "])
+    def test_validate_missing_model_name(self, mock_litellm_client, model_name):
+        """Blank model names are reported as a validation error."""
+        adapter = LiteLLMAdapter(model_name=model_name)
+
+        result = adapter.validate_embedding()
+
+        assert result["valid"] is False
+        assert result["errors"] == ["model_name is required"]
+
+    def test_validate_api_key_error_is_reported(self, mock_litellm_client):
+        """API key validation failures from the client are surfaced as errors."""
+        mock_litellm_client._validate_api_key.side_effect = ValueError("API key not found for provider")
+        adapter = LiteLLMAdapter(model_name="gpt-4")
+
+        result = adapter.validate_inference()
+
+        assert result["valid"] is False
+        assert result["errors"] == ["API key validation failed: API key not found for provider"]
+
+    def test_validate_ignores_unrelated_client_errors(self, mock_litellm_client):
+        """Client errors unrelated to the API key do not invalidate the config."""
+        mock_litellm_client._validate_api_key.side_effect = RuntimeError("network unavailable")
+        adapter = LiteLLMAdapter(model_name="gpt-4")
+
+        result = adapter.validate_inference()
+
+        assert result["valid"] is True
+        assert result["errors"] == []

@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
 Helper functions and classes for PII and HAP detection.
@@ -8,10 +8,10 @@ This module provides utility functions for managing PII and HAP detection result
 including table column management, field mapping, and redaction logic.
 """
 
-import re
 from typing import Any
 
 import pyarrow as pa
+import re2 as re
 from data_processing.utils import TransformUtils
 
 from docpipe.core.constants.operator_constants import OperatorConstants
@@ -259,7 +259,7 @@ class GuardRailsPIIAndHAPExtractor:
             redaction_length = len(item["text"])
             redacted_word = redaction_symbol * redaction_length
             text_to_redact = item["text"]
-            pattern = re.compile(re.escape(text_to_redact), re.IGNORECASE)
+            pattern = re.compile("(?i)" + re.escape(text_to_redact))
             content = pattern.sub(redacted_word, content)
         else:
             # No position or text - cannot redact
@@ -300,7 +300,7 @@ class GuardRailsPIIAndHAPExtractor:
             # Find all occurrences if position not provided
             if "start" not in item or "end" not in item:
                 text_to_find = item["text"]
-                pattern = re.compile(re.escape(text_to_find), re.IGNORECASE)
+                pattern = re.compile("(?i)" + re.escape(text_to_find))
                 for match in pattern.finditer(content):
                     redaction_items.append(
                         {

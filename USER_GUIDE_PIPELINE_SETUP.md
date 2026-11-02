@@ -56,6 +56,7 @@ This guide provides comprehensive details for:
 
 Before proceeding, ensure you have:
 - Python 3.12 installed
+- Node.js 22.15.1 and npm installed (the package install builds the bundled frontend; see [QUICKSTART.md](QUICKSTART.md#prerequisites-check-30-seconds))
 - 5GB+ available disk space
 - Internet connection for downloading dependencies
 
@@ -296,7 +297,7 @@ ffmpeg -version
 **1. Clone the repository:**
 
 ```bash
-git clone https://github.com/IBM/docling-pipelines.git
+git clone https://github.com/docling-project/docling-pipelines.git
 cd docling-pipelines
 ```
 

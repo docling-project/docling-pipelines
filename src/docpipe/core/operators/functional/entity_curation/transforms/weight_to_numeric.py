@@ -1,4 +1,6 @@
-import re
+"""Entity curation transform: weights with units to kilograms, using locale-specific units."""
+
+import re2 as re
 
 
 def weight_to_numeric(*, weight: str | None, locale: str = "en_US") -> float | None:
@@ -274,7 +276,7 @@ def weight_to_numeric(*, weight: str | None, locale: str = "en_US") -> float | N
 
     # Pattern: number (with optional decimal) + optional space + unit
     pattern = r"(\d+(?:[.,]\d+)?)\s*(" + unit_pattern + r")?"
-    match = re.search(pattern, weight, re.IGNORECASE)
+    match = re.search("(?i)" + pattern, weight)
 
     if match:
         # Extract numeric value (handle both . and , as decimal separators)
@@ -285,13 +287,11 @@ def weight_to_numeric(*, weight: str | None, locale: str = "en_US") -> float | N
         unit = match.group(2)
 
         if unit:
-            # Try case-insensitive match for Latin scripts
+            # All keys are lower case (lower() leaves non-Latin scripts unchanged)
             unit_lower = unit.lower()
             if unit_lower in weight_unit_map:
                 return value * weight_unit_map[unit_lower]
-            if unit in weight_unit_map:
-                # For non-Latin scripts (exact match)
-                return value * weight_unit_map[unit]
+            # Matched only through Unicode case folding, e.g. "\u017f" (long s) for "s"
             return None
         # No unit specified, assume kilograms
         return value

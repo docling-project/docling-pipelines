@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Watsonx.ai LLM adapter for embedding generation."""
 
@@ -122,9 +122,11 @@ class WatsonxLLMAdapter(LLMServicePort):
             )
 
         logger.info(
-            f"Initialized WatsonxLLMAdapter with model={model_name}, "
-            f"batch_size={batch_size}, enable_rate_limiting={enable_rate_limiting}, "
-            f"job_run_id={job_run_id or 'shared'}"
+            "Initialized WatsonxLLMAdapter with model=%s, batch_size=%s, enable_rate_limiting=%s, job_run_id=%s",
+            model_name,
+            batch_size,
+            enable_rate_limiting,
+            job_run_id or "shared",
         )
 
     @staticmethod

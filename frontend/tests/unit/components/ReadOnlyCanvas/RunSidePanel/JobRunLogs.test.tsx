@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { JobRunLogs } from '@/components/ReadOnlyCanvas/RunSidePanel/JobRunLogs/JobRunLogs';
 import type { JobRunStatusResponse } from '@/types';
 
@@ -25,7 +26,7 @@ function makeResponse(overrides: Record<string, unknown> = {}): JobRunStatusResp
 
 describe('JobRunLogs', () => {
   it('renders without crashing with a valid log response', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse()}
         selectedNodeId={null}
@@ -37,7 +38,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders inline notification for failed run with no node_sequence', () => {
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse({
           node_sequence: [],
@@ -56,7 +57,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders with a selected node id without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse()}
         selectedNodeId={GUID_1}
@@ -67,7 +68,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders with empty node_sequence without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse({ node_sequence: [] })}
         selectedNodeId={null}
@@ -78,7 +79,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders node names as accordion item buttons', () => {
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse()}
         selectedNodeId={null}
@@ -91,7 +92,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders log content in accordion items after expanding', () => {
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse()}
         selectedNodeId={null}
@@ -104,7 +105,7 @@ describe('JobRunLogs', () => {
   });
 
   it('skips non-GUID keys in node_sequence', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse({
           node_sequence: ['not-a-guid', GUID_1],
@@ -126,7 +127,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders two accordion items for two nodes', () => {
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse()}
         selectedNodeId={null}
@@ -142,7 +143,7 @@ describe('JobRunLogs', () => {
   it('renders Show detailed log button when log exceeds threshold (500 chars)', () => {
     // LOG_PREVIEW_THRESHOLD is 500 characters
     const longLog = 'x'.repeat(600);
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse({ [GUID_1]: longLog })}
         selectedNodeId={null}
@@ -157,7 +158,7 @@ describe('JobRunLogs', () => {
   it('calls onShowFullLog when Show detailed log button is clicked', () => {
     const longLog = 'y'.repeat(600);
     const onShowFullLog = vi.fn();
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse({ [GUID_1]: longLog })}
         selectedNodeId={null}
@@ -170,7 +171,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders failed run without message text when message is empty', () => {
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={makeResponse({
           node_sequence: [],
@@ -184,7 +185,7 @@ describe('JobRunLogs', () => {
   });
 
   it('renders with node id used as name when no node_stats entry', () => {
-    render(
+    renderWithProviders(
       <JobRunLogs
         executionLogs={{
           node_sequence: [GUID_1],

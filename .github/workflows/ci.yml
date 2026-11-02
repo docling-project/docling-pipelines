@@ -4,17 +4,220 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, edited, reopened, synchronize]
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  verify-commits:
+    name: Verify DCO, GPG & PR Template
+    # Only meaningful on pull requests; push and workflow_dispatch have no PR payload.
+    # PRs opened by allowlisted dependency bots are skipped: their commits carry no
+    # Signed-off-by trailer and their PR body is generated, so DCO and template
+    # checks cannot pass. Keep this an explicit
+    # allowlist; do not widen it to user.type == 'Bot'.
+    if: >
+      github.event_name == 'pull_request' &&
+      !contains(fromJSON('["renovate[bot]","dependabot[bot]"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Verify All Commits (DCO + GPG) & PR Template
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+            const prBody = context.payload.pull_request.body || '';
+
+            // Results are handed to the commit-verification.yml workflow_run workflow
+            // as an artifact (step outputs are not exposed through the REST API).
+            function writeResults(data) {
+              const resultsDir = path.join(process.env.RUNNER_TEMP, 'verification-results');
+              fs.mkdirSync(resultsDir, { recursive: true });
+              fs.writeFileSync(
+                path.join(resultsDir, 'results.json'),
+                JSON.stringify(data, null, 2)
+              );
+            }
+
+            // Get all commits in the PR (handle pagination, max 250 per GitHub API)
+            let allCommits = [];
+            let page = 1;
+            const perPage = 100;
+            const maxCommits = 250;
+
+            while (true) {
+              const { data: commits } = await github.rest.pulls.listCommits({
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: perPage,
+                page: page
+              });
+
+              if (commits.length === 0) break;
+              allCommits = allCommits.concat(commits);
+              if (allCommits.length >= maxCommits) {
+                allCommits = allCommits.slice(0, maxCommits);
+                break;
+              }
+              if (commits.length < perPage) break;
+              page++;
+            }
+
+            // Edge case: PR with zero commits - treat as pass (nothing to validate)
+            if (allCommits.length === 0) {
+              console.log('No commits found in PR');
+              writeResults({
+                dco_failed: [],
+                gpg_failed: [],
+                template_failed: [],
+                dco_passed: 0,
+                gpg_passed: 0,
+                template_passed: 0
+              });
+              return;
+            }
+
+            const results = {
+              dco: { passed: [], failed: [] },
+              gpg: { passed: [], failed: [] },
+              template: { passed: [], failed: [] }
+            };
+
+            // Check DCO and GPG for each commit (skip merge commits)
+            for (const commit of allCommits) {
+              // Skip merge commits (have >1 parent) — they don't need DCO sign-off
+              if (commit.parents && commit.parents.length > 1) {
+                console.log(`Skipping merge commit ${commit.sha}`);
+                continue;
+              }
+
+              const sha = commit.sha;
+              const message = commit.commit.message;
+              const verification = commit.commit.verification;
+              const author = commit.commit.author.name;
+              const email = commit.commit.author.email;
+              const shortMsg = message.split('\n')[0];
+
+              // DCO: Signed-off-by trailer
+              // Matches: Signed-off-by: Name <email> (requires non-empty email; git commit -s always includes one)
+              const hasSignoff = /^Signed-off-by:\s+.+<.+>$/m.test(message);
+              if (hasSignoff) {
+                results.dco.passed.push(sha);
+              } else {
+                results.dco.failed.push({ sha, author, email, message: shortMsg });
+              }
+
+              // GPG: GitHub's commit verification
+              if (verification?.verified === true) {
+                results.gpg.passed.push(sha);
+              } else {
+                results.gpg.failed.push({
+                  sha,
+                  author,
+                  email,
+                  message: shortMsg,
+                  reason: verification?.reason || 'unsigned',
+                  verified: verification?.verified || false
+                });
+              }
+            }
+
+            // PR Template validation
+            const requiredSections = [
+              '## Issue',
+              '## Description',
+              '## Basic Checklist',
+              '### Pre-Commit Hook Results'
+            ];
+
+            for (const section of requiredSections) {
+              if (prBody.includes(section)) {
+                results.template.passed.push(section);
+              } else {
+                results.template.failed.push(section);
+              }
+            }
+
+            // Warn if pre-commit results section appears empty or has only placeholder
+            const preCommitMatch = prBody.match(/### Pre-Commit Hook Results[\s\S]*?(?=###|##|$)/);
+            if (preCommitMatch) {
+              const content = preCommitMatch[0].replace(/### Pre-Commit Hook Results/, '').trim();
+              // Consider empty if less than 10 chars or only the placeholder comment
+              if (!content || content.length < 10 || content === '<!-- Paste the output of pre-commit hooks execution to verify all checks passed -->') {
+                results.template.failed.push('### Pre-Commit Hook Results (empty)');
+              }
+            }
+
+            // Output summary
+            const dcoFailCount = results.dco.failed.length;
+            const gpgFailCount = results.gpg.failed.length;
+            const templateFailCount = results.template.failed.length;
+            const allPassed = dcoFailCount === 0 && gpgFailCount === 0 && templateFailCount === 0;
+
+            console.log(`DCO: ${results.dco.passed.length} passed, ${dcoFailCount} failed`);
+            console.log(`GPG: ${results.gpg.passed.length} passed, ${gpgFailCount} failed`);
+            console.log(`Template: ${results.template.passed.length} passed, ${templateFailCount} failed`);
+
+            if (dcoFailCount > 0) {
+              console.log('DCO Failed:', JSON.stringify(results.dco.failed, null, 2));
+            }
+            if (gpgFailCount > 0) {
+              console.log('GPG Failed:', JSON.stringify(results.gpg.failed, null, 2));
+            }
+            if (templateFailCount > 0) {
+              console.log('Template Failed:', JSON.stringify(results.template.failed, null, 2));
+            }
+
+            // Persist results for the comment bot (written before setFailed so it
+            // is available even when verification fails)
+            writeResults({
+              dco_failed: results.dco.failed,
+              gpg_failed: results.gpg.failed,
+              template_failed: results.template.failed,
+              dco_passed: results.dco.passed.length,
+              gpg_passed: results.gpg.passed.length,
+              template_passed: results.template.passed.length
+            });
+
+            // Fail the job if any check failed
+            if (!allPassed) {
+              core.setFailed('Commit verification failed');
+            }
+
+      - name: Upload Verification Results Artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: commit-verification-results
+          path: ${{ runner.temp }}/verification-results/
+          retention-days: 1
+          overwrite: true
+
   lint:
     name: Code Quality & Type Checking
     runs-on: ubuntu-latest
+    needs: verify-commits
+    # verify-commits is skipped on push/workflow_dispatch; still run in that case,
+    # but not when verification failed.
+    if: >
+      !cancelled() &&
+      (needs.verify-commits.result == 'success' || needs.verify-commits.result == 'skipped')
 
     steps:
       - name: Checkout Repository
@@ -64,11 +267,16 @@ jobs:
   frontend-test:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    needs: verify-commits
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      contains(join(github.event.commits.*.modified, ','), 'frontend/') ||
-      contains(join(github.event.commits.*.added, ','), 'frontend/') ||
-      github.event_name == 'pull_request'
+      !cancelled() &&
+      (needs.verify-commits.result == 'success' || needs.verify-commits.result == 'skipped') &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(join(github.event.commits.*.modified, ','), 'frontend/') ||
+        contains(join(github.event.commits.*.added, ','), 'frontend/') ||
+        github.event_name == 'pull_request'
+      )
 
     steps:
       - name: Checkout Repository
@@ -113,6 +321,9 @@ jobs:
     name: Test Suite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
 
     strategy:
       fail-fast: false
@@ -144,7 +355,12 @@ jobs:
         run: sudo apt-get install -y libldap2-dev libsasl2-dev
 
       - name: Install Dependencies
-        run: uv pip install --system -e ".[dev]"
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Unit Tests
         run: python -m pytest tests/unit -m "unit and not integration" -v --cov=src --cov-report=xml --cov-report=term-missing
@@ -164,3 +380,69 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 14
+
+  postgres-integration-test:
+    name: PostgreSQL Integration Tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: docpipe-ci-only # pragma: allowlist secret
+          POSTGRES_DB: docpipe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d docpipe_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PYTHONPATH: src
+      DOCPIPE_TEST_POSTGRES_HOST: localhost
+      DOCPIPE_TEST_POSTGRES_PORT: "5432"
+      DOCPIPE_TEST_POSTGRES_DB: docpipe_test
+      DOCPIPE_TEST_POSTGRES_USER: postgres
+      DOCPIPE_TEST_POSTGRES_PASSWORD: docpipe-ci-only # pragma: allowlist secret
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-suffix: "py312"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install System Dependencies
+        run: sudo apt-get install -y libldap2-dev libsasl2-dev
+
+      - name: Install Dependencies
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run PostgreSQL Integration Tests
+        # -rs lists skips, so a PostgreSQL run that was skipped is visible in the log.
+        run: >-
+          python -m pytest -m integration -v -rs
+          tests/integration/storage
+          tests/integration/assets
+          tests/integration/test_ededup_postgres.py

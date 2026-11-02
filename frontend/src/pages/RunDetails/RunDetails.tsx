@@ -11,6 +11,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { InlineLoading, InlineNotification } from '@carbon/react';
 import type { PipelineFlowDef } from '@elyra/canvas';
@@ -24,11 +25,13 @@ import {
   setExecutionLogs,
 } from '@/slices/jobRunSlice';
 import { generateRoute } from '@/config';
+import { messages } from './RunDetails.messages';
 import styles from './RunDetails.module.scss';
 
 const logger = log4js.getLogger('RunDetails');
 
 export function RunDetails(): React.JSX.Element {
+  const intl = useIntl();
   const { flow_id: flowId, run_id: runId } = useParams<{ flow_id: string; run_id: string }>();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project_id') ?? '';
@@ -57,7 +60,7 @@ export function RunDetails(): React.JSX.Element {
         if (cancelled) { return; }
         const definition = snapshotRes.data as unknown as PipelineFlowDef | undefined;
         if (!definition) {
-          setLoadError('Flow definition not available for this run.');
+          setLoadError(intl.formatMessage(messages.definitionUnavailable));
           return;
         }
         setPipelineFlow(definition);
@@ -79,7 +82,7 @@ export function RunDetails(): React.JSX.Element {
         dispatch(setExecutionLogs(runRes.data));
       } catch {
         if (!cancelled) {
-          setLoadError('Failed to load run details. Please try again.');
+          setLoadError(intl.formatMessage(messages.loadError));
         }
       }
     };
@@ -140,7 +143,7 @@ export function RunDetails(): React.JSX.Element {
       <div className={styles.stateContainer}>
         <InlineNotification
           kind="error"
-          title="Error"
+          title={intl.formatMessage(messages.errorTitle)}
           subtitle={loadError}
           hideCloseButton
         />
@@ -154,7 +157,7 @@ export function RunDetails(): React.JSX.Element {
   if (!pipelineFlow || !flowId || !runId) {
     return (
       <div className={styles.stateContainer}>
-        <InlineLoading description="Loading run..." />
+        <InlineLoading description={intl.formatMessage(messages.loading)} />
       </div>
     );
   }
