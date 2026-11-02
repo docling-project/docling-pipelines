@@ -15,13 +15,14 @@ import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { DefinitionTooltip, Dropdown, Toggle } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import {
   LANGUAGE_DETECT_ATTR as ATTR,
-  LANGUAGE_DETECT_LABEL as LABEL,
   LANGUAGE_DETECT_PROVIDER_ITEMS as PROVIDER_ITEMS,
 } from './constants';
+import { messages } from './LanguageDetect.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface LanguageDetectPanelBodyProps {
@@ -31,6 +32,7 @@ interface LanguageDetectPanelBodyProps {
 export function LanguageDetectPanelBody({
   controller,
 }: LanguageDetectPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Read operator attribute metadata from Redux (passed via Canvas.tsx) ──
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -65,14 +67,14 @@ export function LanguageDetectPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.LANGUAGE_PROVIDER]?.description ?? ''}
           >
-            {LABEL.LANGUAGE_PROVIDER}
+            {intl.formatMessage(messages.languageProvider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="language_provider"
-          titleText={LABEL.LANGUAGE_PROVIDER}
+          titleText={intl.formatMessage(messages.languageProvider)}
           hideLabel
-          label="Select provider"
+          label={intl.formatMessage(messages.selectProvider)}
           items={PROVIDER_ITEMS}
           selectedItem={languageProvider}
           onChange={({ selectedItem }: { selectedItem: string | null }) => {
@@ -94,15 +96,15 @@ export function LanguageDetectPanelBody({
             openOnHover
             align="right"
           >
-            {LABEL.FILTER_UNKNOWN_LANGUAGE}
+            {intl.formatMessage(messages.filterUnknownLanguage)}
           </DefinitionTooltip>
         </div>
         <Toggle
           id="filter_unknown_language"
-          labelText={LABEL.FILTER_UNKNOWN_LANGUAGE}
+          labelText={intl.formatMessage(messages.filterUnknownLanguage)}
           hideLabel
-          labelA="Off"
-          labelB="On"
+          labelA={intl.formatMessage(messages.off)}
+          labelB={intl.formatMessage(messages.on)}
           toggled={filterUnknownLanguage}
           onToggle={(checked: boolean) => {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-call

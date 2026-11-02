@@ -18,23 +18,42 @@ import {
   NumberInput,
   Toggle,
 } from '@carbon/react';
+import { useIntl, type MessageDescriptor } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import {
   CUSTOM_PROVIDER,
-  INGESTION_SETTINGS_DESCRIPTION,
   INGEST_SOURCE_ATTRIBUTE as ATTR,
-  INGEST_SOURCE_LABELS as LABEL,
-  PROVIDER_DESCRIPTIONS,
-  PROVIDER_DISPLAY_LABELS,
+  PROVIDER_BRAND_LABELS,
   SUPPORTED_FILE_EXTENSIONS,
 } from './constants';
+import { messages } from './IngestSource.messages';
 import { ProviderFieldsForm } from '../shared/ProviderFieldsForm';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
+
+/** Maps generic (non-brand) backend provider keys to translated display labels. */
+const PROVIDER_LABEL_MESSAGES: Record<string, MessageDescriptor> = {
+  filesystem: messages.providerLabelFilesystem,
+  web: messages.providerLabelWeb,
+  custom: messages.providerLabelCustom,
+};
+
+/** Maps backend provider keys to translated descriptions shown under Provider configuration. */
+const PROVIDER_DESCRIPTION_MESSAGES: Record<string, MessageDescriptor> = {
+  s3: messages.providerDescriptionS3,
+  ibm_cos: messages.providerDescriptionIbmCos,
+  sharepoint: messages.providerDescriptionSharepoint,
+  onedrive: messages.providerDescriptionOnedrive,
+  google_drive: messages.providerDescriptionGoogleDrive,
+  box_driver: messages.providerDescriptionBoxDriver,
+  filesystem: messages.providerDescriptionFilesystem,
+  web: messages.providerDescriptionWeb,
+  custom: messages.providerDescriptionCustom,
+};
 
 interface IngestSourcePanelBodyProps {
   controller: any;
@@ -60,6 +79,7 @@ function normalizeFilterExtensions(raw: unknown): string[] {
 export function IngestSourcePanelBody({
   controller,
 }: IngestSourcePanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Read operator attribute metadata ──
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
@@ -139,7 +159,15 @@ export function IngestSourcePanelBody({
     [selectedIncludeFilter, selectedExcludeFilter]
   );
   const filterConflictWarning = conflictingExtensions.length > 0
-    ? `Conflict: "${conflictingExtensions.join('", "')}" ${conflictingExtensions.length === 1 ? 'is' : 'are'} in both include and exclude. These file types will be skipped.`
+    ? intl.formatMessage(messages.filterConflict, {
+      extensions: intl.formatList(
+        conflictingExtensions.map((extension) => intl.formatMessage(
+          messages.filterConflictExtension,
+          { extension }
+        ))
+      ),
+      count: conflictingExtensions.length,
+    })
     : null;
 
   return (
@@ -153,17 +181,21 @@ export function IngestSourcePanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.PROVIDER]?.description ?? ''}
           >
-            {LABEL.PROVIDER}
+            {intl.formatMessage(messages.provider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="provider"
-          titleText={LABEL.PROVIDER}
+          titleText={intl.formatMessage(messages.provider)}
           hideLabel
-          label="Select provider"
+          label={intl.formatMessage(messages.selectProvider)}
           items={providerItems}
           selectedItem={provider || null}
-          itemToString={(item: string | null) => (item ? (PROVIDER_DISPLAY_LABELS[item] ?? item) : '')}
+          itemToString={(item: string | null) => {
+            if (!item) { return ''; }
+            const descriptor = PROVIDER_LABEL_MESSAGES[item];
+            return descriptor ? intl.formatMessage(descriptor) : (PROVIDER_BRAND_LABELS[item] ?? item);
+          }}
           invalid={providerValidation.isInvalid}
           invalidText={providerValidation.errorMessage}
           onChange={({ selectedItem }: { selectedItem: string | null }) => {
@@ -181,11 +213,13 @@ export function IngestSourcePanelBody({
         <Accordion align="start" className={common.fullWidthAccordion}>
 
           {/* ── Provider configuration ──────────────────────────────── */}
-          <AccordionItem title="Provider configuration" open>
+          <AccordionItem title={intl.formatMessage(messages.providerConfig)} open>
             <div className={common.accordionContent}>
 
-              {PROVIDER_DESCRIPTIONS[provider] && (
-                <p className={common.accordionDescription}>{PROVIDER_DESCRIPTIONS[provider]}</p>
+              {PROVIDER_DESCRIPTION_MESSAGES[provider] && (
+                <p className={common.accordionDescription}>
+                  {intl.formatMessage(PROVIDER_DESCRIPTION_MESSAGES[provider])}
+                </p>
               )}
 
               {/* Per-provider structured fields */}
@@ -206,7 +240,7 @@ export function IngestSourcePanelBody({
                 <div className={common.formField}>
                   <JsonTextArea
                     id="provider_config"
-                    labelText={LABEL.PROVIDER_CONFIG}
+                    labelText={intl.formatMessage(messages.providerConfig)}
                     placeholder='{"loader_class_path": "my_package.loaders.MyLoader"}'
                     storedValue={typeof providerConfigRaw === 'object' ? providerConfigRaw as Record<string, unknown> : null}
                     rows={4}
@@ -223,10 +257,12 @@ export function IngestSourcePanelBody({
           </AccordionItem>
 
           {/* ── Ingestion settings ──────────────────────────────────── */}
-          <AccordionItem title="Ingestion settings">
+          <AccordionItem title={intl.formatMessage(messages.ingestionSettings)}>
             <div className={common.accordionContent}>
 
-              <p className={common.accordionDescription}>{INGESTION_SETTINGS_DESCRIPTION}</p>
+              <p className={common.accordionDescription}>
+                {intl.formatMessage(messages.ingestionSettingsDescription)}
+              </p>
 
               <div className={common.formField}>
                 <div className={common.labelWithTooltip}>
@@ -235,12 +271,12 @@ export function IngestSourcePanelBody({
                     nodeAttributes={nodeAttributes}
                     definition={nodeAttributes[ATTR.MAX_FILES]?.description ?? ''}
                   >
-                    {LABEL.MAX_FILES}
+                    {intl.formatMessage(messages.maxFiles)}
                   </RequiredParamTooltip>
                 </div>
                 <NumberInput
                   id="max_files"
-                  label={LABEL.MAX_FILES}
+                  label={intl.formatMessage(messages.maxFiles)}
                   hideLabel
                   value={maxFiles}
                   min={1}
@@ -259,15 +295,15 @@ export function IngestSourcePanelBody({
                     nodeAttributes={nodeAttributes}
                     definition={nodeAttributes[ATTR.INCLUDE_FILTER]?.description ?? ''}
                   >
-                    {LABEL.INCLUDE_FILTER}
+                    {intl.formatMessage(messages.includeFilter)}
                   </RequiredParamTooltip>
                 </div>
                 <FilterableMultiSelect
                   key={selectedIncludeFilter.join(',')}
                   id="include_filter"
-                  titleText={LABEL.INCLUDE_FILTER}
+                  titleText={intl.formatMessage(messages.includeFilter)}
                   hideLabel
-                  placeholder="Select file types to include"
+                  placeholder={intl.formatMessage(messages.includeFilterPlaceholder)}
                   items={[...SUPPORTED_FILE_EXTENSIONS]}
                   itemToString={(item: string | null) => item ?? ''}
                   initialSelectedItems={selectedIncludeFilter}
@@ -288,15 +324,15 @@ export function IngestSourcePanelBody({
                     nodeAttributes={nodeAttributes}
                     definition={nodeAttributes[ATTR.EXCLUDE_FILTER]?.description ?? ''}
                   >
-                    {LABEL.EXCLUDE_FILTER}
+                    {intl.formatMessage(messages.excludeFilter)}
                   </RequiredParamTooltip>
                 </div>
                 <FilterableMultiSelect
                   key={selectedExcludeFilter.join(',')}
                   id="exclude_filter"
-                  titleText={LABEL.EXCLUDE_FILTER}
+                  titleText={intl.formatMessage(messages.excludeFilter)}
                   hideLabel
-                  placeholder="Select file types to exclude"
+                  placeholder={intl.formatMessage(messages.excludeFilterPlaceholder)}
                   items={[...SUPPORTED_FILE_EXTENSIONS]}
                   itemToString={(item: string | null) => item ?? ''}
                   initialSelectedItems={selectedExcludeFilter}
@@ -317,15 +353,15 @@ export function IngestSourcePanelBody({
                     nodeAttributes={nodeAttributes}
                     definition={nodeAttributes[ATTR.IGNORE_HIDDEN_FILES]?.description ?? ''}
                   >
-                    {LABEL.IGNORE_HIDDEN_FILES}
+                    {intl.formatMessage(messages.ignoreHiddenFiles)}
                   </RequiredParamTooltip>
                 </div>
                 <Toggle
                   id="ignore_hidden_files"
-                  labelText={LABEL.IGNORE_HIDDEN_FILES}
+                  labelText={intl.formatMessage(messages.ignoreHiddenFiles)}
                   hideLabel
-                  labelA="Off"
-                  labelB="On"
+                  labelA={intl.formatMessage(messages.off)}
+                  labelB={intl.formatMessage(messages.on)}
                   toggled={ignoreHiddenFiles}
                   onToggle={(checked: boolean) => {
                     controller?.updatePropertyValue?.({ name: ATTR.IGNORE_HIDDEN_FILES }, checked);

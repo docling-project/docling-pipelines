@@ -1,6 +1,6 @@
 {
-  "flow_name": "document classification with watsonx",
-  "description": "a flow to classify documents using IBM Watsonx.ai after extraction",
+  "flow_name": "document classification with ollama",
+  "description": "Classify documents with the standard LLM classification adapter (litellm provider pointing at Ollama's OpenAI-compatible API) after Docling extraction",
   "global_config": {
     "doc_column": "content",
     "disable_validation": true,
@@ -16,10 +16,11 @@
         "provider": "filesystem",
         "provider_config": {
           "paths": [
-            "./tests/fixtures/invoices/"
+            "./tests/fixtures/invoices/",
+            "./tests/fixtures/customer_support_docs/"
           ]
         },
-        "include_filter": "txt,pdf,docx"
+        "include_filter": "txt,pdf,docx,md"
       }
     },
     {
@@ -54,6 +55,7 @@
           "email": "Email correspondence",
           "form": "Form or application document",
           "purchase_order": "Purchase order for goods or services",
+          "support_ticket": "Customer support or help desk communication",
           "other": "Other document types"
         },
         "confidence_threshold": 7.0,

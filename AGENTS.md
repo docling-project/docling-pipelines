@@ -56,6 +56,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/integrations/` | External service clients: AWS, Docling, HuggingFace, LiteLLM, Ollama, WatsonX |
 | `src/docpipe/storage/` | Storage abstraction: DuckDB + filesystem; interfaces `TableStorage`, `KeyValueStorage` in `storage/interfaces/`; default DuckDB paths: `data/duckdb/job_stats.duckdb`, `data/duckdb/document_sets.duckdb` |
 | `src/docpipe/utils/infrastructure/logging.py` | `get_logger()` — always use this, never `logging.getLogger()` directly |
+| `src/docpipe/utils/infrastructure/config_utils.py` | `DocpipeConfigLoader` — reads `docling-pipelines-config.yaml` once (cached singleton); use `get(key=...)` / `get_storage()` in factories, never parse the YAML file directly |
 | `src/docpipe/utils/` | Shared: logging, pyarrow handlers (`utils/data/pyarrow_handler.py`), flow_utils, duckdb helpers, llm utils |
 | `src/docpipe/exceptions/` | `DocpipeException`, `FlowValidationException`, `FlowExecutionFailedException` |
 | `tests/` | pytest — mirrors `src/docpipe/` structure; unit tests under `tests/unit/`, integration under `tests/integration/` |
@@ -230,16 +231,19 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `true` (default) \| `false` |
 | `DOCPIPE_CUSTOM_OPERATORS` | Comma-separated package paths injected as operator providers |
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
-| `DOCPIPE_STORAGE_BACKEND` | `duckdb` (default) \| `postgres` |
-| `DOCPIPE_FRAMEWORK_TYPE` | `local` (default) \| `prefect` |
+| `DOCPIPE_STORAGE_BACKEND` | Forwarded to workers only; no longer overrides `job_management.storage` in the config file |
+| `DOCPIPE_FRAMEWORK_TYPE` | Forwarded to workers only; no longer overrides `job_management.framework` in the config file |
+| `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres; also the fallback for asset repositories of type `postgres`) |
+| `DOCUMENTSET_REPOSITORY_TYPE` / `DOCUMENTLIBRARY_REPOSITORY_TYPE` | Asset metadata backend: `duckdb` (default) \| `postgres` (overrides `assets_management.<asset>_repository.type`) |
 | `DOCPIPE_LINEAGE_ENABLED` | `false` (default) \| `true` — emit OpenLineage events (requires the `lineage` extra) |
 | `DOCPIPE_LINEAGE_MODE` | `flow` (default) \| `operator` — add per-node events |
 | `DOCPIPE_LINEAGE_NAMESPACE` | OpenLineage namespace, default `docpipe://local` |
 | `DOCPIPE_LINEAGE_PRODUCER` | Producer URI embedded in facets, default `https://github.com/docling-project/docling-pipelines` |
 | `DOCPIPE_LINEAGE_STRICT` | `false` (default) \| `true` — re-raise observer errors instead of logging a warning |
 | `OPENLINEAGE__TRANSPORT__*` | OpenLineage SDK transport settings (`console` default, `file`, `http`); read by the SDK, not by docpipe |
-| `DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection (when storage=postgres) |
 | `CORS_ORIGINS` | Comma-separated allowed origins, default `http://localhost:3000` |
+| `DOCPIPE_DOCLING_CONVERTER_POOL_SIZE` | Max pooled Docling converters/extractors per process, default `min(2*cpu, 16)`; overrides `docling.converter_pool.size` in the config file |
+| `DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS` | Idle pooled converter lifetime, default `600`; `0` = keep until exit; overrides `docling.converter_pool.idle_ttl_seconds` |
 
 ## Commands
 

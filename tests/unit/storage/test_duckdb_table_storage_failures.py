@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Failure-path tests for DuckDBTableStorage against real DuckDB files."""
 
 import logging
@@ -12,7 +15,7 @@ import pytest
 
 from docpipe.storage.duck_db import duckdb_table_storage
 from docpipe.storage.duck_db.duckdb_table_storage import DuckDBTableStorage
-from docpipe.storage.exceptions import StorageException, StorageValidationError
+from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 
 
 def _prepare_database(db_path: Path, *statements: str) -> None:
@@ -341,3 +344,25 @@ class TestExecuteQueryFailures:
         """A query string that holds only a comment produces no result set."""
         with pytest.raises(StorageException, match="Unexpected error executing query"):
             storage.execute_query(query="-- nothing to run")
+
+
+class TestTableExistsFailures:
+    """table_exists reports a database that cannot be read, instead of a missing table."""
+
+    def test_database_file_that_does_not_exist_yet_has_no_tables(self, tmp_path):
+        """The first write creates the file, so a missing file only means no tables."""
+        storage = DuckDBTableStorage(database_path=str(tmp_path / "not_created_yet.duckdb"))
+
+        assert storage.table_exists(table_name="documents") is False
+
+    def test_read_error_is_raised_as_connection_error(self, monkeypatch, storage, documents):
+        """A failed check is not taken for a missing table, which callers would then create."""
+        _inject_failure(
+            monkeypatch=monkeypatch,
+            storage=storage,
+            statement_prefix="SELECT COUNT(*) FROM information_schema.tables",
+            error=duckdb.IOException("disk error"),
+        )
+
+        with pytest.raises(StorageConnectionError, match=f"Failed to check if table {documents} exists: disk error"):
+            storage.table_exists(table_name=documents)

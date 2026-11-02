@@ -10,10 +10,12 @@ import React, { useMemo, useState } from 'react';
 import { Button } from '@carbon/react';
 import { NoDataEmptyState, Tearsheet } from '@carbon/ibm-products';
 import { Maximize } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
 import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
 import type { FeatureAttributes } from '@/types';
 import styles from './FeaturesTab.module.scss';
+import { messages } from './InputFeaturesTab.messages';
 
 interface InputFeaturesTabProps {
   nodeId: string;
@@ -22,36 +24,37 @@ interface InputFeaturesTabProps {
   isLoading: boolean;
 }
 
-// Compact panel headers (no Description column — not enough width)
-const PANEL_HEADERS: SharedDataTableHeader[] = [
-  { key: 'name', header: 'Input feature' },
-  { key: 'columnName', header: 'Column name' },
-  { key: 'type', header: 'Type' },
-];
-
-// Expanded tearsheet headers — adds Description
-const EXPANDED_HEADERS: SharedDataTableHeader[] = [
-  { key: 'name', header: 'Input feature' },
-  { key: 'columnName', header: 'Column name' },
-  { key: 'description', header: 'Description' },
-  { key: 'type', header: 'Type' },
-];
-
-const INPUT_EMPTY_STATE = (
-  <NoDataEmptyState
-    title="No input features available"
-    subtitle="There are currently no input features for this node."
-    size="sm"
-  />
-);
-
 export function InputFeaturesTab({
   nodeId,
   inputFeatures,
   pipelineNodes,
   isLoading,
 }: InputFeaturesTabProps): React.JSX.Element {
+  const intl = useIntl();
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Compact panel headers (no Description column — not enough width)
+  const panelHeaders = useMemo((): SharedDataTableHeader[] => [
+    { key: 'name', header: intl.formatMessage(messages.inputFeature) },
+    { key: 'columnName', header: intl.formatMessage(messages.columnName) },
+    { key: 'type', header: intl.formatMessage(messages.type) },
+  ], [intl]);
+
+  // Expanded tearsheet headers — adds Description
+  const expandedHeaders = useMemo((): SharedDataTableHeader[] => [
+    { key: 'name', header: intl.formatMessage(messages.inputFeature) },
+    { key: 'columnName', header: intl.formatMessage(messages.columnName) },
+    { key: 'description', header: intl.formatMessage(messages.description) },
+    { key: 'type', header: intl.formatMessage(messages.type) },
+  ], [intl]);
+
+  const emptyState = useMemo(() => (
+    <NoDataEmptyState
+      title={intl.formatMessage(messages.emptyTitle)}
+      subtitle={intl.formatMessage(messages.emptySubtitle)}
+      size="sm"
+    />
+  ), [intl]);
 
   const nodeLabels = useMemo(() => {
     const map: Record<string, string> = {};
@@ -124,16 +127,16 @@ export function InputFeaturesTab({
   return (
     <div className={styles.featuresTab}>
       <p className={styles.tabDescription}>
-        Features added by upstream nodes in the flow that are available for this node.
+        {intl.formatMessage(messages.tabDescription)}
       </p>
       <SharedDataTable
-        headers={PANEL_HEADERS}
+        headers={panelHeaders}
         rows={rows}
         searchable
         searchKeys={['name', '_nodeName']}
-        searchPlaceholder="Search features"
+        searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
         loading={isLoading}
-        emptyState={INPUT_EMPTY_STATE}
+        emptyState={emptyState}
         size="lg"
         horizontalScroll
         renderCell={renderCellFn}
@@ -142,7 +145,7 @@ export function InputFeaturesTab({
             kind="ghost"
             size="md"
             renderIcon={Maximize}
-            iconDescription="Expand table"
+            iconDescription={intl.formatMessage(messages.expandTable)}
             hasIconOnly
             onClick={() => { setIsExpanded(true); }}
             className={styles.expandButton}
@@ -153,28 +156,28 @@ export function InputFeaturesTab({
       <Tearsheet
         open={isExpanded}
         onClose={() => { setIsExpanded(false); }}
-        title="Input features"
-        description="Review the list of features added by upstream nodes in the flow that are available for this node."
+        title={intl.formatMessage(messages.tearsheetTitle)}
+        description={intl.formatMessage(messages.tearsheetDescription)}
         actions={[
           {
-            label: 'Close',
+            label: intl.formatMessage(messages.close),
             kind: 'secondary' as const,
             onClick: () => { setIsExpanded(false); },
           },
         ]}
         hasCloseIcon
-        closeIconDescription="Close"
+        closeIconDescription={intl.formatMessage(messages.close)}
       >
         <div className={styles.tearsheetTableWrapper}>
           <SharedDataTable
             key={String(isExpanded)}
-            headers={EXPANDED_HEADERS}
+            headers={expandedHeaders}
             rows={rows}
             searchable
             searchKeys={['name', '_nodeName']}
-            searchPlaceholder="Search features"
+            searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
             loading={isLoading}
-            emptyState={INPUT_EMPTY_STATE}
+            emptyState={emptyState}
             size="lg"
             horizontalScroll
             renderCell={renderCellFn}

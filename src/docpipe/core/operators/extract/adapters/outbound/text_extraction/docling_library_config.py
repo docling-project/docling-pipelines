@@ -70,8 +70,8 @@ class StandardPipelineConfig(BaseModel):
     accelerator: AcceleratorConfig | None = Field(
         default=None,
         description=(
-            "GPU accelerator options for PDF and image processing. When present, one DocumentConverter "
-            "is built at adapter init and reused across all documents. "
+            "GPU accelerator options for PDF and image processing. When present, the GPU DocumentConverter "
+            "is pooled process-wide and reused across documents and micro-batches. "
             "Requires max_workers=1 and use_processes=false. Cannot be combined with vlm_pipeline."
         ),
     )

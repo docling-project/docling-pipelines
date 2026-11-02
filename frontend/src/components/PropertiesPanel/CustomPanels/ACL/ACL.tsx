@@ -6,9 +6,11 @@
 
 import React from 'react';
 import { Toggle } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import { ACL_ATTR as ATTR, ACL_LABEL as LABEL } from './constants';
+import { ACL_ATTR as ATTR } from './constants';
+import { messages } from './ACL.messages';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
 import { RequiredParamTooltip } from '@/components/common';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
@@ -20,6 +22,7 @@ interface ACLPanelBodyProps {
 
 /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 export function ACLPanelBody({ controller }: ACLPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Operator attribute metadata ──
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
@@ -50,12 +53,12 @@ export function ACLPanelBody({ controller }: ACLPanelBodyProps): React.JSX.Eleme
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.PROVIDER_CONFIG]?.description ?? ''}
           >
-            {LABEL.PROVIDER_CONFIG}
+            {intl.formatMessage(messages.providerConfig)}
           </RequiredParamTooltip>
         </div>
         <JsonTextArea
           id="provider_config"
-          labelText={LABEL.PROVIDER_CONFIG}
+          labelText={intl.formatMessage(messages.providerConfig)}
           storedValue={providerConfigStored}
           placeholder='{"resolve_inheritance": true, "expand_groups": true}'
           invalid={providerConfigValidation.isInvalid}
@@ -74,15 +77,15 @@ export function ACLPanelBody({ controller }: ACLPanelBodyProps): React.JSX.Eleme
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.FAIL_ON_ERROR]?.description ?? ''}
           >
-            {LABEL.FAIL_ON_ERROR}
+            {intl.formatMessage(messages.failOnError)}
           </RequiredParamTooltip>
         </div>
         <Toggle
           id="fail_on_error"
-          labelText={LABEL.FAIL_ON_ERROR}
+          labelText={intl.formatMessage(messages.failOnError)}
           hideLabel
-          labelA="Off"
-          labelB="On"
+          labelA={intl.formatMessage(messages.off)}
+          labelB={intl.formatMessage(messages.on)}
           toggled={failOnError}
           onToggle={(checked: boolean) => {
             controller?.updatePropertyValue?.({ name: ATTR.FAIL_ON_ERROR }, checked);

@@ -124,7 +124,7 @@ Docling pipelines includes a React + TypeScript frontend (IBM Carbon Design Syst
 
 ### Development setup
 
-**Prerequisites:** Node.js 22.15.1 (use `nvm use` in the `frontend/` directory), npm.
+**Prerequisites:** Node.js 22.15.1 (use `nvm use` in the `frontend/` directory), npm. Node.js is also required to install the Python package (`uv sync`, `uv pip install -e .`, `uv build`), because the build hook compiles the frontend.
 
 **1. Start the backend:**
 ```bash
