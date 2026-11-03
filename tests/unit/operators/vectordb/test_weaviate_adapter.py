@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Weaviate vector store adapter."""
 
 import copy
@@ -409,7 +412,7 @@ def test_flow_validator_with_vault_api_key():
         "grpc_secure": True,
         "collection_name": "TestCollection",
         "auth_type": "api_key",
-        "api_key": "vault://hashicorp/weaviate/api_key",
+        "api_key": "vault://hashicorp/weaviate/api_key",  # pragma: allowlist secret
     }
     with patch(CONNECT_PATH) as mock_conn:
         error_text = validation_error_text(flow=vectordb_flow(provider_config=provider_config))

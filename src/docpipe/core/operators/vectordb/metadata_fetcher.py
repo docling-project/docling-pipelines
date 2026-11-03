@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Fetches live metadata from VectorDB connections for flow enrichment.
 
 Used by FlowEnrichmentService to populate available_resources,

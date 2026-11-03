@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for WeaviateResourceMetadata (flow enrichment for the Weaviate provider)."""
 
 from types import SimpleNamespace

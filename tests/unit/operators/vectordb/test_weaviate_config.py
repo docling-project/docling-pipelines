@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for WeaviateConfig and format_config_errors."""
 
 import pytest
@@ -89,7 +92,7 @@ class TestWeaviateConfig:
             connection_type="cloud",
             cluster_url="https://xyz.weaviate.cloud",
             auth_type="api_key",
-            api_key="secret-key",
+            api_key="secret-key",  # pragma: allowlist secret
         )
         assert cfg.cluster_url == "https://xyz.weaviate.cloud"
 
@@ -140,9 +143,9 @@ class TestWeaviateConfig:
     @pytest.mark.parametrize(
         ("auth_type", "kwargs"),
         [
-            ("api_key", {"api_key": "my-secret-key"}),
+            ("api_key", {"api_key": "my-secret-key"}),  # pragma: allowlist secret
             ("bearer_token", {"bearer_token": "my-bearer-token"}),
-            ("client_password", {"username": "admin", "password": "super-password"}),
+            ("client_password", {"username": "admin", "password": "super-password"}),  # pragma: allowlist secret
         ],
     )
     def test_plaintext_credentials_rejected(self, *, auth_type: str, kwargs: dict) -> None:
@@ -268,7 +271,7 @@ class TestWeaviateConfig:
 
     def test_format_config_errors_never_discloses_input_values(self) -> None:
         """Verify format_config_errors never contains sensitive input values."""
-        secret_value = "super_secret_plaintext_key_xyz_987"
+        secret_value = "super_secret_plaintext_key_xyz_987"  # pragma: allowlist secret
         with pytest.raises(ValidationError) as exc_info:
             WeaviateConfig(
                 collection_name="Documents",

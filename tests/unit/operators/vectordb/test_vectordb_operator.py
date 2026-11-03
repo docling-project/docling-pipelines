@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for VectorDB operator with OpenSearch adapter."""
 
 from typing import Any, ClassVar

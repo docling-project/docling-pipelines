@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Real-server tests for the Weaviate VectorDB provider.
 
 The suite runs against a Weaviate server and is meant for manual, pre-release

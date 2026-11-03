@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Weaviate Index Manager for collection creation, schema validation, and lifecycle management."""
 
 import re

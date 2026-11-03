@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config model and error formatting for the Weaviate vector store adapter."""
 
 import re

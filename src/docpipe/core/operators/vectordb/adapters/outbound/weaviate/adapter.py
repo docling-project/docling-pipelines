@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Weaviate vector store adapter.
 
 This adapter implements the VectorStorePort interface for Weaviate.

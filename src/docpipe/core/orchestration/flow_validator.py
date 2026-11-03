@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow validation module for docpipe orchestrator.
 
 This module contains the FlowValidator class which handles all flow validation logic

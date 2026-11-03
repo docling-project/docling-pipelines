@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Weaviate-specific resource metadata fetcher for flow enrichment.
 
 Fetches live collection metadata from a Weaviate deployment: available collections,

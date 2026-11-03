@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for WeaviateIndexManager."""
 
 from unittest.mock import MagicMock
@@ -357,7 +360,7 @@ class TestWeaviateIndexManagerCollectionOperations:
 
     def test_create_collection_redacts_credentials_in_failure(self, *, mock_client: MagicMock) -> None:
         """An SDK error that echoes a resolved credential is masked in the raised message."""
-        secret = "resolved-" + "credential-value"
+        secret = "resolved-" + "credential-value"  # pragma: allowlist secret
         mock_client.collections.exists.return_value = False
         mock_client.collections.create.side_effect = RuntimeError(f"upstream rejected key {secret}")
         manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs", secrets=[secret])

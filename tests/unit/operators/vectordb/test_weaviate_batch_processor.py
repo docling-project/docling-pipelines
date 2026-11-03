@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for WeaviateBatchProcessor."""
 
 from unittest.mock import MagicMock
@@ -148,7 +151,7 @@ class TestWeaviateBatchProcessor:
 
     def test_process_batches_partial_errors_redacted(self, *, mock_client: MagicMock) -> None:
         """Verify partial errors from result.errors are mapped and redacted."""
-        secret = "secret_wv_token_777"
+        secret = "secret_wv_token_777"  # pragma: allowlist secret
         mock_coll = MagicMock()
         mock_result = MagicMock()
 
@@ -299,7 +302,7 @@ class TestWeaviateBatchProcessor:
         assert used.target == "doc_name"
 
     def test_query_by_doc_names_error_is_redacted_in_logs(self, *, mock_client: MagicMock, caplog) -> None:
-        secret = "resolved-" + "credential-value"
+        secret = "resolved-" + "credential-value"  # pragma: allowlist secret
         mock_client.collections.get.side_effect = RuntimeError(f"denied for {secret}")
         processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs", secrets=[secret])
         with caplog.at_level("WARNING"):

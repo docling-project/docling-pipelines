@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for WeaviateClient."""
 
 import logging
@@ -51,7 +54,7 @@ class TestWeaviateClient:
             connection_type="cloud",
             cluster_url="https://test.weaviate.cloud",
             auth_type="api_key",
-            api_key="my-api-key",
+            api_key="my-api-key",  # pragma: allowlist secret
         )
         sdk_client = client.connect()
 
@@ -96,7 +99,7 @@ class TestWeaviateClient:
             grpc_secure=True,
             auth_type="client_password",
             username="admin",
-            password="secret-password",
+            password="secret-password",  # pragma: allowlist secret
         )
         client.connect()
         mock_connect.assert_called_once()
@@ -110,7 +113,7 @@ class TestWeaviateClient:
             port=8080,
             secure=False,
             auth_type="api_key",
-            api_key="secret",
+            api_key="secret",  # pragma: allowlist secret
         )
         with patch("weaviate.connect_to_custom") as mock_connect:
             with pytest.raises(DocpipeException) as exc_info:
@@ -210,7 +213,7 @@ class TestWeaviateClient:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Verify configured secrets and Authorization headers are redacted in exceptions and logs."""
-        secret = "super_confidential_key_999"
+        secret = "super_confidential_key_999"  # pragma: allowlist secret
         mock_connect.side_effect = Exception(f"Connection failed: invalid auth for Bearer {secret} and token {secret}")
 
         client = WeaviateClient(

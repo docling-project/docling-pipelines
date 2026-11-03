@@ -1,5 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Weaviate client wrapper for connection, authentication, and lifecycle management."""
 
+import contextlib
 import re
 from typing import Any
 
@@ -235,10 +239,8 @@ class WeaviateClient:
             return self._client
         except Exception as exc:
             if raw_client is not None:
-                try:
+                with contextlib.suppress(Exception):
                     raw_client.close()
-                except Exception:
-                    pass
                 raw_client = None
 
             if isinstance(exc, DocpipeException):

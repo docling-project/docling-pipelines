@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Weaviate Batch Processor for bulk document indexing, deletion, queries, and keyset paging."""
 
 import hashlib
