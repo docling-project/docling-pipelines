@@ -39,24 +39,40 @@ project. Keep this focused: read only what a finding needs.
 
 Look for these, in this order:
 
-1. Wrong behavior or regressions, also outside the example in the PR: which
+1. Possible malicious or hidden code that the PR description does not explain.
+   Check the added lines for:
+   - Long obfuscated or encoded strings: base64 or hex blobs, strings that the
+     code decodes, decompresses, or passes to `eval`, `exec`, `compile`,
+     `__import__`, `subprocess`, or `pickle`, and strings built from many
+     character codes or joined fragments.
+   - Unusual Unicode in source, config, or workflow files: bidirectional
+     control characters (U+202A to U+202E, U+2066 to U+2069), zero-width or
+     invisible characters (U+200B to U+200D, U+2060, U+FEFF), Unicode tag
+     characters (U+E0000 to U+E007F), and look-alike letters from another
+     script inside an identifier, a path, or a URL (for example a Cyrillic `a`
+     in a Latin name).
+   Hashes, UUIDs, checksums, lock files, test fixtures, and embedded sample
+   data are normal when the PR description or the file name says what they are.
+   Compare each finding with the description. Do not explain how to exploit
+   the code.
+2. Wrong behavior or regressions, also outside the example in the PR: which
    other operators, orchestrators (Python and Prefect), storage backends, or
    default settings does the change affect? A change in a shared base class or
    helper (`AbstractOperator`, `FlowExecutor`, `OperatorFactory`, the storage
    layer) affects every flow. Does the same defect stay in nearby code (a
    sibling operator, the same pattern in another adapter)?
-2. A violation of the architecture rules in `AGENTS.md` that no CI check
+3. A violation of the architecture rules in `AGENTS.md` that no CI check
    catches, for example: an operator that calls a database directly, an
    operator that imports a concrete LLM adapter instead of a port, a route
    handler that returns a domain model instead of a DTO, an `adapters/` import
    in a `domain/` or `application/` module, `SessionInfo` passed as a function
    argument, or a built-in operator that is not in `DOCPIPE_OPERATORS`.
-3. A breaking change to operator parameters, flow JSON, or REST DTOs without an
+4. A breaking change to operator parameters, flow JSON, or REST DTOs without an
    update of the docs (`docs/reference/OPERATORS.md`,
    `docs/reference/GLOBAL_CONFIG.md`) or of the OpenSpec change.
-4. A missing regression test for the fixed defect, or a test that does not
+5. A missing regression test for the fixed defect, or a test that does not
    test the defect.
-5. Claims in the PR description that the diff does not contain.
+6. Claims in the PR description that the diff does not contain.
 
 Do not report:
 
@@ -77,14 +93,18 @@ Severity:
 - `blocker`: a defect that you can show with the code and that must stop the
   merge: the trigger, the wrong result, and the user impact. For example wrong
   output, lost content, a flow JSON that no longer loads, a crash on supported input,
-  an import that fails for a supported install, a security defect, or a
+  an import that fails for a supported install, a security defect, hidden
+  code (item 1) that you can show executes or hides its purpose, or a
   regression test that does not test the defect. These are not blockers: a
   small defect in a limit, a message, or a log; a behavior change that the PR
   states and tests. Report one root cause as one finding, also when it shows
   in several places. Never use `blocker` for a claim that you did not check in
   the source, including the source of a dependency.
 - `question`: evidence is missing, or the claim needs "if", "may", or
-  "could". Ask for the specific evidence and do not assert a defect.
+  "could". Ask for the specific evidence and do not assert a defect. Use
+  `question` for an encoded string or an unusual character that you cannot
+  link to a harm: ask the author what it is. Do not say that the code is
+  malicious unless the code shows it.
 - `suggestion`: a useful improvement with no demonstrated defect.
 
 Report at most 5 findings, and at most 2 of them `suggestion`. Give each
