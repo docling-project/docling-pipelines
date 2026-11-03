@@ -74,12 +74,14 @@ class WeaviateAdapter(VectorStorePort):
         # 2. If add_sparse_vector is True, require a mapping for the content feature
         if self.add_sparse_vector:
             has_content_mapping = any(
-                entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name")) in ("content", "text")
-                or entry.get(
-                    OperatorConstants.Misc.MAPPED_COLUMN_NAME,
-                    entry.get("collection_column", entry.get("mapped_column_name")),
+                WeaviateIndexManager.is_content_mapping(
+                    feature_name=entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name")) or "",
+                    column_name=entry.get(
+                        OperatorConstants.Misc.MAPPED_COLUMN_NAME,
+                        entry.get("collection_column", entry.get("mapped_column_name")),
+                    )
+                    or "",
                 )
-                in ("content", "text")
                 for entry in feature_mappings
             )
             if not has_content_mapping:
@@ -168,6 +170,7 @@ class WeaviateAdapter(VectorStorePort):
         client = self.client_manager.connect()
 
         try:
+            secrets = self.client_manager.resolved_secrets
             self.index_manager = WeaviateIndexManager(
                 client=client,
                 collection_name=config_model.collection_name,
@@ -177,8 +180,8 @@ class WeaviateAdapter(VectorStorePort):
                 add_sparse_vector=self.add_sparse_vector,
                 feature_mappings=filtered_mappings,
                 available_features=available_features,
+                secrets=secrets,
             )
-            secrets = [config_model.api_key, config_model.bearer_token, config_model.password]
             self.batch_processor = WeaviateBatchProcessor(
                 client=client,
                 collection_name=config_model.collection_name,

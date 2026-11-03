@@ -13,7 +13,7 @@ from weaviate.classes.config import (
 )
 
 from docpipe.core.constants import OperatorConstants
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, redact_secrets
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
@@ -45,6 +45,8 @@ RESERVED_SUFFIXES: tuple[str, ...] = (
 )
 
 PROPERTY_NAME_REGEX = re.compile(r"^[a-zA-Z][_0-9a-zA-Z]*$")
+
+CONTENT_NAMES: tuple[str, ...] = ("content", "text")
 
 DISTANCE_METRIC_MAP: dict[str, VectorDistances] = {
     "cosine": VectorDistances.COSINE,
@@ -197,6 +199,7 @@ class WeaviateIndexManager:
         add_sparse_vector: bool = False,
         feature_mappings: list[dict[str, str]] | None = None,
         available_features: dict[str, Any] | None = None,
+        secrets: list[str] | None = None,
     ) -> None:
         self.client_wrapper = client if isinstance(client, WeaviateClient) else None
         self._raw_client = client if not isinstance(client, WeaviateClient) else None
@@ -208,6 +211,29 @@ class WeaviateIndexManager:
         self.feature_mappings = feature_mappings or []
         self.available_features = available_features or {}
         self._mapping_dict = build_mapping_dict(self.feature_mappings)
+        self._secrets = [s for s in (secrets or []) if s]
+
+    def _redact(self, text: str) -> str:
+        """Mask configured credentials in text that may echo SDK or server errors."""
+        return redact_secrets(text=text, secrets=self._secrets)
+
+    @staticmethod
+    def is_content_mapping(*, feature_name: str, column_name: str) -> bool:
+        """Return True when a mapping carries document text, whatever column it is mapped to."""
+        return feature_name in CONTENT_NAMES or column_name in CONTENT_NAMES
+
+    def _content_columns(self) -> set[str]:
+        """Return the mapped columns that hold document text and must be word-tokenized."""
+        columns: set[str] = set()
+        for entry in self.feature_mappings:
+            feat_name = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
+            col_name = entry.get(
+                OperatorConstants.Misc.MAPPED_COLUMN_NAME,
+                entry.get("collection_column", entry.get("mapped_column_name")),
+            )
+            if feat_name and col_name and self.is_content_mapping(feature_name=feat_name, column_name=col_name):
+                columns.add(col_name)
+        return columns
 
     def _vector_name(self, feature_name: str) -> str:
         """Return the named-vector name for a dense vector feature (its mapped column, else the feature)."""
@@ -230,7 +256,7 @@ class WeaviateIndexManager:
         try:
             return bool(self.client.collections.exists(self.collection_name))
         except Exception as exc:
-            logger.warning("Error checking collection existence: %s", exc)
+            logger.warning("Error checking collection existence: %s", self._redact(str(exc)))
             return False
 
     def drop_collection(self) -> bool:
@@ -239,7 +265,7 @@ class WeaviateIndexManager:
             self.client.collections.delete(self.collection_name)
             return True
         except Exception as exc:
-            logger.warning("Error deleting collection '%s': %s", self.collection_name, exc)
+            logger.warning("Error deleting collection '%s': %s", self.collection_name, self._redact(str(exc)))
             return False
 
     def _build_properties(self, *, dimension_mapping: dict[str, int]) -> list[Property]:
@@ -279,7 +305,7 @@ class WeaviateIndexManager:
             feat_type = feat_meta.get("type", "text") if isinstance(feat_meta, dict) else "text"
             data_type = map_feature_type(feat_type)
             tokenization = tokenization_for(feat_name, col_name, feat_type)
-            is_content = feat_name in ("content", "text") or col_name in ("content", "text")
+            is_content = self.is_content_mapping(feature_name=feat_name, column_name=col_name)
 
             if is_content:
                 content_mapped = True
@@ -346,7 +372,7 @@ class WeaviateIndexManager:
                         idx_cfg = Configure.VectorIndex.hnsw(distance_metric=dist, **self.index_parameters)
                 except (TypeError, ValueError) as exc:
                     raise DocpipeException(
-                        message=f"Invalid index_parameters for index_type '{self.index_type}': {exc}",
+                        message=f"Invalid index_parameters for index_type '{self.index_type}': {self._redact(str(exc))}",
                         status_code=400,
                         error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
                     ) from None
@@ -384,7 +410,7 @@ class WeaviateIndexManager:
                 ) from None
 
             raise DocpipeException(
-                message=f"Failed to create collection '{self.collection_name}': {exc}",
+                message=f"Failed to create collection '{self.collection_name}': {self._redact(str(exc))}",
                 status_code=500,
                 error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
             ) from None
@@ -450,13 +476,18 @@ class WeaviateIndexManager:
                                         f"Vector dimension mismatch for '{vec_name}': collection has dimension {actual_dim}, but runtime embedding has dimension {expected_dim}"
                                     )
             except Exception as exc:
-                logger.warning("Could not sample vector dimension for collection '%s': %s", self.collection_name, exc)
+                logger.warning(
+                    "Could not sample vector dimension for collection '%s': %s",
+                    self.collection_name,
+                    self._redact(str(exc)),
+                )
 
         # 4-6. Scalar properties and tokenization checks (runs for all runs)
         existing_props = {prop.name.lower(): prop for prop in (coll_cfg.properties or [])}
 
         missing_props_to_add: list[Property] = []
         expected_properties = self._build_properties(dimension_mapping=dimension_mapping)
+        content_columns = self._content_columns() | set(CONTENT_NAMES)
 
         for expected_prop in expected_properties:
             prop_key = expected_prop.name.lower()
@@ -493,8 +524,7 @@ class WeaviateIndexManager:
                     )
 
             # Content property check
-            is_content = expected_prop.name in ("content", "text")
-            if is_content:
+            if expected_prop.name in content_columns:
                 actual_tokenization = getattr(existing_prop, "tokenization", None)
                 actual_searchable = getattr(
                     existing_prop, "index_searchable", getattr(existing_prop, "indexSearchable", False)
@@ -520,5 +550,8 @@ class WeaviateIndexManager:
                 logger.info("Added missing property '%s' to collection '%s'", missing_prop.name, self.collection_name)
             except Exception as exc:
                 logger.warning(
-                    "Failed to add property '%s' to collection '%s': %s", missing_prop.name, self.collection_name, exc
+                    "Failed to add property '%s' to collection '%s': %s",
+                    missing_prop.name,
+                    self.collection_name,
+                    self._redact(str(exc)),
                 )

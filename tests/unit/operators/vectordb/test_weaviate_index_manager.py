@@ -272,6 +272,100 @@ class TestWeaviateIndexManagerCollectionOperations:
         )
         manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
 
+    @staticmethod
+    def _existing_collection(*, mock_client: MagicMock, content_property: str, tokenization: Tokenization) -> None:
+        """Mock an existing collection with a pk, an indexed vector, and one content property."""
+        mock_client.collections.exists.return_value = True
+        indexed = MagicMock()
+        indexed.vector_index_config.skip = False
+
+        def prop(*, name: str, tok: Tokenization, searchable: bool) -> MagicMock:
+            p = MagicMock()
+            p.name = name
+            p.data_type = DataType.TEXT
+            p.tokenization = tok
+            p.index_filterable = True
+            p.index_searchable = searchable
+            return p
+
+        cfg = MagicMock()
+        cfg.vector_config = {"vector_embeddings": indexed}
+        cfg.properties = [
+            prop(name="pk", tok=Tokenization.FIELD, searchable=True),
+            prop(name=content_property, tok=tokenization, searchable=True),
+        ]
+        collection = mock_client.collections.get.return_value
+        collection.config.get.return_value = cfg
+        collection.aggregate.over_all.return_value.total_count = 0
+
+    @pytest.mark.parametrize("column", ["body", "content", "text"])
+    def test_validate_existing_collection_rejects_field_tokenized_content_in_any_column(
+        self, *, mock_client: MagicMock, column: str
+    ) -> None:
+        """A content feature mapped to any column must be word-tokenized, not only 'content' or 'text'."""
+        self._existing_collection(mock_client=mock_client, content_property=column, tokenization=Tokenization.FIELD)
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "content", "mapped_column_name": column},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "content": {"type": "text"},
+            },
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
+        assert f"Content property '{column}'" in str(exc_info.value)
+
+    def test_validate_existing_collection_accepts_word_tokenized_content_in_custom_column(
+        self, *, mock_client: MagicMock
+    ) -> None:
+        self._existing_collection(mock_client=mock_client, content_property="body", tokenization=Tokenization.WORD)
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "content", "mapped_column_name": "body"},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "content": {"type": "text"},
+            },
+        )
+        manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
+
+    def test_create_collection_word_tokenizes_content_in_custom_column(self, *, mock_client: MagicMock) -> None:
+        mock_client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "content", "mapped_column_name": "body"},
+            ],
+            available_features={"doc_id_hash": {"type": "keyword", "is_primary": True}, "content": {"type": "text"}},
+        )
+        manager.create_collection(dimension_mapping={})
+        properties = {p.name: p for p in mock_client.collections.create.call_args.kwargs["properties"]}
+        assert properties["body"].tokenization == Tokenization.WORD
+
+    def test_create_collection_redacts_credentials_in_failure(self, *, mock_client: MagicMock) -> None:
+        """An SDK error that echoes a resolved credential is masked in the raised message."""
+        secret = "resolved-" + "credential-value"
+        mock_client.collections.exists.return_value = False
+        mock_client.collections.create.side_effect = RuntimeError(f"upstream rejected key {secret}")
+        manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs", secrets=[secret])
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 8})
+        assert secret not in str(exc_info.value)
+        assert "***" in str(exc_info.value)
+
     def test_create_collection_sparse_only(self, *, mock_client: MagicMock) -> None:
         """Verify create_collection in sparse-only mode passes non-indexed keyword_only vector."""
         mock_client.collections.exists.return_value = False

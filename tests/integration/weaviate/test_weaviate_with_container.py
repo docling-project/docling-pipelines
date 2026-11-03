@@ -818,6 +818,29 @@ def test_dense_run_is_rejected_when_the_content_property_is_not_word_tokenized(
     assert count(sdk, collection_name) == 0
 
 
+def test_dense_run_is_rejected_when_content_is_mapped_to_a_field_tokenized_custom_column(
+    server: Endpoint, sdk: weaviate.WeaviateClient, collection_name: str
+) -> None:
+    create_collection(
+        sdk,
+        collection_name,
+        properties=[
+            Property(name="pk", data_type=DataType.TEXT, tokenization=Tokenization.FIELD, index_filterable=True),
+            Property(name="body", data_type=DataType.TEXT, tokenization=Tokenization.FIELD, index_searchable=True),
+        ],
+    )
+    config = vectordb_config(server=server, collection=collection_name)
+    for mapping in config["feature_mappings"]:
+        if mapping["feature_name"] == "content":
+            mapping["mapped_column_name"] = "body"
+
+    metadata = run(config=config, table=make_table(docs=[doc(hash_="d1", chunks=2)]))
+
+    assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.FAILED.value
+    assert "'body'" in metadata[Metrics.External.FAILED_DOCS][0]["reason"]
+    assert count(sdk, collection_name) == 0
+
+
 # ---------------------------------------------------------------------------
 # Connection release
 # ---------------------------------------------------------------------------

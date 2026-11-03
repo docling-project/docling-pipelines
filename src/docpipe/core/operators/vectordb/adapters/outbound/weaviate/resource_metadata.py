@@ -14,14 +14,13 @@ from weaviate.classes.config import Tokenization
 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import tokenization_for
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import CONTENT_NAMES, tokenization_for
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
 
 _VECTOR_TYPE = "VECTOR"
 _PK = OperatorConstants.VectorDB.DEFAULT_PRIMARY_KEY_FIELD
-_CONTENT_NAMES = ("content", "text")
 _CONNECTION_TYPE_CLOUD = "cloud"
 _CLIENT_KWARG_KEYS: dict[str, str] = {
     "connection_type": OperatorConstants.VectorDB.CONNECTION_TYPE,
@@ -215,9 +214,9 @@ class WeaviateResourceMetadata:
         for entry in feature_mappings:
             feature = entry.get(OperatorConstants.Misc.FEATURE_NAME)
             column = entry.get(OperatorConstants.Misc.MAPPED_COLUMN_NAME)
-            if column and (feature in _CONTENT_NAMES or column in _CONTENT_NAMES):
+            if column and (feature in CONTENT_NAMES or column in CONTENT_NAMES):
                 candidates.append(column)
-        candidates.extend(_CONTENT_NAMES)
+        candidates.extend(CONTENT_NAMES)
         return next((props[name] for name in candidates if name in props), None)
 
     @staticmethod
@@ -231,7 +230,7 @@ class WeaviateResourceMetadata:
         for entry in feature_mappings:
             feature = entry.get(OperatorConstants.Misc.FEATURE_NAME)
             column = entry.get(OperatorConstants.Misc.MAPPED_COLUMN_NAME)
-            if not feature or not column or column == _PK or feature in _CONTENT_NAMES or column in _CONTENT_NAMES:
+            if not feature or not column or column == _PK or feature in CONTENT_NAMES or column in CONTENT_NAMES:
                 continue
             meta = available_features.get(feature, {})
             feature_type = meta.get(OperatorConstants.Misc.TYPE) if isinstance(meta, dict) else None
@@ -377,7 +376,7 @@ class WeaviateResourceMetadata:
                     _map(name, name)
 
             if add_sparse:
-                content_prop = next((props[n] for n in _CONTENT_NAMES if n in props), None)
+                content_prop = next((props[n] for n in CONTENT_NAMES if n in props), None)
                 if content_prop is not None and content_prop.index_searchable:
                     content_feature = operator_config.get(
                         OperatorConstants.Columns.DOC_COLUMN, OperatorConstants.Columns.DOC_COLUMN_DEFAULT

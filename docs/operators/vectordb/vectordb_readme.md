@@ -153,7 +153,7 @@ Weaviate has no stored sparse vector. "Sparse" retrieval is BM25 keyword search 
 - Set `add_sparse_vector: true` at the top level of the node `config`. Setting it only inside `provider_config` records the BM25 parameters but does not enable sparse-only runs.
 - The content feature must be mapped (for example `content` to `text`). A `sparse_embeddings` mapping is accepted and ignored.
 - A sparse-only run (no dense embedding column) creates a keyword-only collection: one non-indexed named vector (named `keyword_only`) and objects written without a vector. Sparse-only runs currently require in-memory chunks from upstream operators; the standard extract, chunker, vectordb pipeline produces memory-mapped chunks and does not qualify. Hybrid runs (dense plus BM25) are unaffected.
-- An existing collection must have a searchable, `word`-tokenized content property; this cannot be changed after the collection is created.
+- An existing collection must have a searchable, `word`-tokenized property in whichever column the content feature is mapped to (for example `text` or `body`); this cannot be changed after the collection is created.
 - Querying is outside this operator. Use the Weaviate client:
 
 ```python
@@ -455,7 +455,7 @@ For a sparse-only run, omit the embeddings feature and see the in-memory chunk r
 | Weaviate: collection name rejected | Name does not start with an upper-case ASCII letter | Use a name such as `DocpipeChunks`; Weaviate capitalizes the first letter |
 | Weaviate: property name rejected | Name is reserved (for example `id`, `_additional`) or begins with an upper-case letter (the server lower-cases it) | Map the feature to a lower-case, non-reserved name |
 | Weaviate: dimension mismatch | The existing collection's named vector has a different dimension than the embeddings | Use the matching model, or write to a new collection |
-| Weaviate: existing collection rejected | Its `pk` property is `word`-tokenized, or its content property is not searchable or not `word`-tokenized | These cannot be changed in place; create a new collection |
+| Weaviate: existing collection rejected | Its `pk` property is `word`-tokenized, or the property the content feature is mapped to is not searchable or not `word`-tokenized | These cannot be changed in place; create a new collection |
 | Weaviate: `dynamic` index refused | The server was not started with `ASYNC_INDEXING=true` | Enable async indexing on the server or use `hnsw` or `flat` |
 | Weaviate: unexpected quantization | The server applies `DEFAULT_QUANTIZATION` to new collections | Check the server's environment; this is not set by the operator |
 | Weaviate: sparse mode fails | The content feature is unmapped or the existing content property is not searchable | Map `content` and use a collection whose content property is searchable |

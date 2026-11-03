@@ -444,3 +444,25 @@ def test_secret_safety_across_adapter_paths(monkeypatch, caplog):
         assert "super-secret-token-12345" not in str(exc_info.value)
         assert "super-secret-token-12345" not in caplog.text
         assert "[REDACTED]" in str(exc_info.value) or "Failed with" in str(exc_info.value)
+
+
+def test_managers_receive_resolved_credentials_for_redaction(monkeypatch):
+    """Environment-referenced credentials are masked in manager errors by their resolved value."""
+    resolved = "resolved-" + "credential-value"
+    monkeypatch.setenv("WEAVIATE_REDACTION_KEY", resolved)
+    cfg = {
+        "connection_type": "custom",
+        "host": "localhost",
+        "port": 8080,
+        "secure": True,
+        "grpc_secure": True,
+        "collection_name": "TestCollection",
+        "auth_type": "api_key",
+        "api_key": "${WEAVIATE_REDACTION_KEY}",
+    }
+    with patch(CONNECT_TO_CUSTOM_PATH, return_value=MagicMock()):
+        adapter = WeaviateAdapter(**cfg)
+
+    assert resolved in adapter.batch_processor.secrets
+    assert "${WEAVIATE_REDACTION_KEY}" not in adapter.batch_processor.secrets
+    assert adapter.index_manager._redact(f"echoed {resolved}") == "echoed ***"

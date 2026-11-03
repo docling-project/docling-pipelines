@@ -16,6 +16,17 @@ logger = get_logger()
 _AUTH_HEADER_RE = re.compile(r"(?i)(bearer\s+)[^\s\"',]+")
 
 
+def redact_secrets(*, text: str, secrets: list[str]) -> str:
+    """Replace each non-empty secret and any bearer token in text with a mask."""
+    if not text:
+        return text
+    redacted = text
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "***")
+    return _AUTH_HEADER_RE.sub(r"\1***", redacted)
+
+
 class WeaviateClient:
     """Manages connection, authentication, and lifecycle for the Weaviate Python SDK client.
 
@@ -69,15 +80,14 @@ class WeaviateClient:
         self._client: weaviate.WeaviateClient | None = None
         self._resolved_secrets: list[str] = []
 
+    @property
+    def resolved_secrets(self) -> list[str]:
+        """Resolved credential values, available once the connection has been built."""
+        return list(self._resolved_secrets)
+
     def _redact(self, text: str) -> str:
         """Redact known credentials and Authorization headers from text."""
-        if not text:
-            return text
-        redacted = text
-        for secret in self._resolved_secrets:
-            if secret:
-                redacted = redacted.replace(secret, "***")
-        return _AUTH_HEADER_RE.sub(r"\1***", redacted)
+        return redact_secrets(text=text, secrets=self._resolved_secrets)
 
     def _resolve_and_build_auth(self) -> Any:
         """Resolve credentials from environment variables and construct Auth object."""

@@ -275,6 +275,37 @@ class TestWeaviateBatchProcessor:
         assert len(chunks_map["file_1"]) == 1250
         assert mock_coll.query.fetch_objects.call_count == 2
 
+    @pytest.mark.parametrize(
+        "mappings",
+        [
+            [("id", "file_id"), ("name", "doc_name")],
+            [("name", "doc_name"), ("id", "file_id")],
+        ],
+    )
+    def test_query_by_doc_names_ignores_mapping_order(
+        self, *, mock_client: MagicMock, mappings: list[tuple[str, str]]
+    ) -> None:
+        """The name lookup filters the name property whichever mapping is declared first."""
+        mock_coll = MagicMock()
+        mock_coll.query.fetch_objects.return_value.objects = []
+        mock_client.collections.get.return_value = mock_coll
+        processor = WeaviateBatchProcessor(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[{"feature_name": f, "mapped_column_name": c} for f, c in mappings],
+        )
+        processor.query_by_doc_names(doc_names=["report.pdf"])
+        used = mock_coll.query.fetch_objects.call_args.kwargs["filters"]
+        assert used.target == "doc_name"
+
+    def test_query_by_doc_names_error_is_redacted_in_logs(self, *, mock_client: MagicMock, caplog) -> None:
+        secret = "resolved-" + "credential-value"
+        mock_client.collections.get.side_effect = RuntimeError(f"denied for {secret}")
+        processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs", secrets=[secret])
+        with caplog.at_level("WARNING"):
+            assert processor.query_by_doc_names(doc_names=["a.pdf"]) == []
+        assert secret not in caplog.text
+
     def test_query_by_doc_names(self, *, mock_client: MagicMock) -> None:
         """Verify query_by_doc_names queries Weaviate and returns property dicts."""
         mock_coll = MagicMock()

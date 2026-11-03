@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import re
 from typing import Any
 
 import weaviate
@@ -11,7 +10,7 @@ from weaviate.classes.query import Filter, Sort
 from weaviate.util import generate_uuid5
 
 from docpipe.core.constants import OperatorConstants
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, redact_secrets
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
@@ -26,8 +25,8 @@ DEFAULT_BATCH_SIZE: int = 100
 MAX_BATCH_SIZE_MB: int = 3
 BULK_DELETE_BATCH_SIZE: int = 500
 KEYSET_PAGE_SIZE: int = 1000
-
-_AUTH_HEADER_RE = re.compile(r"(?i)(bearer\s+)[^\s\"',]+")
+NAME_FEATURES: tuple[str, ...] = ("name", "doc_name")
+DEFAULT_NAME_FIELD: str = "doc_name"
 
 
 class WeaviateBatchProcessor:
@@ -72,13 +71,7 @@ class WeaviateBatchProcessor:
 
     def _redact(self, text: str) -> str:
         """Redact secrets and authorization headers from error messages."""
-        if not text:
-            return text
-        redacted = text
-        for secret in self.secrets:
-            if secret:
-                redacted = redacted.replace(secret, "***")
-        return _AUTH_HEADER_RE.sub(r"\1***", redacted)
+        return redact_secrets(text=text, secrets=self.secrets)
 
     def prepare_document(
         self,
@@ -265,7 +258,9 @@ class WeaviateBatchProcessor:
             res = collection.aggregate.over_all(total_count=True)
             return int(res.total_count or 0)
         except Exception as exc:
-            logger.warning("Error getting document count for collection '%s': %s", self.collection_name, exc)
+            logger.warning(
+                "Error getting document count for collection '%s': %s", self.collection_name, self._redact(str(exc))
+            )
             return 0
 
     def get_chunk_ids_for_documents(self, *, file_ids: list[str]) -> dict[str, list[str]]:
@@ -305,8 +300,22 @@ class WeaviateBatchProcessor:
                 chunk_ids_map[file_id] = file_chunks
             return chunk_ids_map
         except Exception as exc:
-            logger.warning("Error querying chunk IDs for file IDs: %s", exc)
+            logger.warning("Error querying chunk IDs for file IDs: %s", self._redact(str(exc)))
             return {}
+
+    def _name_field(self) -> str:
+        """Return the column mapped to the document name, independent of mapping order."""
+        mapped = {
+            entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name")): entry.get(
+                OperatorConstants.Misc.MAPPED_COLUMN_NAME,
+                entry.get("collection_column", entry.get("mapped_column_name")),
+            )
+            for entry in self.feature_mappings
+        }
+        for feature in NAME_FEATURES:
+            if mapped.get(feature):
+                return str(mapped[feature])
+        return DEFAULT_NAME_FIELD
 
     def query_by_doc_names(
         self,
@@ -318,16 +327,7 @@ class WeaviateBatchProcessor:
         if not doc_names:
             return []
 
-        name_field = "doc_name"
-        for entry in self.feature_mappings:
-            feat_name = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
-            col_name = entry.get(
-                OperatorConstants.Misc.MAPPED_COLUMN_NAME,
-                entry.get("collection_column", entry.get("mapped_column_name")),
-            )
-            if feat_name in ("name", "doc_name", "id", "doc_id") and col_name:
-                name_field = col_name
-                break
+        name_field = self._name_field()
 
         try:
             collection = self.client.collections.get(self.collection_name)
@@ -337,5 +337,5 @@ class WeaviateBatchProcessor:
             )
             return [dict(obj.properties) for obj in (res.objects or []) if obj.properties]
         except Exception as exc:
-            logger.warning("Error querying documents by name: %s", exc)
+            logger.warning("Error querying documents by name: %s", self._redact(str(exc)))
             return []
