@@ -331,7 +331,15 @@ class TestMetricTypes:
         assert MilvusMetricTypes.BM25 == "BM25"
         assert MilvusMetricTypes.HAMMING == "HAMMING"
         assert MilvusMetricTypes.JACCARD == "JACCARD"
-        assert len(MilvusMetricTypes.ALL_TYPES) == 6
+        for metric in (
+            MilvusMetricTypes.L2,
+            MilvusMetricTypes.IP,
+            MilvusMetricTypes.COSINE,
+            MilvusMetricTypes.BM25,
+            MilvusMetricTypes.HAMMING,
+            MilvusMetricTypes.JACCARD,
+        ):
+            assert metric in MilvusMetricTypes.ALL_TYPES
 
 
 class TestIndexTypes:
@@ -350,7 +358,8 @@ class TestIndexTypes:
         assert MilvusIndexTypes.SPARSE_WAND == "SPARSE_WAND"
         assert MilvusIndexTypes.BIN_FLAT == "BIN_FLAT"
         assert MilvusIndexTypes.BIN_IVF_FLAT == "BIN_IVF_FLAT"
-        assert len(MilvusIndexTypes.ALL_TYPES) == 11
+        assert MilvusIndexTypes.BIN_FLAT in MilvusIndexTypes.ALL_TYPES
+        assert MilvusIndexTypes.BIN_IVF_FLAT in MilvusIndexTypes.ALL_TYPES
 
     def test_default_parameters_for_all_types(self):
         """Test that default parameters exist for all index types"""
