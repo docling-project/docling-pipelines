@@ -7,26 +7,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { NotificationPanel, panelState } from '@/components/Canvas/NotificationPanel/NotificationPanel';
+import { NotificationPanel } from '@/components/Canvas/NotificationPanel/NotificationPanel';
+import { resetPanelState } from '@/components/Canvas/NotificationPanel/panelState';
 
 beforeEach(() => {
   vi.useFakeTimers();
-  // Guard: panelState may be undefined under parallel worker initialisation.
-  if (panelState) {
-    panelState.isOpen = false;
-    panelState.showTopBar = false;
-    panelState.topBarDismissed = false;
-    panelState.notifications = [];
-  }
+  resetPanelState();
 });
 afterEach(() => {
   vi.useRealTimers();
-  if (panelState) {
-    panelState.isOpen = false;
-    panelState.showTopBar = false;
-    panelState.topBarDismissed = false;
-    panelState.notifications = [];
-  }
+  resetPanelState();
 });
 
 const defaultProps = {
