@@ -32,7 +32,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/core/operators/extract/` | `ExtractOperator` — docling-based text + entity extraction |
 | `src/docpipe/core/operators/functional/` | `BranchingOperator`, `ChunkerOperator`, `EmbeddingsOperator`, `MergeOperator`, `DocIdHashOperator`, `NOOPOperator`, `EntityCurationOperator` |
 | `src/docpipe/core/operators/quality/` | `DocumentClassifierOperator`, `DocQuality`, `EdedupOperator`, `LanguageDetect`, `MLEnrichmentOperator`, `PIIAndHAPAnnotator`, `ReadabilityOperator`, `RedactionOperator`, `SQLFilterOperator` |
-| `src/docpipe/core/operators/vectordb/` | `VectorDBOperator` — OpenSearch / Milvus adapters |
+| `src/docpipe/core/operators/vectordb/` | `VectorDBOperator` — OpenSearch / Milvus / Weaviate adapters |
 | `src/docpipe/core/operators/document_sets/` | `DocumentSetOperator` — Storage category |
 | `src/docpipe/core/operators/acl/` | `ACLOperator` — access control on data |
 | `src/docpipe/core/orchestration/flow_executor.py` | `FlowExecutor` — loads flow JSON, calls orchestrator |

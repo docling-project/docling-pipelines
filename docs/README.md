@@ -54,7 +54,7 @@ Configuration examples and patterns for all operators:
 - **[Extract](operators/extract/extract_operator_readme.md)** - Extract text and entities from documents
 - **[Chunker](operators/functional/chunker_readme.md)** - Split documents into chunks
 - **[Embeddings](operators/functional/embeddings_readme.md)** - Generate vector embeddings
-- **[VectorDB](operators/vectordb/)** - Store vectors in OpenSearch or Milvus
+- **[VectorDB](operators/vectordb/)** - Store vectors in OpenSearch, Milvus, or Weaviate
 - **[StorageOutput](operators/storage/storage_output_readme.md)** - Write documents to a file destination (filesystem, etc.)
 
 ### All Operator Configurations

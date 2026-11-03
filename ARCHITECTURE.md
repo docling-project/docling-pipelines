@@ -30,7 +30,7 @@ Docling-pipelines is a modular, operator-based data processing framework designe
 - **PyArrow Data Format**: All data flows through the pipeline as PyArrow tables, ensuring efficient memory usage and interoperability
 - **DAG-Based Workflow Execution**: Flows are defined as JSON configurations representing directed acyclic graphs (DAGs) of operator nodes
 - **Prefect Orchestration**: Workflow execution managed by Prefect with support for both ephemeral (local) and distributed execution via work pools (Docker)
-- **Modern AI/ML Integrations**: Native support for Ollama (LLM operations), Docling (document processing), OpenSearch (vector and scalar storage) and Milvus (vector storage)
+- **Modern AI/ML Integrations**: Native support for Ollama (LLM operations), Docling (document processing), OpenSearch (vector and scalar storage), Milvus (vector storage) and Weaviate (vector storage)
 
 ### Architectural Patterns
 
@@ -59,7 +59,7 @@ This architectural diversity is a deliberate design choice that supports the fra
 | **Storage**             | DuckDB (metadata and tables), Filesystem (metadata only)                                                                                              |
 | **Document Processing** | Docling (with ASR support for audio/video via ffmpeg)                                                                                                 |
 | **LLM Integration**     | Ollama, Watsonx.ai, LiteLLM (unified interface supporting 100+ LLM providers including OpenAI, Anthropic, Google, AWS Bedrock, and more), HuggingFace (native local/API support) |
-| **Vector Storage**      | OpenSearch, Milvus, NMSLIB, Faiss                                                                                                                     |
+| **Vector Storage**      | OpenSearch, Milvus, Weaviate, NMSLIB, Faiss                                                                                                                     |
 | **Language Detection**  | FastText, langdetect                                                                                                                                  |
 | **Web Framework**       | FastAPI (optional)                                                                                                                                    |
 | **Testing**             | pytest, pytest-cov                                                                                                                                    |
@@ -4632,7 +4632,7 @@ Operators are organized by category (defined in `OperatorCategory` enum). For co
 - **Ingest**: Data source ingestion (local files, S3, SharePoint, etc.)
 - **Functional**: Data transformation (chunking, embeddings, branching, merging)
 - **Quality**: Data quality checks (deduplication, classification, PII detection)
-- **VectorDB**: Vector storage (OpenSearch, Milvus)
+- **VectorDB**: Vector storage (OpenSearch, Milvus, Weaviate)
 - **Storage**: Persistent storage (DocumentSet with DuckDB) and file export to destinations (StorageOutputOperator — filesystem, S3, IBM COS, SharePoint, OneDrive, Google Drive)
 
 **Architecture Highlights:**

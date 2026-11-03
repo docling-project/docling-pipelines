@@ -58,6 +58,7 @@ class DocpipeConstants:
     DATA_FOLDER = "data_folder"
     OPERAND_NAMESPACE = "OPERAND_NAMESPACE"
     DAG = "dag"
+    VAULT_PLACEHOLDER = "__vault_placeholder__"
     DEFINITION = "definition"
     DESCRIPTION = "description"
     FLOW = "flow"

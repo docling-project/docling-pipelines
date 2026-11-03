@@ -1,0 +1,568 @@
+"""Unit tests for WeaviateIndexManager."""
+
+from unittest.mock import MagicMock
+
+import pytest
+from weaviate.classes.config import DataType, Tokenization
+
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import (
+    WeaviateIndexManager,
+    map_feature_type,
+    tokenization_for,
+    validate_primary_key_mapping,
+    validate_property_names,
+)
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+
+
+class TestWeaviateIndexManagerStaticRules:
+    """Test suite for static schema mapping, naming rules, and PK validation."""
+
+    @pytest.mark.parametrize(
+        ("feat_type", "expected_data_type"),
+        [
+            ("text", DataType.TEXT),
+            ("string", DataType.TEXT),
+            ("keyword", DataType.TEXT),
+            ("date", DataType.TEXT),
+            ("int8", DataType.INT),
+            ("int16", DataType.INT),
+            ("int32", DataType.INT),
+            ("int64", DataType.INT),
+            ("integer", DataType.INT),
+            ("long", DataType.INT),
+            ("short", DataType.INT),
+            ("byte", DataType.INT),
+            ("float", DataType.NUMBER),
+            ("double", DataType.NUMBER),
+            ("number", DataType.NUMBER),
+            ("bool", DataType.BOOL),
+            ("boolean", DataType.BOOL),
+            ("json", DataType.TEXT),
+            ("object", DataType.TEXT),
+            ("nested", DataType.TEXT),
+            ("unknown_custom_type", DataType.TEXT),
+            (None, DataType.TEXT),
+        ],
+    )
+    def test_map_feature_type(self, *, feat_type: str | None, expected_data_type: DataType) -> None:
+        """Verify feature type to DataType mapping table."""
+        assert map_feature_type(feat_type) == expected_data_type
+
+    @pytest.mark.parametrize(
+        ("feat_name", "col_name", "feat_type", "expected_tokenization"),
+        [
+            ("doc_id_hash", "pk", "keyword", Tokenization.FIELD),
+            ("id", "doc_id", "text", Tokenization.FIELD),
+            ("doc_id", "doc_id", "text", Tokenization.FIELD),
+            ("name", "doc_name", "text", Tokenization.FIELD),
+            ("doc_name", "doc_name", "text", Tokenization.FIELD),
+            ("tag", "tag", "keyword", Tokenization.FIELD),
+            ("content", "content", "text", Tokenization.WORD),
+            ("text", "text", "text", Tokenization.WORD),
+            ("description", "desc", "text", Tokenization.WORD),
+        ],
+    )
+    def test_tokenization_for(
+        self,
+        *,
+        feat_name: str,
+        col_name: str,
+        feat_type: str | None,
+        expected_tokenization: Tokenization,
+    ) -> None:
+        """Verify identity vs content tokenization rule."""
+        assert tokenization_for(feat_name, col_name, feat_type) == expected_tokenization
+
+    @pytest.mark.parametrize(
+        "name",
+        ["pk", "content", "doc_name", "chunk_index", "embedding_model", "a_1_b"],
+    )
+    def test_validate_property_names_valid(self, *, name: str) -> None:
+        """Verify valid property names pass validation."""
+        validate_property_names([name])
+
+    def test_validate_property_names_uppercase_start_rejected(self) -> None:
+        """Verify property names starting with uppercase are rejected with suggestion."""
+        with pytest.raises(DocpipeException) as exc_info:
+            validate_property_names(["Title", "valid_prop"])
+        assert exc_info.value.status_code == 400
+        assert "starts with an uppercase letter; please use 'title' instead" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "reserved_name",
+        ["id", "_id", "vector", "_vector", "_creationTimeUnix", "_additional"],
+    )
+    def test_validate_property_names_reserved_rejected(self, *, reserved_name: str) -> None:
+        """Verify reserved property names are rejected."""
+        with pytest.raises(DocpipeException) as exc_info:
+            validate_property_names([reserved_name])
+        assert exc_info.value.status_code == 400
+        assert "is reserved in Weaviate" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "suffix_name",
+        [
+            "field_searchable",
+            "field_rangeable",
+            "item_temp",
+            "doc__meta_count",
+            "text_propertyLength",
+            "val_nullState",
+        ],
+    )
+    def test_validate_property_names_reserved_suffix_rejected(self, *, suffix_name: str) -> None:
+        """Verify property names with reserved suffixes are rejected."""
+        with pytest.raises(DocpipeException) as exc_info:
+            validate_property_names([suffix_name])
+        assert exc_info.value.status_code == 400
+        assert "ends with reserved suffix" in str(exc_info.value)
+
+    def test_validate_property_names_case_folded_duplicates_rejected(self) -> None:
+        """Verify case-folded duplicates are rejected."""
+        with pytest.raises(DocpipeException) as exc_info:
+            validate_property_names(["my_field", "my_Field"])  # "my_Field" also fails uppercase or duplicate
+        assert exc_info.value.status_code == 400
+
+    def test_validate_primary_key_mapping_valid(self) -> None:
+        """Verify primary feature mapped to 'pk' passes validation."""
+        available_features = {
+            "doc_id_hash": {"type": "keyword", "is_primary": True},
+            "content": {"type": "text"},
+        }
+        feature_mappings = [
+            {"feature_name": "doc_id_hash", "collection_column": "pk"},
+            {"feature_name": "content", "collection_column": "content"},
+        ]
+        validate_primary_key_mapping(
+            feature_mappings=feature_mappings,
+            available_features=available_features,
+        )
+
+    def test_validate_primary_key_mapping_primary_mapped_to_non_pk_rejected(self) -> None:
+        """Verify primary feature mapped to non-pk column is rejected."""
+        available_features = {
+            "doc_id_hash": {"type": "keyword", "is_primary": True},
+        }
+        feature_mappings = [
+            {"feature_name": "doc_id_hash", "collection_column": "document_pk"},
+        ]
+        with pytest.raises(DocpipeException) as exc_info:
+            validate_primary_key_mapping(
+                feature_mappings=feature_mappings,
+                available_features=available_features,
+            )
+        assert exc_info.value.status_code == 400
+        assert "Primary feature 'doc_id_hash' must be mapped to column 'pk'" in str(exc_info.value)
+
+    def test_validate_primary_key_mapping_non_primary_mapped_to_pk_rejected(self) -> None:
+        """Verify non-primary feature mapped to pk is rejected."""
+        available_features = {
+            "doc_id_hash": {"type": "keyword", "is_primary": True},
+            "other_id": {"type": "string"},
+        }
+        feature_mappings = [
+            {"feature_name": "doc_id_hash", "collection_column": "pk"},
+            {"feature_name": "other_id", "collection_column": "pk"},
+        ]
+        with pytest.raises(DocpipeException) as exc_info:
+            validate_primary_key_mapping(
+                feature_mappings=feature_mappings,
+                available_features=available_features,
+            )
+        assert exc_info.value.status_code == 400
+        assert "Only the primary feature 'doc_id_hash' can be mapped to column 'pk'" in str(exc_info.value)
+
+
+class TestWeaviateIndexManagerCollectionOperations:
+    """Test suite for collection creation, validation against existing schema, and deletion."""
+
+    @pytest.fixture
+    def mock_client(self) -> MagicMock:
+        """Create mock Weaviate client."""
+        return MagicMock()
+
+    def test_collection_exists_and_drop(self, *, mock_client: MagicMock) -> None:
+        """Verify collection_exists and drop_collection methods."""
+        mock_client.collections.exists.return_value = True
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+        )
+        assert manager.collection_exists() is True
+        mock_client.collections.exists.assert_called_with("TestDocs")
+
+        assert manager.drop_collection() is True
+        mock_client.collections.delete.assert_called_with("TestDocs")
+
+    def test_create_collection_already_exists_raises_409(self, *, mock_client: MagicMock) -> None:
+        """Verify create_collection raises 409 if collection already exists."""
+        mock_client.collections.exists.return_value = True
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 409
+        assert "already exists" in str(exc_info.value)
+
+    def test_create_collection_dense_single_vector(self, *, mock_client: MagicMock) -> None:
+        """Verify create_collection with single dense vector."""
+        mock_client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            index_type="hnsw",
+            distance_metric="cosine",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "collection_column": "pk"},
+                {"feature_name": "content", "collection_column": "content"},
+                {"feature_name": "embeddings", "collection_column": "embeddings"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "content": {"type": "text"},
+                "embeddings": {"type": "vector", "dimension": 384},
+            },
+        )
+        manager.create_collection(dimension_mapping={"embeddings": 384})
+        mock_client.collections.create.assert_called_once()
+        kwargs = mock_client.collections.create.call_args.kwargs
+        assert kwargs["name"] == "TestDocs"
+        assert len(kwargs["vector_config"]) == 1
+        assert kwargs["vector_config"][0].name == "embeddings"
+
+    def test_create_collection_names_vector_after_mapped_column(self, *, mock_client: MagicMock) -> None:
+        """The named vector uses the mapped column, not the source feature name."""
+        mock_client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+                {"feature_name": "embeddings_alt", "mapped_column_name": "vector_embeddings_alt"},
+            ],
+            available_features={"doc_id_hash": {"type": "keyword", "is_primary": True}},
+        )
+        manager.create_collection(dimension_mapping={"embeddings": 8, "embeddings_alt": 4})
+        names = [v.name for v in mock_client.collections.create.call_args.kwargs["vector_config"]]
+        assert names == ["vector_embeddings", "vector_embeddings_alt"]
+
+    def test_validate_existing_collection_resolves_mapped_vector_name(self, *, mock_client: MagicMock) -> None:
+        """Existing-collection validation looks the vector up by its mapped column."""
+        mock_client.collections.exists.return_value = True
+        indexed = MagicMock()
+        indexed.vector_index_config.skip = False
+        cfg = MagicMock()
+        cfg.vector_config = {"vector_embeddings": indexed}
+        cfg.properties = []
+        collection = mock_client.collections.get.return_value
+        collection.config.get.return_value = cfg
+        collection.aggregate.over_all.return_value.total_count = 0
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+            ],
+            available_features={"doc_id_hash": {"type": "keyword", "is_primary": True}},
+        )
+        manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
+
+    def test_create_collection_sparse_only(self, *, mock_client: MagicMock) -> None:
+        """Verify create_collection in sparse-only mode passes non-indexed keyword_only vector."""
+        mock_client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            add_sparse_vector=True,
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "collection_column": "pk"},
+                {"feature_name": "content", "collection_column": "content"},
+                {"feature_name": "sparse_embeddings", "collection_column": "sparse_embeddings"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "content": {"type": "text"},
+            },
+        )
+        manager.create_collection(dimension_mapping={})
+        mock_client.collections.create.assert_called_once()
+        kwargs = mock_client.collections.create.call_args.kwargs
+        assert len(kwargs["vector_config"]) == 1
+        assert kwargs["vector_config"][0].name == "keyword_only"
+        assert kwargs["inverted_index_config"] is not None
+
+    def test_create_collection_invalid_index_parameters_raises_400(self, *, mock_client: MagicMock) -> None:
+        """Verify invalid index_parameters raises 400 DocpipeException."""
+        mock_client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            index_type="hnsw",
+            index_parameters={"invalid_unsupported_param": 123},
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 400
+        assert "Invalid index_parameters" in str(exc_info.value)
+
+    def test_create_collection_dynamic_422_converted_to_400(self, *, mock_client: MagicMock) -> None:
+        """Verify dynamic index 422 error is converted to 400 with async indexing guidance."""
+        mock_client.collections.exists.return_value = False
+        mock_client.collections.create.side_effect = Exception("422 Unprocessable Entity: dynamic indexing not enabled")
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            index_type="dynamic",
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 400
+        assert "requires async indexing enabled" in str(exc_info.value)
+
+    def test_validate_existing_collection_missing_raises_400(self, *, mock_client: MagicMock) -> None:
+        """Verify validate_existing_collection raises 400 if collection does not exist."""
+        mock_client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="MissingCollection",
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 400
+        assert "does not exist" in str(exc_info.value)
+
+    def test_validate_existing_collection_keyword_only_with_dense_run_fails(self, *, mock_client: MagicMock) -> None:
+        """Verify a keyword-only collection is rejected for a dense vector run."""
+        mock_client.collections.exists.return_value = True
+        mock_coll = MagicMock()
+        mock_cfg = MagicMock()
+
+        # Vector config with skip=True (keyword only)
+        mock_vec_cfg = MagicMock()
+        mock_vec_cfg.vector_index_config.skip = True
+        mock_cfg.vector_config = {"keyword_only": mock_vec_cfg}
+        mock_cfg.properties = []
+        mock_coll.config.get.return_value = mock_cfg
+        mock_client.collections.get.return_value = mock_coll
+
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 400
+        assert "is a keyword-only collection and has no indexed vector" in str(exc_info.value)
+
+    def test_validate_existing_collection_dimension_mismatch_fails(self, *, mock_client: MagicMock) -> None:
+        """Verify vector dimension mismatch fails validation."""
+        mock_client.collections.exists.return_value = True
+        mock_coll = MagicMock()
+        mock_cfg = MagicMock()
+
+        # Indexed vector
+        mock_vec_cfg = MagicMock()
+        mock_vec_cfg.vector_index_config.skip = False
+        mock_cfg.vector_config = {"embeddings": mock_vec_cfg}
+
+        # Valid properties
+        pk_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        pk_prop.name = "pk"
+        pk_prop.data_type = DataType.TEXT
+        pk_prop.dataType = DataType.TEXT
+        pk_prop.tokenization = Tokenization.FIELD
+        pk_prop.indexFilterable = True
+        pk_prop.indexSearchable = True
+
+        content_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        content_prop.name = "content"
+        content_prop.data_type = DataType.TEXT
+        content_prop.dataType = DataType.TEXT
+        content_prop.tokenization = Tokenization.WORD
+        content_prop.indexFilterable = True
+        content_prop.indexSearchable = True
+
+        mock_cfg.properties = [pk_prop, content_prop]
+        mock_coll.config.get.return_value = mock_cfg
+        mock_coll.aggregate.over_all.return_value.total_count = 5
+
+        # Sample object with dimension 768 instead of 384
+        sample_obj = MagicMock()
+        sample_obj.vector = {"embeddings": [0.1] * 768}
+        mock_coll.query.fetch_objects.return_value.objects = [sample_obj]
+        mock_client.collections.get.return_value = mock_coll
+
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            available_features={"content": {"type": "text"}},
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 400
+        assert "Vector dimension mismatch for 'embeddings'" in str(exc_info.value)
+
+    def test_validate_existing_collection_identity_tokenization_mismatch_fails(self, *, mock_client: MagicMock) -> None:
+        """Verify identity property with WORD tokenization fails validation."""
+        mock_client.collections.exists.return_value = True
+        mock_coll = MagicMock()
+        mock_cfg = MagicMock()
+
+        # Indexed vector
+        mock_vec_cfg = MagicMock()
+        mock_vec_cfg.vector_index_config.skip = False
+        mock_cfg.vector_config = {"embeddings": mock_vec_cfg}
+
+        # pk with WORD tokenization (invalid for identity)
+        pk_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        pk_prop.name = "pk"
+        pk_prop.data_type = DataType.TEXT
+        pk_prop.dataType = DataType.TEXT
+        pk_prop.tokenization = Tokenization.WORD
+        pk_prop.indexFilterable = True
+        pk_prop.indexSearchable = True
+
+        content_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        content_prop.name = "content"
+        content_prop.data_type = DataType.TEXT
+        content_prop.dataType = DataType.TEXT
+        content_prop.tokenization = Tokenization.WORD
+        content_prop.indexFilterable = True
+        content_prop.indexSearchable = True
+
+        mock_cfg.properties = [pk_prop, content_prop]
+        mock_coll.config.get.return_value = mock_cfg
+        mock_coll.aggregate.over_all.return_value.total_count = 0
+        mock_client.collections.get.return_value = mock_coll
+
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            available_features={"content": {"type": "text"}},
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 400
+        assert "Identity property 'pk' must have field tokenization" in str(exc_info.value)
+
+    def test_validate_existing_collection_adds_missing_properties(self, *, mock_client: MagicMock) -> None:
+        """Verify missing scalar properties are added when validation passes."""
+        mock_client.collections.exists.return_value = True
+        mock_coll = MagicMock()
+        mock_cfg = MagicMock()
+
+        mock_vec_cfg = MagicMock()
+        mock_vec_cfg.vector_index_config.skip = False
+        mock_cfg.vector_config = {"embeddings": mock_vec_cfg}
+
+        # Existing properties have pk and content, but missing "doc_name"
+        pk_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        pk_prop.name = "pk"
+        pk_prop.data_type = DataType.TEXT
+        pk_prop.dataType = DataType.TEXT
+        pk_prop.tokenization = Tokenization.FIELD
+        pk_prop.indexFilterable = True
+        pk_prop.indexSearchable = True
+
+        content_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        content_prop.name = "content"
+        content_prop.data_type = DataType.TEXT
+        content_prop.dataType = DataType.TEXT
+        content_prop.tokenization = Tokenization.WORD
+        content_prop.indexFilterable = True
+        content_prop.indexSearchable = True
+
+        mock_cfg.properties = [pk_prop, content_prop]
+        mock_coll.config.get.return_value = mock_cfg
+        mock_coll.aggregate.over_all.return_value.total_count = 0
+        mock_client.collections.get.return_value = mock_coll
+
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "collection_column": "pk"},
+                {"feature_name": "content", "collection_column": "content"},
+                {"feature_name": "doc_name", "collection_column": "doc_name"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "content": {"type": "text"},
+                "doc_name": {"type": "string"},
+            },
+        )
+        manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+        mock_coll.config.add_property.assert_called_once()
+        added_prop = mock_coll.config.add_property.call_args[0][0]
+        assert added_prop.name == "doc_name"

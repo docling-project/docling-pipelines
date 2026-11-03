@@ -435,6 +435,27 @@ class TestFetchMetadataRouting:
     def test_milvus_constant_equals_expected_string(self):
         assert OperatorConstants.VectorDB.MILVUS == "milvus"
 
+    def test_weaviate_delegates_to_weaviate_resource_metadata(self):
+        fetcher = VectorDBMetadataFetcher()
+        expected = VectorDBMetadataFetcher._empty_result()
+
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateResourceMetadata"
+        ) as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.fetch.return_value = expected
+            mock_cls.return_value = mock_instance
+
+            result = fetcher.fetch_metadata(
+                adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+                operator_config={OperatorConstants.Config.PROVIDER_CONFIG: {"host": "localhost"}},
+                available_features={},
+            )
+
+        assert result is expected
+        mock_instance.fetch.assert_called_once()
+        assert mock_instance.fetch.call_args.kwargs["provider_config"] == {"host": "localhost"}
+
     def test_fetch_passes_provider_config_to_adapter(self):
         """fetch_metadata extracts provider_config from operator_config and forwards it."""
         fetcher = VectorDBMetadataFetcher()
