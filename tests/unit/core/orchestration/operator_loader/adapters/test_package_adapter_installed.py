@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """PackageAdapter tests against a real package "installed" into a temporary sys.path entry.
 
 The package directory and its .dist-info (version + docpipe.operators entry points) live in
@@ -199,15 +202,18 @@ class TestLoading:
         assert CustomOperatorLoader(sources=[adapter]).load_and_validate_operator(info, adapter).__name__ == "ActualOp"
 
     def test_stale_named_metadata_is_reported_without_loading_another_class(
-        self, installed_without_entry_points: str, caplog
+        self, installed_without_entry_points: str
     ) -> None:
+        from unittest.mock import patch
+
         adapter = PackageAdapter(package_name=installed_without_entry_points)
         info = next(op for op in adapter.list_operators() if op.short_name == "module_op")
         stale = replace(info, name="MissingOp")
         loader = CustomOperatorLoader(sources=[adapter])
 
-        assert loader.load_and_validate_operator(stale, adapter) is None
-        assert "Operator class 'MissingOp'" in caplog.text
+        with patch("docpipe.core.orchestration.operator_loader.loader_service.logger") as mock_logger:
+            assert loader.load_and_validate_operator(stale, adapter) is None
+            assert any("Operator class 'MissingOp'" in str(call) for call in mock_logger.error.call_args_list)
         assert loader.load_and_validate_operator(info, adapter).__name__ == "ModuleOp"
 
     def test_loads_entry_point_module_and_caches_it(self, installed: str) -> None:

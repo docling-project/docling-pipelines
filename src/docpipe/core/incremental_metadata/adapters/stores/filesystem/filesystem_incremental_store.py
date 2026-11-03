@@ -326,6 +326,66 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         except Timeout as exc:
             raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
 
+    def unmark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str] | None = None) -> None:
+        """Unmark soft-deleted documents, setting deleted flag back to False."""
+        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+
+        try:
+            with lock.acquire(timeout=self._lock_timeout):
+                table = self._read_table(job_id=job_id)
+
+                if table is None or table.num_rows == 0:
+                    return
+
+                if doc_ids is not None:
+                    mask_in_target = pc.is_in(table["id"], pa.array(doc_ids))  # type: ignore[attr-defined]
+                    mask_unmark = pc.and_(table["deleted"], mask_in_target)  # type: ignore[attr-defined]
+                else:
+                    mask_unmark = pc.equal(table["deleted"], True)  # type: ignore[attr-defined]
+
+                # Check if there are any records to unmark
+                to_unmark_table = table.filter(mask_unmark)
+                if to_unmark_table.num_rows == 0:
+                    return
+
+                deleted_column = pc.if_else(mask_unmark, pa.array([False] * table.num_rows), table["deleted"])  # type: ignore[attr-defined]
+                updated_table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted_column)
+
+                self._write_table(job_id=job_id, table=updated_table)
+                logger.info("Unmarked %s soft-deleted docs for job_id=%s", to_unmark_table.num_rows, job_id)
+
+        except Timeout as exc:
+            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+
+    def purge_soft_deleted_docs(self, *, job_id: str) -> None:
+        """Permanently delete all soft-deleted records for a given job."""
+        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+
+        try:
+            with lock.acquire(timeout=self._lock_timeout):
+                table = self._read_table(job_id=job_id)
+
+                if table is None or table.num_rows == 0:
+                    return
+
+                # Filter out deleted documents (keep only non-deleted)
+                mask = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
+                filtered_table = table.filter(mask)
+
+                if filtered_table.num_rows == 0:
+                    # All records were deleted, remove file
+                    parquet_path = self._get_parquet_path(job_id=job_id)
+                    if parquet_path.exists():
+                        parquet_path.unlink()
+                    logger.info("Purged all soft-deleted records (no remaining records) for job_id=%s", job_id)
+                elif filtered_table.num_rows < table.num_rows:
+                    purged_count = table.num_rows - filtered_table.num_rows
+                    self._write_table(job_id=job_id, table=filtered_table)
+                    logger.info("Purged %s soft-deleted records for job_id=%s", purged_count, job_id)
+
+        except Timeout as exc:
+            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+
     def delete_docs(self, *, job_id: str, doc_ids: list[str]) -> None:
         """Permanently delete metadata records for specified documents."""
         if not doc_ids:

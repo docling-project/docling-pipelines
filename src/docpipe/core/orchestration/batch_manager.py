@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Batch Manager - Handles batch creation and management for flow execution.
 
@@ -73,7 +76,7 @@ class BatchManager:
         for batch in table.to_batches(max_chunksize=batch_size):
             batch_table = pa.Table.from_batches([batch])
             if batch_table.num_rows == 0:  # pragma: no cover
-                self.logger.debug(f"Skipping empty batch at position {batch_num}")
+                self.logger.debug("Skipping empty batch at position %s", batch_num)
                 continue
             batches.append(BatchInfo(batch_id=str(uuid.uuid4()), batch_num=batch_num, table=batch_table))
             batch_num += 1
@@ -106,7 +109,7 @@ class BatchManager:
             if len(batch_indices) > 0:
                 batch_table = table.take(batch_indices.tolist())
                 if batch_table.num_rows == 0:  # pragma: no cover
-                    self.logger.debug(f"Skipping empty batch at index {batch_idx}")
+                    self.logger.debug("Skipping empty batch at index %s", batch_idx)
                     continue
                 result_batches.append(BatchInfo(batch_id=str(uuid.uuid4()), batch_num=batch_num, table=batch_table))
                 batch_num += 1
@@ -143,8 +146,8 @@ class BatchManager:
         # Check if SIZE column exists for file-size-based batching
         if OperatorConstants.Misc.SIZE not in table.column_names:
             self.logger.warning(
-                f"SIZE column not found in table. Falling back to record-count batching. "
-                f"Available columns: {table.column_names}"
+                "SIZE column not found in table. Falling back to record-count batching. Available columns: %s",
+                table.column_names,
             )
             return self._batches_by_record_count(table=table, batch_size=batch_size)
 
@@ -187,9 +190,11 @@ class BatchManager:
         avg_size_mb = total_size_mb / num_batches
         size_distribution = [f"Batch {i}: {batch_sizes[i] / mb_divisor:.2f} MB" for i in range(num_batches)]
         self.logger.info(
-            f"Created {num_batches} size-balanced batches. "
-            f"Total size: {total_size_mb:.2f} MB, Avg per batch: {avg_size_mb:.2f} MB. "
-            f"Distribution: {'; '.join(size_distribution)}"
+            "Created %s size-balanced batches. Total size: %.2f MB, Avg per batch: %.2f MB. Distribution: %s",
+            num_batches,
+            total_size_mb,
+            avg_size_mb,
+            "; ".join(size_distribution),
         )
 
         # Convert to BatchInfo objects using take() which preserves schema exactly
@@ -222,10 +227,15 @@ class BatchManager:
             if batch_size is None:
                 raise FlowExecutionFailedException("micro_batch_size must be set when micro-batching is enabled")
             batches = self.create_batches(table=ingested_table, batch_size=batch_size)
+            if not batches and ingested_table.num_rows == 0:
+                batches = [BatchInfo(batch_id=str(uuid.uuid4()), batch_num=0, table=ingested_table)]
             batch_count = len(batches)
 
             self.logger.info(
-                f">>> Split {ingested_table.num_rows} rows into {batch_count} batches of size {batch_size}",
+                ">>> Split %s rows into %s batches of size %s",
+                ingested_table.num_rows,
+                batch_count,
+                batch_size,
                 extra=common_log_arguments,
             )
 
@@ -238,7 +248,8 @@ class BatchManager:
             batches = [BatchInfo(batch_id=batch_id, batch_num=0, table=ingested_table)]
 
             self.logger.info(
-                f">>> Non-batch mode: Processing all {ingested_table.num_rows} rows in single execution",
+                ">>> Non-batch mode: Processing all %s rows in single execution",
+                ingested_table.num_rows,
                 extra=common_log_arguments,
             )
 
@@ -255,7 +266,7 @@ class BatchManager:
             max_concurrent_batches: Maximum number of batches that can execute concurrently
         """
         self._batch_semaphore = threading.Semaphore(max_concurrent_batches)
-        self.logger.debug(f"Initialized batch semaphore with {max_concurrent_batches} slots")
+        self.logger.debug("Initialized batch semaphore with %s slots", max_concurrent_batches)
 
     def get_batch_semaphore(self) -> threading.Semaphore | None:
         """

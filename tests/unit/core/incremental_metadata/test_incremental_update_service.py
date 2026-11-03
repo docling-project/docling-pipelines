@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for IncrementalUpdateService."""
 
 import pyarrow as pa
@@ -267,6 +270,44 @@ class TestIncrementalUpdateService:
             "doc-1": {"modified_time": 1, "job_run_id": "run-1"},
             "doc-2": {"modified_time": 2, "job_run_id": "run-1"},
         }
+
+    def test_unmark_soft_deleted_docs_service(self, *, service):
+        """Test unmarking soft-deleted docs through service."""
+        table = _build_table(ids=["doc-1", "doc-2"], names=["a", "b"], modified_times=[1, 2])
+        service.save_metadata_for_incremental_update(job_id="job-1", job_run_id="run-1", tables=[table])
+        service.mark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1"])
+        assert service.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2"}
+
+        service.unmark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-2"])
+        assert service.get_soft_deleted_doc_ids(job_id="job-1") == set()
+
+    def test_purge_soft_deleted_docs_service(self, *, service):
+        """Test purging soft-deleted docs through service."""
+        table = _build_table(ids=["doc-1", "doc-2"], names=["a", "b"], modified_times=[1, 2])
+        service.save_metadata_for_incremental_update(job_id="job-1", job_run_id="run-1", tables=[table])
+        service.mark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1"])
+        assert service.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2"}
+
+        service.purge_soft_deleted_docs(job_id="job-1")
+        assert service.get_soft_deleted_doc_ids(job_id="job-1") == set()
+        assert "doc-1" in service.get_all_processed_docs(job_id="job-1")
+        assert "doc-2" not in service.get_all_processed_docs(job_id="job-1")
+
+    def test_unmark_soft_deleted_docs_exception(self, *, service):
+        """Test exception handling in unmark_soft_deleted_docs."""
+        from unittest.mock import patch
+
+        with patch.object(service.store, "unmark_soft_deleted_docs", side_effect=Exception("Unmark failure")):
+            with pytest.raises(FlowExecutionFailedException, match="Unmark failure"):
+                service.unmark_soft_deleted_docs(job_id="job-1")
+
+    def test_purge_soft_deleted_docs_exception(self, *, service):
+        """Test exception handling in purge_soft_deleted_docs."""
+        from unittest.mock import patch
+
+        with patch.object(service.store, "purge_soft_deleted_docs", side_effect=Exception("Purge failure")):
+            with pytest.raises(FlowExecutionFailedException, match="Purge failure"):
+                service.purge_soft_deleted_docs(job_id="job-1")
 
 
 class TestSaveMetadataWithFailedAndNonRecoverableDocs:

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class for all docpipe flow orchestrators."""
 
 import threading
@@ -1110,6 +1113,33 @@ class AbstractOrchestrator(ABC):
 
         job_run_id = self.job_run_id or ""
         flow_id = self.flow_id or ""
+
+        if (
+            self.job_status
+            not in (
+                ExecutionStatus.CANCELING,
+                ExecutionStatus.CANCELED,
+                ExecutionStatus.FAILING,
+                ExecutionStatus.FAILED,
+            )
+            and self.job_id
+        ):
+            try:
+                incremental_service = get_incremental_update_service()
+                incremental_service.purge_soft_deleted_docs(job_id=self.job_id)
+                self.logger.info(
+                    "Purged soft-deleted records from incremental metadata for job_id=%s",
+                    self.job_id,
+                    extra=self.common_log_arguments,
+                )
+            except Exception as purge_exc:
+                self.logger.warning(
+                    "Failed to purge soft-deleted records for job_id=%s: %s",
+                    self.job_id,
+                    purge_exc,
+                    extra=self.common_log_arguments,
+                )
+
         if self.job_status in (ExecutionStatus.CANCELING, ExecutionStatus.CANCELED):
             self._notify_observer(
                 "on_flow_abort",
@@ -1330,33 +1360,45 @@ class AbstractOrchestrator(ABC):
 
         # Check if table is empty
         if ingested_table.num_rows == 0:
+            soft_deleted_docs: set[str] = set()
+            try:
+                soft_deleted_docs = incremental_service.get_soft_deleted_doc_ids(job_id=self.job_id)
+            except Exception as e:
+                self.logger.debug("Could not retrieve soft-deleted docs: %s", e)
+
+            if not soft_deleted_docs:
+                self.logger.info(
+                    ">>> No documents ingested and no soft-deleted documents — marking downstream nodes as skipped and exiting early",
+                    extra=self.common_log_arguments,
+                )
+                downstream_nodes = op_flow[1:] if len(op_flow) > 1 else []
+                for downstream_node in downstream_nodes:
+                    try:
+                        self.flow_execution_event_handler.after_node_skipped(
+                            node_id=downstream_node.get(OperatorConstants.Columns.ID),
+                            node_name=downstream_node.get(OperatorConstants.Columns.NAME),
+                            operator_type=downstream_node.get(OperatorConstants.Misc.OPERATOR),
+                            global_config=global_config,
+                            start_time=get_current_timestamp(),
+                            end_time=get_current_timestamp(),
+                            column_names=[],
+                            reason="Skipped - no documents ingested in previous step",
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            "Failed to record skipped status for node %s: %s",
+                            downstream_node.get(OperatorConstants.Columns.NAME, "unknown"),
+                            e,
+                            extra=self.common_log_arguments,
+                        )
+                clean_up_prefect_home()
+                self._finalize_dag_flow(op_flow=op_flow, global_config=global_config)
+                return
             self.logger.info(
-                ">>> No documents ingested — marking downstream nodes as skipped and exiting early",
+                ">>> No documents ingested, but %s soft-deleted documents found — proceeding to downstream nodes for target cleanup",
+                len(soft_deleted_docs),
                 extra=self.common_log_arguments,
             )
-            downstream_nodes = op_flow[1:] if len(op_flow) > 1 else []
-            for downstream_node in downstream_nodes:
-                try:
-                    self.flow_execution_event_handler.after_node_skipped(
-                        node_id=downstream_node.get(OperatorConstants.Columns.ID),
-                        node_name=downstream_node.get(OperatorConstants.Columns.NAME),
-                        operator_type=downstream_node.get(OperatorConstants.Misc.OPERATOR),
-                        global_config=global_config,
-                        start_time=get_current_timestamp(),
-                        end_time=get_current_timestamp(),
-                        column_names=[],
-                        reason="Skipped - no documents ingested in previous step",
-                    )
-                except Exception as e:
-                    self.logger.warning(
-                        "Failed to record skipped status for node %s: %s",
-                        downstream_node.get(OperatorConstants.Columns.NAME, "unknown"),
-                        e,
-                        extra=self.common_log_arguments,
-                    )
-            clean_up_prefect_home()
-            self._finalize_dag_flow(op_flow=op_flow, global_config=global_config)
-            return
 
         # Prepare batches using batch manager
         self.logger.debug(

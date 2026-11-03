@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for VectorDB operator with OpenSearch adapter."""
 
 from unittest.mock import MagicMock, Mock, patch
@@ -10,7 +13,7 @@ from docpipe.core.constants.constants import Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb import VectorDBOperator
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException
 from docpipe.utils.infrastructure.config import get_opensearch_config
 from docpipe.utils.operators.vectordb_utils import generate_composite_pk, generate_positional_pk
 
@@ -1946,6 +1949,131 @@ class TestIndexAndRecordResultsFailedChunks:
         assert "<" not in doc_dict["content"]
         assert "Hello World from DocLang" in doc_dict["content"]
         assert doc_dict["page_no"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Soft-deleted document cleanup and rollback
+# ---------------------------------------------------------------------------
+
+
+class TestSoftDeletedCleanupAndRollback:
+    """Test VectorDBOperator cleanup of soft-deleted docs and rollback on failure."""
+
+    def test_soft_deleted_docs_cleaned_up_from_vector_store(self):
+        mock_adapter = Mock()
+        mock_adapter.index_exists.return_value = True
+        mock_adapter.detect_all_vector_dimensions.return_value = {"embeddings": 3}
+        mock_adapter.index_documents.return_value = (1, [])
+        mock_adapter.get_chunk_ids_for_documents.side_effect = lambda doc_ids: {
+            doc_id: {f"{doc_id}_chunk_0", f"{doc_id}_chunk_1"} for doc_id in doc_ids if doc_id == "deleted_doc_1"
+        }
+        mock_adapter.delete_documents_by_ids.return_value = (2, 0)
+
+        mock_incremental_svc = Mock()
+        mock_incremental_svc.get_soft_deleted_doc_ids.return_value = {"deleted_doc_1"}
+
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+            OperatorConstants.Config.AVAILABLE_FEATURES: {
+                "embeddings": {
+                    OperatorConstants.Misc.TYPE: "vector",
+                    OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+                }
+            },
+        }
+
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch(
+                "docpipe.core.incremental_metadata.get_incremental_update_service",
+                return_value=mock_incremental_svc,
+            ),
+        ):
+            op = VectorDBOperator(config)
+            op.job_id = "job-test-123"
+
+            table = pa.table(
+                {
+                    "id": ["doc1"],
+                    "doc_id_hash": ["doc1_hash"],
+                    "content": ["text"],
+                    "embeddings": [[0.1, 0.2, 0.3]],
+                }
+            )
+            _, metadata = op.transform(table)
+
+            assert metadata[Metrics.External.PROCESSED_DOCS] == 1
+            mock_adapter.delete_documents_by_ids.assert_called_once()
+            deleted_chunks = mock_adapter.delete_documents_by_ids.call_args[0][0]
+            assert set(deleted_chunks) == {"deleted_doc_1_chunk_0", "deleted_doc_1_chunk_1"}
+
+    def test_soft_deleted_cleanup_on_empty_table(self):
+        mock_adapter = Mock()
+        mock_adapter.get_chunk_ids_for_documents.return_value = {"deleted_doc_1": {"chunk_0"}}
+        mock_adapter.delete_documents_by_ids.return_value = (1, 0)
+
+        mock_incremental_svc = Mock()
+        mock_incremental_svc.get_soft_deleted_doc_ids.return_value = {"deleted_doc_1"}
+
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+        }
+
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch(
+                "docpipe.core.incremental_metadata.get_incremental_update_service",
+                return_value=mock_incremental_svc,
+            ),
+        ):
+            op = VectorDBOperator(config)
+            op.job_id = "job-test-123"
+
+            empty_table = pa.table({"id": pa.array([], type=pa.string())})
+            _, _metadata = op.transform(empty_table)
+
+            mock_adapter.delete_documents_by_ids.assert_called_once_with(["chunk_0"])
+
+    def test_soft_deleted_cleanup_failure_triggers_unmark_rollback(self):
+        mock_adapter = Mock()
+        mock_adapter.get_chunk_ids_for_documents.side_effect = Exception("Vector store connection error")
+
+        mock_incremental_svc = Mock()
+        mock_incremental_svc.get_soft_deleted_doc_ids.return_value = {"deleted_doc_1"}
+
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+        }
+
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch(
+                "docpipe.core.incremental_metadata.get_incremental_update_service",
+                return_value=mock_incremental_svc,
+            ),
+        ):
+            op = VectorDBOperator(config)
+            op.job_id = "job-test-123"
+
+            table = pa.table(
+                {"id": ["doc1"], "doc_id_hash": ["doc1_hash"], "content": ["text"], "embeddings": [[0.1, 0.2, 0.3]]}
+            )
+            with pytest.raises(FlowExecutionFailedException, match="Failed to clean up soft-deleted documents"):
+                op.transform(table)
+
+            mock_incremental_svc.unmark_soft_deleted_docs.assert_called_once_with(job_id="job-test-123")
 
 
 if __name__ == "__main__":
