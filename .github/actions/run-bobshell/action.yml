@@ -40,7 +40,7 @@ inputs:
       SHA-256 of the Bob Shell tarball for this version. Verified by hand on
       the download of version 2.0.5. Update it together with the version.
     required: false
-    default: "eff232eb1b69f34f984ddd295e6960470058ca922b1c751879c5a8d06199f566"
+    default: "eff232eb1b69f34f984ddd295e6960470058ca922b1c751879c5a8d06199f566" # pragma: allowlist secret
 
 runs:
   using: composite
