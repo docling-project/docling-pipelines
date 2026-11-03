@@ -165,7 +165,12 @@ class GraphExecutionEngine:
     @staticmethod
     def _raise_if_node_failed(*, node: Node, metadata: dict) -> None:
         """Raise when an operator reports failure so event dispatch cannot report success."""
-        if metadata.get(Metrics.External.NODE_STATUS) == ExecutionStatus.FAILED.value:
+        status = metadata.get(Metrics.External.NODE_STATUS)
+        if (
+            status in (ExecutionStatus.FAILED.value, ExecutionStatus.COMPLETED_WITH_ERRORS.value)
+            or metadata.get(Metrics.External.FAILED_DOCS_COUNT, 0) > 0
+            or metadata.get(Metrics.External.FAILED_DOCS)
+        ):
             raise FlowExecutionFailedException(
                 f"Operator '{node.name}' ({node.operator_name}) reported a failed execution."
             )
