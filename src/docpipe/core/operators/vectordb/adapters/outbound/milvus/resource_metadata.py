@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Milvus-specific resource metadata fetcher for flow enrichment.
 
 Fetches live collection metadata from a Milvus connection: available collections,

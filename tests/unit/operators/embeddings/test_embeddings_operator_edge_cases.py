@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """EmbeddingsOperator edge cases: configuration validation, input formats and file-backed chunks.
 
 The embedding provider is replaced by a small deterministic port double; everything else

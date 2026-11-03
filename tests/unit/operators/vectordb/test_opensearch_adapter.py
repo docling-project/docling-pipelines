@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for OpenSearchAdapter flow-validation hooks."""
 
 from unittest.mock import MagicMock

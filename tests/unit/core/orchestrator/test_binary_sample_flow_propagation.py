@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """End-to-end feature propagation for the Milvus binary sample flow."""
 
 import json

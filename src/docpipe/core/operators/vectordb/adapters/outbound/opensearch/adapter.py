@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenSearch adapter for vector database operations.
 
 This adapter implements the VectorStorePort interface.

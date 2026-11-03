@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Milvus Batch Processor
 Handles bulk operations including indexing, updates, and deletes with batching logic.

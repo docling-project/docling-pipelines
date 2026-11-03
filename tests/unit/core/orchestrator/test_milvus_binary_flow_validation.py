@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Validator-level tests: /validate_flow rejects BIN_* indexes without a binary vector feature."""
 
 import copy

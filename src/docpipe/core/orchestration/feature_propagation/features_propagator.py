@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Feature propagator for flow validation.
 
 This module contains the FeaturePropagator class which handles feature

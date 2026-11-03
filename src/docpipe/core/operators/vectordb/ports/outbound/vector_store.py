@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Port interface for vector database services.
 
 This port defines the contract that all vector database adapters must implement.
