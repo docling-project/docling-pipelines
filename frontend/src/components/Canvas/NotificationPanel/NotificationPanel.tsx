@@ -8,9 +8,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import BottomNotificationPanel from './BottomNotificationPanel/BottomNotificationPanel';
 import type { NotificationItem } from './BottomNotificationPanel/BottomNotificationPanel';
 import TopNotificationBar from './TopNotificationBar/TopNotificationBar';
-import { panelState, resetPanelState } from './panelState';
 import { VALIDATION_STATUS, HIGHLIGHT_MESSAGE_CODES } from '@/constants/notificationPanel';
 import type { FlowValidationResponse, ValidationActionType } from '@/services/api';
+
+// ── Module-level persistent store ────────────────────────────────────────────
+// Survives component re-mounts (e.g. flyout open/close cycles that unmount Canvas subtree).
+const panelState = {
+  isOpen: false,
+  showTopBar: false,
+  topBarDismissed: false,
+  notifications: [] as NotificationItem[],
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -169,7 +177,10 @@ export function NotificationPanel({
       globalThis.removeEventListener('showBottomPanel', handleShow);
       globalThis.removeEventListener('hideBottomPanel', handleHide);
       // Reset module-level store on unmount
-      resetPanelState();
+      panelState.isOpen = false;
+      panelState.showTopBar = false;
+      panelState.topBarDismissed = false;
+      panelState.notifications = [];
     };
   }, []);
 
