@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Milvus Index Manager
 Handles collection creation, validation, and schema management for Milvus.
@@ -31,19 +34,10 @@ class MilvusMetricTypes:
     BM25: str = "BM25"  # BM25 for sparse vectors
     ALL_DENSE_METRIC_TYPES: ClassVar[list[str]] = [L2, IP, COSINE]
 
-    # Binary vector similarity metrics
+    # Binary vector similarity metrics (Milvus 2.6 supports only HAMMING and JACCARD for BIN_* indexes)
     HAMMING: str = "HAMMING"
     JACCARD: str = "JACCARD"
-    TANIMOTO: str = "TANIMOTO"
-    SUBSTRUCTURE: str = "SUBSTRUCTURE"
-    SUPERSTRUCTURE: str = "SUPERSTRUCTURE"
-    ALL_BINARY_METRIC_TYPES: ClassVar[list[str]] = [
-        HAMMING,
-        JACCARD,
-        TANIMOTO,
-        SUBSTRUCTURE,
-        SUPERSTRUCTURE,
-    ]
+    ALL_BINARY_METRIC_TYPES: ClassVar[list[str]] = [HAMMING, JACCARD]
 
     ALL_TYPES: ClassVar[list[str]] = [L2, IP, COSINE, BM25, *ALL_BINARY_METRIC_TYPES]
 
@@ -322,6 +316,30 @@ class MilvusIndexManager:
             MilvusIndexTypes.HNSW,
             MilvusMetricTypes.L2,
             INDEX_DEFAULT_PARAMETERS.get(MilvusIndexTypes.HNSW, {}).copy(),
+        )
+
+    def _warn_if_dense_config_overridden(
+        self, *, vector_field_name: str, applied_index_type: str, applied_metric_type: str
+    ) -> None:
+        """Log a warning when a binary field is indexed with defaults instead of the configured dense settings.
+
+        Args:
+            vector_field_name: Milvus field name of the binary vector field
+            applied_index_type: Index type actually used for the field
+            applied_metric_type: Metric type actually used for the field
+        """
+        if self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES:
+            return
+        logger.warning(
+            "Binary vector field '%s' cannot use the configured dense index settings "
+            "(index_type=%s, metric_type=%s, index_parameters=%s); using index_type=%s, metric_type=%s with "
+            "default parameters instead.",
+            vector_field_name,
+            self.index_type,
+            self.metric_type,
+            self.index_parameters,
+            applied_index_type,
+            applied_metric_type,
         )
 
     def _validate_metric_type(self) -> None:
@@ -767,6 +785,12 @@ class MilvusIndexManager:
                 field_index_type, field_metric_type, field_params = self._resolve_vector_index_config(
                     vector_field_name=vector_field_name, is_binary=is_binary, has_binary_field=has_binary_field
                 )
+                if is_binary:
+                    self._warn_if_dense_config_overridden(
+                        vector_field_name=vector_field_name,
+                        applied_index_type=field_index_type,
+                        applied_metric_type=field_metric_type,
+                    )
 
                 logger.info(
                     "[MILVUS COLLECTION] Creating index on %s vector field '%s' "

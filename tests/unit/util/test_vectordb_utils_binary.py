@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for binary-vector helpers in vectordb_utils."""
 
 import pyarrow as pa
@@ -55,6 +58,20 @@ class TestDetectVectorDimensionBinary:
         table = pa.table({"emb": pa.array([[0.1, 0.2, 0.3]], type=pa.list_(pa.float32()))})
         assert detect_vector_dimension(table=table, embeddings_column="emb") == 3
 
+    def test_empty_flat_bytes_row_is_skipped(self):
+        """An empty b'' row must not produce a dimension of 0; the next valid row is used."""
+        table = pa.table({"emb": pa.array([b"", b"\x00" * 16], type=pa.binary())})
+        assert detect_vector_dimension(table=table, embeddings_column="emb") == 128
+
+    def test_empty_nested_bytes_row_is_skipped(self):
+        """An empty nested [b''] row must not produce a dimension of 0; the next valid row is used."""
+        table = pa.table({"emb": pa.array([[b""], [b"\x00" * 16]], type=pa.list_(pa.binary()))})
+        assert detect_vector_dimension(table=table, embeddings_column="emb") == 128
+
+    def test_only_empty_bytes_returns_none(self):
+        table = pa.table({"emb": pa.array([b"", b""], type=pa.binary())})
+        assert detect_vector_dimension(table=table, embeddings_column="emb") is None
+
 
 class TestCalculateBatchSizeBytesBinary:
     def test_bytes_values_are_measured_not_zero(self):
@@ -64,3 +81,17 @@ class TestCalculateBatchSizeBytesBinary:
     def test_bytes_do_not_trigger_fallback_to_zero(self):
         docs = [{"pk": "a", "vec": bytearray(b"\x01" * 8)}]
         assert calculate_batch_size_bytes(documents=docs) > 0
+
+    def test_size_includes_raw_payload_length(self):
+        """The estimate must count the raw bytes, not the digits of their length."""
+        small = calculate_batch_size_bytes(documents=[{"pk": "a", "vec": b"\x00" * 16}])
+        large = calculate_batch_size_bytes(documents=[{"pk": "a", "vec": b"\x00" * 4096}])
+        assert large - small == 4096 - 16
+        assert large >= 4096
+
+    def test_size_sums_all_byte_values(self):
+        docs = [{"pk": "a", "vec": b"\x00" * 1000}, {"pk": "b", "vec": b"\x00" * 3000}]
+        assert calculate_batch_size_bytes(documents=docs) >= 4000
+
+    def test_non_serializable_non_bytes_returns_zero(self):
+        assert calculate_batch_size_bytes(documents=[{"pk": "a", "vec": object()}]) == 0

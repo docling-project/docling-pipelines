@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for MilvusAdapter."""
 
 from unittest.mock import MagicMock, patch
@@ -133,14 +136,18 @@ class TestMilvusAdapterGetConfigSchema:
             "BM25",
             "HAMMING",
             "JACCARD",
-            "TANIMOTO",
-            "SUBSTRUCTURE",
-            "SUPERSTRUCTURE",
         ],
     )
     def test_metric_type_valid(self, value):
         cfg = self.Config(collection_name="col", metric_type=value)
         assert cfg.metric_type == value
+
+    @pytest.mark.parametrize("value", ["TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"])
+    def test_metric_type_removed_in_milvus_2_6_raises(self, value):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            self.Config(collection_name="col", metric_type=value)
 
     def test_metric_type_invalid_raises(self):
         from pydantic import ValidationError

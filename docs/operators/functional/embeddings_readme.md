@@ -13,7 +13,8 @@ Generates dense vector embeddings from document text using a configurable AI pro
 embeddings suitable for similarity search and RAG pipelines. It supports HuggingFace (local
 and API), LiteLLM (100+ providers including Ollama, OpenAI, Azure, Cohere, AWS), and WatsonX
 through a unified adapter architecture. Long text is automatically split and averaged when it
-exceeds the model token limit.
+exceeds the model token limit. With `quantization: "binary"`, the float embeddings are reduced
+to packed 1-bit vectors for compact storage in Milvus binary indexes.
 
 ---
 
@@ -25,6 +26,7 @@ exceeds the model token limit.
 - Per-document error handling — failed documents are logged and skipped
 - Request batching across documents — texts from many documents share full requests of `batch_size`, with up to `max_concurrent_requests` requests in flight
 - Configurable output column name (`embeddings_column`)
+- Optional 1-bit binary quantization (`quantization`), supported by the Milvus VectorDB adapter only
 - Works with both `content` (full text) and `chunked_content` (pre-chunked) inputs
 
 ---
@@ -107,7 +109,10 @@ All input columns are preserved. The operator appends:
 | Column | PyArrow Type | Description |
 |---|---|---|
 | `embeddings` (or `embeddings_column`) | `list<float32>` | Dense embedding vector. For chunked input, a list of vectors (one per chunk). |
-| `embeddings` with `quantization: binary` | `binary` | Packed-bit vector (`dimension / 8` bytes). For chunked input, a list of byte strings. |
+| `embeddings` with `quantization: binary` | `binary` | Packed-bit vector of `ceil(dimension / 8)` bytes. For chunked input, `list<binary>` (one byte string per chunk). |
+
+With `quantization: binary`, `numpy.packbits` zero-pads the last byte when the model dimension is not a multiple of 8.
+The vector dimension stored in Milvus is the padded bit count (`bytes * 8`).
 
 ---
 
@@ -188,6 +193,29 @@ All input columns are preserved. The operator appends:
 }
 ```
 
+### Example 5 — Binary quantization for Milvus
+
+```json
+{
+  "type": "embeddings",
+  "name": "embed",
+  "config": {
+    "provider": "huggingface",
+    "provider_config": {
+      "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+      "use_local": true
+    },
+    "quantization": "binary"
+  },
+  "depends_on": ["chunk"]
+}
+```
+
+Pair this node with a Milvus VectorDB node that uses `index_type: "BIN_FLAT"` or `"BIN_IVF_FLAT"` and a binary
+`metric_type` (`HAMMING` or `JACCARD`). See the
+[Milvus operator guide](../vectordb/milvus.md) and
+[`sample_flows/vectordb/milvus_binary_integration.json`](../../../sample_flows/vectordb/milvus_binary_integration.json).
+
 ---
 
 ## Troubleshooting
@@ -203,6 +231,9 @@ All input columns are preserved. The operator appends:
 | Rate-limit (HTTP 429) errors from a hosted provider | Too many requests in flight | Lower `provider_config.max_concurrent_requests` (LiteLLM default `4`) |
 | Warning `A shared embedding request failed; re-embedding ... documents in isolation` | A request shared by several documents was rejected for its input (HTTP 400/413/422 or a context-length error) | Expected fallback: each affected document is retried on its own and only documents that still fail are recorded as failed; check their failure reasons |
 | Warning `A shared embedding request failed with an error that does not depend on its texts` | Rate limit, timeout, connection error, 5xx or authentication error after the provider retries | All documents of that request are recorded as failed without being re-sent; check the failure reason and the provider, then rerun the flow |
+| `Invalid quantization '...'. Supported: ['none', 'binary', 'ubinary']` | Unsupported `quantization` value | Use `none`, `binary` or `ubinary` |
+| `OpenSearch Error: Binary vector features are not supported` | `quantization: binary` upstream of an OpenSearch VectorDB node | Remove `quantization` or use a Milvus VectorDB node |
+| `Binary index type '...' requires a binary vector feature, but none is available from upstream operators` | Milvus `BIN_*` `index_type` without `quantization: binary` on the embeddings node | Set `quantization` to `binary` or `ubinary` on the embeddings node, or use a dense `index_type` |
 
 ### API key best practice
 

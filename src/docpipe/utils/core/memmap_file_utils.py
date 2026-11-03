@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import json
 from pathlib import Path
 
@@ -52,11 +55,13 @@ def write_content_to_file(content_list, filepath):
         metadata_path = filepath + DocpipeConstants.METADATA_SUFFIX
         if not Path(metadata_path).exists():
             write_embedding_metadata(
-                filepath, dim, dtype=EMBEDDING_DTYPE_PACKED_BITS if is_packed_bits else EMBEDDING_DTYPE_FLOAT32
+                filepath=filepath,
+                dim=dim,
+                dtype=EMBEDDING_DTYPE_PACKED_BITS if is_packed_bits else EMBEDDING_DTYPE_FLOAT32,
             )
 
 
-def write_embedding_metadata(filepath, dim, dtype=EMBEDDING_DTYPE_FLOAT32):
+def write_embedding_metadata(*, filepath, dim, dtype=EMBEDDING_DTYPE_FLOAT32):
     """
     Write embedding dimension metadata to a companion file.
 
@@ -188,10 +193,11 @@ def load_embeddings_from_memmap_file(filepath):
     DocpipeException
         If metadata is invalid
     """
-    # Read dimension from metadata file
-    dim = read_embedding_metadata(filepath)
+    # Read dimension and storage layout from the metadata file in a single pass
+    metadata = _read_embedding_metadata_dict(filepath)
+    dim = metadata["dim"]
 
-    if _is_packed_bits_file(filepath):
+    if metadata.get("dtype") == EMBEDDING_DTYPE_PACKED_BITS:
         return list(_yield_packed_bit_rows(filepath, dim))
 
     # Compute number of embeddings from file size

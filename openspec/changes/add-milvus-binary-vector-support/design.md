@@ -9,8 +9,8 @@ See `proposal.md` for background and motivation.
 ## Goals / Non-Goals
 
 **Goals:**
-- Enable `MilvusIndexManager` to create collections with `DataType.BINARY_VECTOR` fields when binary vectors or quantization are configured.
-- Support `BIN_FLAT` and `BIN_IVF_FLAT` index algorithms with binary metrics (`HAMMING`, `JACCARD`, `TANIMOTO`, `SUBSTRUCTURE`, `SUPERSTRUCTURE`).
+- Enable `MilvusIndexManager` to create collections with `DataType.BINARY_VECTOR` fields for features typed as binary vectors (for example by embeddings quantization).
+- Support `BIN_FLAT` and `BIN_IVF_FLAT` index algorithms with binary metrics (`HAMMING`, `JACCARD`).
 - Support binary quantization in `EmbeddingsOperator` to produce byte-packed binary vectors from float embeddings using sign thresholding.
 - Support multi-vector collections containing both binary vectors and dense float vectors.
 - Reject binary vectors in `auth_type: "lite"` mode with clear, actionable validation errors.
@@ -35,7 +35,7 @@ See `proposal.md` for background and motivation.
 
 **Decision:** Extend `MilvusIndexTypes` and `MilvusMetricTypes` in `index_manager.py`:
 - `MilvusIndexTypes`: add `BIN_FLAT = "BIN_FLAT"`, `BIN_IVF_FLAT = "BIN_IVF_FLAT"`.
-- `MilvusMetricTypes`: add `HAMMING = "HAMMING"`, `JACCARD = "JACCARD"`, `TANIMOTO = "TANIMOTO"`, `SUBSTRUCTURE = "SUBSTRUCTURE"`, `SUPERSTRUCTURE = "SUPERSTRUCTURE"`.
+- `MilvusMetricTypes`: add `HAMMING = "HAMMING"`, `JACCARD = "JACCARD"`.
 - `INDEX_DEFAULT_PARAMETERS`: add `BIN_FLAT: {}`, `BIN_IVF_FLAT: {"nlist": 128}`.
 - Validate metric compatibility: binary index types only allow binary metrics; dense index types reject binary-only metrics.
 - **No separate binary configuration keys.** The existing `index_type` / `metric_type` / `index_parameters` are applied dynamically per field kind (`MilvusIndexManager._resolve_vector_index_config`):
@@ -58,7 +58,7 @@ See `proposal.md` for background and motivation.
 
 ### 4. Binary Quantization in `EmbeddingsOperator`
 
-**Decision:** Add an optional `quantization` configuration key to `EmbeddingsOperator` (`"none" | "binary" | "ubinary"`).
+**Decision:** Add an optional node-level `quantization` configuration key to `EmbeddingsOperator` (`"none" | "binary" | "ubinary"`). `FeaturePropagator` reads it from the embeddings node config only; it is not a `global_config` setting.
 - When `quantization: "binary"` or `"ubinary"`, apply 1-bit sign thresholding (`arr > 0`) followed by `np.packbits(..., axis=-1).tobytes()`.
 - Store the resulting byte sequence in the output table column (as `pa.binary()` or Python `bytes`).
 - **File-backed (memmap) path:** `write_content_to_file` writes `bytes` rows verbatim and records the dimension in bits (`len(bytes) * 8`) with metadata `{"dim": N, "dtype": "packed_bits"}`; float files keep `{"dim": N}`. Readers (`yield_embeddings_from_memmap_file`, `load_embeddings_from_memmap_file`) return `bytes` rows for packed-bit files, so `VectorDBOperator` streams them to Milvus without `.tolist()`.

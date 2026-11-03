@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Shared utilities for VectorDB adapters.
 
 This module contains common functionality used across different VectorDB adapters
@@ -76,29 +79,14 @@ def feature_mapping_items(
             yield e[_fn], e[_mc]
 
 
-def _json_size_default(obj: Any) -> int:
-    """JSON ``default`` hook for size estimation: count raw bytes (binary vectors) by their length.
-
-    Args:
-        obj: Object the JSON encoder could not serialize.
-
-    Returns:
-        Length of the byte string.
-
-    Raises:
-        TypeError: The object is not bytes-like.
-    """
-    if isinstance(obj, (bytes, bytearray)):
-        return len(obj)
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
-
 def calculate_batch_size_bytes(*, documents: list[dict[str, Any]]) -> int:
     """Calculate approximate size of documents in bytes.
 
     This utility function estimates the memory footprint of a batch of documents
-    by serializing them to JSON and measuring the byte size. Used for batch
-    size optimization across all VectorDB adapters.
+    by serializing them to JSON and measuring the byte size. Raw ``bytes`` values
+    (binary vectors) cannot be JSON serialized, so each one is replaced by a
+    placeholder in the JSON and its actual length is added to the total. Used for
+    batch size optimization across all VectorDB adapters.
 
     Args:
         documents: List of documents to measure
@@ -106,8 +94,17 @@ def calculate_batch_size_bytes(*, documents: list[dict[str, Any]]) -> int:
     Returns:
         Size in bytes, or 0 if calculation fails
     """
+    raw_bytes_total = 0
+
+    def _count_raw_bytes(obj: Any) -> str:
+        nonlocal raw_bytes_total
+        if isinstance(obj, (bytes, bytearray)):
+            raw_bytes_total += len(obj)
+            return ""
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
     try:
-        return len(json.dumps(documents, default=_json_size_default).encode("utf-8"))
+        return len(json.dumps(documents, default=_count_raw_bytes).encode("utf-8")) + raw_bytes_total
     except Exception:
         return 0
 
@@ -151,6 +148,8 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
 
             # Handle raw bytes / bytearray for binary vector embeddings
             if isinstance(embedding_value, (bytes, bytearray)):
+                if len(embedding_value) == 0:
+                    continue
                 bit_dim = len(embedding_value) * 8
                 logger.info(
                     "Auto-detected binary vector dimension: %s bits (%s bytes)",
@@ -186,6 +185,8 @@ def detect_vector_dimension(*, table: pa.Table, embeddings_column: str) -> int |
                     logger.info("Auto-detected vector dimension: %s (from chunked embeddings)", nested_dimension)
                     return nested_dimension
             elif isinstance(embedding_value[0], (bytes, bytearray)):
+                if len(embedding_value[0]) == 0:
+                    continue
                 nested_bit_dim = len(embedding_value[0]) * 8
                 logger.info(
                     "Auto-detected binary vector dimension: %s bits (%s bytes) (from chunked byte embeddings)",

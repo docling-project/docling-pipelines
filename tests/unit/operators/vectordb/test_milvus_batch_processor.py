@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for MilvusBatchProcessor
 """
@@ -660,6 +663,34 @@ class TestQueryAndDeleteEdgeCases:
         batches = processor.create_batches(documents=documents)
         # Each oversized doc should be in its own batch
         assert len(batches) >= 2
+
+    def test_create_batches_size_split_with_binary_vectors(self, mock_client):
+        """Binary vector payloads count toward the batch size limit and force a split."""
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.batch_processor import MAX_BATCH_SIZE_MB
+
+        vector_bytes = b"\x00" * (MAX_BATCH_SIZE_MB * 1024 * 1024 // 2 + 1)
+        features = {
+            "doc_id": {"available_for_vector_db": True, "type": "string"},
+            "binary_embeddings": {"available_for_vector_db": True, "type": "vector_binary"},
+        }
+        mappings = [
+            {"feature_name": "doc_id", "mapped_column_name": "pk"},
+            {"feature_name": "binary_embeddings", "mapped_column_name": "vector_embeddings"},
+        ]
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            batch_size=1000,
+            available_features=features,
+            feature_mappings=mappings,
+            embeddings_column="binary_embeddings",
+        )
+        documents = [(f"d{i}", {"doc_id": f"d{i}", "binary_embeddings": vector_bytes}) for i in range(3)]
+
+        batches = processor.create_batches(documents=documents)
+
+        assert len(batches) >= 2
+        assert sum(len(batch) for batch in batches) == 3
 
 
 class TestQueryPksByDocIds:

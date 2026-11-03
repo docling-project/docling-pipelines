@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config model for the Milvus vector store adapter."""
 
 from typing import Literal
@@ -94,12 +97,9 @@ class MilvusConfig(BaseModel):
         "BM25",
         "HAMMING",
         "JACCARD",
-        "TANIMOTO",
-        "SUBSTRUCTURE",
-        "SUPERSTRUCTURE",
     ] = Field(
         default="L2",
-        description="Vector similarity metric.",
+        description="Vector similarity metric. HAMMING and JACCARD are for binary vectors (Milvus 2.6).",
     )
     index_parameters: dict = Field(
         default_factory=dict,

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for MilvusIndexManager
 """
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pyarrow as pa
@@ -328,10 +331,7 @@ class TestMetricTypes:
         assert MilvusMetricTypes.BM25 == "BM25"
         assert MilvusMetricTypes.HAMMING == "HAMMING"
         assert MilvusMetricTypes.JACCARD == "JACCARD"
-        assert MilvusMetricTypes.TANIMOTO == "TANIMOTO"
-        assert MilvusMetricTypes.SUBSTRUCTURE == "SUBSTRUCTURE"
-        assert MilvusMetricTypes.SUPERSTRUCTURE == "SUPERSTRUCTURE"
-        assert len(MilvusMetricTypes.ALL_TYPES) == 9
+        assert len(MilvusMetricTypes.ALL_TYPES) == 6
 
 
 class TestIndexTypes:
@@ -975,9 +975,22 @@ class TestBinaryVectorIndexSupport:
         assert "BIN_FLAT" in MilvusIndexTypes.ALL_TYPES
         assert "BIN_IVF_FLAT" in MilvusIndexTypes.ALL_TYPES
 
-        for metric in ["HAMMING", "JACCARD", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]:
+        for metric in ["HAMMING", "JACCARD"]:
             assert metric in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES
             assert metric in MilvusMetricTypes.ALL_TYPES
+
+    @pytest.mark.parametrize("metric", ["TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"])
+    def test_metrics_removed_in_milvus_2_6_are_rejected(self, mock_client, metric):
+        """Binary metrics Milvus no longer supports must fail at init, not at index creation."""
+        assert metric not in MilvusMetricTypes.ALL_TYPES
+        with pytest.raises(DocpipeException) as exc_info:
+            MilvusIndexManager(
+                client=mock_client,
+                collection_name="test_bin_col",
+                index_type=MilvusIndexTypes.BIN_FLAT,
+                metric_type=metric,
+            )
+        assert f"Invalid metric type '{metric}'" in str(exc_info.value)
 
     def test_valid_binary_index_initialization(self, mock_client):
         """Verify initializing with valid binary index and metric."""
@@ -1014,16 +1027,6 @@ class TestBinaryVectorIndexSupport:
                 metric_type=MilvusMetricTypes.HAMMING,
             )
         assert "cannot use binary metric" in str(exc_info.value)
-
-    def test_dense_index_with_bm25_metric_is_accepted(self, mock_client):
-        """BM25 is not a binary metric, so a dense index may be paired with it."""
-        manager = MilvusIndexManager(
-            client=mock_client,
-            collection_name="test_dense_col",
-            index_type=MilvusIndexTypes.HNSW,
-            metric_type=MilvusMetricTypes.BM25,
-        )
-        assert manager.metric_type == MilvusMetricTypes.BM25
 
     def test_milvus_lite_rejects_binary_index_type(self, mock_client):
         """Milvus Lite must reject binary index types at initialization."""
@@ -1238,6 +1241,56 @@ class TestBinaryVectorIndexSupport:
         assert calls["binary_vec"]["index_type"] == MilvusIndexTypes.BIN_FLAT
         assert calls["binary_vec"]["metric_type"] == MilvusMetricTypes.HAMMING
         assert calls["binary_vec"]["params"] == {}
+
+    def test_binary_field_dense_config_override_logs_warning(self, mock_client):
+        """Replacing a configured dense index on a binary field must be visible in the logs."""
+        features = {"binary_embeddings": {"available_for_vector_db": True, "type": "vector_binary"}}
+        mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "binary_vec"}]
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_bin_col",
+            index_type=MilvusIndexTypes.HNSW,
+            metric_type=MilvusMetricTypes.COSINE,
+            index_parameters={"M": 8},
+            available_features=features,
+            feature_mappings=mappings,
+        )
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager.logger") as mock_logger:
+            manager.create_collection(dimension_mapping={"binary_embeddings": 128})
+
+        mock_logger.warning.assert_called_once()
+        args = mock_logger.warning.call_args.args
+        assert "cannot use the configured dense index settings" in args[0]
+        assert "binary_vec" in args
+        assert MilvusIndexTypes.HNSW in args
+        assert MilvusMetricTypes.COSINE in args
+        assert MilvusIndexTypes.BIN_FLAT in args
+        assert MilvusMetricTypes.HAMMING in args
+
+    def test_binary_index_config_on_binary_field_does_not_warn(self, mock_client):
+        """No warning when the configured BIN_* index is used as-is."""
+        features = {"binary_embeddings": {"available_for_vector_db": True, "type": "vector_binary"}}
+        mappings = [{"feature_name": "binary_embeddings", "mapped_column_name": "binary_vec"}]
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_bin_col",
+            index_type=MilvusIndexTypes.BIN_FLAT,
+            metric_type=MilvusMetricTypes.HAMMING,
+            available_features=features,
+            feature_mappings=mappings,
+        )
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager.logger") as mock_logger:
+            manager.create_collection(dimension_mapping={"binary_embeddings": 128})
+
+        mock_logger.warning.assert_not_called()
+
+    def test_dense_field_with_dense_index_does_not_warn(self, mock_client):
+        """Dense fields keep their configuration, so nothing is overridden and nothing is logged."""
+        manager = self._hybrid_manager(mock_client, index_type=MilvusIndexTypes.BIN_FLAT, metric_type="HAMMING")
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager.logger") as mock_logger:
+            manager.create_collection(dimension_mapping={"dense_embeddings": 384, "binary_embeddings": 256})
+
+        mock_logger.warning.assert_not_called()
 
     def test_float_only_collection_with_bin_index_type_raises(self, mock_client):
         """A float field must not be silently treated as binary because index_type is BIN_*."""
