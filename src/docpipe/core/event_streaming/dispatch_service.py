@@ -3,8 +3,6 @@
 
 """Resolve events and execute mapped flows in process."""
 
-from copy import deepcopy
-
 from docpipe.core.assets.flows.application.services import AuthoringCompiler, FlowService
 from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
 from docpipe.core.constants.constants import DocpipeConstants
@@ -31,8 +29,7 @@ class EventDispatchService:
     def dispatch(self, *, event: InputEvent) -> None:
         """Resolve the saved flow and wait for streaming execution to complete."""
         mapping = self._mapping_service.get_mapping(key=event.routing_key)
-        flow = self._flow_service.get_flow(flow_id=mapping.flow_id)
-        flow_definition = deepcopy(flow.definition)
+        flow_definition = self._flow_service.get_flow(flow_id=mapping.flow_id).definition
         if DocpipeConstants.FLOW_NAME in flow_definition:
             authoring_flow = AuthoringFlow.from_dict(data=flow_definition)
             runtime_flow = AuthoringCompiler().compile(authoring_flow=authoring_flow)
