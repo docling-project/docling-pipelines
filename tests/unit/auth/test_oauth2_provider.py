@@ -5,15 +5,16 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qsl
 
 import httpx
+import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwk, jwt
+from jwt.algorithms import RSAAlgorithm
 
 from docpipe.api.auth.models import User
 from docpipe.api.auth.oauth2_config import (
@@ -398,7 +399,8 @@ def _rsa_key_pair() -> tuple[str, str]:
 def signing_key() -> dict[str, Any]:
     """The provider's signing key and the JWKS that publishes it."""
     private_pem, public_pem = _rsa_key_pair()
-    public_jwk = jwk.construct(public_pem, "RS256").to_dict()
+    public_key = cast(rsa.RSAPublicKey, serialization.load_pem_public_key(public_pem.encode()))
+    public_jwk = json.loads(RSAAlgorithm.to_jwk(public_key))
     public_jwk["kid"] = _KID
     return {"private_pem": private_pem, "public_pem": public_pem, "jwks": {"keys": [public_jwk]}}
 
@@ -529,7 +531,7 @@ class TestValidateIdToken:
         provider = GenericOIDCProvider(oauth2_config)
         token = _sign_rs256(_claims(), private_pem=signing_key["private_pem"])
 
-        # A malformed JWKS document (list instead of object) is not a JWTError.
+        # A malformed JWKS document (list instead of object) is not a PyJWTError.
         with patch.object(provider, "get_jwks", new_callable=AsyncMock, return_value=["not", "a", "jwks"]):
             with pytest.raises(ExternalServiceError, match=r"^Token validation failed"):
                 await provider.validate_id_token(token)

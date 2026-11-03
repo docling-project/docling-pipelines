@@ -15,6 +15,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useIntl } from 'react-intl';
 import {
   RadioButton,
   Dropdown,
@@ -32,6 +33,7 @@ import { WarningAlt } from '@carbon/icons-react';
 import { Tearsheet } from '@carbon/ibm-products';
 import type { ElyraController } from '@/types';
 import { enrichFlowFeatures } from '@/services/api';
+import { messages } from './Merging.messages';
 import styles from './Merging.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -158,9 +160,23 @@ function PreviewTable({
 
 // Merged output table
 function MergedTablePreview({ previewType }: { previewType: PreviewType }): React.JSX.Element {
+  const intl = useIntl();
   const headers = previewType === PREVIEW_TYPE.MERGE_ROWS
-    ? ['Doc ID', 'Name', 'Author', 'Language', 'Quality']
-    : ['Doc ID', 'Name', 'Author', 'Language', 'Name_linkname', 'Quality'];
+    ? [
+        intl.formatMessage(messages.headerDocId),
+        intl.formatMessage(messages.headerName),
+        intl.formatMessage(messages.headerAuthor),
+        intl.formatMessage(messages.headerLanguage),
+        intl.formatMessage(messages.headerQuality),
+      ]
+    : [
+        intl.formatMessage(messages.headerDocId),
+        intl.formatMessage(messages.headerName),
+        intl.formatMessage(messages.headerAuthor),
+        intl.formatMessage(messages.headerLanguage),
+        intl.formatMessage(messages.headerNameLinkname),
+        intl.formatMessage(messages.headerQuality),
+      ];
 
   // CSS module classes typed as string|undefined — use '' as fallback
   const b2 = styles.branch2Row ?? '';
@@ -196,7 +212,7 @@ function MergedTablePreview({ previewType }: { previewType: PreviewType }): Reac
 
   return (
     <div className={`${styles.tableBox} ${styles.mergedTable}`}>
-      <h5>Merged Table</h5>
+      <h5>{intl.formatMessage(messages.mergedTableTitle)}</h5>
       <TableContainer>
         <Table size="sm">
           <TableHead>
@@ -235,6 +251,8 @@ function MergedTablePreview({ previewType }: { previewType: PreviewType }): Reac
 type DiagramSvgProps = { previewType: PreviewType };
 
 function DiagramSvg({ previewType }: DiagramSvgProps): React.JSX.Element {
+  const intl = useIntl();
+
   // Circle fill colours for each preview mode
   const TRANSPARENT = 'transparent';
   const LIGHT_BLUE   = 'var(--merging-blue-light)';
@@ -303,7 +321,7 @@ function DiagramSvg({ previewType }: DiagramSvgProps): React.JSX.Element {
   };
 
   return (
-    <svg className={styles.connectorSvg} aria-label="Merge diagram">
+    <svg className={styles.connectorSvg} aria-label={intl.formatMessage(messages.diagramAriaLabel)}>
       <defs>
         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto" fill={GRAY}>
           <polygon points="0 0, 10 3.5, 0 7" />
@@ -345,6 +363,7 @@ interface MergingPanelBodyProps {
 }
 
 export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   const appData = controller.getAppData() as {
     nodeId?: string;
     pipelineFlow?: { pipelines?: Array<{ nodes?: any[] }> };
@@ -479,14 +498,14 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
   const columnOptionItems: ColumnOption[] = [COLUMN_OPTION.INNER_JOIN, COLUMN_OPTION.FULL_OUTER];
   const columnOptionLabel = (item: ColumnOption): string =>
     item === COLUMN_OPTION.INNER_JOIN
-      ? 'Inner join - combine all matching rows'
-      : 'Full outer - includes all rows from all datasets';
+      ? intl.formatMessage(messages.columnOptionInnerJoin)
+      : intl.formatMessage(messages.columnOptionFullOuter);
 
   const previewItems: PreviewType[] = [PREVIEW_TYPE.MERGE_ROWS, PREVIEW_TYPE.INNER_JOIN, PREVIEW_TYPE.FULL_OUTER];
   const previewItemLabel = (item: PreviewType): string => {
-    if (item === PREVIEW_TYPE.MERGE_ROWS) { return 'Merges rows from all tables, one after another'; }
-    if (item === PREVIEW_TYPE.INNER_JOIN) { return 'Inner join - combine all matching rows'; }
-    return 'Full outer - includes all rows from all datasets';
+    if (item === PREVIEW_TYPE.MERGE_ROWS) { return intl.formatMessage(messages.previewRows); }
+    if (item === PREVIEW_TYPE.INNER_JOIN) { return intl.formatMessage(messages.previewInnerJoin); }
+    return intl.formatMessage(messages.previewFullOuter);
   };
 
   // Derived variable — replaces the IIFE in render (react/no-unstable-nested-components).
@@ -500,15 +519,15 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
 
       {/* ── Merge type ──────────────────────────────────────────────────────── */}
       <div className={styles.formField}>
-        <p className={styles.fieldLabel}>Merge type</p>
-        <p className={styles.fieldHint}>Select how to merge data from multiple inputs</p>
+        <p className={styles.fieldLabel}>{intl.formatMessage(messages.mergeType)}</p>
+        <p className={styles.fieldHint}>{intl.formatMessage(messages.mergeTypeHint)}</p>
 
         <div className={styles.radioButtonGroup}>
           <div className={styles.radioOption}>
             <RadioButton
               id="merge-rows"
               name="mergeTypeGroupRows"
-              labelText="Combine rows: Merge rows from all tables, one after another"
+              labelText={intl.formatMessage(messages.mergeRowsLabel)}
               value={MERGE_TYPE.ROWS}
               checked={mergeType === MERGE_TYPE.ROWS}
               onChange={() => { updateMergeType(MERGE_TYPE.ROWS); }}
@@ -518,7 +537,7 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
             <RadioButton
               id="merge-columns"
               name="mergeTypeGroupColumns"
-              labelText="Combine columns: Merge columns from all tables row by row"
+              labelText={intl.formatMessage(messages.mergeColumnsLabel)}
               value={MERGE_TYPE.COLUMNS}
               checked={mergeType === MERGE_TYPE.COLUMNS}
               onChange={() => { updateMergeType(MERGE_TYPE.COLUMNS); }}
@@ -531,8 +550,8 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
             <div className={styles.formField}>
               <Dropdown
                 id="merge-column-option"
-                titleText="Column merge option"
-                label="Select join type"
+                titleText={intl.formatMessage(messages.columnMergeOptionTitle)}
+                label={intl.formatMessage(messages.selectJoinType)}
                 hideLabel
                 selectedItem={columnOption}
                 items={columnOptionItems}
@@ -547,8 +566,8 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
                 kind="info"
                 lowContrast
                 hideCloseButton
-                title="Note:"
-                subtitle="Combining columns requires a common key column across all input branches."
+                title={intl.formatMessage(messages.columnNoteTitle)}
+                subtitle={intl.formatMessage(messages.columnNoteSubtitle)}
               />
             </div>
           </div>
@@ -565,28 +584,27 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
             className={styles.selectButton}
             disabled={!mergeType}
           >
-            Preview with sample data
+            {intl.formatMessage(messages.previewButton)}
           </Button>
         </div>
       </div>
 
       {/* ── Preview tearsheet */}
-      { }
       <Tearsheet
         open={isTearsheetOpen}
         onClose={() => { setIsTearsheetOpen(false); }}
         hasCloseIcon
-        closeIconDescription="Close"
-        title="Merge Preview"
-        description="Preview of how the merge type works with sample data"
+        closeIconDescription={intl.formatMessage(messages.close)}
+        title={intl.formatMessage(messages.previewTearsheetTitle)}
+        description={intl.formatMessage(messages.previewTearsheetDesc)}
       >
         <div className={styles.tearsheetTableWrapper}>
           {/* Preview type selector */}
           <div className={styles.previewSelectContainer}>
             <Dropdown
               id="merge-preview-type"
-              titleText="Merge type"
-              label="Merge type"
+              titleText={intl.formatMessage(messages.previewDropdownTitle)}
+              label={intl.formatMessage(messages.previewDropdownLabel)}
               selectedItem={previewType}
               items={previewItems}
               itemToString={previewItemLabel}
@@ -599,11 +617,11 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
 
           {previewType === PREVIEW_TYPE.MERGE_ROWS && (
             <p className={styles.noteText}>
-              When combining rows, columns that only exist in one branch will appear as Null in the merged result.
+              {intl.formatMessage(messages.previewRowsNote)}
             </p>
           )}
           <p className={styles.disclaimerText}>
-            The preview uses sample data to illustrate the merge behaviour. Actual results depend on your data.
+            {intl.formatMessage(messages.previewDisclaimer)}
           </p>
 
           {/* Diagram wrapper */}
@@ -617,8 +635,13 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
               <div className={styles.inputTables}>
                 <div className={styles.tableAlignment}>
                   <PreviewTable
-                    title="Input from Branch 1"
-                    headers={['Doc ID', 'Name', 'Author', 'Language']}
+                    title={intl.formatMessage(messages.inputFromBranch1)}
+                    headers={[
+                      intl.formatMessage(messages.headerDocId),
+                      intl.formatMessage(messages.headerName),
+                      intl.formatMessage(messages.headerAuthor),
+                      intl.formatMessage(messages.headerLanguage),
+                    ]}
                     rows={[
                       [D.row1, D.doc1, D.alice,   D.english],
                       [D.row2, D.doc2, D.bob,     D.german],
@@ -629,16 +652,25 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
 
                   {previewType === PREVIEW_TYPE.MERGE_ROWS ? (
                     <PreviewTable
-                      title="Input from Branch 2"
-                      headers={['Doc ID', 'Name', 'Quality', 'Language']}
+                      title={intl.formatMessage(messages.inputFromBranch2)}
+                      headers={[
+                        intl.formatMessage(messages.headerDocId),
+                        intl.formatMessage(messages.headerName),
+                        intl.formatMessage(messages.headerQuality),
+                        intl.formatMessage(messages.headerLanguage),
+                      ]}
                       rows={[[D.row5, D.doc9, D.q4, D.english]]}
                       tableType="branch2"
                       className="merge-rows-branch2 branch2-table"
                     />
                   ) : (
                     <PreviewTable
-                      title="Input from Branch 2"
-                      headers={['Doc ID', 'Name', 'Quality']}
+                      title={intl.formatMessage(messages.inputFromBranch2)}
+                      headers={[
+                        intl.formatMessage(messages.headerDocId),
+                        intl.formatMessage(messages.headerName),
+                        intl.formatMessage(messages.headerQuality),
+                      ]}
                       rows={[
                         [D.row1, D.doc1, D.q1],
                         [D.row2, D.doc2, D.q2],
@@ -662,20 +694,20 @@ export function MergingPanelBody({ controller }: MergingPanelBodyProps): React.J
       {/* ── Live output feature count — updates after each enrichment call ── */}
       {outputFeatureCount > 0 && (
         <p className={styles.fieldHint}>
-          {`Output: ${outputFeatureCount} feature${outputFeatureCount !== 1 ? 's' : ''}`}
+          {intl.formatMessage(messages.outputFeaturesCount, { count: outputFeatureCount })}
         </p>
       )}
 
       {/* ── Incoming link summary ──────────────────────────────────────────── */}
       {incomingLinks.length > 0 && (
         <div className={styles.linkSummary}>
-          <p className={styles.fieldLabel}>Incoming links</p>
+          <p className={styles.fieldLabel}>{intl.formatMessage(messages.incomingLinks)}</p>
           <TableContainer>
             <Table size="sm">
               <TableHead>
                 <TableRow>
-                  <TableHeader>Source Node</TableHeader>
-                  <TableHeader>Link Name</TableHeader>
+                  <TableHeader>{intl.formatMessage(messages.sourceNode)}</TableHeader>
+                  <TableHeader>{intl.formatMessage(messages.linkName)}</TableHeader>
                 </TableRow>
               </TableHead>
               <TableBody>

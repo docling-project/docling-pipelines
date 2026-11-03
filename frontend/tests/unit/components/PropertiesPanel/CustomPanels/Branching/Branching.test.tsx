@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen } from '@testing-library/react';
 import React from 'react';
 import { BranchingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Branching/Branching';
 import type { ElyraController } from '@/types';
@@ -15,7 +16,7 @@ function makeController(appDataOverrides: Record<string, unknown> = {}): ElyraCo
 
 describe('BranchingPanelBody', () => {
   it('renders empty state message when no link conditions exist', () => {
-    render(<BranchingPanelBody controller={makeController()} />);
+    renderWithProviders(<BranchingPanelBody controller={makeController()} />);
     expect(screen.getByText(/Connect output links from this node/)).toBeDefined();
   });
 
@@ -40,7 +41,7 @@ describe('BranchingPanelBody', () => {
         ],
       }],
     };
-    render(<BranchingPanelBody controller={makeController({ nodeId: 'branch-1', pipelineFlow: flow })} />);
+    renderWithProviders(<BranchingPanelBody controller={makeController({ nodeId: 'branch-1', pipelineFlow: flow })} />);
     expect(screen.getByText('Target Node')).toBeDefined();
     expect(screen.getByText('Link Name')).toBeDefined();
     expect(screen.getByText('Branch A')).toBeDefined();
@@ -67,7 +68,7 @@ describe('BranchingPanelBody', () => {
         ],
       }],
     };
-    render(<BranchingPanelBody controller={makeController({ nodeId: 'branch-1', pipelineFlow: flow })} />);
+    renderWithProviders(<BranchingPanelBody controller={makeController({ nodeId: 'branch-1', pipelineFlow: flow })} />);
     expect(screen.getByText('My Chunker')).toBeDefined();
   });
 });

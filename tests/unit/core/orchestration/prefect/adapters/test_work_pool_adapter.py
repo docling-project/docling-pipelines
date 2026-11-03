@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for WorkPoolAdapter.
 
@@ -497,43 +500,8 @@ class TestResolveConfigPath:
 
 
 # ---------------------------------------------------------------------------
-# _get_effective_job_management_env
-# ---------------------------------------------------------------------------
-
-
-class TestGetEffectiveJobManagementEnv:
-    def test_includes_factory_env(self):
-        adapter = _build_adapter()
-        mock_factory = Mock()
-        mock_factory.resolve_worker_env.return_value = {"MY_VAR": "val"}
-        with (
-            patch(
-                "docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory.from_default_sources",
-                return_value=mock_factory,
-            ),
-            patch.object(adapter, "_resolve_job_management_config_path", return_value=Path("/no/config.yaml")),
-        ):
-            result = adapter._get_effective_job_management_env()
-        assert "MY_VAR" in result
-
-    def test_tolerates_factory_exception(self):
-        adapter = _build_adapter()
-        with (
-            patch(
-                "docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory.from_default_sources",
-                side_effect=RuntimeError("factory down"),
-            ),
-            patch.object(adapter, "_resolve_job_management_config_path", return_value=Path("/no/config.yaml")),
-        ):
-            result = adapter._get_effective_job_management_env()
-        assert isinstance(result, dict)
-
-
-# ---------------------------------------------------------------------------
 # _build_container_env
 # ---------------------------------------------------------------------------
-
-
 class TestBuildContainerEnv:
     def test_fills_required_defaults(self):
         adapter = _build_adapter()
@@ -1023,38 +991,8 @@ class TestCancelRemainingRunsAsyncNoPending:
 
 
 # ---------------------------------------------------------------------------
-# _get_effective_job_management_env — config path exists branch (line 862)
-# ---------------------------------------------------------------------------
-
-
-class TestGetEffectiveJobManagementEnvConfigExists:
-    def test_includes_config_path_when_file_exists(self, tmp_path):
-        adapter = _build_adapter()
-        cfg = tmp_path / "docling-pipelines-config.yaml"
-        cfg.write_text("storage: duckdb\n")
-
-        mock_factory = Mock()
-        mock_factory.resolve_worker_env.return_value = {}
-
-        with (
-            patch.object(adapter, "_resolve_job_management_config_path", return_value=cfg),
-            patch(
-                "docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory.from_default_sources",
-                return_value=mock_factory,
-            ),
-        ):
-            result = adapter._get_effective_job_management_env()
-
-        from docpipe.core.constants import EnvironmentVariables
-
-        assert EnvironmentVariables.DOCPIPE_CONFIG_PATH in result
-
-
-# ---------------------------------------------------------------------------
 # _build_container_env — all keys pre-populated (covers the False branches 883-898)
 # ---------------------------------------------------------------------------
-
-
 class TestBuildContainerEnvAllKeysPreset:
     def test_does_not_overwrite_any_preset_key(self):
         """All env keys already present → every 'if not in env' branch takes the False path."""

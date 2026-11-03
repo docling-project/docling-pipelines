@@ -15,6 +15,9 @@ Before starting, verify you have:
 python3.12 --version
 # Expected: Python 3.12.x
 
+# Check Node.js 22.15.1 and npm (required to build the bundled frontend)
+node --version && npm --version
+
 # Check available disk space (need ~5GB)
 df -h .
 ```
@@ -24,11 +27,28 @@ df -h .
 - **Ubuntu/Debian**: `sudo apt install python3.12 python3.12-venv`
 - **Fedora/RHEL**: `sudo dnf install python3.12`
 
+**Don't have Node.js 22.15.1?**
+
+`uv sync` builds the React frontend as part of the package install, so it fails with `npm not found` if Node.js is missing. The repo pins Node.js 22.15.1 in `frontend/.nvmrc`; a version manager such as [nvm](https://github.com/nvm-sh/nvm) installs the pinned version:
+
+```bash
+cd frontend
+nvm install   # reads frontend/.nvmrc
+nvm use
+cd ..
+```
+
+On macOS you can install nvm with `brew install nvm`. Run `uv sync` from the same shell so `npm` is on `PATH`.
+
 ---
 
-## Automated Setup (2 minutes)
+## Setup (1–2 minutes)
 
-Run the automated setup script to install everything:
+Choose the setup mode that fits your needs:
+- **Option A — Fast Local Setup (Recommended, Default):** Runs entirely in-process using local HuggingFace `sentence-transformers` embeddings and **Milvus Lite** (`.db` file). Zero Docker/Podman containers or external daemons required.
+- **Option B — Full Service Stack (Ollama + OpenSearch):** Installs and starts local Ollama and OpenSearch containers (with OpenSearch Dashboards). See [Option B: Full Service Stack (Ollama + OpenSearch)](#option-b-full-service-stack-ollama--opensearch) below.
+
+### Option A: Fast Local Setup (Zero Containers)
 
 ```bash
 # Clone the repository
@@ -36,53 +56,21 @@ git clone https://github.com/docling-project/docling-pipelines.git
 # or, if you forked: git clone https://github.com/<your-username>/docling-pipelines.git
 cd docling-pipelines
 
-# Make setup script executable
-chmod +x scripts/setup_docling_pipelines_environment.sh
-
-# Run automated setup (installs only required model for quick start)
-./scripts/setup_docling_pipelines_environment.sh --models nomic-embed-text
+# Install Python virtual environment and dependencies (includes sentence-transformers & milvus-lite)
+uv sync --extra dev
 ```
 
-**What this installs:**
-- ✅ uv package manager
-- ✅ Ollama server + nomic-embed-text model (~274MB)
-- ✅ OpenSearch + Dashboards (for vector storage)
-- ✅ Python virtual environment + dependencies
-
-**Setup takes 5-10 minutes** depending on your internet connection.
-
-### Configure Environment
-
-Copy the example environment file and configure it:
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# The default values work for local development
-# Edit .env if you need to customize settings
-```
-
-### Setup Verification
-
-After setup completes, verify services are running:
-
-```bash
-# Check Ollama (should return list of models)
-curl http://localhost:11434/api/tags
-
-# Check OpenSearch (should return cluster info)
-curl -u admin:MyStrongPass123! http://localhost:9200
-```
-
-✅ **Success**: Both commands return JSON responses  
-❌ **Failed**: See [Troubleshooting](#troubleshooting-quick-fixes) below
+> ** Don't have `uv` installed yet?** Run the setup script in Python-only mode to install `uv` and create `.venv` automatically without starting Ollama or OpenSearch:
+> ```bash
+> chmod +x scripts/setup_docling_pipelines_environment.sh
+> ./scripts/setup_docling_pipelines_environment.sh --skip-ollama --skip-opensearch
+> ```
 
 ---
 
-## Your First Pipeline (2 minutes)
+## Your First Pipeline (1 minute)
 
-Now let's run a complete document processing pipeline!
+Now let's run a complete document processing pipeline (`Ingest → Extract → Chunk → Embed → Store in Milvus Lite`) with zero external services!
 
 ### Step 1: Verify Sample Documents
 
@@ -94,17 +82,13 @@ ls -la sample_documents/
 # Output includes: hello.txt, 1kb_file.txt samples
 ```
 
-**Note:** The sample flow processes these .txt files. You can add your own PDF, TXT, or DOCX files to this directory if desired.
+**Note:** The sample flow processes these `.txt` files. You can add your own PDF, TXT, or DOCX files to this directory if desired.
 
 ### Step 2: Activate Environment
 
 ```bash
 # Set PYTHONPATH (from project root)
 export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
-
-# Activate the shell configuration file.
-source ~/.zshrc # if ~/.zshrc exists.
-source ~/.bashrc # if ~/.bashrc exists.
 
 # Activate virtual environment (from project root)
 source .venv/bin/activate
@@ -113,9 +97,11 @@ source .venv/bin/activate
 ### Step 3: Run the Pipeline
 
 ```bash
-# Run the complete pipeline (from project root)
-docling-pipelines --flow-file sample_flows/quickstart/complete_pipeline_ollama.json
+# Run the container-free local pipeline (from project root)
+docling-pipelines --flow-file sample_flows/quickstart/milvus_lite_integration.json
 ```
+
+> **Note:** On the first run, `sentence-transformers/all-MiniLM-L6-v2` (~80MB) is downloaded and cached locally by HuggingFace. Notice that `milvus_lite_integration.json` sets `"enable_micro_batching": false` in `global_config` because Milvus Lite uses a single-process file lock on the `.db` file.
 
 ### Expected Output
 
@@ -123,42 +109,20 @@ Docling Pipelines provides clean, formatted console output showing pipeline prog
 
 ```
 ================================================================================
- FLOW: complete-document-pipeline
- Operators: 5
- Started: 2024-01-15 10:30:00
-================================================================================
-
-[ingest] Starting ingest_source...
-
-================================================================================
- ingest (COMPLETED)
-================================================================================
- Duration: 0.50s | Documents: 1 processed, 0 failed, 0 skipped
-
- Data Columns: 8 total (8 added by this operator)
-   Added (8): id, name, path, size, created_time, modified_time, content, extension
-================================================================================
-
-[extract] Starting extract_operator...
-[chunk] Starting chunker...
-[embeddings] Starting embeddings...
-[vectordb] Starting vectordb...
-
-================================================================================
  FLOW EXECUTION SUMMARY
 ================================================================================
- Status: COMPLETED
- Total Duration: 15.30s
- Documents: 1 completed, 0 failed, 0 skipped (of 1 total)
+ Status: Completed
+ Total Duration: 11.00s
+ Documents: 2 completed, 0 failed, 0 skipped (of 2 total)
 
  Operator Summary:
  Operator                       Status               Duration     Docs
  ------------------------------------------------------------------------------
- ingest_source_filesystem       Completed            < 1s         2/2
- extract_with_docling           Completed            < 1s         2/2
- simple_chunker                 Completed            1.00s        2/2
- ollama_embeddings              Completed            1.00s        2/2
- opensearch_vector_store        Completed            1.00s        2/2
+ ingest_documents               Completed            < 1s         2/2
+ extract_content                Completed            < 1s         2/2
+ chunk_documents                Completed            2.00s        2/2
+ generate_embeddings            Completed            < 1s         2/2
+ store_in_milvus_lite           Completed            1.00s        2/2
 ================================================================================
 ```
 
@@ -170,31 +134,40 @@ Docling Pipelines provides clean, formatted console output showing pipeline prog
 
 ### Step 4: Verify Success
 
-Check that your document was processed and stored in OpenSearch:
+Check that your documents were processed and persisted to the local Milvus Lite `.db` file:
 
 ```bash
-# Query the index
-curl -u admin:MyStrongPass123! \
-  "http://localhost:9200/sample-documents-index/_search?pretty" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": {"match_all": {}}, "size": 1}'
+python -c '
+from pymilvus import MilvusClient
+
+client = MilvusClient("./data/milvus/local_documents.db")
+print("Collections:", client.list_collections())
+print("Stats:", client.get_collection_stats("local_documents"))
+client.close()
+'
+```
+
+Expected response:
+
+```
+Collections: ['local_documents']
+Stats: {'row_count': 2}
 ```
 
 **✅ You succeeded if:**
 - Pipeline completes without errors
-- OpenSearch query returns your document chunks
-- You see embeddings in the response
+- `local_documents` collection exists in `./data/milvus/local_documents.db` with `row_count: 2`
 
 **🎉 Congratulations!** You've successfully:
 1. ✅ Installed Docling Pipelines and all dependencies
-2. ✅ Processed a document through the complete pipeline
-3. ✅ Stored vector embeddings in OpenSearch
+2. ✅ Processed documents through the complete pipeline
+3. ✅ Generated local embeddings with Sentence-Transformers and stored them in Milvus Lite
 
 ---
 
 ## Understanding What Just Happened
 
-Your document went through this pipeline:
+Your documents went through this pipeline:
 
 ```
 📄 Text File → 📥 Ingest → 📝 Extract → ✂️ Chunk → 🧮 Embed → 💾 Store
@@ -202,11 +175,49 @@ Your document went through this pipeline:
 
 **Each operator did:**
 
-1. **IngestSourceOperator** (filesystem provider): Read `hello.txt` from disk
-2. **ExtractOperator**: Extracted structured content using docling_library mode
-3. **Chunker**: Split into simple chunks (~512 chars each)
-4. **EmbeddingsOperator**: Generated vector embeddings using Ollama
-5. **VectorDBOperator**: Stored in OpenSearch for similarity search
+1. **IngestSourceOperator** (filesystem provider): Read sample files (`hello.txt`, `1kb_file.txt`) from disk
+2. **ExtractOperator**: Extracted structured content using `docling_library` mode
+3. **Chunker**: Split content into chunks using `hybrid` chunking (~512 chars each)
+4. **EmbeddingsOperator**: Generated 384-d vector embeddings locally in-process using `sentence-transformers/all-MiniLM-L6-v2`
+5. **VectorDBOperator**: Stored vectors and metadata in a local Milvus Lite file (`./data/milvus/local_documents.db`)
+
+---
+
+## Option B: Full Service Stack (Ollama + OpenSearch)
+
+If you want to run pipelines backed by **Ollama** (for local LLM inference/embeddings) and **OpenSearch** (with the OpenSearch Dashboards UI), run the full automated setup:
+
+```bash
+# Make setup script executable
+chmod +x scripts/setup_docling_pipelines_environment.sh
+
+# Run automated setup (installs uv, Ollama + nomic-embed-text, OpenSearch + Dashboards, and .venv)
+./scripts/setup_docling_pipelines_environment.sh --models nomic-embed-text
+
+# Copy environment template
+cp .env.example .env
+```
+
+**Setup takes 5–10 minutes** depending on your internet connection.
+
+### Verify Services & Run the Ollama + OpenSearch Pipeline
+
+```bash
+# 1. Check Ollama (should return list of models)
+curl http://localhost:11434/api/tags
+
+# 2. Check OpenSearch (should return cluster info)
+curl -u admin:MyStrongPass123! http://localhost:9200
+
+# 3. Run the Ollama + OpenSearch pipeline
+docling-pipelines --flow-file sample_flows/quickstart/complete_pipeline_ollama.json
+
+# 4. Query the OpenSearch index to verify
+curl -u admin:MyStrongPass123! \
+  "http://localhost:9200/sample-documents-index/_search?pretty" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": {"match_all": {}}, "size": 1}'
+```
 
 ---
 
@@ -257,7 +268,7 @@ docling-pipelines --list-operators --verbose
 
 ### Create Your Own Pipeline
 
-1. **Copy the sample flow**: `cp sample_flows/quickstart/complete_pipeline_ollama.json my_flow.json`
+1. **Copy the sample flow**: `cp sample_flows/quickstart/milvus_lite_integration.json my_flow.json` (or `complete_pipeline_ollama.json` for Ollama/OpenSearch)
 2. **Edit the configuration**: Change `paths`, `chunk_size`, models, etc.
 3. **Run your custom flow**: `docling-pipelines --flow-file my_flow.json`
 
@@ -276,7 +287,7 @@ docling-pipelines --list-operators --verbose
 
 ## Run the Web UI
 
-The frontend source is in `frontend/` and requires Node.js. The FastAPI backend must already be running (see [Automated Setup](#automated-setup-2-minutes) above).
+The frontend source is in `frontend/` and requires Node.js. The Python virtual environment must already be set up (see [Setup](#setup-12-minutes) above).
 
 ### Step 1 — Install Node.js 22.15.1
 
@@ -415,7 +426,7 @@ podman-compose -f docker/docker-compose.opensearch.yml restart
 mkdir -p sample_documents
 
 # Verify the flow file path is correct
-ls -la sample_flows/quickstart/complete_pipeline_ollama.json
+ls -la sample_flows/quickstart/milvus_lite_integration.json
 ```
 
 ### Still Having Issues?
@@ -424,7 +435,7 @@ ls -la sample_flows/quickstart/complete_pipeline_ollama.json
 2. **View detailed error messages**: Run with debug logging:
    ```bash
    export DS_LOG_LEVEL=DEBUG
-   docling-pipelines --flow-file sample_flows/quickstart/complete_pipeline_ollama.json
+   docling-pipelines --flow-file sample_flows/quickstart/milvus_lite_integration.json
    ```
 3. **Start fresh**: Clean up and re-run setup:
    ```bash

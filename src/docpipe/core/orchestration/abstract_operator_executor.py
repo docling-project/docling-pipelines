@@ -155,7 +155,7 @@ class AbstractOperatorExecutor:
     def validate(self, *, errors: list, warnings: list, available_features: list):
         """Validate."""
         op = self.get_operator()
-        op.validate(errors, warnings, available_features)
+        op.validate(errors=errors, warnings=warnings, available_features=available_features)
 
     def get_metadata(self):
         """
@@ -203,11 +203,11 @@ class AbstractOperatorExecutor:
                 name, or None for nodes without upstream input data.
         """
         node_id = self._params[OperatorConstants.Columns.ID]
-        logger.info(f"Initializing stats for node '{self._name}' (ID: {node_id}).")
+        logger.info("Initializing stats for node '%s' (ID: %s).", self._name, node_id)
 
         # Use injected job stats service
         if not self._job_stats_service:
-            logger.warning(f"Job stats service not available for node '{node_id}'")
+            logger.warning("Job stats service not available for node '%s'", node_id)
             return
 
         # Extract batch_id and batch_num from params if micro-batching is enabled
@@ -222,7 +222,7 @@ class AbstractOperatorExecutor:
             batch_id=batch_id,
             batch_num=batch_num,
         )
-        logger.info(f"Initial stats for node '{node_id}' stored successfully.")
+        logger.info("Initial stats for node '%s' stored successfully.", node_id)
 
     def update_final_node_stats(self, *, tables: list[pa.Table], metadata: dict):
         """Finalize node statistics for the current node execution.
@@ -239,11 +239,11 @@ class AbstractOperatorExecutor:
         """
         node_id = self._params[OperatorConstants.Columns.ID]
         job_run_id = self._params[DocpipeConstants.JOB_RUN_ID]
-        logger.info(f"Updating final stats for node '{node_id}'.")
+        logger.info("Updating final stats for node '%s'.", node_id)
 
         # Use injected job stats service
         if not self._job_stats_service:
-            logger.warning(f"Job stats service not available for node '{node_id}'")
+            logger.warning("Job stats service not available for node '%s'", node_id)
             return
 
         # Remove 'non_recoverable_docs_table' from metadata before saving
@@ -266,15 +266,16 @@ class AbstractOperatorExecutor:
         node_status = metadata_copy.get(Metrics.External.NODE_STATUS, ExecutionStatus.COMPLETED.value)
 
         logger.info(
-            f"Node '{node_id}' stats summary: "
-            f"{len(docs_completed)} completed, "
-            f"{len(failed_docs)} failed, "
-            f"{len(skipped_docs)} skipped."
+            "Node '%s' stats summary: %s completed, %s failed, %s skipped.",
+            node_id,
+            len(docs_completed),
+            len(failed_docs),
+            len(skipped_docs),
         )
 
         if failed_docs or skipped_docs:
             logger.warning(
-                f"Node '{node_id}' completed with issues: failed={len(failed_docs)}, skipped={len(skipped_docs)}"
+                "Node '%s' completed with issues: failed=%s, skipped=%s", node_id, len(failed_docs), len(skipped_docs)
             )
 
         self._job_stats_service.complete_node_execution(
@@ -290,7 +291,7 @@ class AbstractOperatorExecutor:
             batch_id=batch_id,
             batch_num=batch_num,
         )
-        logger.info(f"Final stats for node '{node_id}' stored successfully.")
+        logger.info("Final stats for node '%s' stored successfully.", node_id)
 
     @staticmethod
     def get_output_file_path(*, data_access):
@@ -433,7 +434,8 @@ class AbstractOperatorExecutor:
             )
 
             logger.info(
-                f"Saved {len(empty_doc_indices)} empty documents to incremental metadata",
+                "Saved %s empty documents to incremental metadata",
+                len(empty_doc_indices),
                 extra={
                     DocpipeConstants.JOB_ID: self._params.get(DocpipeConstants.JOB_ID),
                     DocpipeConstants.JOB_RUN_ID: self._params.get(DocpipeConstants.JOB_RUN_ID),
@@ -441,7 +443,8 @@ class AbstractOperatorExecutor:
             )
         except Exception as e:
             logger.warning(
-                f"Failed to save empty documents to incremental metadata: {e!s}",
+                "Failed to save empty documents to incremental metadata: %s",
+                e,
                 extra={
                     DocpipeConstants.JOB_ID: self._params.get(DocpipeConstants.JOB_ID),
                     DocpipeConstants.JOB_RUN_ID: self._params.get(DocpipeConstants.JOB_RUN_ID),
@@ -475,7 +478,9 @@ class AbstractOperatorExecutor:
             doc_name = name_col[idx].as_py() if name_col is not None else f"document_{idx}"
 
             logger.info(
-                f"Skipping document '{doc_name}' (ID: {doc_id}) due to empty content",
+                "Skipping document '%s' (ID: %s) due to empty content",
+                doc_name,
+                doc_id,
                 extra={
                     DocpipeConstants.JOB_ID: self._params.get(DocpipeConstants.JOB_ID),
                     DocpipeConstants.JOB_RUN_ID: self._params.get(DocpipeConstants.JOB_RUN_ID),

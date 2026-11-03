@@ -18,8 +18,6 @@ import threading
 from functools import wraps
 from pathlib import Path
 
-import nltk
-
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -140,6 +138,9 @@ def ensure_nltk_data(package_id: str = "punkt_tab") -> None:
         This function uses a thread lock to prevent concurrent downloads,
         which could cause race conditions or duplicate downloads.
     """
+    # Imported lazily so that importing this module (via the operator registry) does not load nltk.
+    import nltk
+
     venv_nltk_data = Path(sys.prefix) / "nltk_data"
 
     # Use thread lock to prevent concurrent downloads

@@ -44,12 +44,17 @@ sample_flows/
    docling-pipelines --flow-file sample_flows/quickstart/basic_ingest_extract.json
    ```
 
-2. **Try a complete pipeline:**
+2. **Try a complete local pipeline (zero external services):**
+   ```bash
+   docling-pipelines --flow-file sample_flows/quickstart/milvus_lite_integration.json
+   ```
+
+3. **Try a complete pipeline with Ollama and OpenSearch:**
    ```bash
    docling-pipelines --flow-file sample_flows/quickstart/complete_pipeline_ollama.json
    ```
 
-3. **Explore advanced patterns:**
+4. **Explore advanced patterns:**
    ```bash
    docling-pipelines --flow-file sample_flows/advanced/branching_dual_embeddings_with_ingest_report.json
    ```
@@ -65,6 +70,7 @@ Perfect for beginners - simple, well-documented examples to get started.
 | Flow | Description | Prerequisites |
 |------|-------------|---------------|
 | `basic_ingest_extract.json` | Minimal 2-operator pipeline: ingest → extract | Docling |
+| [milvus_lite_integration.json](quickstart/milvus_lite_integration.json) | Container-free local pipeline: ingest → extract → chunk → local HuggingFace embeddings → Milvus Lite (`.db` file) | Docling, Sentence-Transformers, Milvus Lite (all included by default) |
 | `complete_pipeline_ollama.json` | Full local pipeline: ingest → extract → chunk → embed → OpenSearch | Ollama, OpenSearch |
 | `complete_pipeline_watsonx.json` | Full cloud pipeline with Watsonx provider | Watsonx API, OpenSearch |
 | [docker_e2e_ollama_opensearch.json](quickstart/docker_e2e_ollama_opensearch.json) | PDFs to Docling extraction, Ollama embeddings, OpenSearch | Docker stack, `/documents` PDF mount, Ollama embedding model, OpenSearch credentials |
@@ -130,7 +136,6 @@ Complete pipelines demonstrating vector database integrations.
 |------|----------|-------------|
 | `opensearch_integration.json` | OpenSearch | Full pipeline with OpenSearch vector storage |
 | `milvus_integration.json` | Milvus | Full pipeline with Milvus vector storage |
-| [milvus_lite_integration.json](vectordb/milvus_lite_integration.json) | Milvus Lite | Docling, hybrid chunking, Hugging Face embeddings to local Milvus Lite; requires sample documents and embedding model, no database server |
 
 **Start here if:** You're setting up vector search or RAG systems.
 
@@ -445,7 +450,8 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | If you want to... | Start with... |
 |-------------------|---------------|
 | Learn the basics | `quickstart/basic_ingest_extract.json` |
-| Set up RAG pipeline | `quickstart/complete_pipeline_ollama.json` |
+| Run a zero-container local RAG pipeline | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
+| Set up RAG pipeline with Ollama & OpenSearch | `quickstart/complete_pipeline_ollama.json` |
 | Run the Docker Ollama/OpenSearch pipeline | [quickstart/docker_e2e_ollama_opensearch.json](quickstart/docker_e2e_ollama_opensearch.json) |
 | Use cloud LLMs | `quickstart/complete_pipeline_watsonx.json` |
 | Classify documents | `operators/classification_ollama.json` |
@@ -461,7 +467,7 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | Complex pipeline | `advanced/multi_stage_enrichment.json` |
 | Use OpenSearch | `vectordb/opensearch_integration.json` |
 | Use Milvus | `vectordb/milvus_integration.json` |
-| Use serverless Milvus Lite | [vectordb/milvus_lite_integration.json](vectordb/milvus_lite_integration.json) |
+| Use serverless Milvus Lite | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
 | Export original files to Box | [storage_output/comprehensive_export_box.json](storage_output/comprehensive_export_box.json) |
 | Export original files to Google Drive | [storage_output/comprehensive_export_google_drive.json](storage_output/comprehensive_export_google_drive.json) |
 | Export original files to SharePoint | [storage_output/comprehensive_export_sharepoint.json](storage_output/comprehensive_export_sharepoint.json) |

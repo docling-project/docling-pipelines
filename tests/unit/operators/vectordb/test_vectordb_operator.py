@@ -25,7 +25,6 @@ def basic_config():
     provider_cfg["index_name"] = "test_index"
     return {
         OperatorConstants.Config.PROVIDER: "opensearch",
-        OperatorConstants.VectorDB.CREATE_INDEX: True,
         OperatorConstants.Columns.DOC_ID_COLUMN: env_config.get(OperatorConstants.Columns.DOC_ID_COLUMN, "doc_id_hash"),
         OperatorConstants.Config.AVAILABLE_FEATURES: {
             "doc_id_hash": {
@@ -121,7 +120,6 @@ class TestVectorDBOperatorInitialization:
         """Milvus: missing collection_name raises at construction (adapter guard fires before validate())."""
         config = {
             OperatorConstants.Config.PROVIDER: "milvus",
-            OperatorConstants.VectorDB.CREATE_INDEX: True,
             OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
             OperatorConstants.Config.PROVIDER_CONFIG: {
                 "host": "localhost",
@@ -140,7 +138,6 @@ class TestVectorDBOperatorInitialization:
         """Milvus: validate() also surfaces collection_name via schema-driven check when adapter is mocked."""
         config = {
             OperatorConstants.Config.PROVIDER: "milvus",
-            OperatorConstants.VectorDB.CREATE_INDEX: True,
             OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
             OperatorConstants.Config.PROVIDER_CONFIG: {
                 "host": "localhost",
@@ -269,6 +266,65 @@ class TestBatchProcessing:
         mock_adapter.index_documents.assert_called_once()
         assert metadata["processed_docs"] == 3
         assert metadata["failed_docs_count"] == 0
+
+    def test_transform_creates_index_when_absent(self, basic_config, sample_table):
+        """Index is created automatically, without any create_index option, when it does not exist."""
+        mock_adapter = Mock()
+        mock_adapter.index_exists.return_value = False
+        mock_adapter.detect_all_vector_dimensions.return_value = {"embeddings": 384}
+        mock_adapter.index_documents.return_value = (3, [])
+
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+            return_value=mock_adapter,
+        ):
+            operator = VectorDBOperator(basic_config)
+            _result_tables, metadata = operator.transform(sample_table)
+
+        mock_adapter.create_index.assert_called_once_with(dimension_mapping={"embeddings": 384})
+        mock_adapter.validate_existing_schema.assert_not_called()
+        mock_adapter.index_documents.assert_called_once()
+        assert metadata["processed_docs"] == 3
+
+    @pytest.mark.parametrize("legacy_value", [True, False])
+    def test_legacy_create_index_logs_deprecation_and_is_ignored(self, basic_config, sample_table, legacy_value):
+        """A legacy create_index value logs a deprecation warning and never skips index handling."""
+        basic_config["create_index"] = legacy_value
+        mock_adapter = Mock()
+        mock_adapter.index_exists.return_value = False
+        mock_adapter.detect_all_vector_dimensions.return_value = {"embeddings": 384}
+        mock_adapter.index_documents.return_value = (3, [])
+
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            operator = VectorDBOperator(basic_config)
+            operator.transform(sample_table)
+
+        warning_messages = [call.args[0] for call in mock_logger.warning.call_args_list]
+        assert any("'create_index' configuration parameter is deprecated" in msg for msg in warning_messages)
+        mock_adapter.create_index.assert_called_once_with(dimension_mapping={"embeddings": 384})
+
+    def test_no_deprecation_warning_without_create_index(self, basic_config):
+        """No deprecation warning is logged when create_index is not supplied."""
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=Mock(),
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            VectorDBOperator(basic_config)
+
+        assert not any("create_index" in str(call.args[0]) for call in mock_logger.warning.call_args_list)
+
+    def test_metadata_excludes_create_index(self):
+        """get_metadata() no longer exposes the create_index parameter."""
+        assert "create_index" not in VectorDBOperator.get_metadata()["attributes"]
 
 
 class TestChunkedEmbeddings:
