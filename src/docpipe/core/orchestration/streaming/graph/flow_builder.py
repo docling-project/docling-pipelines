@@ -29,6 +29,7 @@ class FlowBuilder:
         flow_dag: list[dict] = enriched_flow[DocpipeConstants.DAG]
 
         flow_graph: FlowGraph = FlowGraph()
+        branch_ids = {operator["id"]: operator.get(OperatorConstants.Misc.LINK_ID) for operator in flow_dag}
         for operator in flow_dag:
             node: Node = Node(
                 id=UUID(operator["id"]),
@@ -38,12 +39,11 @@ class FlowBuilder:
             )
             flow_graph.add_node(node=node)
 
-        for operator in flow_dag:
             for output_edge in operator["output_edges"]:
                 edge = Edge(
-                    source_id=UUID(operator["id"]),
+                    source_id=node.id,
                     target_id=UUID(output_edge["node_id_ref"]),
-                    branch_id=output_edge.get(DocpipeConstants.LINK_NAME, None),
+                    branch_id=branch_ids[output_edge["node_id_ref"]],
                 )
                 flow_graph.add_edge(edge=edge)
 
@@ -63,6 +63,7 @@ class FlowBuilder:
                 **self.params,
                 DocpipeConstants.NODE_ID: operator["id"],
                 DocpipeConstants.NODE_NAME: operator["name"],
+                DocpipeConstants.FORCE_INGEST: True,
             }
 
         # Resolve Vault references in the effective configuration before feature propagation.

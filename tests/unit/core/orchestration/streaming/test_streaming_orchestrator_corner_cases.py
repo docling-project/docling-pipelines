@@ -3,7 +3,6 @@
 
 """StreamingOrchestrator corner cases: empty inputs and unknown operators."""
 
-import re
 from typing import Any
 from uuid import UUID
 
@@ -13,7 +12,10 @@ import pytest
 from docpipe.core.operators.functional.branching_operator import BranchingOperator
 from docpipe.core.operators.functional.chunker import ChunkerOperator
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
+from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExecutionEngine
+from docpipe.core.orchestration.streaming.graph.flow_model import Node
 from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
+from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 
 INGEST_ID = UUID("00000000-0000-0000-0000-000000000001")
 NEXT_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -62,7 +64,11 @@ def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_empty_ingest)
     chunker_transform = mocker.patch.object(ChunkerOperator, "transform", autospec=True)
 
-    outputs = StreamingOrchestrator().execute(flow=flow, params={})
+    execution = mocker.spy(GraphExecutionEngine, "execute")
+    result = StreamingOrchestrator().execute(flow=flow, params={})
+
+    assert result is None
+    outputs = execution.spy_return
 
     chunker_transform.assert_not_called()
     assert list(outputs) == [NEXT_ID]
@@ -73,7 +79,7 @@ def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
 
 def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
     """A branching node that receives an empty table is skipped and every branch gets the empty table."""
-    flow = {
+    flow: dict[str, Any] = {
         "name": "empty-branching-flow",
         "dag": [
             _node(
@@ -102,11 +108,16 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
             ),
         ],
     }
+    flow["dag"][-1]["link_id"] = "branch_1"
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_empty_ingest)
     branching_transform = mocker.patch.object(BranchingOperator, "transform", autospec=True)
     chunker_transform = mocker.patch.object(ChunkerOperator, "transform", autospec=True)
 
-    outputs = StreamingOrchestrator().execute(flow=flow, params={})
+    execution = mocker.spy(GraphExecutionEngine, "execute")
+    result = StreamingOrchestrator().execute(flow=flow, params={})
+
+    assert result is None
+    outputs = execution.spy_return
 
     branching_transform.assert_not_called()
     chunker_transform.assert_not_called()
@@ -122,5 +133,20 @@ def test_streaming_orchestrator_unknown_operator_fails():
         "dag": [_node(INGEST_ID, "mystery_step", "does_not_exist", {}, [], [])],
     }
 
-    with pytest.raises(ValueError, match=f"^{re.escape('Operator:does_not_exist not found.')}$"):
+    with pytest.raises(FlowExecutionFailedException, match="Operator:does_not_exist not found") as error:
         StreamingOrchestrator().execute(flow=flow, params={})
+
+    assert "node=mystery_step operator=does_not_exist" in str(error.value)
+    assert isinstance(error.value.__cause__, ValueError)
+
+
+def test_reported_failure_omits_document_reason():
+    """Failure metadata can stop execution without exposing document details."""
+    node = Node(id=INGEST_ID, name="source", operator_name="ingest_source", operator_config={})
+    with pytest.raises(FlowExecutionFailedException, match="reported a failed execution") as error:
+        GraphExecutionEngine._raise_if_node_failed(
+            node=node, metadata={"failed_docs_count": 1, "failed_docs": [{"reason": "Sensitive document details"}]}
+        )
+
+    assert "ingest_source" in str(error.value)
+    assert "Sensitive document details" not in str(error.value)
