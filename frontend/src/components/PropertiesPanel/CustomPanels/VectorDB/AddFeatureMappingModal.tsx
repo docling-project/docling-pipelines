@@ -8,6 +8,7 @@
  */
 
 import React, { useState } from 'react';
+import { useIntl } from 'react-intl';
 import {
   Dropdown,
   Modal,
@@ -15,6 +16,7 @@ import {
 } from '@carbon/react';
 import type { FeatureAttributes } from '@/types';
 import { DEFAULT_COLUMN_MAPPINGS } from './constants';
+import { messages } from './AddFeatureMappingModal.messages';
 import styles from './VectorDB.module.scss';
 
 interface AddFeatureMappingModalProps {
@@ -34,6 +36,7 @@ export function AddFeatureMappingModal({
   onClose,
   onAdd,
 }: AddFeatureMappingModalProps): React.JSX.Element {
+  const intl = useIntl();
   const [selectedFeature, setSelectedFeature] = useState<string>('');
   const [columnName, setColumnName] = useState<string>('');
   const [submitted, setSubmitted] = useState(false);
@@ -74,9 +77,9 @@ export function AddFeatureMappingModal({
   return (
     <Modal
       open={open}
-      modalHeading="Add feature mapping"
-      primaryButtonText="Add"
-      secondaryButtonText="Cancel"
+      modalHeading={intl.formatMessage(messages.modalHeading)}
+      primaryButtonText={intl.formatMessage(messages.primaryButton)}
+      secondaryButtonText={intl.formatMessage(messages.secondaryButton)}
       primaryButtonDisabled={!selectedFeature || !columnName.trim()}
       onRequestSubmit={handleAdd}
       onRequestClose={handleClose}
@@ -84,22 +87,22 @@ export function AddFeatureMappingModal({
     >
       <Dropdown
         id="add-mapping-feature-select"
-        titleText="Feature"
-        label="Select a feature"
+        titleText={intl.formatMessage(messages.featureTitle)}
+        label={intl.formatMessage(messages.selectFeatureLabel)}
         items={unmappedFeatures}
         selectedItem={selectedFeature || null}
         onChange={handleFeatureChange}
         invalid={isFeatureInvalid}
-        invalidText="Feature is required"
+        invalidText={intl.formatMessage(messages.featureRequired)}
       />
       <div className={styles.modalColumnInput}>
         <TextInput
           id="add-mapping-column-input"
-          labelText="Column name"
-          placeholder="e.g. my_column"
+          labelText={intl.formatMessage(messages.columnName)}
+          placeholder={intl.formatMessage(messages.columnNamePlaceholder)}
           value={columnName}
           invalid={isColumnInvalid}
-          invalidText="Column name is required"
+          invalidText={intl.formatMessage(messages.columnNameRequired)}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             setColumnName(e.target.value);
           }}
