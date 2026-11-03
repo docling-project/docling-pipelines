@@ -16,7 +16,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
    - `IngestSourceOperator` defaults `included_extensions` to the result of `get_supported_file_extensions()` when no `include_filter` is given.
 2. **Audio/Video extraction in `OperatorUtils.extract_content()` and `DoclingAdapter`**:
    - `OperatorUtils.extract_content()` constructs `audio_video_suffixes` solely from `FormatToExtensions[InputFormat.AUDIO]`, causing video files to fall through to `DocumentStream` instead of the file-path conversion path. The existing file path conversion writes to `Path.cwd() / doc_name`, which is shared across threads and trusts `doc_name`.
-   - `DoclingAdapter` (`_build_gpu_converter()` and `extract_single_document()`) binds `format_options[InputFormat.AUDIO] = AudioFormatOption(...)` when `use_asr_pipeline` is enabled, but does not configure `InputFormat.VIDEO`.
+   - `DoclingAdapter` (`_build_gpu_converter_config()` and `extract_single_document()`) binds `format_options[InputFormat.AUDIO] = AudioFormatOption(...)` when `use_asr_pipeline` is enabled, but does not configure `InputFormat.VIDEO`.
 
 ## Goals / Non-Goals
 
@@ -59,7 +59,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 - **Operator / Application Layer (`IngestSourceOperator`, `ExtractOperator`, `DocumentClassifierOperator`)**:
   - Validates document extensions against `OperatorConstants.FileExtensions` and `get_supported_file_extensions()`; orchestrates table filtering and `skipped_docs` metadata recording without directly invoking `docling` pipelines or external HTTP clients.
 - **Ports (`TextExtractionPort`, `DocumentSourcePort`)**:
-  - Unchanged contracts.
+  - Pass the effective format through the text extraction contract to the Docling adapter; update implementations and callers consistently. The document source contract is unchanged.
 - **Outbound Adapters (`DoclingAdapter`, `WebPageSourceAdapter`)**:
   - `DoclingAdapter` translates operator config into Docling `FormatOption` instances (`PdfFormatOption`, `ImageFormatOption`, `AudioFormatOption`, `VideoFormatOption`).
   - `WebPageSourceAdapter` maps HTTP `Content-Type` headers to canonical `OperatorConstants.FileExtensions`.
@@ -77,7 +77,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 - **Alternatives considered**: Converting `BASE_EXTENSIONS` to a `tuple[str, ...]`. Rejected to maintain backward compatibility with any external caller or test asserting `isinstance(BASE_EXTENSIONS, list)`.
 
 ### Decision 2: Widen the default `include_filter` instead of pinning it
-- **Choice**: Leave `IngestSourceOperator` defaulting `included_extensions` to `get_supported_file_extensions()`, so Tier 1 formats (and Tier 4 when ASR is available) are ingested by default.
+- **Choice**: Leave `IngestSourceOperator` defaulting `included_extensions` to `get_supported_file_extensions()`, so Tier 1 formats, audio when ASR is available, and video when video dependencies are available are ingested by default.
 - **Rationale**: Matches the existing behavior where audio/video are ingested by default when ASR is installed. Users who want the old behavior set `include_filter` explicitly.
 - **Trade-off**: Existing flows without `include_filter` ingest more file types after upgrade. This is documented in the ingest README and the proposal.
 
@@ -88,18 +88,22 @@ Currently, file format eligibility across ingestion, extraction, classification,
 ### Decision 4: Union `InputFormat.AUDIO` and `InputFormat.VIDEO` suffixes and write to a temporary directory in `OperatorUtils.extract_content()`
 - **Choice**:
   1. Build `audio_video_suffixes` from both `FormatToExtensions[InputFormat.AUDIO]` and `FormatToExtensions[InputFormat.VIDEO]` using `.lstrip(".")` normalization so entries normalize to `.mp4`, `.mkv`, etc.
-  2. Replace `Path.cwd() / doc_name` with a file named `Path(doc_name).name` inside `tempfile.TemporaryDirectory()`. The directory is removed on exit, giving each call its own namespace and dropping any path components in `doc_name`.
-- **Rationale**: The current working directory is shared by all worker threads, so identical names collide, and a crafted `doc_name` could write outside the intended directory. The spec requirement is "temporary file", which this satisfies. Docling's media backends select the demuxer from the suffix, so the filename suffix is preserved.
-- **Extensionless media is out of scope**: the temp-file path is selected from the suffix of `file_path` (or the suffix detected from magic bytes). Magic-byte detection is extended only for `.epub` and `.webp`, not for audio/video signatures. A media document whose name has no suffix and no `document_format` is therefore skipped by `ExtractOperator._validate_extensions`, and if it reaches `extract_content()` it is not written to a temp file, so no resolved extension is appended. Adding audio/video signatures to `detect_extension_from_bytes()` is a separate change.
+  2. Resolve the effective extension once: a nonempty `document_format` takes precedence over the filename suffix, normalized to lowercase with one leading dot. Use that same value for validation and extraction, including when they conflict. Pass it through the text extraction port; use it as the temporary filename suffix, replacing an existing conflicting suffix or appending it to an extensionless basename.
+  3. Replace `Path.cwd() / doc_name` with a sanitized basename and the effective suffix inside `tempfile.TemporaryDirectory()`. The directory is removed on exit, giving each call its own namespace and dropping any path components in `doc_name`.
+- **Rationale**: The current working directory is shared by all worker threads, so identical names collide, and a crafted `doc_name` could write outside the intended directory. The spec requirement is "temporary file", which this satisfies. Docling's media backends select the demuxer from the suffix, so the effective suffix is used.
+- **Media without an effective format is out of scope**: the temp-file path is selected from the effective extension supplied by validation, or from magic bytes if extraction is called directly. Magic-byte detection is extended only for `.epub` and `.webp`, not for audio/video signatures. A media document whose name has no suffix and no `document_format` is therefore skipped by `ExtractOperator._validate_extensions`, and if it reaches `extract_content()` it is not written to a temp file, so no resolved extension is appended. Adding audio/video signatures to `detect_extension_from_bytes()` is a separate change.
 
 ### Decision 5: Configure `VideoFormatOption` in `DoclingAdapter`
-- **Choice**: In `_build_gpu_converter()` and `extract_single_document()`, when `self.use_asr_pipeline and _asr_available()` is true, additionally import `VideoFormatOption`, `VideoPipeline`, and `VideoPipelineOptions` and set `format_options[InputFormat.VIDEO] = VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=VideoPipelineOptions(...))`, where:
+- **Choice**: In `_build_gpu_converter_config()` and `extract_single_document()`, when `self.use_asr_pipeline` and video dependencies are available, additionally import `VideoFormatOption`, `VideoPipeline`, and `VideoPipelineOptions` and set `format_options[InputFormat.VIDEO] = VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=VideoPipelineOptions(...))`, where:
   - `generate_frame_images=False`, because the extract operator emits text/markdown and sampled frame images would add image placeholders and memory cost.
-  - `asr_options` is set from the resolved ASR model spec only when `asr_model_name` is set. `_configure_asr_engine()` returns `None` when it is not set, in which case the Docling default is kept.
+  - Omitted `asr_model_name` selects `whisper_turbo`. Explicit empty string or null leaves the video ASR model at Docling defaults, while still configuring `VideoFormatOption`; audio retains its existing default behavior.
+  - VLM and ASR options are independent: with both flags enabled VLM handles PDF/images, while ASR handles audio/video, in both standard and GPU converter paths.
   - The imports are guarded with `try / except (ImportError, AttributeError)` so unit tests that mock only `AudioFormatOption` on `docling.document_converter` continue to pass.
+- **Dependencies and gating**: `docling[asr]` installs `format-audio`, not `format-video`. Add `docling-slim[format-video]==2.142.1` to `vlm_asr`, run `uv lock` and `uv pip install -e ".[dev]"`, and implement a separate video dependency availability check used by ingestion and extraction. Gate audio and video extensions independently; unavailable video support must not disable audio. Verify the probe against isolated audio-only and video-enabled environments. Do not infer ffmpeg availability from Python imports.
 - **Rationale**: Docling `2.142.1` separates `InputFormat.VIDEO` (`VideoPipeline`) from `InputFormat.AUDIO` (`AsrPipeline`). Without this, user-configured `asr_model_name` applies to audio but not to video. The code comment in `extract_single_document()` claiming Docling has no separate VIDEO format is wrong for this version and is replaced.
 
 ### Decision 6: Extend `detect_extension_from_bytes()` and `detect_extension_zip_based_office_formats()` for `.webp` and `.epub`
+- **Limitation**: Extensionless EML and MHTML cannot reliably be identified by the UTF-8 fallback and may be treated as plain text if they reach it. Supply a filename suffix or `document_format` for reliable routing.
 - **Choice**:
   - In `detect_extension_from_bytes()`: check `binary_content[:4] == b"RIFF" and binary_content[8:12] == b"WEBP"` -> return `".webp"`.
   - In `detect_extension_zip_based_office_formats()`: check `b"application/epub+zip" in content_sample` **before** the `word/`, `xl/`, and `ppt/` checks -> return `".epub"`.
@@ -117,7 +121,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 
 - **[Risk] Plain `.txt` vs `.text` handling in `OperatorUtils.extract_content()`** -> **Mitigation**: Keep `.txt` on the fast `OperatorUtils.extract_text_file()` path (which existing unit tests expect) while `.text`, `.markdown`, `.qmd`, and `.rmd` flow through Docling's Markdown backend (verified to convert, including `.Rmd`, since suffixes are lower-cased).
 - **[Risk] Existing unit tests mocking `docling.document_converter` with only `AudioFormatOption`** -> **Mitigation**: Guard the video imports as described in Decision 5.
-- **[Risk] `VideoPipeline` requires `ffmpeg` on system `PATH` at runtime** -> **Mitigation**: Extension validation gates video on `is_asr_available()`, and Docling's `VideoPipeline` emits a structured conversion error if `ffmpeg` is absent. `USER_GUIDE_PIPELINE_SETUP.md` and `docs/reference/OPERATORS.md` list MKV and WebM among ffmpeg-dependent formats.
+- **[Risk] `VideoPipeline` requires `ffmpeg` on system `PATH` at runtime** -> **Mitigation**: Extension validation gates video on the separate video dependency check, and Docling 2.142.1's `VideoPipeline` records a structured conversion error if `ffmpeg` is absent; test that docpipe surfaces it as a per-document failure. `USER_GUIDE_PIPELINE_SETUP.md` and `docs/reference/OPERATORS.md` list MKV and WebM among ffmpeg-dependent formats.
 - **[Risk] `.eml` / `.msg` on slim installs** -> **Mitigation**: Docling raises an actionable import error for `mail-parser` / `python-oxmsg` only when such a file is parsed; the failure is recorded per document.
 - **[Risk] More files ingested by default** -> **Mitigation**: Decision 2; documented behavior change.
 
@@ -125,7 +129,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 
 1. Add the new `EXT_*` constants and update `BASE_EXTENSIONS`, `AUDIO_VIDEO_EXTENSIONS`, `DOCLING_SERVE_EXTENSIONS` (explicit list), and `CLASSIFICATION_FILE_EXTENSIONS` in `OperatorConstants.FileExtensions`, plus `CSV` and `EML` in `OperatorConstants.MimeTypes`.
 2. Update `get_supported_file_extensions()`, `OperatorUtils.extract_content()`, `OperatorUtils.detect_extension_from_bytes()`, and `OperatorUtils.detect_extension_zip_based_office_formats()` in `src/docpipe/core/operators/operator_utils.py`.
-3. Update `DoclingAdapter` (`_build_gpu_converter()` and `extract_single_document()`) to configure `InputFormat.VIDEO` when ASR is enabled, and update the `WebPageSourceAdapter` MIME mapping.
+3. Update `DoclingAdapter` (`_build_gpu_converter_config()` and `extract_single_document()`) to configure `InputFormat.VIDEO` when ASR is enabled, and update the `WebPageSourceAdapter` MIME mapping.
 4. Update `SUPPORTED_FILE_EXTENSIONS` in `frontend/src/components/PropertiesPanel/CustomPanels/IngestSource/constants.ts`.
 5. Update docs.
 6. Run backend unit tests (`pytest`) and frontend verification (`npm run lint && npm run build`). Rollback is a clean revert of constant lists and helper methods with zero database migrations.
