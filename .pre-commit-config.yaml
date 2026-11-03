@@ -88,3 +88,21 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
+
+  # OpenSpec spec and change validation
+  - repo: local
+    hooks:
+      - id: openspec-validate
+        name: OpenSpec validate (strict)
+        entry: openspec validate --all --strict --no-interactive
+        language: node
+        additional_dependencies: ["@fission-ai/openspec@1.15.0"]
+        files: ^openspec/
+        pass_filenames: false
+      - id: openspec-validate-archived
+        name: OpenSpec validate archived changes
+        entry: openspec validate --archived --no-interactive
+        language: node
+        additional_dependencies: ["@fission-ai/openspec@1.15.0"]
+        files: ^openspec/changes/archive/
+        pass_filenames: false
