@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Text extraction port interface.
 
 This module defines the port interface for text extraction operations following
@@ -18,6 +21,7 @@ from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.job_management.domain.models.node_stats import NodeMetadataItem
 from docpipe.core.operators.abstract_operator import AbstractOperator
+from docpipe.core.operators.extract.encrypted_documents import DocumentDecryptor
 from docpipe.core.operators.functional.doc_id_hash import DocIdHashOperator
 from docpipe.core.operators.operator_utils import OperatorUtils, format_failed_docs_summary
 from docpipe.utils.data.transform import TransformUtils
@@ -91,6 +95,10 @@ class TextExtractionPort(ABC):
         self.node_id = config.get(DocpipeConstants.NODE_ID)
         self.node_name = config.get(DocpipeConstants.NODE_NAME)
         self.batch_id = config.get(DocpipeConstants.BATCH_ID)
+
+        # Decrypts password-protected documents after fetch; set by the owning operator.
+        # Kept out of ``global_config`` so passwords never reach content fetchers.
+        self.document_decryptor: DocumentDecryptor | None = None
 
         logger.info(
             "Initialized %s with job_run_id=%s, node_id=%s, batch_id=%s",
@@ -226,6 +234,8 @@ class TextExtractionPort(ABC):
         doc_tasks: list[dict[str, Any]] = OperatorUtils.prepare_document_content_fetch(
             table=table, global_config=self.global_config
         )
+        if self.document_decryptor is not None:
+            self.document_decryptor.decrypt_tasks(tasks=doc_tasks, table=table)
         doc_contents: list[str] = [""] * table.num_rows
         doc_metadata_list: list[dict[str, Any]] = [{}] * table.num_rows
 
@@ -327,7 +337,10 @@ class TextExtractionPort(ABC):
                     )
                     failed_count += 1
                     continue
-                future = self._submit_extraction_task(executor=executor, task=task)
+                # A document that could not be decrypted is reported through the normal result handling
+                future = DocumentDecryptor.failed_result_future(task=task)
+                if future is None:
+                    future = self._submit_extraction_task(executor=executor, task=task)
                 future_to_task[future] = task
 
             # Collect results as they complete
@@ -572,7 +585,9 @@ class TextExtractionPort(ABC):
         error_message = result.get(OperatorConstants.Extraction.ERROR, "Unknown error")
 
         # Check if error is non-recoverable (password-protected, corrupted, etc.)
-        if is_non_recoverable_error(error_message):
+        if is_non_recoverable_error(
+            error_message, failure_reason=result.get(OperatorConstants.Extraction.FAILURE_REASON)
+        ):
             non_recoverable_doc_ids.append(idx)
             # Enhance error message to indicate document won't be reprocessed
             error_message = f"{error_message}. This document will not be processed in future flow executions unless the document is modified."

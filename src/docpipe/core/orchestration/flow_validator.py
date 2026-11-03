@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow validation module for docpipe orchestrator.
 
 This module contains the FlowValidator class which handles all flow validation logic
@@ -260,7 +263,7 @@ class FlowValidator:
         if isinstance(value, str) and is_vault_reference(value):
             if key in ("credentials", "credentials_json", "provider_credentials"):
                 return {"__vault_mock__": True}
-            return "__vault_placeholder__"
+            return DocpipeConstants.VAULT_VALIDATION_PLACEHOLDER
         if isinstance(value, dict):
             return {k: FlowValidator._sanitize_vault_refs_for_validation(v, key=str(k)) for k, v in value.items()}
         if isinstance(value, list):

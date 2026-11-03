@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project-wide string constants, enums, and configuration keys for docpipe."""
 
 import os
@@ -115,6 +118,7 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    VAULT_VALIDATION_PLACEHOLDER = "__vault_placeholder__"  # Stands in for vault:// values during flow validation
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
     TMP = "tmp"

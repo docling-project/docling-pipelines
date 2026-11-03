@@ -54,6 +54,7 @@ dependencies = [
     "mako==1.4.3",
     "mlx==0.32.2; sys_platform == 'darwin'",
     "msal==1.37.0",
+    "msoffcrypto-tool==6.0.0",
     "nltk==3.10.4",
     "o365==2.1.9",
     "ollama==0.6.1",

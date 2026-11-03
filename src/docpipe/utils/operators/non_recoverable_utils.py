@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Non-Recoverable Document Utilities
 
@@ -15,7 +18,7 @@ from docpipe.utils.infrastructure.logging import get_logger
 logger = get_logger(__name__)
 
 
-def is_non_recoverable_error(error_message: str) -> bool:
+def is_non_recoverable_error(error_message: str, *, failure_reason: str | None = None) -> bool:
     """
     Check if error message indicates a non-recoverable error.
 
@@ -25,8 +28,13 @@ def is_non_recoverable_error(error_message: str) -> bool:
     - Corrupted or malformed documents
     - Docling/PDFium conversion failures
 
+    A failure with an explicit recoverable ``failure_reason`` (for example ``password_required``
+    from in-memory decryption) is never non-recoverable, because a configuration change such as
+    adding a password fixes it on the next run.
+
     Args:
         error_message: Error message from extraction process
+        failure_reason: Explicit failure reason code set by the producer of the error, if any
 
     Returns:
         True if error is non-recoverable, False otherwise
@@ -37,6 +45,9 @@ def is_non_recoverable_error(error_message: str) -> bool:
         >>> is_non_recoverable_error("Network timeout")
         False
     """
+    if failure_reason in OperatorConstants.Extraction.RECOVERABLE_FAILURE_REASONS:
+        return False
+
     if not error_message:
         return False
 
