@@ -108,7 +108,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
             self.set_default_node_stats(tables=tables)
             is_merge_operator = isinstance(tables, dict)
             if is_merge_operator:
-                logger.info(f"Invoking the transform method with multiple tables for the {op.short_name} operator...")
+                logger.info("Invoking the transform method with multiple tables for the %s operator...", op.short_name)
                 result = op.transform(table=pa.table({}), tables=tables)
             else:
                 result = op.transform(tables)
@@ -169,7 +169,9 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
 
         # Log error with transaction id
         logger.error(
-            f"Error during transformation in node id: {node_id} transaction_ID: {get_session_info().transaction_id!s}",
+            "Error during transformation in node id: %s transaction_ID: %s",
+            node_id,
+            get_session_info().transaction_id,
             stack_info=True,
             exc_info=True,
         )
