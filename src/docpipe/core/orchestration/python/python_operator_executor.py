@@ -245,7 +245,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
         Idempotent, and never raises.
         """
         op, self._operator_instance = self._operator_instance, None
-        if op is None or not hasattr(op, "cleanup"):
+        if op is None:
             return
         try:
             op.cleanup()

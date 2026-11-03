@@ -12,13 +12,17 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
 
+from docpipe.core.assets.flows.application.services.authoring_compiler import AuthoringCompiler
+from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
 from docpipe.core.operators.extract.extract_operator import ExtractOperator
 from docpipe.core.operators.functional.branching_operator import BranchingOperator
 from docpipe.core.operators.functional.chunker import ChunkerOperator
 from docpipe.core.operators.functional.embeddings.embeddings_operator import EmbeddingsOperator
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
 from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
+from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExecutionEngine
 from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
+from docpipe.utils.orchestration.elyra_converter import ElyraConverter
 
 CONTENT = "# Quarterly Report\n\nRevenue grew 12% year over year.\n\nOperating costs were flat."
 SOURCE = "/documents/report.pdf"
@@ -202,13 +206,18 @@ def test_streaming_orchestrator_linear(mocker, monkeypatch):
         EmbeddingsOperator: _embeddings_transform,
         VectorDBOperator: _vectordb_transform,
     }
+    transforms = {}
     for operator_class, fake_transform in fake_transforms.items():
-        mocker.patch.object(operator_class, "transform", autospec=True, side_effect=fake_transform)
+        transforms[operator_class] = mocker.patch.object(
+            operator_class, "transform", autospec=True, side_effect=fake_transform
+        )
 
-    outputs = StreamingOrchestrator().execute(flow=flow, params=params)
+    flow["dag"].reverse()  # Exercise dependency ordering as well as the completion-only return.
+    result = StreamingOrchestrator().execute(flow=flow, params=params)
 
-    assert list(outputs) == [node_ids[4]]
-    (table,) = outputs[node_ids[4]].tables
+    assert result is None
+    transforms[VectorDBOperator].assert_called_once()
+    table = transforms[VectorDBOperator].call_args.kwargs["table"]
     assert table.to_pylist() == [
         {
             "id": DOC_ID,
@@ -340,6 +349,7 @@ def test_streaming_orchestrator_branching_and_merging(mocker, monkeypatch):
             {
                 "id": str(chunk_1_id),
                 "name": "simple_chunker_1",
+                "link_id": "branch_1",
                 "operator": "chunker",
                 "config": {
                     "chunk_type": "simple",
@@ -353,6 +363,7 @@ def test_streaming_orchestrator_branching_and_merging(mocker, monkeypatch):
             {
                 "id": str(chunk_2_id),
                 "name": "simple_chunker_2",
+                "link_id": "branch_2",
                 "operator": "chunker",
                 "config": {
                     "chunk_type": "simple",
@@ -454,13 +465,17 @@ def test_streaming_orchestrator_branching_and_merging(mocker, monkeypatch):
         EmbeddingsOperator: _embeddings_transform,
         VectorDBOperator: _vectordb_transform,
     }
+    transforms = {}
     for operator_class, fake_transform in fake_transforms.items():
-        mocker.patch.object(operator_class, "transform", autospec=True, side_effect=fake_transform)
+        transforms[operator_class] = mocker.patch.object(
+            operator_class, "transform", autospec=True, side_effect=fake_transform
+        )
 
-    outputs = StreamingOrchestrator().execute(flow=flow, params=params)
+    result = StreamingOrchestrator().execute(flow=flow, params=params)
 
-    assert list(outputs) == [store_id]
-    (table,) = outputs[store_id].tables
+    assert result is None
+    transforms[VectorDBOperator].assert_called_once()
+    table = transforms[VectorDBOperator].call_args.kwargs["table"]
     assert table.to_pylist() == [
         {
             "id": DOC_ID,
@@ -563,3 +578,58 @@ def test_flow_builder_duplicate_node_ids_fail():
     builder = FlowBuilder(flow=flow, params={})
     with pytest.raises(ValueError, match=f"^Duplicate node id: '{node_id}'.$"):
         builder.build_graph()
+
+
+@pytest.mark.parametrize("flow_format", ["authoring", "elyra"])
+def test_compiled_branch_routes(*, mocker, flow_format):
+    """Both compilers route real branch outputs by identity rather than the display label."""
+    definition = {
+        "flow_name": "branch-routing",
+        "flow": [
+            {
+                "name": "source",
+                "type": "ingest_source",
+                "config": {"provider": "filesystem", "provider_config": {"paths": ["/documents"]}},
+            },
+            {
+                "name": "split",
+                "type": "branching",
+                "depends_on": ["source"],
+                "config": {
+                    "branches": {
+                        route: {
+                            "link_name": label,
+                            "criteria_json": {
+                                "criteria_list": [{"variable": "document_format", "operator": "=", "value": extension}],
+                                "logical_operator": "AND",
+                            },
+                        }
+                        for route, label, extension in [
+                            ("pdf_route", "PDF documents", ".pdf"),
+                            ("text_route", "Text documents", ".txt"),
+                        ]
+                    }
+                },
+            },
+            {"name": "pdf", "type": "noop", "config": {"sleep_sec": 0}, "depends_on": ["split.pdf_route"]},
+            {"name": "text", "type": "noop", "config": {"sleep_sec": 0}, "depends_on": ["split.text_route"]},
+        ],
+    }
+    flow = AuthoringCompiler().compile(authoring_flow=AuthoringFlow.from_dict(data=definition))
+    if flow_format == "elyra":
+        converter = ElyraConverter()
+        elyra = converter.transform_internal_to_elyra(internal_json={"flow": flow}, metadata={})
+        flow = converter.transform_elyra_to_internal(elyra_json=elyra, flow_id="saved-flow")["flow"]
+        branch = next(node for node in flow["dag"] if node["operator"] == "branching")
+        assert all("link_name" not in edge for edge in branch["output_edges"])
+    flow["dag"].reverse()
+    original_flow = json.dumps(flow, sort_keys=True)
+    mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_ingest_documents_transform)
+    execution = mocker.spy(GraphExecutionEngine, "execute")
+
+    assert StreamingOrchestrator.execute(flow=flow, params={}) is None
+
+    node_ids = {node["name"]: UUID(node["id"]) for node in flow["dag"]}
+    assert execution.spy_return[node_ids["pdf"]].tables[0]["id"].to_pylist() == [DOC_ID]
+    assert execution.spy_return[node_ids["text"]].tables[0]["id"].to_pylist() == [TEXT_DOC_ID]
+    assert json.dumps(flow, sort_keys=True) == original_flow

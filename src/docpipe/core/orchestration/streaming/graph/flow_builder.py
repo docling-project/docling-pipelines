@@ -34,6 +34,7 @@ class FlowBuilder:
         flow_dag: list[dict] = self.flow[DocpipeConstants.DAG]
 
         flow_graph: FlowGraph = FlowGraph()
+        branch_ids = {operator["id"]: operator.get(OperatorConstants.Misc.LINK_ID) for operator in flow_dag}
         for operator in flow_dag:
             config = {
                 **(self.flow.get(OperatorConstants.Config.GLOBAL_CONFIG) or {}),
@@ -55,7 +56,8 @@ class FlowBuilder:
                 edge = Edge(
                     source_id=UUID(operator[OperatorConstants.Misc.ID]),
                     target_id=UUID(output_edge[DocpipeConstants.NODE_ID_REF]),
-                    branch_id=output_edge.get(DocpipeConstants.LINK_NAME, None),
+                    branch_id=branch_ids.get(output_edge[DocpipeConstants.NODE_ID_REF])
+                    or output_edge.get(DocpipeConstants.LINK_NAME, None),
                 )
                 flow_graph.add_edge(edge=edge)
 
@@ -93,6 +95,7 @@ class FlowBuilder:
                 **self.params,
                 DocpipeConstants.NODE_ID: operator[OperatorConstants.Misc.ID],
                 DocpipeConstants.NODE_NAME: operator[OperatorConstants.Misc.NAME],
+                DocpipeConstants.FORCE_INGEST: True,
             }
 
         # Propagate features and populate the metadata required by downstream operators.

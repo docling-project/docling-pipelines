@@ -3,7 +3,6 @@
 
 """StreamingOrchestrator corner cases: empty inputs and unknown operators."""
 
-import re
 from copy import deepcopy
 from typing import Any
 from unittest.mock import call
@@ -22,6 +21,7 @@ from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExe
 from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph, Node
 from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOutput
 from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
+from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.integrations.secrets import secret_provider
 
 INGEST_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -164,7 +164,11 @@ def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_empty_ingest)
     chunker_transform = mocker.patch.object(ChunkerOperator, "transform", autospec=True)
 
-    outputs = StreamingOrchestrator().execute(flow=flow, params={})
+    execution = mocker.spy(GraphExecutionEngine, "execute")
+    result = StreamingOrchestrator().execute(flow=flow, params={})
+
+    assert result is None
+    outputs = execution.spy_return
 
     chunker_transform.assert_not_called()
     assert list(outputs) == [NEXT_ID]
@@ -176,7 +180,7 @@ def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
 def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
     """A branching node that receives an empty table is skipped and every branch gets the empty table."""
     second_sink_id = UUID("00000000-0000-0000-0000-000000000004")
-    flow = {
+    flow: dict[str, Any] = {
         "name": "empty-branching-flow",
         "dag": [
             _node(
@@ -216,12 +220,18 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
             ),
         ],
     }
+    flow["dag"][2]["link_id"] = "branch_1"
+    flow["dag"][3]["link_id"] = "branch_2"
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_empty_ingest)
     branching_transform = mocker.patch.object(BranchingOperator, "transform", autospec=True)
     chunker_transform = mocker.patch.object(ChunkerOperator, "transform", autospec=True)
     branching_execution = mocker.spy(GraphExecutionEngine, "_execute_branching_node")
 
-    outputs = StreamingOrchestrator().execute(flow=flow, params={})
+    execution = mocker.spy(GraphExecutionEngine, "execute")
+    result = StreamingOrchestrator().execute(flow=flow, params={})
+
+    assert result is None
+    outputs = execution.spy_return
 
     branching_transform.assert_not_called()
     chunker_transform.assert_not_called()
@@ -296,8 +306,11 @@ def test_streaming_orchestrator_unknown_operator_fails(mocker):
         return [pa.Table.from_pylist([doc])], {}
 
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
-    with pytest.raises(ValueError, match=f"^{re.escape('Operator:does_not_exist not found.')}$"):
+    with pytest.raises(FlowExecutionFailedException, match="Operator:does_not_exist not found") as error:
         StreamingOrchestrator().execute(flow=flow, params={})
+
+    assert "node=mystery_step operator=does_not_exist" in str(error.value)
+    assert isinstance(error.value.__cause__, ValueError)
 
 
 def test_streaming_orchestrator_cycle_detection_fails():
@@ -376,7 +389,7 @@ def test_execution_engine_clears_buffer_on_failure(mocker):
     ordered_ids = FlowBuilder.sort_graph(flow_graph=flow_graph)
     engine = GraphExecutionEngine(flow_graph=flow_graph, ordered_operator_ids=ordered_ids)
 
-    with pytest.raises(RuntimeError, match="Operator boom"):
+    with pytest.raises(FlowExecutionFailedException, match="Operator boom"):
         engine.execute()
 
     assert len(engine.output_buffer.data_buffer) == 0
@@ -437,7 +450,7 @@ def test_execution_engine_valid_branch_result_index(result_index):
 def test_execution_engine_missing_branch_metadata_raises_value_error(mocker):
     """When a branching operator's metadata does not contain the target branch, ValueError is raised."""
     second_sink_id = UUID("00000000-0000-0000-0000-000000000004")
-    flow = {
+    flow: dict[str, Any] = {
         "name": "missing-branch-metadata-flow",
         "dag": [
             _node(
@@ -489,14 +502,14 @@ def test_execution_engine_missing_branch_metadata_raises_value_error(mocker):
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
     mocker.patch.object(BranchingOperator, "transform", autospec=True, side_effect=_branching_missing_branch)
 
-    with pytest.raises(ValueError, match=r"Branch 'branch_1' not found in branching node 'branch_by_format'\."):
+    with pytest.raises(FlowExecutionFailedException, match=r"Branch 'branch_1' not found in branching node 'branch_by_format'\."):
         StreamingOrchestrator().execute(flow=flow, params={})
 
 
 def test_execution_engine_missing_result_index_raises_value_error(mocker):
     """When branching metadata for a branch is missing result_index, ValueError is raised."""
     second_sink_id = UUID("00000000-0000-0000-0000-000000000004")
-    flow = {
+    flow: dict[str, Any] = {
         "name": "missing-result-index-flow",
         "dag": [
             _node(
@@ -549,6 +562,6 @@ def test_execution_engine_missing_result_index_raises_value_error(mocker):
     mocker.patch.object(BranchingOperator, "transform", autospec=True, side_effect=_branching_missing_index)
 
     with pytest.raises(
-        ValueError, match=r"Result index missing for branch 'branch_1' in branching node 'branch_by_format'\."
+        FlowExecutionFailedException, match=r"Result index missing for branch 'branch_1' in branching node 'branch_by_format'\."
     ):
         StreamingOrchestrator().execute(flow=flow, params={})
