@@ -7,6 +7,7 @@
  */
 
 import React, { useCallback } from 'react';
+import { useIntl } from 'react-intl';
 import {
   Accordion,
   AccordionItem,
@@ -25,24 +26,21 @@ import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
 import { TagInput } from '@/components/common/TagInput/TagInput';
 import {
   BOX_CONFIG_KEY,
-  CONTENT_FORMAT_LABELS,
   DESTINATION_CONFIG_KEY,
   FILESYSTEM_CONFIG_KEY,
   GOOGLE_DRIVE_CONFIG_KEY,
   OUTPUT_FORMAT_KEY,
   OUTPUT_STRUCTURE_KEY,
-  OUTPUT_STRUCTURE_TYPE_LABELS,
   S3_CONFIG_KEY,
   S3_PROVIDERS,
   SHAREPOINT_CONFIG_KEY,
   SHAREPOINT_PROVIDERS,
   STORAGE_OUTPUT_ATTRIBUTE as ATTR,
-  STORAGE_OUTPUT_LABELS as LABEL,
-  WRITE_MODE_LABELS,
   type ContentFormat,
   type OutputStructureType,
   type WriteMode,
 } from './constants';
+import { messages } from './StorageOutput.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
 
@@ -54,6 +52,24 @@ interface StorageOutputPanelBodyProps {
 export function StorageOutputPanelBody({
   controller,
 }: StorageOutputPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
+
+  const writeModeLabels: Record<WriteMode, string> = {
+    processed_content: intl.formatMessage(messages.modeProcessedContent),
+    refetch_original: intl.formatMessage(messages.modeRefetchOriginal),
+    comprehensive_export: intl.formatMessage(messages.modeComprehensiveExport),
+  };
+
+  const contentFormatLabels: Record<ContentFormat, string> = {
+    md: intl.formatMessage(messages.formatMd),
+    txt: intl.formatMessage(messages.formatTxt),
+    json: intl.formatMessage(messages.formatJson),
+  };
+
+  const structureTypeLabels: Record<OutputStructureType, string> = {
+    flat: intl.formatMessage(messages.structureFlat),
+    hierarchical: intl.formatMessage(messages.structureHierarchical),
+  };
 
   // ── Operator metadata ─────────────────────────────────────────────────────
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
@@ -244,17 +260,17 @@ export function StorageOutputPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.MODE]?.description ?? ''}
           >
-            {LABEL.MODE}
+            {intl.formatMessage(messages.mode)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="mode"
-          titleText={LABEL.MODE}
+          titleText={intl.formatMessage(messages.mode)}
           hideLabel
-          label="Select mode"
+          label={intl.formatMessage(messages.selectMode)}
           items={modeItems}
           selectedItem={mode ?? null}
-          itemToString={(item: WriteMode | null) => (item ? WRITE_MODE_LABELS[item] : '')}
+          itemToString={(item: WriteMode | null) => (item ? writeModeLabels[item] : '')}
           invalid={modeValidation.isInvalid}
           invalidText={modeValidation.errorMessage}
           onChange={({ selectedItem }: { selectedItem: WriteMode | null }) => {
@@ -267,7 +283,7 @@ export function StorageOutputPanelBody({
 
       {/* ══ DESTINATION CONFIGURATION ════════════════════════════════════ */}
       <Accordion align="start">
-        <AccordionItem title="Destination configuration" open>
+        <AccordionItem title={intl.formatMessage(messages.destinationConfigTitle)} open>
           <div className={common.accordionContent}>
             {nodeAttributes[ATTR.DESTINATION_CONFIG]?.description && (
               <p className={common.accordionDescription}>
@@ -283,14 +299,14 @@ export function StorageOutputPanelBody({
             nodeAttributes={destAttrs}
             definition={destAttrs[DESTINATION_CONFIG_KEY.PROVIDER]?.description ?? ''}
           >
-            {LABEL.PROVIDER}
+            {intl.formatMessage(messages.provider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="destination_provider"
-          titleText={LABEL.PROVIDER}
+          titleText={intl.formatMessage(messages.provider)}
           hideLabel
-          label="Select provider"
+          label={intl.formatMessage(messages.selectProvider)}
           items={providerItems}
           selectedItem={provider || null}
           invalid={destConfigValidation.isInvalid && !provider}
@@ -321,12 +337,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['filesystem']?.properties ?? {}}
                 definition={providerSchemas['filesystem']?.properties?.[FILESYSTEM_CONFIG_KEY.ROOT_PATH]?.description ?? ''}
               >
-                {LABEL.ROOT_PATH}
+                {intl.formatMessage(messages.rootPath)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="fs_root_path"
-              labelText={LABEL.ROOT_PATH}
+              labelText={intl.formatMessage(messages.rootPath)}
               hideLabel
               value={fsRootPath}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -341,15 +357,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['filesystem']?.properties ?? {}}
                 definition={providerSchemas['filesystem']?.properties?.[FILESYSTEM_CONFIG_KEY.CREATE_DIRS]?.description ?? ''}
               >
-                {LABEL.CREATE_DIRS}
+                {intl.formatMessage(messages.createDirs)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="fs_create_dirs"
-              labelText={LABEL.CREATE_DIRS}
+              labelText={intl.formatMessage(messages.createDirs)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={createDirs}
               onToggle={(checked: boolean) => { updateProviderConfig(FILESYSTEM_CONFIG_KEY.CREATE_DIRS, checked); }}
             />
@@ -367,12 +383,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.ACCESS_KEY]?.description ?? ''}
               >
-                {LABEL.ACCESS_KEY}
+                {intl.formatMessage(messages.accessKey)}
               </RequiredParamTooltip>
             </div>
             <VaultInput
               id="s3_access_key"
-              labelText={LABEL.ACCESS_KEY}
+              labelText={intl.formatMessage(messages.accessKey)}
               value={s3AccessKey}
               onChange={(val: string) => {
                 updateProviderConfig(S3_CONFIG_KEY.ACCESS_KEY, val);
@@ -386,12 +402,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.SECRET_KEY]?.description ?? ''}
               >
-                {LABEL.SECRET_KEY}
+                {intl.formatMessage(messages.secretKey)}
               </RequiredParamTooltip>
             </div>
             <VaultInput
               id="s3_secret_key"
-              labelText={LABEL.SECRET_KEY}
+              labelText={intl.formatMessage(messages.secretKey)}
               value={s3SecretKey}
               onChange={(val: string) => {
                 updateProviderConfig(S3_CONFIG_KEY.SECRET_KEY, val);
@@ -405,12 +421,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.BUCKET]?.description ?? ''}
               >
-                {LABEL.BUCKET}
+                {intl.formatMessage(messages.bucket)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="s3_bucket"
-              labelText={LABEL.BUCKET}
+              labelText={intl.formatMessage(messages.bucket)}
               hideLabel
               value={s3Bucket}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -425,12 +441,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.KEY_PREFIX]?.description ?? ''}
               >
-                {LABEL.KEY_PREFIX}
+                {intl.formatMessage(messages.keyPrefix)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="s3_key_prefix"
-              labelText={LABEL.KEY_PREFIX}
+              labelText={intl.formatMessage(messages.keyPrefix)}
               hideLabel
               value={s3KeyPrefix}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -445,12 +461,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.ENDPOINT_URL]?.description ?? ''}
               >
-                {LABEL.ENDPOINT_URL}
+                {intl.formatMessage(messages.endpointUrl)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="s3_endpoint_url"
-              labelText={LABEL.ENDPOINT_URL}
+              labelText={intl.formatMessage(messages.endpointUrl)}
               hideLabel
               value={s3EndpointUrl}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -465,12 +481,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.REGION]?.description ?? ''}
               >
-                {LABEL.REGION}
+                {intl.formatMessage(messages.region)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="s3_region"
-              labelText={LABEL.REGION}
+              labelText={intl.formatMessage(messages.region)}
               hideLabel
               value={s3Region}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -485,15 +501,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.VERIFY_EXPECTED_BUCKET_OWNER]?.description ?? ''}
               >
-                {LABEL.VERIFY_EXPECTED_BUCKET_OWNER}
+                {intl.formatMessage(messages.verifyExpectedBucketOwner)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="s3_verify_bucket_owner"
-              labelText={LABEL.VERIFY_EXPECTED_BUCKET_OWNER}
+              labelText={intl.formatMessage(messages.verifyExpectedBucketOwner)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={s3VerifyBucketOwner}
               onToggle={(checked: boolean) => { updateProviderConfig(S3_CONFIG_KEY.VERIFY_EXPECTED_BUCKET_OWNER, checked); }}
             />
@@ -505,15 +521,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.CREATE_DIRS]?.description ?? ''}
               >
-                {LABEL.CREATE_DIRS}
+                {intl.formatMessage(messages.createDirs)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="s3_create_dirs"
-              labelText={LABEL.CREATE_DIRS}
+              labelText={intl.formatMessage(messages.createDirs)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={createDirs}
               onToggle={(checked: boolean) => { updateProviderConfig(S3_CONFIG_KEY.CREATE_DIRS, checked); }}
             />
@@ -526,12 +542,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[S3_CONFIG_KEY.CONTENT_TYPE_MAP]?.description ?? ''}
               >
-                {LABEL.CONTENT_TYPE_MAP}
+                {intl.formatMessage(messages.contentTypeMap)}
               </RequiredParamTooltip>
             </div>
             <JsonTextArea
               id="s3_content_type_map"
-              labelText={LABEL.CONTENT_TYPE_MAP}
+              labelText={intl.formatMessage(messages.contentTypeMap)}
               storedValue={contentTypeMapStored}
               rows={3}
               onChange={(value) => {
@@ -552,12 +568,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['box']?.properties ?? {}}
                 definition={providerSchemas['box']?.properties?.[BOX_CONFIG_KEY.CREDENTIALS_PATH]?.description ?? ''}
               >
-                {LABEL.BOX_CREDENTIALS_PATH}
+                {intl.formatMessage(messages.boxCredentialsPath)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="box_credentials_path"
-              labelText={LABEL.BOX_CREDENTIALS_PATH}
+              labelText={intl.formatMessage(messages.boxCredentialsPath)}
               hideLabel
               value={boxCredentialsPath}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -572,12 +588,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['box']?.properties ?? {}}
                 definition={providerSchemas['box']?.properties?.[BOX_CONFIG_KEY.FOLDER_ID]?.description ?? ''}
               >
-                {LABEL.BOX_FOLDER_ID}
+                {intl.formatMessage(messages.boxFolderId)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="box_folder_id"
-              labelText={LABEL.BOX_FOLDER_ID}
+              labelText={intl.formatMessage(messages.boxFolderId)}
               hideLabel
               value={boxFolderId}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -592,15 +608,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['box']?.properties ?? {}}
                 definition={providerSchemas['box']?.properties?.[BOX_CONFIG_KEY.CREATE_DIRS]?.description ?? ''}
               >
-                {LABEL.CREATE_DIRS}
+                {intl.formatMessage(messages.createDirs)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="box_create_dirs"
-              labelText={LABEL.CREATE_DIRS}
+              labelText={intl.formatMessage(messages.createDirs)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={createDirs}
               onToggle={(checked: boolean) => { updateProviderConfig(BOX_CONFIG_KEY.CREATE_DIRS, checked); }}
             />
@@ -618,12 +634,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.CLIENT_ID]?.description ?? ''}
               >
-                {LABEL.CLIENT_ID}
+                {intl.formatMessage(messages.clientId)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="sp_client_id"
-              labelText={LABEL.CLIENT_ID}
+              labelText={intl.formatMessage(messages.clientId)}
               hideLabel
               value={spClientId}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -638,12 +654,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.CLIENT_SECRET]?.description ?? ''}
               >
-                {LABEL.CLIENT_SECRET}
+                {intl.formatMessage(messages.clientSecret)}
               </RequiredParamTooltip>
             </div>
             <VaultInput
               id="sp_client_secret"
-              labelText={LABEL.CLIENT_SECRET}
+              labelText={intl.formatMessage(messages.clientSecret)}
               value={spClientSecret}
               onChange={(val: string) => {
                 updateProviderConfig(SHAREPOINT_CONFIG_KEY.CLIENT_SECRET, val);
@@ -657,12 +673,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.TENANT_ID]?.description ?? ''}
               >
-                {LABEL.TENANT_ID}
+                {intl.formatMessage(messages.tenantId)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="sp_tenant_id"
-              labelText={LABEL.TENANT_ID}
+              labelText={intl.formatMessage(messages.tenantId)}
               hideLabel
               value={spTenantId}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -677,12 +693,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.DRIVE_ID]?.description ?? ''}
               >
-                {LABEL.SP_DRIVE_ID}
+                {intl.formatMessage(messages.spDriveId)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="sp_drive_id"
-              labelText={LABEL.SP_DRIVE_ID}
+              labelText={intl.formatMessage(messages.spDriveId)}
               hideLabel
               value={spDriveId}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -697,12 +713,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.FOLDER_PATH]?.description ?? ''}
               >
-                {LABEL.FOLDER_PATH}
+                {intl.formatMessage(messages.folderPath)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="sp_folder_path"
-              labelText={LABEL.FOLDER_PATH}
+              labelText={intl.formatMessage(messages.folderPath)}
               hideLabel
               value={spFolderPath}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -717,14 +733,14 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.GRAPH_API_VERSION]?.description ?? ''}
               >
-                {LABEL.GRAPH_API_VERSION}
+                {intl.formatMessage(messages.graphApiVersion)}
               </RequiredParamTooltip>
             </div>
             <Dropdown
               id="sp_graph_api_version"
-              titleText={LABEL.GRAPH_API_VERSION}
+              titleText={intl.formatMessage(messages.graphApiVersion)}
               hideLabel
-              label="Select version"
+              label={intl.formatMessage(messages.selectVersion)}
               items={['v1.0', 'beta']}
               selectedItem={spGraphApiVersion}
               onChange={({ selectedItem }: { selectedItem: string | null }) => {
@@ -739,15 +755,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas[provider]?.properties ?? {}}
                 definition={providerSchemas[provider]?.properties?.[SHAREPOINT_CONFIG_KEY.CREATE_DIRS]?.description ?? ''}
               >
-                {LABEL.CREATE_DIRS}
+                {intl.formatMessage(messages.createDirs)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="sp_create_dirs"
-              labelText={LABEL.CREATE_DIRS}
+              labelText={intl.formatMessage(messages.createDirs)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={createDirs}
               onToggle={(checked: boolean) => { updateProviderConfig(SHAREPOINT_CONFIG_KEY.CREATE_DIRS, checked); }}
             />
@@ -765,12 +781,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.FOLDER_ID]?.description ?? ''}
               >
-                {LABEL.GD_FOLDER_ID}
+                {intl.formatMessage(messages.gdFolderId)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="gd_folder_id"
-              labelText={LABEL.GD_FOLDER_ID}
+              labelText={intl.formatMessage(messages.gdFolderId)}
               hideLabel
               value={gdFolderId}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -785,12 +801,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.DRIVE_ID]?.description ?? ''}
               >
-                {LABEL.GD_DRIVE_ID}
+                {intl.formatMessage(messages.gdDriveId)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="gd_drive_id"
-              labelText={LABEL.GD_DRIVE_ID}
+              labelText={intl.formatMessage(messages.gdDriveId)}
               hideLabel
               value={gdDriveId}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -805,12 +821,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.SERVICE_ACCOUNT_JSON_PATH]?.description ?? ''}
               >
-                {LABEL.SERVICE_ACCOUNT_JSON_PATH}
+                {intl.formatMessage(messages.serviceAccountJsonPath)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="gd_service_account_path"
-              labelText={LABEL.SERVICE_ACCOUNT_JSON_PATH}
+              labelText={intl.formatMessage(messages.serviceAccountJsonPath)}
               hideLabel
               value={gdServiceAccountPath}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -825,12 +841,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.CREDENTIALS_PATH]?.description ?? ''}
               >
-                {LABEL.GD_CREDENTIALS_PATH}
+                {intl.formatMessage(messages.gdCredentialsPath)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="gd_credentials_path"
-              labelText={LABEL.GD_CREDENTIALS_PATH}
+              labelText={intl.formatMessage(messages.gdCredentialsPath)}
               hideLabel
               value={gdCredentialsPath}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -845,12 +861,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.TOKEN_PATH]?.description ?? ''}
               >
-                {LABEL.TOKEN_PATH}
+                {intl.formatMessage(messages.tokenPath)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="gd_token_path"
-              labelText={LABEL.TOKEN_PATH}
+              labelText={intl.formatMessage(messages.tokenPath)}
               hideLabel
               value={gdTokenPath}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -865,15 +881,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.SCOPES]?.description ?? ''}
               >
-                {LABEL.SCOPES}
+                {intl.formatMessage(messages.scopes)}
               </RequiredParamTooltip>
             </div>
             <TagInput
               id="gd_scopes"
               tags={gdScopes}
-              labelText={LABEL.SCOPES}
+              labelText={intl.formatMessage(messages.scopes)}
               hideLabel
-              helperText="Press Enter or comma to add a scope."
+              helperText={intl.formatMessage(messages.scopesHelperText)}
               onChange={(newScopes) => {
                 updateProviderConfig(GOOGLE_DRIVE_CONFIG_KEY.SCOPES, newScopes);
               }}
@@ -886,12 +902,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.CHUNK_SIZE_MB]?.description ?? ''}
               >
-                {LABEL.CHUNK_SIZE_MB}
+                {intl.formatMessage(messages.chunkSizeMb)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="gd_chunk_size_mb"
-              label={LABEL.CHUNK_SIZE_MB}
+              label={intl.formatMessage(messages.chunkSizeMb)}
               hideLabel
               min={1}
               value={gdChunkSizeMb}
@@ -907,15 +923,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={providerSchemas['google_drive']?.properties ?? {}}
                 definition={providerSchemas['google_drive']?.properties?.[GOOGLE_DRIVE_CONFIG_KEY.CREATE_DIRS]?.description ?? ''}
               >
-                {LABEL.CREATE_DIRS}
+                {intl.formatMessage(messages.createDirs)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="gd_create_dirs"
-              labelText={LABEL.CREATE_DIRS}
+              labelText={intl.formatMessage(messages.createDirs)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={createDirs}
               onToggle={(checked: boolean) => { updateProviderConfig(GOOGLE_DRIVE_CONFIG_KEY.CREATE_DIRS, checked); }}
             />
@@ -928,14 +944,14 @@ export function StorageOutputPanelBody({
         <div className={common.formField}>
           <VaultInput
             id="destination_credentials"
-            labelText={LABEL.CREDENTIALS}
+            labelText={intl.formatMessage(messages.credentials)}
             labelComponent={
               <RequiredParamTooltip
                 paramId={DESTINATION_CONFIG_KEY.CREDENTIALS}
                 nodeAttributes={destAttrs}
                 definition={destAttrs[DESTINATION_CONFIG_KEY.CREDENTIALS]?.description ?? ''}
               >
-                {LABEL.CREDENTIALS}
+                {intl.formatMessage(messages.credentials)}
               </RequiredParamTooltip>
             }
             multiline
@@ -946,7 +962,7 @@ export function StorageOutputPanelBody({
               credentialsStored.trim() !== '' &&
               !isValidJsonObject(credentialsStored)
             }
-            invalidText="Credentials must be a valid JSON object or a vault:// reference."
+            invalidText={intl.formatMessage(messages.credentialsInvalid)}
             onChange={(val: string) => {
               let parsedValue: unknown = val;
               if (isVaultReference(val)) {
@@ -973,7 +989,7 @@ export function StorageOutputPanelBody({
         </AccordionItem>
 
         {/* ══ OUTPUT FORMAT ════════════════════════════════════════════════ */}
-        <AccordionItem title="Output format">
+        <AccordionItem title={intl.formatMessage(messages.outputFormatTitle)}>
           <div className={common.accordionContent}>
             {nodeAttributes[ATTR.OUTPUT_FORMAT]?.description && (
               <p className={common.accordionDescription}>
@@ -988,17 +1004,17 @@ export function StorageOutputPanelBody({
                 nodeAttributes={outputFormatAttrs}
                 definition={outputFormatAttrs[OUTPUT_FORMAT_KEY.CONTENT_FORMAT]?.description ?? ''}
               >
-                {LABEL.CONTENT_FORMAT}
+                {intl.formatMessage(messages.contentFormat)}
               </RequiredParamTooltip>
             </div>
             <Dropdown
               id="content_format"
-              titleText={LABEL.CONTENT_FORMAT}
+              titleText={intl.formatMessage(messages.contentFormat)}
               hideLabel
-              label="Select format"
+              label={intl.formatMessage(messages.selectFormat)}
               items={contentFormatItems}
               selectedItem={contentFormat}
-              itemToString={(item: ContentFormat | null) => (item ? CONTENT_FORMAT_LABELS[item] : '')}
+              itemToString={(item: ContentFormat | null) => (item ? contentFormatLabels[item] : '')}
               onChange={({ selectedItem }: { selectedItem: ContentFormat | null }) => {
                 if (selectedItem) { updateOutputFormat(OUTPUT_FORMAT_KEY.CONTENT_FORMAT, selectedItem); }
               }}
@@ -1012,15 +1028,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={outputFormatAttrs}
                 definition={outputFormatAttrs[OUTPUT_FORMAT_KEY.INCLUDE_METADATA_SIDECAR]?.description ?? ''}
               >
-                {LABEL.INCLUDE_METADATA_SIDECAR}
+                {intl.formatMessage(messages.includeMetadataSidecar)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="include_metadata_sidecar"
-              labelText={LABEL.INCLUDE_METADATA_SIDECAR}
+              labelText={intl.formatMessage(messages.includeMetadataSidecar)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={includeMetadataSidecar}
               onToggle={(checked: boolean) => { updateOutputFormat(OUTPUT_FORMAT_KEY.INCLUDE_METADATA_SIDECAR, checked); }}
             />
@@ -1030,7 +1046,7 @@ export function StorageOutputPanelBody({
         </AccordionItem>
 
         {/* ══ OUTPUT STRUCTURE ══════════════════════════════════════════ */}
-        <AccordionItem title="Output structure">
+        <AccordionItem title={intl.formatMessage(messages.outputStructureTitle)}>
           <div className={common.accordionContent}>
             {nodeAttributes[ATTR.OUTPUT_STRUCTURE]?.description && (
               <p className={common.accordionDescription}>
@@ -1045,17 +1061,17 @@ export function StorageOutputPanelBody({
                 nodeAttributes={outputStructureAttrs}
                 definition={outputStructureAttrs[OUTPUT_STRUCTURE_KEY.TYPE]?.description ?? ''}
               >
-                {LABEL.STRUCTURE_TYPE}
+                {intl.formatMessage(messages.structureType)}
               </RequiredParamTooltip>
             </div>
             <Dropdown
               id="structure_type"
-              titleText={LABEL.STRUCTURE_TYPE}
+              titleText={intl.formatMessage(messages.structureType)}
               hideLabel
-              label="Select structure"
+              label={intl.formatMessage(messages.selectStructure)}
               items={structureTypeItems}
               selectedItem={structureType}
-              itemToString={(item: OutputStructureType | null) => (item ? OUTPUT_STRUCTURE_TYPE_LABELS[item] : '')}
+              itemToString={(item: OutputStructureType | null) => (item ? structureTypeLabels[item] : '')}
               onChange={({ selectedItem }: { selectedItem: OutputStructureType | null }) => {
                 if (selectedItem) { updateOutputStructure(OUTPUT_STRUCTURE_KEY.TYPE, selectedItem); }
               }}
@@ -1069,12 +1085,12 @@ export function StorageOutputPanelBody({
                 nodeAttributes={outputStructureAttrs}
                 definition={outputStructureAttrs[OUTPUT_STRUCTURE_KEY.PATH_TEMPLATE]?.description ?? ''}
               >
-                {LABEL.PATH_TEMPLATE}
+                {intl.formatMessage(messages.pathTemplate)}
               </RequiredParamTooltip>
             </div>
             <TextInput
               id="path_template"
-              labelText={LABEL.PATH_TEMPLATE}
+              labelText={intl.formatMessage(messages.pathTemplate)}
               hideLabel
               value={pathTemplate}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1090,15 +1106,15 @@ export function StorageOutputPanelBody({
                 nodeAttributes={outputStructureAttrs}
                 definition={outputStructureAttrs[OUTPUT_STRUCTURE_KEY.OVERWRITE_EXISTING]?.description ?? ''}
               >
-                {LABEL.OVERWRITE_EXISTING}
+                {intl.formatMessage(messages.overwriteExisting)}
               </RequiredParamTooltip>
             </div>
             <Toggle
               id="overwrite_existing"
-              labelText={LABEL.OVERWRITE_EXISTING}
+              labelText={intl.formatMessage(messages.overwriteExisting)}
               hideLabel
-              labelA="Off"
-              labelB="On"
+              labelA={intl.formatMessage(messages.off)}
+              labelB={intl.formatMessage(messages.on)}
               toggled={overwriteExisting}
               onToggle={(checked: boolean) => { updateOutputStructure(OUTPUT_STRUCTURE_KEY.OVERWRITE_EXISTING, checked); }}
             />

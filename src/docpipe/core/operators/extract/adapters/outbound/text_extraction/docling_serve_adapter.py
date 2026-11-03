@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Docling Serve remote extraction adapter.
 
 This adapter implements remote document extraction using the Docling Serve API.
@@ -341,6 +344,11 @@ class DoclingServeAdapter(TextExtractionPort):
 
         v2 response: {"documents": [{"artifacts": [{"artifact_type": "markdown", "uri": "..."}]}], ...}
         Content is not inline — each artifact must be fetched from its presigned URI.
+
+        The extraction fails when the response has no documents, or when the primary
+        artifact (Markdown, or DocLang with ``doc_format=doclang``) is missing, has no URI
+        or cannot be fetched. Secondary artifacts never make an extraction successful on
+        their own, and a secondary artifact that cannot be fetched is skipped.
         """
         documents = result.get("documents", [])
         logger.debug("v2 response - %d document(s) in result", len(documents))
@@ -361,7 +369,7 @@ class DoclingServeAdapter(TextExtractionPort):
 
         if not documents:
             logger.warning("v2 response contains no documents for %s", file_path)
-            return result_dict, [primary_format]
+            return self._v2_failure(error=f"docling-serve v2 response contains no documents for {file_path}"), []
 
         doc = documents[0]
         artifacts = doc.get("artifacts", [])
@@ -369,6 +377,8 @@ class DoclingServeAdapter(TextExtractionPort):
 
         # Determine which formats to fetch: primary format + any requested additional formats
         requested_formats = {primary_format} | set(self.additional_formats)
+        # Why the primary artifact could not be used, for the error message.
+        primary_error: str | None = None
 
         for artifact in artifacts:
             artifact_type = artifact.get("artifact_type", "")
@@ -379,6 +389,8 @@ class DoclingServeAdapter(TextExtractionPort):
             uri = artifact.get("uri", "")
             if not uri:
                 logger.warning("v2 artifact '%s' has no URI for %s", artifact_type, file_path)
+                if fmt == primary_format:
+                    primary_error = f"the '{artifact_type}' artifact has no URI"
                 continue
 
             logger.info("Fetching v2 artifact '%s' for %s", artifact_type, file_path)
@@ -388,6 +400,8 @@ class DoclingServeAdapter(TextExtractionPort):
                 content: str = resp.text
             except Exception as fetch_err:
                 logger.warning("Failed to fetch v2 artifact '%s' for %s: %s", artifact_type, file_path, fetch_err)
+                if fmt == primary_format:
+                    primary_error = f"the '{artifact_type}' artifact could not be fetched: {fetch_err}"
                 continue
 
             if fmt == primary_format:
@@ -405,18 +419,25 @@ class DoclingServeAdapter(TextExtractionPort):
                 logger.info("Generated %s format for %s", fmt, file_path)
 
         if primary_format not in formats_generated:
-            if result_dict.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT):
-                # Primary content was fetched successfully via a non-standard artifact_type path;
-                # prepend it to formats_generated so the caller sees the correct format list.
-                formats_generated.insert(0, primary_format)
-            else:
-                logger.warning(
-                    "Primary format '%s' was not found or failed to fetch in v2 response for %s",
-                    primary_format,
-                    file_path,
-                )
-                # Do NOT insert — primary content is genuinely missing. Leaving formats_generated
-                # without the primary format lets the caller treat this as a failed extraction
-                # rather than silently flowing None/empty content downstream.
+            reason = primary_error or f"it has no '{primary_format}' artifact"
+            logger.warning(
+                "Primary format '%s' is missing from the v2 response for %s: %s", primary_format, file_path, reason
+            )
+            # Fail the document instead of letting empty content flow downstream.
+            return (
+                self._v2_failure(
+                    error=f"docling-serve v2 response for {file_path} has no {primary_format} content: {reason}"
+                ),
+                formats_generated,
+            )
 
         return result_dict, formats_generated
+
+    @staticmethod
+    def _v2_failure(*, error: str) -> dict[str, Any]:
+        """Return the result of a v2 extraction that has no primary content."""
+        return {
+            OperatorConstants.Extraction.SUCCESS: False,
+            OperatorConstants.Extraction.ERROR: error,
+            OperatorConstants.Columns.DOC_COLUMN_DEFAULT: None,
+        }

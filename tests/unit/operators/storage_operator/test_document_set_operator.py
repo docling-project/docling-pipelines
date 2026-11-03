@@ -23,6 +23,15 @@ from docpipe.exceptions.docpipe_exceptions import (
     FlowExecutionFailedException,
     FlowValidationException,
 )
+from docpipe.utils.infrastructure import DocpipeConfigLoader
+
+
+@pytest.fixture(autouse=True)
+def reset_config_loader():
+    """Clear the DocpipeConfigLoader cache before and after each test."""
+    DocpipeConfigLoader.reset()
+    yield
+    DocpipeConfigLoader.reset()
 
 
 @pytest.fixture

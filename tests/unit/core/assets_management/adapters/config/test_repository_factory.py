@@ -11,7 +11,6 @@ import pytest
 import yaml
 
 from docpipe.core.assets.flows.adapters.config.repository_factory import (
-    ENV_CONFIG_PATH_KEY,
     RepositoryFactory,
     RepositoryType,
 )
@@ -19,6 +18,7 @@ from docpipe.core.assets.flows.adapters.repositories.local.local_flow_repository
     LocalFlowRepository,
 )
 from docpipe.core.assets.flows.domain.ports.flow_repository import FlowRepository
+from docpipe.core.constants import EnvironmentVariables
 from docpipe.exceptions.docpipe_exceptions import RepositoryConfigurationException
 
 
@@ -102,7 +102,7 @@ class TestRepositoryFactory:
 
         monkeypatch.delenv("LOCAL_FLOWS_DIR", raising=False)
         monkeypatch.delenv("FLOW_REPOSITORY_TYPE", raising=False)
-        monkeypatch.setenv(ENV_CONFIG_PATH_KEY, str(config_path))
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(config_path))
 
         repository = RepositoryFactory.create_flow_repository()
 
@@ -114,7 +114,7 @@ class TestRepositoryFactory:
         config_path = tmp_path / "docpipe.yaml"
         config_path.write_text("assets_management: [unterminated", encoding="utf-8")
 
-        monkeypatch.setenv(ENV_CONFIG_PATH_KEY, str(config_path))
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(config_path))
 
         # Should not raise despite the invalid YAML; falls back to an empty config.
         assert RepositoryFactory._load_yaml_config() == {}
@@ -138,7 +138,7 @@ class TestRepositoryFactory:
             encoding="utf-8",
         )
 
-        monkeypatch.setenv(ENV_CONFIG_PATH_KEY, str(config_path))
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(config_path))
         monkeypatch.setenv("LOCAL_FLOWS_DIR", str(env_dir))
         monkeypatch.delenv("FLOW_REPOSITORY_TYPE", raising=False)
 
