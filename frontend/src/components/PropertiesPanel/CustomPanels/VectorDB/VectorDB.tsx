@@ -22,6 +22,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip, VaultInput } from '@/components/common';
 import {
@@ -41,10 +42,10 @@ import { isValidJsonObject } from '@/utils/json';
 import {
   DEFAULT_ENGINE_VALUES,
   VECTORDB_ATTRIBUTES as ATTR,
-  VECTORDB_LABELS as LABEL,
   VECTORDB_PROVIDERS,
   getProviderConfig,
 } from './constants';
+import { messages } from './VectorDB.messages';
 import { clearProviderConfigResource, mergeProviderConfig } from './vectordb-save';
 import { VectorDBSummaryTable } from './VectorDBSummaryTable';
 import { VectorDBFeatureMappingTearsheet } from './VectorDBFeatureMappingTearsheet';
@@ -60,15 +61,17 @@ interface VectorDBEmptyStateProps {
 }
 
 function VectorDBEmptyState({ onAddClick }: VectorDBEmptyStateProps): React.JSX.Element {
+  const intl = useIntl();
+
   return (
     <div className={styles.emptyStateWrapper}>
       <NoDataEmptyState
-        title={LABEL.FEATURE_MAPPING_TITLE}
-        subtitle={LABEL.FEATURE_MAPPING_DESC}
+        title={intl.formatMessage(messages.featureMappingTitle)}
+        subtitle={intl.formatMessage(messages.featureMappingDesc)}
         size="sm"
         action={{
           kind: 'tertiary',
-          text: LABEL.ADD_FEATURE_MAPPINGS,
+          text: intl.formatMessage(messages.addFeatureMappings),
           onClick: onAddClick,
         }}
       />
@@ -80,6 +83,7 @@ function VectorDBEmptyState({ onAddClick }: VectorDBEmptyStateProps): React.JSX.
 export function VectorDBPanelBody({
   controller,
 }: VectorDBPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   const [isTearsheetOpen, setIsTearsheetOpen] = useState(false);
   // Tracks whether the Advanced JSON textarea has been touched — gates the invalid
   // indicator so the textarea does not show red before the user types anything.
@@ -345,7 +349,7 @@ export function VectorDBPanelBody({
   // The tearsheet itself owns the API call and loading state.
   const handleOpenTearsheet = (): void => {
     if (advancedConfigDraft !== null || (advancedConfig !== '' && !isAdvancedConfigValid)) {
-      setProviderConfigError('Advanced JSON configuration must be a valid JSON object before opening feature mappings.');
+      setProviderConfigError(intl.formatMessage(messages.advancedConfigInvalidError));
       return;
     }
     setProviderConfigError(null);
@@ -413,13 +417,13 @@ export function VectorDBPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.PROVIDER]?.description ?? 'Vector database backend provider'}
           >
-            {LABEL.PROVIDER}
+            {intl.formatMessage(messages.provider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="vectordb-provider-dropdown"
-          label="Select provider"
-          titleText={LABEL.PROVIDER}
+          label={intl.formatMessage(messages.selectProvider)}
+          titleText={intl.formatMessage(messages.provider)}
           hideLabel
           items={providerOptions}
           selectedItem={provider || null}
@@ -445,13 +449,13 @@ export function VectorDBPanelBody({
       <div className={common.formField}>
         <Accordion className={styles.providerAccordion}>
           {/* Connection Settings Accordion Item */}
-          <AccordionItem title="Connection" open>
+          <AccordionItem title={intl.formatMessage(messages.connectionTitle)} open>
             {provider === VECTORDB_PROVIDERS.OPENSEARCH && (
               <div className={common.accordionContent}>
                 <div className={common.formField}>
                   <TextInput
                     id="opensearch-host"
-                    labelText="Host"
+                    labelText={intl.formatMessage(messages.host)}
                     value={opensearchHost}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       updateProviderConfigField('host', e.target.value);
@@ -462,7 +466,7 @@ export function VectorDBPanelBody({
                 <div className={common.formField}>
                   <TextInput
                     id="opensearch-port"
-                    labelText="Port"
+                    labelText={intl.formatMessage(messages.port)}
                     value={opensearchPort}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       const num = parseInt(e.target.value, 10);
@@ -474,9 +478,9 @@ export function VectorDBPanelBody({
                 <div className={common.formField}>
                   <Toggle
                     id="opensearch-use-ssl"
-                    labelText="Use SSL/TLS"
-                    labelA="Off"
-                    labelB="On"
+                    labelText={intl.formatMessage(messages.useSsl)}
+                    labelA={intl.formatMessage(messages.off)}
+                    labelB={intl.formatMessage(messages.on)}
                     toggled={opensearchUseSsl}
                     onToggle={(checked: boolean) => {
                       updateProviderConfigField('use_ssl', checked);
@@ -487,9 +491,9 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <Toggle
                       id="opensearch-verify-certs"
-                      labelText="Verify SSL Certificates"
-                      labelA="Off"
-                      labelB="On"
+                      labelText={intl.formatMessage(messages.verifySslCerts)}
+                      labelA={intl.formatMessage(messages.off)}
+                      labelB={intl.formatMessage(messages.on)}
                       toggled={opensearchVerifyCerts}
                       onToggle={(checked: boolean) => {
                         updateProviderConfigField('verify_certs', checked);
@@ -507,7 +511,7 @@ export function VectorDBPanelBody({
                     <div className={common.formField}>
                       <TextInput
                         id="milvus-host"
-                        labelText="Host"
+                        labelText={intl.formatMessage(messages.host)}
                         value={milvusHost}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           updateProviderConfigField('host', e.target.value);
@@ -518,7 +522,7 @@ export function VectorDBPanelBody({
                     <div className={common.formField}>
                       <TextInput
                         id="milvus-port"
-                        labelText="Port"
+                        labelText={intl.formatMessage(messages.port)}
                         value={milvusPort}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           const num = parseInt(e.target.value, 10);
@@ -532,7 +536,7 @@ export function VectorDBPanelBody({
                 <div className={common.formField}>
                   <TextInput
                     id="milvus-database"
-                    labelText="Database Name"
+                    labelText={intl.formatMessage(messages.databaseName)}
                     value={milvusDatabase}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       updateProviderConfigField('database', e.target.value);
@@ -544,9 +548,9 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <Toggle
                       id="milvus-secure"
-                      labelText="Secure (TLS/SSL)"
-                      labelA="Off"
-                      labelB="On"
+                      labelText={intl.formatMessage(messages.secureTls)}
+                      labelA={intl.formatMessage(messages.off)}
+                      labelB={intl.formatMessage(messages.on)}
                       toggled={milvusSecure}
                       onToggle={(checked: boolean) => {
                         updateProviderConfigField('secure', checked);
@@ -559,21 +563,21 @@ export function VectorDBPanelBody({
           </AccordionItem>
 
           {/* Authentication Accordion Item */}
-          <AccordionItem title="Authentication" open>
+          <AccordionItem title={intl.formatMessage(messages.authenticationTitle)} open>
             {provider === VECTORDB_PROVIDERS.OPENSEARCH && (
               <div className={common.accordionContent}>
                 {/* Auth method selector — maps to the three mutually exclusive backend auth paths */}
                 <div className={common.formField}>
                   <Dropdown
                     id="opensearch-auth-method"
-                    titleText="Authentication method"
-                    label="Select method"
+                    titleText={intl.formatMessage(messages.authMethod)}
+                    label={intl.formatMessage(messages.selectMethod)}
                     items={['none', 'basic', 'jwt', 'aws']}
                     itemToString={(item: string | null) => {
-                      if (item === 'none') {return 'None';}
-                      if (item === 'basic') {return 'Basic (username / password)';}
-                      if (item === 'jwt') {return 'JWT token';}
-                      if (item === 'aws') {return 'AWS IAM';}
+                      if (item === 'none') { return intl.formatMessage(messages.authNone); }
+                      if (item === 'basic') { return intl.formatMessage(messages.authBasic); }
+                      if (item === 'jwt') { return intl.formatMessage(messages.authJwt); }
+                      if (item === 'aws') { return intl.formatMessage(messages.authAws); }
                       return item ?? '';
                     }}
                     selectedItem={derivedOpensearchAuthMethod !== 'none' ? derivedOpensearchAuthMethod : opensearchAuthMethod}
@@ -599,7 +603,7 @@ export function VectorDBPanelBody({
                     <div className={common.formField}>
                       <TextInput
                         id="opensearch-username"
-                        labelText="Username"
+                        labelText={intl.formatMessage(messages.username)}
                         value={opensearchUsername}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           updateProviderConfigField('username', e.target.value);
@@ -610,7 +614,7 @@ export function VectorDBPanelBody({
                     <div className={common.formField}>
                       <VaultInput
                         id="opensearch-password"
-                        labelText="Password"
+                        labelText={intl.formatMessage(messages.password)}
                         value={opensearchPassword}
                         onChange={(v: string) => {
                           updateProviderConfigField('password', v);
@@ -625,7 +629,7 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <VaultInput
                       id="opensearch-jwt-token"
-                      labelText="JWT Token"
+                      labelText={intl.formatMessage(messages.jwtToken)}
                       value={opensearchJwtToken}
                       onChange={(v: string) => {
                         updateProviderConfigField('jwt_token', v);
@@ -639,7 +643,7 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <TextInput
                       id="opensearch-aws-region"
-                      labelText="AWS Region"
+                      labelText={intl.formatMessage(messages.awsRegion)}
                       value={opensearchAwsRegion}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         updateProviderConfigField('aws_region', e.target.value);
@@ -658,8 +662,8 @@ export function VectorDBPanelBody({
                 <div className={common.formField}>
                   <Dropdown
                     id="milvus-auth-type"
-                    label="Select auth type"
-                    titleText="Auth Type"
+                    label={intl.formatMessage(messages.selectAuthType)}
+                    titleText={intl.formatMessage(messages.authType)}
                     items={['standalone', 'grpc', 'uri', 'token']}
                     selectedItem={milvusAuthType}
                     onChange={({ selectedItem }: { selectedItem?: string | null }) => {
@@ -682,7 +686,7 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <TextInput
                       id="milvus-username"
-                      labelText="Username"
+                      labelText={intl.formatMessage(messages.username)}
                       value={milvusUsername}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         updateMilvusAuthField('username', e.target.value);
@@ -694,15 +698,15 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <VaultInput
                       id="milvus-password"
-                      labelText="Password"
+                      labelText={intl.formatMessage(messages.password)}
                       labelComponent={
                         <div className={common.labelWithTooltip}>
                           <DefinitionTooltip
-                            definition="Password for password-based authentication."
+                            definition={intl.formatMessage(messages.passwordTooltip)}
                             openOnHover
                             align="right"
                           >
-                            Password
+                            {intl.formatMessage(messages.password)}
                           </DefinitionTooltip>
                         </div>
                       }
@@ -717,15 +721,15 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <VaultInput
                       id="milvus-token"
-                      labelText="Token"
+                      labelText={intl.formatMessage(messages.token)}
                       labelComponent={
                         <div className={common.labelWithTooltip}>
                           <DefinitionTooltip
-                            definition="API token for Milvus cloud or wx.data deployments."
+                            definition={intl.formatMessage(messages.tokenTooltip)}
                             openOnHover
                             align="right"
                           >
-                            Token
+                            {intl.formatMessage(messages.token)}
                           </DefinitionTooltip>
                         </div>
                       }
@@ -740,7 +744,7 @@ export function VectorDBPanelBody({
                   <div className={common.formField}>
                     <TextInput
                       id="milvus-uri"
-                      labelText="URI"
+                      labelText={intl.formatMessage(messages.uri)}
                       value={milvusUri}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         updateMilvusAuthField('uri', e.target.value);
@@ -754,19 +758,19 @@ export function VectorDBPanelBody({
           </AccordionItem>
 
           {/* Advanced JSON Accordion Item */}
-          <AccordionItem title="Advanced">
+          <AccordionItem title={intl.formatMessage(messages.advancedTitle)}>
             <div className={common.accordionContent}>
               <div className={common.formField}>
                 <TextArea
                   id="vectordb-provider-config-textarea"
-                  labelText="Additional configuration (JSON)"
+                  labelText={intl.formatMessage(messages.additionalConfig)}
                   placeholder="{}"
-                  helperText="Extra provider-specific options not covered above"
+                  helperText={intl.formatMessage(messages.additionalConfigHelperText)}
                   rows={5}
                   value={advancedConfigDraft ?? advancedConfig}
                   onChange={handleAdvancedConfigChange}
                   invalid={!isAdvancedConfigValid}
-                  invalidText="Must be a valid JSON object"
+                  invalidText={intl.formatMessage(messages.additionalConfigInvalid)}
                 />
               </div>
             </div>
@@ -778,7 +782,7 @@ export function VectorDBPanelBody({
       {providerConfigError && (
         <InlineNotification
           kind="error"
-          title="Error"
+          title={intl.formatMessage(messages.errorTitle)}
           subtitle={providerConfigError}
           lowContrast
           hideCloseButton

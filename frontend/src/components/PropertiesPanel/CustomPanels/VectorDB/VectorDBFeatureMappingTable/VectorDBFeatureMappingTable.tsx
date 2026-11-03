@@ -12,6 +12,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import {
   Button,
   DataTable,
@@ -32,7 +33,7 @@ import {
 } from '@carbon/react';
 import { TrashCan, WarningFilled } from '@carbon/icons-react';
 import type { FeatureMappingItem } from '@/types';
-import { VECTORDB_LABELS as LABEL } from '../constants';
+import { messages } from './VectorDBFeatureMappingTable.messages';
 import styles from './VectorDBFeatureMappingTable.module.scss';
 
 interface VectorDBFeatureMappingTableProps {
@@ -49,6 +50,7 @@ export function VectorDBFeatureMappingTable({
   onRemoveSelected,
   onAddClick,
 }: VectorDBFeatureMappingTableProps): React.JSX.Element {
+  const intl = useIntl();
   const [searchFilter, setSearchFilter] = useState<string>('');
 
   const filteredRows = useMemo(() => {
@@ -73,9 +75,9 @@ export function VectorDBFeatureMappingTable({
   })), [filteredRows]);
 
   const headers = [
-    { key: 'feature',     header: 'Feature' },
-    { key: 'featureDesc', header: 'Feature description' },
-    { key: 'column',      header: 'Column' },
+    { key: 'feature',     header: intl.formatMessage(messages.headerFeature) },
+    { key: 'featureDesc', header: intl.formatMessage(messages.headerFeatureDesc) },
+    { key: 'column',      header: intl.formatMessage(messages.headerColumn) },
     { key: 'required',    header: '' },
   ];
 
@@ -97,7 +99,7 @@ export function VectorDBFeatureMappingTable({
 
           return (
             <TableContainer {...getTableContainerProps()}>
-              <TableToolbar {...getToolbarProps()} aria-label="Feature mappings table toolbar">
+              <TableToolbar {...getToolbarProps()} aria-label={intl.formatMessage(messages.toolbarAria)}>
                 <TableBatchActions {...getBatchActionProps()}>
                   <TableBatchAction
                     renderIcon={TrashCan}
@@ -105,13 +107,13 @@ export function VectorDBFeatureMappingTable({
                       onRemoveSelected(selectedRows.map((r) => r.id));
                     }}
                   >
-                    Remove
+                    {intl.formatMessage(messages.remove)}
                   </TableBatchAction>
                 </TableBatchActions>
                 <TableToolbarContent>
                   <TableToolbarSearch
                     persistent
-                    placeholder="Filter table"
+                    placeholder={intl.formatMessage(messages.filterTablePlaceholder)}
                     value={searchFilter}
                     onChange={(_e: unknown, value?: string) => {
                       setSearchFilter(value ?? '');
@@ -123,7 +125,7 @@ export function VectorDBFeatureMappingTable({
                     className={styles.actionButton}
                     onClick={onAddClick}
                   >
-                    {LABEL.ADD_FEATURE_MAPPINGS}
+                    {intl.formatMessage(messages.addFeatureMappings)}
                   </Button>
                 </TableToolbarContent>
               </TableToolbar>
@@ -156,7 +158,7 @@ export function VectorDBFeatureMappingTable({
                         <TableSelectRow
                           {...getSelectionProps({ row })}
                           disabled={isMandatory}
-                          aria-label={`Select feature ${row.id}`}
+                          aria-label={intl.formatMessage(messages.selectFeatureAria, { id: row.id })}
                         />
 
                         {row.cells.map((cell) => {
@@ -183,7 +185,7 @@ export function VectorDBFeatureMappingTable({
                                 {isMandatory && (
                                   <span
                                     className={styles.mandatoryIcon}
-                                    title="Required feature — cannot be removed"
+                                    title={intl.formatMessage(messages.requiredFeatureTooltip)}
                                   >
                                     <WarningFilled size={16} />
                                   </span>
