@@ -21,7 +21,8 @@ terminal outcome.
   The complete deliverable list and limits are defined in [Scope](#scope).
 - **BREAKING** for event-streaming consumers: `dispatch()` signals completed processing instead of returning a job-run
   response; event processing produces no job-run history, report, snapshot, or cancellation handle. Kafka commits move
-  from HTTP acceptance to completion or retry exhaustion. Existing REST job-run request/response contracts are retained.
+  from HTTP acceptance to completion or terminal processing failure. Existing REST job-run request/response contracts
+  are retained.
 
 ## Scope
 
@@ -35,21 +36,22 @@ backlog entries cannot independently expand it.
   discovery, compiler/runtime integrity checks, and required feature propagation without full per-event validation.
 - **S02 - Event input and configuration:** Bind the existing create/update `InputEvent` to one document through the
   existing provider contract; force reprocessing while preserving filters, configuration precedence, and secret
-  resolution. Use isolated event/session configuration without inherited job/run IDs.
-- **S03 - Existing operator execution:** Run the DAG sequentially with Arrow tables in memory. Preserve schemas,
-  applicable rows/chunks, feature drops/renames, empty-document filtering, branch selection, merge link identities,
+  resolution. Use isolated event configuration without creating or attaching job/run IDs.
+- **S03 - Existing operator execution:** Run the DAG sequentially with Arrow tables and preserve configured
+  chunk/embedding spill behavior. Preserve schemas,
+  applicable rows/chunks, table feature drops/renames, operator-owned filtering, branch selection, merge link identities,
   and empty-route behavior. Propagate exceptions and reported document failures; stop the failed attempt's remaining
   work.
 - **S04 - Attempt lifecycle:** Use fresh operator instances per attempt, release resources through supported cleanup
-  hooks, restore session state, and retain configured sink writes. Create no jobs, intermediate spill files, or batch
+  hooks, and retain configured sink writes. Create no jobs or batch
   finalization artifacts. Use existing no-job-context behavior rather than redesigning operators.
 - **S05 - Direct integration:** Wire the existing listener, mapping service, flow service, and operator discovery to
   the new runtime. Remove the dispatch HTTP/API URL dependency and job-run response handling.
-- **S06 - Event handling policy:** Process one event at a time with configurable bounded immediate retries. Log terminal
-  outcomes, attempt manual commits after success/exhaustion or invalid-event rejection, and retain existing commit-error
-  reporting. Add only the planned retry-count setting, `DOCPIPE_EVENT_MAX_RETRIES`, with default `0`.
-- **S07 - Graceful shutdown:** Stop accepting new work and drain the active event, including its allowed retries,
-  cleanup, and terminal commit attempt, before closing the consumer. Leave unfinished work uncommitted.
+- **S06 - Event handling policy:** Process each valid event once. Log completion or failure, attempt a manual commit
+  after either outcome or invalid-event rejection, and retain existing commit-error reporting. Continue to the next event
+  after the commit attempt. Automatic processing retries and retry configuration are excluded.
+- **S07 - Graceful shutdown:** Stop accepting new work and allow the active event's execution, cleanup, reporting, and
+  commit attempt to proceed before the listener thread closes the consumer. Keep the existing five-second shutdown wait.
 - **S08 - Verification and documentation:** Test and document S01-S07, verify sink output and no event job records,
   update the existing streaming sample/guide, and run the planned batch regressions, lint, type, build, and spec checks.
   Deferred backlog experiments and safeguards are excluded from acceptance.
@@ -74,10 +76,10 @@ backlog entries cannot independently expand it.
 
 ### New Capabilities
 
-- `backend/streaming-orchestrator`: Saved-flow preparation and document-bound in-memory DAG execution with existing
+- `backend/streaming-orchestrator`: Saved-flow preparation and document-bound DAG execution with existing
   operators, isolated attempt state, resource cleanup, and completion/failure signalling without job tracking.
-- `backend/event-stream-processing`: Direct event routing, sequential listener execution, bounded retries, terminal
-  diagnostics, offset acknowledgement, environment configuration, and shutdown behavior.
+- `backend/event-stream-processing`: Direct event routing, sequential listener execution, terminal diagnostics, offset
+  acknowledgement, and shutdown behavior.
 
 ### Modified Capabilities
 
@@ -87,10 +89,18 @@ their existing contracts. Streaming uses the existing no-job-context deduplicati
 
 ## Non-goals
 
+- Custom operators and custom merge overrides in initial streaming support.
+- Generic ordinary multi-table output and automatic concatenation; ordinary operators produce one table.
+- Direct branching-to-merge wiring and orchestrator-owned document-content filtering.
+
 - Corner-case safeguards, future enhancements, and their associated validation scenarios, as tracked in the
   [deferred backlog](design.md#deferred-backlog).
 - Durable streaming run records, job reporting, cancellation APIs, micro-batching, and batch finalization.
 - New source-provider reference semantics, event operations, mapping CRUD routes, or sink persistence contracts.
+- Rename-aware updates to propagated feature metadata. Existing output table drops/renames and feature-drop
+  propagation are retained.
+- Automatic processing retries. Stage-aware retries require failure classification and reconciliation of persisted sink
+  state before they can be safely designed.
 
 ## Impact
 
@@ -98,8 +108,8 @@ their existing contracts. Streaming uses the existing no-job-context deduplicati
 constants, API listener lifecycle integration, tests, and event-streaming deployment documentation.
 
 The runtime reuses `FlowService`, existing mapping storage, `AuthoringCompiler`, `ElyraConverter`, operator discovery,
-feature propagation, and stateless operator utilities. Chunking/embedding configurations must disable disk spilling
-for this path. Any necessary reuse changes remain narrowly scoped and preserve batch behavior.
+feature propagation, and stateless operator utilities. Existing chunking/embedding spill configuration remains in effect.
+Any necessary reuse changes remain narrowly scoped and preserve batch behavior.
 
 `/api/v1/flows` and `/api/v1/event_mappings` remain the authoring and routing APIs. `/api/v1/job_runs` remains available
 for explicit batch runs; the listener stops calling it. Existing storage adapters remain behind their ports; configured

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pure-Python operator executor for in-process flow orchestration."""
 
 import copy
@@ -240,7 +243,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
         Idempotent, and never raises.
         """
         op, self._operator_instance = self._operator_instance, None
-        if op is None or not hasattr(op, "cleanup"):
+        if op is None:
             return
         try:
             op.cleanup()
