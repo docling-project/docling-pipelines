@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JobTrackerService.write_job_logs() — chronological node_stats sorting.
 
@@ -205,10 +208,10 @@ class TestWriteJobLogsFromDict:
         assert "node_stats" not in written
 
     def test_missing_start_time_defaults_to_zero(self, service, tmp_path):
-        """Nodes missing start_time are treated as 0 and do not raise."""
+        """Nodes missing start_time are treated as pending (0) and placed after executed nodes."""
         raw_node_stats = {
-            "node-b": {"name": "NodeB"},  # no start_time key
-            "node-a": {"name": "NodeA", "start_time": 100},
+            "node-b": {"name": "NodeB"},  # no start_time key (pending)
+            "node-a": {"name": "NodeA", "start_time": 100},  # executed
         }
         job_stats = _job_stats_dict(raw_node_stats)
         log_path = str(tmp_path / "job_stats.json")
@@ -218,9 +221,9 @@ class TestWriteJobLogsFromDict:
 
         with Path(log_path).open() as f:
             written = json.load(f)
-        # node-b has start_time=0, node-a has start_time=100 → node-b comes first
+        # node-a (executed, start_time=100) comes before node-b (pending, start_time=0)
         keys = list(written["node_stats"].keys())
-        assert keys.index("node-b") < keys.index("node-a")
+        assert keys.index("node-a") < keys.index("node-b")
 
 
 # ---------------------------------------------------------------------------

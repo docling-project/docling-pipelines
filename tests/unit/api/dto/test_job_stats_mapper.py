@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JobStatsMapper — chronological sorting of node_stats.
 
@@ -85,6 +88,19 @@ class TestJobStatsMapperToDto:
         zebra_idx = keys.index(NODE_Z)
         assert apple_idx < zebra_idx
 
+    def test_node_stats_sorted_completed_running_pending(self):
+        """Completed nodes come first, running nodes second, pending nodes (start_time=0) last."""
+        node_stats = {
+            NODE_C: _make_node(NODE_C, "PendingNode", start_time=0, end_time=0),
+            NODE_B: _make_node(NODE_B, "RunningNode", start_time=150, end_time=0),
+            NODE_A: _make_node(NODE_A, "CompletedNode", start_time=100, end_time=200),
+        }
+        job_stats = _make_job_stats(node_stats)
+
+        dto = JobStatsMapper.to_dto(job_stats)
+
+        assert list(dto.node_stats.keys()) == [NODE_A, NODE_B, NODE_C]
+
     def test_single_node_returns_unchanged(self):
         """to_dto() with a single node returns that single entry."""
         node_stats = {NODE_X: _make_node(NODE_X, "OnlyNode", start_time=500)}
@@ -154,6 +170,19 @@ class TestJobStatsMapperToStatusResponse:
 
         assert response.node_sequence == [NODE_A, NODE_B, NODE_C]
 
+    def test_node_sequence_fallback_places_completed_before_running_before_pending(self):
+        """to_status_response() with no node_order fallback places completed -> running -> pending."""
+        node_stats = {
+            NODE_C: _make_node(NODE_C, "PendingNode", start_time=0, end_time=0),
+            NODE_B: _make_node(NODE_B, "RunningNode", start_time=150, end_time=0),
+            NODE_A: _make_node(NODE_A, "CompletedNode", start_time=100, end_time=200),
+        }
+        job_stats = _make_job_stats(node_stats)
+
+        response = JobStatsMapper.to_status_response(job_stats)
+
+        assert response.node_sequence == [NODE_A, NODE_B, NODE_C]
+
     def test_node_metadata_order_matches_node_sequence(self):
         """node_metadata array is in the same order as node_sequence."""
         node_stats = {
@@ -202,6 +231,50 @@ class TestJobStatsMapperToStatusResponse:
         response = JobStatsMapper.to_status_response(job_stats)
 
         assert list(response.job_stats.node_stats.keys()) == [NODE_A, NODE_B, NODE_C]
+
+    def test_node_sequence_respects_topological_node_order(self):
+        """to_status_response() uses node_order when provided, overriding same-second timestamps."""
+        # Reproducing issue #527: downstream nodes skipped at the same second
+        # Alphabetical sort would place Extract Content ('Ex') after Embeddings ('Em')
+        node_ingest = "11111111-0000-0000-0000-000000000001"
+        node_extract = "22222222-0000-0000-0000-000000000002"
+        node_quality = "33333333-0000-0000-0000-000000000003"
+        node_chunk = "44444444-0000-0000-0000-000000000004"
+        node_embed = "55555555-0000-0000-0000-000000000005"
+
+        node_stats = {
+            node_ingest: _make_node(node_ingest, "Ingest data", start_time=100, end_time=101),
+            node_chunk: _make_node(node_chunk, "Chunking", start_time=101, end_time=101),
+            node_quality: _make_node(node_quality, "Document Quality", start_time=101, end_time=101),
+            node_embed: _make_node(node_embed, "Embeddings", start_time=101, end_time=101),
+            node_extract: _make_node(node_extract, "Extract Content", start_time=101, end_time=101),
+        }
+        job_stats = _make_job_stats(node_stats)
+        topological_order = [node_ingest, node_extract, node_quality, node_chunk, node_embed]
+
+        response = JobStatsMapper.to_status_response(job_stats, node_order=topological_order)
+
+        assert response.node_sequence == topological_order
+        assert [m.id for m in response.node_metadata] == topological_order
+        assert list(response.job_stats.node_stats.keys()) == topological_order
+
+    def test_node_sequence_appends_unmapped_nodes_at_end(self):
+        """Nodes not present in topological node_order are appended at the end sorted chronologically."""
+        node_1 = "11111111-0000-0000-0000-000000000001"
+        node_2 = "22222222-0000-0000-0000-000000000002"
+        node_extra = "33333333-0000-0000-0000-000000000003"
+
+        node_stats = {
+            node_1: _make_node(node_1, "Node1", start_time=100),
+            node_2: _make_node(node_2, "Node2", start_time=100),
+            node_extra: _make_node(node_extra, "ExtraNode", start_time=105),
+        }
+        job_stats = _make_job_stats(node_stats)
+        topological_order = [node_1, node_2]
+
+        response = JobStatsMapper.to_status_response(job_stats, node_order=topological_order)
+
+        assert response.node_sequence == [node_1, node_2, node_extra]
 
 
 class TestJobStatsMapperReportFields:

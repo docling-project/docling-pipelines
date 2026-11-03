@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for DAG utility functions.
 
@@ -8,7 +11,11 @@ Tests cover:
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from docpipe.utils.orchestration.dag_utils import extract_dag_nodes
+from docpipe.utils.orchestration.dag_utils import (
+    extract_dag_nodes,
+    get_topologically_sorted_node_ids,
+    order_node_items,
+)
 
 
 class TestExtractDagNodes:
@@ -239,3 +246,129 @@ class TestExtractDagNodes:
 
         mock_cls.assert_not_called()
         assert result == []
+
+
+class TestGetTopologicallySortedNodeIds:
+    """Test get_topologically_sorted_node_ids helper."""
+
+    def test_sorted_runtime_dag_returns_topological_ids(self):
+        """Runtime dag format returns node IDs in topological order."""
+        flow_definition = {
+            "dag": [
+                {"id": "node-3", "name": "Chunker", "input_edges": [{"node_id_ref": "node-2"}], "output_edges": []},
+                {"id": "node-1", "name": "Ingest", "input_edges": [], "output_edges": [{"node_id_ref": "node-2"}]},
+                {
+                    "id": "node-2",
+                    "name": "Extract",
+                    "input_edges": [{"node_id_ref": "node-1"}],
+                    "output_edges": [{"node_id_ref": "node-3"}],
+                },
+            ]
+        }
+        result = get_topologically_sorted_node_ids(flow_definition=flow_definition)
+        assert result == ["node-1", "node-2", "node-3"]
+
+    def test_empty_or_none_returns_empty_list(self):
+        """None or empty flow definition returns empty list."""
+        assert get_topologically_sorted_node_ids(flow_definition=None) == []
+        assert get_topologically_sorted_node_ids(flow_definition={}) == []
+
+    def test_handles_cycles_gracefully(self):
+        """Cyclic DAG returns empty list without raising exception."""
+        flow_definition = {
+            "dag": [
+                {"id": "node-1", "output_edges": [{"node_id_ref": "node-2"}]},
+                {"id": "node-2", "output_edges": [{"node_id_ref": "node-1"}]},
+            ]
+        }
+        result = get_topologically_sorted_node_ids(flow_definition=flow_definition)
+        assert result == []
+
+    def test_authoring_format_with_missing_intermediate_node_stats(self):
+        """Authoring flow preserves relative topological order when intermediate node stats are missing."""
+        flow_definition = {
+            "flow": [
+                {"name": "Ingest", "type": "ingest_source", "depends_on": []},
+                {"name": "Extract", "type": "extract_operator", "depends_on": ["Ingest"]},
+                {"name": "Chunker", "type": "chunker", "depends_on": ["Extract"]},
+            ]
+        }
+        ingest_uuid = "aaaaaaaa-0000-0000-0000-000000000001"
+        chunker_uuid = "cccccccc-0000-0000-0000-000000000001"
+
+        # Insert in reverse order to ensure sort is driven by authoring DAG dependency, not dict order
+        node_stats = {
+            chunker_uuid: SimpleNamespace(name="Chunker", start_time=200),
+            ingest_uuid: SimpleNamespace(name="Ingest", start_time=100),
+        }
+
+        result = get_topologically_sorted_node_ids(flow_definition=flow_definition, node_stats=node_stats)
+        assert result == [ingest_uuid, chunker_uuid]
+
+    def test_runtime_dag_filtered_by_node_stats(self):
+        """Runtime DAG format filters sorted IDs to only those present in node_stats."""
+        flow_definition = {
+            "dag": [
+                {"id": "node-3", "name": "Chunker", "input_edges": [{"node_id_ref": "node-2"}], "output_edges": []},
+                {"id": "node-1", "name": "Ingest", "input_edges": [], "output_edges": [{"node_id_ref": "node-2"}]},
+                {
+                    "id": "node-2",
+                    "name": "Extract",
+                    "input_edges": [{"node_id_ref": "node-1"}],
+                    "output_edges": [{"node_id_ref": "node-3"}],
+                },
+            ]
+        }
+        node_stats = {"node-3": {"name": "Chunker"}, "node-1": {"name": "Ingest"}}
+        result = get_topologically_sorted_node_ids(flow_definition=flow_definition, node_stats=node_stats)
+        assert result == ["node-1", "node-3"]
+
+
+class TestOrderNodeItems:
+    """Test order_node_items helper."""
+
+    def test_order_node_items_appends_unmatched_nodes_chronologically(self):
+        """Unmatched extra nodes not in node_order are sorted chronologically and placed after matched nodes."""
+        node_stats = {
+            "extra-2": {"name": "ExtraLate", "start_time": 500, "end_time": 600},
+            "node-1": {"name": "Node1", "start_time": 100, "end_time": 200},
+            "extra-1": {"name": "ExtraEarly", "start_time": 300, "end_time": 400},
+            "node-2": {"name": "Node2", "start_time": 200, "end_time": 300},
+        }
+        node_order = ["node-2", "node-1"]
+
+        result = order_node_items(node_stats=node_stats, node_order=node_order)
+        ordered_keys = [k for k, _ in result]
+        assert ordered_keys == ["node-2", "node-1", "extra-1", "extra-2"]
+
+    def test_order_node_items_empty_returns_empty(self):
+        """Empty node_stats returns empty list."""
+        assert order_node_items(node_stats={}) == []
+
+    def test_order_node_items_no_node_order_falls_back_to_chronological(self):
+        """When node_order is None, sorts all nodes chronologically."""
+        node_stats = {
+            "node-b": {"name": "NodeB", "start_time": 200, "end_time": 300},
+            "node-a": {"name": "NodeA", "start_time": 100, "end_time": 200},
+        }
+        result = order_node_items(node_stats=node_stats, node_order=None)
+        assert [k for k, _ in result] == ["node-a", "node-b"]
+
+    def test_order_node_items_fallback_places_completed_before_running_before_pending(self):
+        """When node_order is None, sorts completed -> running -> pending chronologically."""
+        node_stats = {
+            "pending-node": {"name": "Pending", "start_time": 0, "end_time": 0},
+            "running-node": {"name": "Running", "start_time": 150, "end_time": 0},
+            "completed-node": {"name": "Completed", "start_time": 100, "end_time": 200},
+        }
+        result = order_node_items(node_stats=node_stats, node_order=None)
+        assert [k for k, _ in result] == ["completed-node", "running-node", "pending-node"]
+
+    def test_order_node_items_fallback_with_objects(self):
+        """Objects with start_time=0 sort after executed nodes."""
+        node_stats = {
+            "pending": SimpleNamespace(name="Pending", start_time=0, end_time=0),
+            "completed": SimpleNamespace(name="Completed", start_time=100, end_time=120),
+        }
+        result = order_node_items(node_stats=node_stats, node_order=None)
+        assert [k for k, _ in result] == ["completed", "pending"]

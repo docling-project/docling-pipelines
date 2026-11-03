@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobTrackerService - Production job stats service using new architecture
 
@@ -1371,21 +1374,28 @@ class JobTrackerService(JobStatsService):
             else:
                 job_stats_dict = job_stats
 
-            # Sort node_stats by start_time to match execution order
+            # Sort node_stats by topological order if snapshot is available, falling back to chronological order
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
                 node_stats = job_stats_dict["node_stats"]
-                # Sort by start_time, then end_time, then name
-                sorted_node_stats = dict(
-                    sorted(
-                        node_stats.items(),
-                        key=lambda item: (
-                            item[1].get("start_time", 0),
-                            item[1].get("end_time", 0),
-                            item[1].get("name", ""),
-                        ),
-                    )
-                )
-                job_stats_dict["node_stats"] = sorted_node_stats
+                job_run_id = job_stats_dict.get("job_run_id")
+                node_order: list[str] | None = None
+                if job_run_id:
+                    try:
+                        flow_def = self.get_flow_definition(job_run_id=job_run_id)
+                        if flow_def:
+                            from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
+
+                            node_order = get_topologically_sorted_node_ids(
+                                flow_definition=flow_def,
+                                node_stats=node_stats,
+                            )
+                    except Exception as e:
+                        logger.warning("Failed to determine topological node order for job log writing: %s", e)
+
+                from docpipe.utils.orchestration.dag_utils import order_node_items
+
+                ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
+                job_stats_dict["node_stats"] = dict(ordered_items)
 
             # Write to file
             with Path(job_log_path).open("w") as f:
@@ -1451,8 +1461,25 @@ class JobTrackerService(JobStatsService):
         if not job_stats:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
+        node_order: list[str] | None = None
+        try:
+            flow_def = self.get_flow_definition(job_run_id=job_run_id)
+            if flow_def:
+                from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
+
+                node_order = get_topologically_sorted_node_ids(
+                    flow_definition=flow_def,
+                    node_stats=job_stats.node_stats,
+                )
+        except Exception as e:
+            logger.warning("Failed to determine topological node order for job_run_id %s: %s", job_run_id, e)
+
         # Delegate to mapper for enterprise-compatible model construction
-        return JobStatsMapper.to_status_response(job_stats=job_stats, include_logs=include_logs)
+        return JobStatsMapper.to_status_response(
+            job_stats=job_stats,
+            include_logs=include_logs,
+            node_order=node_order,
+        )
 
     def get_flow_definition(self, *, job_run_id: str) -> dict[str, Any] | None:
         """
@@ -1611,21 +1638,12 @@ class JobTrackerService(JobStatsService):
         return 0 < failed_batch_count < total_batch_count
 
     @staticmethod
-    def _calculate_node_sequence(*, node_stats: dict) -> list[str]:
-        """Calculate node execution sequence based on start_time."""
-        if not node_stats:
-            return []
+    def _calculate_node_sequence(*, node_stats: dict, node_order: list[str] | None = None) -> list[str]:
+        """Calculate node execution sequence based on topological order with chronological fallback."""
+        from docpipe.utils.orchestration.dag_utils import order_node_items
 
-        # Sort nodes by start_time, then end_time, then name
-        sorted_nodes: list[tuple[Any, Any]] = sorted(
-            node_stats.items(),
-            key=lambda item: (
-                (item[1].get("start_time", 0) if isinstance(item[1], dict) else getattr(item[1], "start_time", 0)),
-                (item[1].get("end_time", 0) if isinstance(item[1], dict) else getattr(item[1], "end_time", 0)),
-                (item[1].get("name", "") if isinstance(item[1], dict) else getattr(item[1], "name", "")),
-            ),
-        )
-        return [node_id for node_id, _ in sorted_nodes]
+        ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
+        return [node_id for node_id, _ in ordered_items]
 
     @staticmethod
     def _build_node_metadata_array(*, node_stats: dict) -> list[dict]:

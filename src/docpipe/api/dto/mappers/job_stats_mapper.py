@@ -1,10 +1,14 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobStatsMapper module for converting JobStats domain models to enterprise-compatible DTOs.
 """
 
 from docpipe.api.dto.job_run_dto import JobRunStatusResponse
 from docpipe.api.dto.job_stats_dto import JobStatsDto
-from docpipe.core.job_management.domain.models import JobStats, NodeStats
+from docpipe.core.job_management.domain.models import JobStats
+from docpipe.utils.orchestration.dag_utils import get_node_sort_key, order_node_items
 
 from .node_stats_mapper import NodeStatsMapper
 
@@ -16,21 +20,15 @@ MAX_DURATION_LIMIT_SECONDS = 31536000
 class JobStatsMapper:
     """Mapper for JobStats domain models to DTOs."""
 
-    @staticmethod
-    def _get_node_sort_key(node_item: tuple[str, NodeStats]) -> tuple[int, int, int, int, str]:
-        """Generate a sort key to order nodes chronologically, placing pending/running nodes properly."""
-        _, stats = node_item
-        is_pending = 1 if stats.start_time == 0 else 0
-        is_running = 1 if stats.end_time == 0 else 0
-        return (is_pending, stats.start_time, is_running, stats.end_time, stats.name)
+    _get_node_sort_key = staticmethod(get_node_sort_key)
+    _order_node_items = staticmethod(order_node_items)
 
     @staticmethod
-    def to_dto(job_stats: JobStats) -> JobStatsDto:
-        """Convert JobStats domain model to JobStatsDto with chronologically sorted node_stats."""
-        # Sort node_stats: completed/running first chronologically, then pending ones last
-        sorted_node_items = sorted(
-            job_stats.node_stats.items(),
-            key=JobStatsMapper._get_node_sort_key,
+    def to_dto(job_stats: JobStats, *, node_order: list[str] | None = None) -> JobStatsDto:
+        """Convert JobStats domain model to JobStatsDto with topologically or chronologically sorted node_stats."""
+        sorted_node_items = JobStatsMapper._order_node_items(
+            node_stats=job_stats.node_stats,
+            node_order=node_order,
         )
         node_stats_dto = {node_id: NodeStatsMapper.to_dto(stats) for node_id, stats in sorted_node_items}
 
@@ -85,31 +83,37 @@ class JobStatsMapper:
         )
 
     @staticmethod
-    def to_status_response(job_stats: JobStats, include_logs: bool = False) -> JobRunStatusResponse:
+    def to_status_response(
+        job_stats: JobStats,
+        *,
+        include_logs: bool = False,
+        node_order: list[str] | None = None,
+    ) -> JobRunStatusResponse:
         """
         Convert JobStats domain model to a JobRunStatusResponse DTO.
 
         Args:
             job_stats: JobStats domain model
             include_logs: Whether to include individual node log strings as dynamic fields
+            node_order: Optional pre-resolved topological list of node IDs
 
         Returns:
             JobRunStatusResponse DTO ready for API response
         """
         from docpipe.api.dto.job_run_dto import JobRunStatusResponse
 
-        # Calculate node_sequence (execution order based on start_time, pending last)
-        sorted_nodes = sorted(
-            job_stats.node_stats.items(),
-            key=JobStatsMapper._get_node_sort_key,
+        # Calculate node_sequence (topological order if provided, otherwise chronological)
+        sorted_nodes = JobStatsMapper._order_node_items(
+            node_stats=job_stats.node_stats,
+            node_order=node_order,
         )
         node_sequence = [node_id for node_id, _ in sorted_nodes]
 
         # Build node_metadata array in the same order as node_sequence
         node_metadata = [NodeStatsMapper.to_node_metadata_item(node_id, stats) for node_id, stats in sorted_nodes]
 
-        # Convert to DTO
-        job_stats_dto = JobStatsMapper.to_dto(job_stats)
+        # Convert to DTO with matching node ordering
+        job_stats_dto = JobStatsMapper.to_dto(job_stats, node_order=node_order)
 
         response = JobRunStatusResponse(
             node_sequence=node_sequence, job_stats=job_stats_dto, node_metadata=node_metadata

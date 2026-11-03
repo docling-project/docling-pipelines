@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 DAG Utility Functions
 
@@ -206,3 +209,142 @@ def extract_dag_nodes(
 
     authoring_ops: list[dict[str, Any]] = flow_definition.get(DocpipeConstants.FLOW, [])
     return _reconstruct_dag_nodes_from_authoring(authoring_ops=authoring_ops, node_stats=node_stats)
+
+
+def _sort_authoring_ops_topologically(authoring_ops: list[dict[str, Any]]) -> list[str]:
+    """Topologically sort authoring operator names from their depends_on graph."""
+    from docpipe.utils.orchestration.flow_utils import sort_dag_topologically
+
+    named_ops = [op for op in authoring_ops if isinstance(op, dict) and op.get(OperatorConstants.Misc.NAME)]
+    if not named_ops:
+        return []
+
+    name_to_depends: dict[str, list[str]] = {
+        op[OperatorConstants.Misc.NAME]: [
+            dep.split(".")[0] for dep in (op.get(OperatorConstants.Misc.DEPENDS_ON) or [])
+        ]
+        for op in named_ops
+    }
+
+    # Reverse depends_on to build output_edges
+    name_to_output_targets: dict[str, list[str]] = {n: [] for n in name_to_depends}
+    for name, deps in name_to_depends.items():
+        for dep in deps:
+            if dep in name_to_output_targets:
+                name_to_output_targets[dep].append(name)
+
+    authoring_dag = [
+        {
+            OperatorConstants.Misc.ID: name,
+            DocpipeConstants.OUTPUT_EDGES: [
+                {DocpipeConstants.NODE_ID_REF: target} for target in name_to_output_targets.get(name, [])
+            ],
+        }
+        for name in name_to_depends
+    ]
+    sorted_nodes = sort_dag_topologically(dag=authoring_dag)
+    return [node[OperatorConstants.Misc.ID] for node in sorted_nodes]
+
+
+def get_topologically_sorted_node_ids(
+    *,
+    flow_definition: dict[str, Any] | None,
+    node_stats: dict[str, Any] | None = None,
+) -> list[str]:
+    """Extract and topologically sort node IDs from a flow definition snapshot.
+
+    For runtime and Elyra flow formats, sorts the complete DAG definition first
+    and filters to nodes present in node_stats (if provided).
+    For authoring flow formats, sorts the full authoring DAG by operator name
+    and maps the sorted names to the real node UUIDs from node_stats.
+    This guarantees that intermediate skipped or failed nodes missing from
+    node_stats do not break the relative topological ordering of remaining nodes.
+
+    Args:
+        flow_definition: Flow definition snapshot dict (Runtime, Authoring, or Elyra format).
+        node_stats: Optional node stats mapping keyed by node_id.
+
+    Returns:
+        List of node IDs in topological execution order, or empty list if unavailable.
+    """
+    if not flow_definition:
+        return []
+    try:
+        from docpipe.utils.orchestration.flow_utils import sort_dag_topologically
+
+        # Runtime DAG format
+        dag = flow_definition.get(DocpipeConstants.DAG)
+        if isinstance(dag, list):
+            if not dag:
+                return []
+            sorted_nodes = sort_dag_topologically(dag=dag)
+            sorted_ids = [node[OperatorConstants.Misc.ID] for node in sorted_nodes if OperatorConstants.Misc.ID in node]
+            if node_stats is not None:
+                return [nid for nid in sorted_ids if nid in node_stats]
+            return sorted_ids
+
+        # Elyra / CPD pipeline format
+        if flow_definition.get(ElyraConstants.DOC_TYPE) == "pipeline" and ElyraConstants.PIPELINES in flow_definition:
+            converted = _convert_elyra_to_dag(flow_definition=flow_definition)
+            if converted:
+                sorted_nodes = sort_dag_topologically(dag=converted)
+                sorted_ids = [
+                    node[OperatorConstants.Misc.ID] for node in sorted_nodes if OperatorConstants.Misc.ID in node
+                ]
+                if node_stats is not None:
+                    return [nid for nid in sorted_ids if nid in node_stats]
+                return sorted_ids
+
+        # Authoring format
+        if DocpipeConstants.FLOW in flow_definition:
+            authoring_ops = flow_definition.get(DocpipeConstants.FLOW, [])
+            sorted_names = _sort_authoring_ops_topologically(authoring_ops)
+            if node_stats is not None:
+                name_to_uuid = _build_name_to_uuid(node_stats)
+                return [name_to_uuid[name] for name in sorted_names if name in name_to_uuid]
+            return sorted_names
+
+        return []
+    except Exception as exc:
+        logger.warning("Failed to topologically sort flow snapshot nodes: %s", exc)
+        return []
+
+
+def get_node_sort_key(node_item: tuple[str, Any]) -> tuple[int, int, int, int, str]:
+    """Generate a sort key to order nodes chronologically, placing completed/running first and pending last."""
+    _, stats = node_item
+    start_time = (stats.get("start_time") or 0) if isinstance(stats, dict) else (getattr(stats, "start_time", 0) or 0)
+    end_time = (stats.get("end_time") or 0) if isinstance(stats, dict) else (getattr(stats, "end_time", 0) or 0)
+    name = (stats.get("name") or "") if isinstance(stats, dict) else (getattr(stats, "name", "") or "")
+    is_pending = 1 if start_time == 0 else 0
+    is_running = 1 if end_time == 0 else 0
+    return (is_pending, int(start_time), is_running, int(end_time), str(name))
+
+
+def order_node_items(
+    *,
+    node_stats: dict[str, Any],
+    node_order: list[str] | None = None,
+) -> list[tuple[str, Any]]:
+    """Order node items by provided topological node_order, falling back to chronological sort.
+
+    Unmatched/extra nodes not in node_order are sorted chronologically and appended to the end.
+    """
+    if not node_stats:
+        return []
+
+    if node_order:
+        ordered_items: list[tuple[str, Any]] = []
+        seen: set[str] = set()
+        for node_id in node_order:
+            if node_id in node_stats and node_id not in seen:
+                ordered_items.append((node_id, node_stats[node_id]))
+                seen.add(node_id)
+        # Append any node_stats entries not present in node_order sorted chronologically
+        remaining_items = [(node_id, stats) for node_id, stats in node_stats.items() if node_id not in seen]
+        if remaining_items:
+            remaining_items.sort(key=get_node_sort_key)
+            ordered_items.extend(remaining_items)
+        return ordered_items
+
+    return sorted(node_stats.items(), key=get_node_sort_key)

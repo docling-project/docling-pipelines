@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JobTrackerService.
 
@@ -13,7 +16,8 @@ Final document counting algorithm:
 3. Skipped documents (from ingest, neither completed nor failed)
 """
 
-from unittest.mock import Mock
+import json
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -1950,6 +1954,30 @@ class TestCalculateNodeSequence:
         result = JobTrackerService._calculate_node_sequence(node_stats={"n1": n1, "n2": n2})
         assert result[0] == "n2"
 
+    def test_sorts_completed_before_running_before_pending(self):
+        """Fallback sorting places completed -> running -> pending."""
+        n_pending = NodeStats(id="n_pending", name="pending", start_time=0, end_time=0)
+        n_running = NodeStats(id="n_running", name="running", start_time=150, end_time=0)
+        n_completed = NodeStats(id="n_completed", name="completed", start_time=100, end_time=200)
+
+        result = JobTrackerService._calculate_node_sequence(
+            node_stats={"n_pending": n_pending, "n_running": n_running, "n_completed": n_completed}
+        )
+        assert result == ["n_completed", "n_running", "n_pending"]
+
+    def test_node_sequence_with_node_order_and_unmapped_nodes(self):
+        """Unmatched extra nodes are sorted chronologically and placed after matched nodes."""
+        n1 = NodeStats(id="n1", name="a", start_time=100, end_time=200)
+        n2 = NodeStats(id="n2", name="b", start_time=200, end_time=300)
+        extra_late = NodeStats(id="extra_late", name="late", start_time=500, end_time=600)
+        extra_early = NodeStats(id="extra_early", name="early", start_time=300, end_time=400)
+
+        result = JobTrackerService._calculate_node_sequence(
+            node_stats={"extra_late": extra_late, "n2": n2, "extra_early": extra_early, "n1": n1},
+            node_order=["n1", "n2"],
+        )
+        assert result == ["n1", "n2", "extra_early", "extra_late"]
+
 
 class TestBuildNodeMetadataArray:
     def test_builds_from_object_stats(self):
@@ -2064,3 +2092,132 @@ class TestUpdateDocCounts:
             operator_category="Ingest",
         )
         assert job_stats.total_docs == 2
+
+
+class TestGetFormattedJobStats:
+    """Tests for JobTrackerService.get_formatted_job_stats topological ordering."""
+
+    def test_topological_order_applied_when_snapshot_available(
+        self, *, job_tracker_service, mock_store, mock_aggregator
+    ):
+        """get_formatted_job_stats uses flow snapshot to order node_sequence topologically."""
+        from docpipe.core.job_management.domain.models.job_stats import JobStats
+        from docpipe.core.job_management.domain.models.node_stats import NodeStats
+
+        node_ingest = "11111111-0000-0000-0000-000000000001"
+        node_extract = "22222222-0000-0000-0000-000000000002"
+        node_quality = "33333333-0000-0000-0000-000000000003"
+        node_chunk = "44444444-0000-0000-0000-000000000004"
+
+        # Node stats with same-second timestamps where alphabetical sort would be wrong
+        node_stats = {
+            node_ingest: NodeStats(id=node_ingest, name="Ingest", start_time=100, end_time=101),
+            node_chunk: NodeStats(id=node_chunk, name="Chunking", start_time=101, end_time=101),
+            node_quality: NodeStats(id=node_quality, name="Document Quality", start_time=101, end_time=101),
+            node_extract: NodeStats(id=node_extract, name="Extract Content", start_time=101, end_time=101),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats)
+        mock_store.get_job_stats.return_value = job_stats
+        mock_aggregator.get_aggregated_node_stats.return_value = node_stats
+        mock_aggregator.get_batch_node_stats.return_value = {}
+
+        flow_def = {
+            "dag": [
+                {"id": node_ingest, "name": "Ingest", "output_edges": [{"node_id_ref": node_extract}]},
+                {"id": node_extract, "name": "Extract Content", "output_edges": [{"node_id_ref": node_quality}]},
+                {"id": node_quality, "name": "Document Quality", "output_edges": [{"node_id_ref": node_chunk}]},
+                {"id": node_chunk, "name": "Chunking", "output_edges": []},
+            ]
+        }
+
+        with patch.object(job_tracker_service, "get_flow_definition", return_value=flow_def):
+            response = job_tracker_service.get_formatted_job_stats(job_run_id=JOB_RUN_ID)
+
+        expected_order = [node_ingest, node_extract, node_quality, node_chunk]
+        assert response.node_sequence == expected_order
+        assert list(response.job_stats.node_stats.keys()) == expected_order
+
+    def test_chronological_fallback_when_snapshot_missing(self, *, job_tracker_service, mock_store, mock_aggregator):
+        """get_formatted_job_stats falls back to chronological sort when get_flow_definition returns None."""
+        from docpipe.core.job_management.domain.models.job_stats import JobStats
+        from docpipe.core.job_management.domain.models.node_stats import NodeStats
+
+        node_1 = "11111111-0000-0000-0000-000000000001"
+        node_2 = "22222222-0000-0000-0000-000000000002"
+
+        node_stats = {
+            node_2: NodeStats(id=node_2, name="Node2", start_time=200, end_time=201),
+            node_1: NodeStats(id=node_1, name="Node1", start_time=100, end_time=101),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats)
+        mock_store.get_job_stats.return_value = job_stats
+        mock_aggregator.get_aggregated_node_stats.return_value = node_stats
+        mock_aggregator.get_batch_node_stats.return_value = {}
+
+        with patch.object(job_tracker_service, "get_flow_definition", return_value=None):
+            response = job_tracker_service.get_formatted_job_stats(job_run_id=JOB_RUN_ID)
+
+        assert response.node_sequence == [node_1, node_2]
+
+
+class TestWriteJobLogs:
+    """Tests for JobTrackerService.write_job_logs topological ordering."""
+
+    def test_writes_topologically_ordered_node_stats(self, *, job_tracker_service, tmp_path):
+        """write_job_logs writes node_stats in topological order when snapshot is available."""
+        node_ingest = "11111111-0000-0000-0000-000000000001"
+        node_extract = "22222222-0000-0000-0000-000000000002"
+        node_chunk = "33333333-0000-0000-0000-000000000003"
+
+        node_stats = {
+            node_chunk: NodeStats(id=node_chunk, name="Chunking", start_time=101, end_time=101),
+            node_ingest: NodeStats(id=node_ingest, name="Ingest", start_time=100, end_time=101),
+            node_extract: NodeStats(id=node_extract, name="Extract Content", start_time=101, end_time=101),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats)
+        flow_def = {
+            "dag": [
+                {"id": node_ingest, "name": "Ingest", "output_edges": [{"node_id_ref": node_extract}]},
+                {"id": node_extract, "name": "Extract Content", "output_edges": [{"node_id_ref": node_chunk}]},
+                {"id": node_chunk, "name": "Chunking", "output_edges": []},
+            ]
+        }
+
+        log_file = tmp_path / "job_stats.json"
+        with patch.object(job_tracker_service, "get_flow_definition", return_value=flow_def):
+            job_tracker_service.write_job_logs(job_stats=job_stats, job_log_path=str(log_file))
+
+        with log_file.open() as f:
+            written_data = json.load(f)
+
+        assert list(written_data["node_stats"].keys()) == [node_ingest, node_extract, node_chunk]
+
+    def test_writes_node_stats_with_unmapped_extra_nodes(self, *, job_tracker_service, tmp_path):
+        """write_job_logs appends unmatched nodes chronologically after topologically ordered nodes."""
+        node_ingest = "11111111-0000-0000-0000-000000000001"
+        node_extract = "22222222-0000-0000-0000-000000000002"
+        extra_late = "33333333-0000-0000-0000-000000000003"
+        extra_early = "44444444-0000-0000-0000-000000000004"
+
+        node_stats = {
+            extra_late: NodeStats(id=extra_late, name="Late Extra", start_time=500, end_time=600),
+            node_extract: NodeStats(id=node_extract, name="Extract", start_time=200, end_time=300),
+            extra_early: NodeStats(id=extra_early, name="Early Extra", start_time=300, end_time=400),
+            node_ingest: NodeStats(id=node_ingest, name="Ingest", start_time=100, end_time=200),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats)
+        flow_def = {
+            "dag": [
+                {"id": node_ingest, "name": "Ingest", "output_edges": [{"node_id_ref": node_extract}]},
+                {"id": node_extract, "name": "Extract", "output_edges": []},
+            ]
+        }
+
+        log_file = tmp_path / "job_stats.json"
+        with patch.object(job_tracker_service, "get_flow_definition", return_value=flow_def):
+            job_tracker_service.write_job_logs(job_stats=job_stats, job_log_path=str(log_file))
+
+        with log_file.open() as f:
+            written_data = json.load(f)
+
+        assert list(written_data["node_stats"].keys()) == [node_ingest, node_extract, extra_early, extra_late]
