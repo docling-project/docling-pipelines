@@ -1536,36 +1536,111 @@ class TestLockLayoutAndSanitization:
 
     def test_sanitize_lock_id(self):
         """Test sanitization of job_run_id for lock filenames."""
-        # Standard UUID or alphanumeric string remains unchanged
+        # Standard UUID or alphanumeric string gets clean prefix + SHA256 digest
         valid_id = "job-run-123_abc"
-        assert JsonJobStatsStore._sanitize_lock_id(valid_id) == valid_id
+        sanitized = JsonJobStatsStore._sanitize_lock_id(valid_id)
+        assert sanitized.startswith("job-run-123_abc_")
+        assert len(sanitized) <= 65
 
         # Path traversal characters must be replaced and hashed
         traversal_id = "../../etc/passwd"
-        sanitized = JsonJobStatsStore._sanitize_lock_id(traversal_id)
-        assert "/" not in sanitized
-        assert ".." not in sanitized
-        assert len(sanitized) <= 85
+        sanitized_traversal = JsonJobStatsStore._sanitize_lock_id(traversal_id)
+        assert "/" not in sanitized_traversal
+        assert ".." not in sanitized_traversal
+        assert len(sanitized_traversal) <= 65
+
+        # Collisions between raw ID and sanitized form are eliminated by uniform hashing
+        id1 = JsonJobStatsStore._sanitize_lock_id("test_id")
+        id2 = JsonJobStatsStore._sanitize_lock_id("test/id")
+        assert id1 != id2
 
         # Excessively long job_run_id must be truncated and hashed
         long_id = "a" * 300
         sanitized_long = JsonJobStatsStore._sanitize_lock_id(long_id)
-        assert len(sanitized_long) <= 85
-        assert sanitized_long.startswith("a" * 64)
+        assert len(sanitized_long) <= 65
+        assert sanitized_long.startswith("a" * 48)
 
     def test_lock_file_locations_in_locks_dir(self, *, store, temp_data_dir):
         """Assert exact lock file locations inside .locks/ directory."""
         job_run_id = "custom-run-456"
         expected_locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        safe_id = store._sanitize_lock_id(job_run_id)
 
         assert store._get_locks_dir() == expected_locks_dir
+        assert store._get_job_stats_lock_path(job_run_id=job_run_id) == expected_locks_dir / f"{safe_id}_job_stats.lock"
         assert (
-            store._get_job_stats_lock_path(job_run_id=job_run_id) == expected_locks_dir / f"{job_run_id}_job_stats.lock"
+            store._get_node_stats_lock_path(job_run_id=job_run_id) == expected_locks_dir / f"{safe_id}_node_stats.lock"
         )
-        assert (
-            store._get_node_stats_lock_path(job_run_id=job_run_id)
-            == expected_locks_dir / f"{job_run_id}_node_stats.lock"
-        )
+
+    def test_reserved_and_traversal_job_run_ids_rejected(self, *, store, sample_job_stats):
+        """store methods reject reserved .locks and path traversal job_run_ids."""
+        with pytest.raises(ValueError, match="Reserved job_run_id"):
+            store._validate_job_run_id(job_run_id=".locks")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store._validate_job_run_id(job_run_id="../escaped")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store._validate_job_run_id(job_run_id="sub/dir")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store._validate_job_run_id(job_run_id="sub\\dir")
+
+        with pytest.raises(ValueError, match="Invalid job_run_id"):
+            store._validate_job_run_id(job_run_id="")
+
+        # Test rejected at public API boundary
+        with pytest.raises(ValueError, match="Reserved job_run_id"):
+            store.delete_job_stats(".locks")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.delete_job_stats("../../escape")
+
+    def test_read_nonexistent_job_does_not_create_lock_files(self, *, store, temp_data_dir):
+        """Reading nonexistent job or node stats must not leak empty lock files in .locks/."""
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        nonexistent_id = f"missing-{uuid.uuid4()}"
+
+        assert store.get_job_stats(nonexistent_id) is None
+        assert store.get_node_stats(job_run_id=nonexistent_id) == []
+        assert store.get_batch_node_stats(job_run_id=nonexistent_id) == {}
+        assert store.get_node_stats_by_batch_and_node(nonexistent_id, "node1") is None
+
+        # .locks should either not exist or have no lock files for this id
+        if locks_dir.exists():
+            lock_files = list(locks_dir.glob(f"*{nonexistent_id}*"))
+            assert lock_files == []
+
+    def test_delete_nonexistent_job_cleans_up_acquired_locks(self, *, store, temp_data_dir):
+        """Deleting a nonexistent job raises not found but cleans up its lock files in finally block."""
+        nonexistent_id = f"missing-del-{uuid.uuid4()}"
+        safe_id = store._sanitize_lock_id(nonexistent_id)
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+
+        with pytest.raises(JobStatsStoreDeleteException, match="Job run not found"):
+            store.delete_job_stats(nonexistent_id)
+
+        # Lock files created during acquire must be cleaned up
+        job_lock = locks_dir / f"{safe_id}_job_stats.lock"
+        node_lock = locks_dir / f"{safe_id}_node_stats.lock"
+        assert not job_lock.exists()
+        assert not node_lock.exists()
+
+    def test_delete_job_stats_lock_timeout_does_not_unlink(self, *, store, sample_job_stats):
+        """When delete_job_stats times out acquiring lock, it does not unlink lock files."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        job_lock_path = store._get_job_stats_lock_path(job_run_id=job_run_id)
+        assert job_lock_path.exists()
+
+        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
+            mock_cls.return_value.acquire.side_effect = Timeout("Lock busy")
+            with pytest.raises(JobStatsStoreDeleteException, match="Failed to acquire lock"):
+                store.delete_job_stats(job_run_id)
+
+        # Because timeout occurred, lock files must NOT be unlinked
+        assert job_lock_path.exists()
 
 
 class TestAtomicWriteErrorHandling:
