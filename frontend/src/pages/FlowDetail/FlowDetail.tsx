@@ -16,6 +16,7 @@ import { cancelJobRun } from '@/services/api/actions/job-run-actions';
 import * as flowMapper from '@/services/api/mappers/flow-mapper';
 import * as projectMapper from '@/services/api/mappers/project-mapper';
 import { API_STATUS_MAP } from '@/constants/flowStatus';
+import { POLL_INTERVAL_MS } from '@/constants/jobRunStatus';
 import { setFlow, updateFlow, setLoading, setError, setCurrentFlow } from '@/slices/flowSlice';
 import { setProject } from '@/slices/projectsSlice';
 import { makeSelectFlow, makeSelectProject, selectCurrentFlow } from '@/selectors';
@@ -157,9 +158,11 @@ export function FlowDetail(): React.JSX.Element | null {
   // ── Fetch job runs via GET /api/job-runs?job_id=:flowId ─────────────────
   // Runs are kept in local state — they are transient and do not need to
   // survive navigation. fetchRuns is memoised so the effect dep array is stable.
-  const fetchRuns = useCallback((jobId: string): void => {
-    setRunsLoading(true);
-    setRunsError(null);
+  const fetchRuns = useCallback((jobId: string, silent = false): void => {
+    if (!silent) {
+      setRunsLoading(true);
+      setRunsError(null);
+    }
     getJobRuns({ job_id: jobId })
       .then((res) => {
         const rows: RunRow[] = res.data.list.map((item) => ({
@@ -173,16 +176,25 @@ export function FlowDetail(): React.JSX.Element | null {
         setRuns(rows);
       })
       .catch(() => {
-        setRunsError(intl.formatMessage(messages.runsLoadError));
+        // Background polls fail quietly; the next tick retries.
+        if (!silent) { setRunsError(intl.formatMessage(messages.runsLoadError)); }
       })
       .finally(() => {
-        setRunsLoading(false);
+        if (!silent) { setRunsLoading(false); }
       });
   }, [intl]);
 
   useEffect(() => {
     if (flowId) { fetchRuns(flowId); }
   }, [flowId, fetchRuns]);
+
+  // Keep duration/status fresh while any run is still in progress.
+  const hasInProgressRun = runs.some((r) => r.status === 'in_progress');
+  useEffect(() => {
+    if (!flowId || !hasInProgressRun) { return; }
+    const timer = setInterval(() => { fetchRuns(flowId, true); }, POLL_INTERVAL_MS);
+    return () => { clearInterval(timer); };
+  }, [flowId, hasInProgressRun, fetchRuns]);
 
   // ── Inject ⓘ Info button into the breadcrumb actions slot ───────────────
   // Always visible — isSelected reflects panel open state; click toggles panel.
