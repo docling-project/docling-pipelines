@@ -14,6 +14,7 @@ By automatically detecting previously failed documents during standard increment
 - **Node-Level Checkpoint Injection**: When execution reaches the failed node, the orchestrator retrieves the upstream parent checkpoint rows for the deferred documents, combines them with incoming batch tables, and clears them from `deferred_execution_docs`.
 - **Micro-Batching Integration**: Fresh and deferred documents are partitioned into micro-batches after Ingest so that each batch carries its respective deferred document metadata until the resumption node.
 - **Persistence & Metrics Updates**: `NodeStats` and storage stores (DuckDB, PostgreSQL, JSON) persist `deferred_execution_docs`. Successfully resumed documents are finalized in `IncrementalMetadataStore` and their intermediate checkpoints purged.
+- **Exhausted Retry Persistence & Reporting**: Documents that exhaust `max_retry_attempts` are permanently persisted to `IncrementalMetadataStore` with non-recoverable failure metadata and explicitly reported as `Failed (Max retries exhausted)` in the post-execution job run report.
 
 ## Non-goals
 
@@ -36,3 +37,4 @@ By automatically detecting previously failed documents during standard increment
   - `src/docpipe/core/operators/ingest/ingest_source.py` (Timestamp comparison, deferred docs emission)
   - `src/docpipe/core/orchestration/abstract_operator_executor.py` (Checkpoint injection & deferred tracking)
   - `src/docpipe/core/orchestration/abstract_orchestrator.py` & `prefect_engine.py` (Resumption planning)
+  - `src/docpipe/core/job_management/application/services/report_generator.py` (Job run report failure details)

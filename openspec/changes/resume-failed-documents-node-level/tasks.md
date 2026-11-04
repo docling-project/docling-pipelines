@@ -24,8 +24,13 @@
 - [ ] 4.2 [backend] Update `AbstractOperatorExecutor` to remove resumed documents from `deferred_execution_docs` upon injection and carry forward remaining deferred documents in node metadata.
 - [ ] 4.3 [backend] Update `NodeStatsAggregator` and `BatchAggregator` in `src/docpipe/core/job_management/application/` to aggregate `deferred_execution_docs` and enforce the consistency equation `total_docs = processed + deferred + failed + skipped`.
 
-## 5. End-to-End Flow Execution & Integration Testing
+## 5. Exhausted Retries Persistence & Report Generation
 
-- [ ] 5.1 [backend] Wire `ResumptionService` into `FlowExecutor` / `AbstractOrchestrator` execution lifecycle in `src/docpipe/core/orchestration/abstract_orchestrator.py`.
-- [ ] 5.2 [backend] Add integration test in `tests/integration/orchestration/test_node_level_resumption.py` verifying a multi-node flow (Ingest -> Extract -> Chunker -> Embeddings -> VectorDB) resumes failed documents at Node 4 on a second run without re-extracting.
-- [ ] 5.3 [backend] Run project test suite and linters (`pytest tests/unit tests/integration` and `ruff check src/`).
+- [ ] 5.1 [backend] Update `ResumptionService` and `IncrementalUpdateService` to persist metadata records for retry-exhausted documents to `IncrementalMetadataStore` to prevent automated re-execution.
+- [ ] 5.2 [backend] Update `JobReportGenerator` in `src/docpipe/core/job_management/application/services/report_generator.py` to format retry-exhausted documents with status `Failed` and reason indicating maximum retries were exhausted. Verify with `pytest tests/unit/core/job_management/test_report_generator.py`.
+
+## 6. End-to-End Flow Execution & Integration Testing
+
+- [ ] 6.1 [backend] Wire `ResumptionService` into `FlowExecutor` / `AbstractOrchestrator` execution lifecycle in `src/docpipe/core/orchestration/abstract_orchestrator.py`.
+- [ ] 6.2 [backend] Add integration test in `tests/integration/orchestration/test_node_level_resumption.py` verifying a multi-node flow (Ingest -> Extract -> Chunker -> Embeddings -> VectorDB) resumes failed documents at Node 4 on a second run without re-extracting, and verifies exhausted retry documents appear in the job report.
+- [ ] 6.3 [backend] Run project test suite and linters (`pytest tests/unit tests/integration` and `ruff check src/`).

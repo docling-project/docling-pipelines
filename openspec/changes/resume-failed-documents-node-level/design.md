@@ -13,6 +13,7 @@ This design introduces a pre-execution **Resumption Planner** that identifies fa
 - Maintain mathematical consistency across node-level metrics: $\text{documents\_in\_scope} = \text{processed} + \text{deferred} + \text{failed} + \text{skipped}$.
 - Validate source file timestamps so modified files automatically bypass stale checkpoints and re-ingest fresh.
 - Enforce `max_retry_attempts` to prevent persistent poisons from retrying indefinitely.
+- Persist metadata for retry-exhausted documents to `IncrementalMetadataStore` and report them in the post-execution job run CSV report.
 
 **Non-Goals:**
 - Cross-job checkpoint sharing.
@@ -70,6 +71,9 @@ graph TD
   - Queries retry counts and compares against `max_retry_attempts`.
   - Checks existence and timestamps of upstream checkpoint files.
   - Generates the `ResumptionPlan`.
+  - Flags documents that reached `max_retry_attempts` for non-recoverable incremental metadata persistence.
+- `JobReportGenerator` / `ReportGenerator`:
+  - Formats report rows for retry-exhausted documents with status `Failed` and reason `Maximum retries exhausted at <node_name>: <reason>`.
 - `NodeStatsAggregator` / `BatchAggregator`:
   - Updated to aggregate `deferred_execution_docs` across batches and maintain `total_expected = processed + deferred + failed + skipped`.
 
@@ -95,9 +99,9 @@ graph TD
 - **Decision**: If source `modified_time > checkpoint_time`, invalidate checkpoint and ingest fresh from Node 1.
 - **Rationale**: If a file was updated in source storage to fix an error, the upstream checkpoint is stale and the entire document must be re-extracted.
 
-### 3. Retry Threshold via `max_retry_attempts`
-- **Decision**: Introduce `global_config.max_retry_attempts` (default: 3).
-- **Rationale**: Prevents unparseable or malicious files from cycling through retries on every scheduled incremental run.
+### 3. Retry Threshold via `max_retry_attempts` & Failure Reporting
+- **Decision**: Introduce `global_config.max_retry_attempts` (default: 3). When exhausted, persist document metadata as non-recoverable in `IncrementalMetadataStore` and report explicitly in the job run report.
+- **Rationale**: Prevents unparseable or malicious files from cycling through retries on every scheduled incremental run, and gives operators clear visibility into permanently failed documents in the post-execution CSV report.
 
 ## Risks / Trade-offs
 

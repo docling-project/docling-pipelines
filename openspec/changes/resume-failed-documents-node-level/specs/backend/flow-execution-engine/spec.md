@@ -45,3 +45,14 @@ The engine SHALL track the consecutive failure count per document at each node. 
 #### Scenario: Failure count exceeding threshold halts automatic retry
 - **WHEN** a document has failed 3 consecutive times at Node 4 and `max_retry_attempts` is 3
 - **THEN** the document is excluded from automatic resumption and marked non-recoverable in incremental metadata
+
+### Requirement: Persistence and reporting of exhausted retry documents
+When a document exhausts its configured maximum retry attempts, the engine SHALL persist its failure metadata to the incremental metadata store as a non-recoverable document and report its status and failure details in the post-execution job run report.
+
+#### Scenario: Exhausted retry document persisted to incremental metadata
+- **WHEN** a document reaches `max_retry_attempts` failures at Node 4
+- **THEN** its metadata record is persisted to the incremental metadata store to prevent future automated retries
+
+#### Scenario: Exhausted retry document reported in job run report
+- **WHEN** a job run report is generated for a run where a document exhausted maximum retries
+- **THEN** the report row for that document contains status `Failed` with reason stating maximum retries were exhausted along with the failure node and error detail
