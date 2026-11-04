@@ -52,7 +52,7 @@ describe('fetchNodeFeatures', () => {
       http.post('/api/enrichFlowFeatures', () => HttpResponse.json(ENRICHED_RESPONSE))
     );
     const map = await fetchNodeFeatures(BASE_FLOW);
-    expect(map['node-1'].input_features).toEqual({ content: { type: 'string' } });
+    expect(map['node-1']?.input_features).toEqual({ content: { type: 'string' } });
   });
 
   it('maps output_features for each node', async () => {
@@ -60,7 +60,7 @@ describe('fetchNodeFeatures', () => {
       http.post('/api/enrichFlowFeatures', () => HttpResponse.json(ENRICHED_RESPONSE))
     );
     const map = await fetchNodeFeatures(BASE_FLOW);
-    expect(map['node-2'].output_features).toEqual({ embeddings: { type: 'array' } });
+    expect(map['node-2']?.output_features).toEqual({ embeddings: { type: 'array' } });
   });
 
   it('injects parameters: {} for nodes that lack it', async () => {
@@ -70,7 +70,7 @@ describe('fetchNodeFeatures', () => {
     server.use(
       http.post('/api/enrichFlowFeatures', async ({ request }) => {
         const body = await request.json() as typeof flowWithoutParams;
-        const node = body.pipelines[0].nodes[0] as Record<string, unknown>;
+        const node = body.pipelines[0]?.nodes[0] as Record<string, unknown>;
         expect(node['parameters']).toBeDefined();
         return HttpResponse.json({ pipelines: [{ nodes: [{ id: 'node-bare', parameters: {} }] }] });
       })

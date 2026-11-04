@@ -10,7 +10,7 @@ import { createTestStore } from '../../mocks/fixtures/store.fixture';
 function makeWrapper() {
   const store = createTestStore();
   const Wrapper = ({ children }: { children: React.ReactNode }) =>
-    React.createElement(Provider, { store }, children);
+    React.createElement(Provider as any, { store }, children);
   return { store, Wrapper };
 }
 
