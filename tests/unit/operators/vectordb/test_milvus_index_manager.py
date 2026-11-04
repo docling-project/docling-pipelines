@@ -1359,3 +1359,13 @@ class TestValidateVectorFeatureTypes:
     def test_sparse_mode_skips_check(self, mock_client):
         manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING", add_sparse_vector=True)
         manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_lite_with_binary_feature_and_flat_index_raises(self, mock_client):
+        """FLAT/L2 is valid for Lite, but a binary feature (quantization) still cannot be stored."""
+        manager = self._manager(mock_client, index_type="FLAT", metric_type="L2", is_lite=True)
+        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector_binary"})
+
+    def test_lite_with_dense_feature_passes(self, mock_client):
+        manager = self._manager(mock_client, index_type="FLAT", metric_type="L2", is_lite=True)
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})

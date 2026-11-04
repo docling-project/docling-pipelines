@@ -61,7 +61,7 @@ to packed 1-bit vectors for compact storage in Milvus binary indexes.
 | `provider` | string | **Yes** | `"litellm"` | Provider: `huggingface`, `litellm`, `watsonx` |
 | `provider_config` | object | Varies | — | Provider-specific config including `model_id` (see below) |
 | `embeddings_column` | string | No | `"embeddings"` | Output column name for generated embeddings |
-| `quantization` | string | No | `"none"` | `"none"`, `"binary"` or `"ubinary"`. `binary` and `ubinary` are equivalent: 1-bit sign thresholding (`value > 0`) packed 8 dimensions per byte. Best with zero-centred (e.g. normalized) embeddings; the output feature becomes `vector_binary` and its dimension is counted in bits |
+| `quantization` | string | No | `"none"` | `"none"`, `"binary"` or `"ubinary"`. `binary` and `ubinary` are equivalent: 1-bit sign thresholding (`value > 0`) packed 8 dimensions per byte. Best with zero-centred (e.g. normalized) embeddings; the output feature becomes `vector_binary` and its dimension is counted in bits. Set it on the embeddings node, not in `global_config`: flow validation reads only the node configuration |
 | `doc_column` | string | No | `"content"` | Input column containing text to embed |
 | `overlap_ratio` | float | No | `0.2` | Overlap ratio when auto-chunking long text (0.0–0.5) |
 | `token_limit` | integer | No | `8192` | Max token limit; text beyond this is auto-chunked and averaged |
@@ -234,6 +234,7 @@ Pair this node with a Milvus VectorDB node that uses `index_type: "BIN_FLAT"` or
 | `Invalid quantization '...'. Supported: ['none', 'binary', 'ubinary']` | Unsupported `quantization` value | Use `none`, `binary` or `ubinary` |
 | `OpenSearch Error: Binary vector features are not supported` | `quantization: binary` upstream of an OpenSearch VectorDB node | Remove `quantization` or use a Milvus VectorDB node |
 | `Binary index type '...' requires a binary vector feature, but none is available from upstream operators` | Milvus `BIN_*` `index_type` without `quantization: binary` on the embeddings node | Set `quantization` to `binary` or `ubinary` on the embeddings node, or use a dense `index_type` |
+| `Binary vector features are not supported by Milvus Lite` | `quantization: binary` upstream of a Milvus VectorDB node with `auth_type: lite` | Remove `quantization`, or use standalone Milvus or watsonx.data |
 
 ### API key best practice
 

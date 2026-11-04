@@ -233,19 +233,35 @@ class MilvusIndexManager:
     def validate_vector_feature_types(self, *, feature_types: dict[str, str | None]) -> None:
         """Check the index configuration against the vector feature types known before the run.
 
-        A ``BIN_*`` ``index_type`` needs at least one binary vector feature, which only exists when an
-        upstream operator emits one (e.g. embeddings with ``quantization: binary``). Without it the
-        collection cannot be created, so the mismatch is reported at validation time.
+        Milvus Lite cannot hold binary vectors, so a binary vector feature is rejected for Lite whatever the
+        ``index_type`` is. A ``BIN_*`` ``index_type`` needs at least one binary vector feature, which only
+        exists when an upstream operator emits one (e.g. embeddings with ``quantization: binary``). Without it
+        the collection cannot be created. Both mismatches are reported at validation time.
 
         Args:
             feature_types: Mapping of input feature name to its propagated feature type.
 
         Raises:
-            DocpipeException: A ``BIN_*`` index type is configured but no binary vector feature is available.
+            DocpipeException: Milvus Lite receives a binary vector feature, or a ``BIN_*`` index type is
+                configured but no binary vector feature is available.
         """
+        has_binary_feature = any(
+            is_binary_vector_feature(feature_config={"type": ftype}) for ftype in feature_types.values()
+        )
+        if self.is_lite and has_binary_feature:
+            raise DocpipeException(
+                message=(
+                    "MilvusDB Error: Binary vector features are not supported by Milvus Lite. "
+                    "Milvus Lite only supports dense vectors with FLAT index. "
+                    "Remove 'quantization' from the embeddings operator, or use standalone Milvus or "
+                    "watsonx.data for binary vector indexing."
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
         if self.add_sparse_vector or self.index_type not in MilvusIndexTypes.ALL_BINARY_TYPES:
             return
-        if any(is_binary_vector_feature(feature_config={"type": ftype}) for ftype in feature_types.values()):
+        if has_binary_feature:
             return
         raise DocpipeException(
             message=(

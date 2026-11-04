@@ -699,13 +699,13 @@ class TestEmbeddingsQuantizationSpecialCase:
             )
             return prop
 
-    def _propagate(self, propagator, operator_config: dict):
+    def _propagate(self, propagator, operator_config: dict, global_config: dict | None = None):
         return propagator.propagate_features(
             node_id="embed-node",
             operator_short_name=OperatorConstants.Operators.EMBEDDINGS,
             operator_config=operator_config,
             input_features={"content": _make_feature_def()},
-            global_config={},
+            global_config=global_config or {},
             parent_results=[],
         )
 
@@ -718,6 +718,12 @@ class TestEmbeddingsQuantizationSpecialCase:
     @pytest.mark.parametrize("config", [{}, {OperatorConstants.Config.QUANTIZATION: "none"}])
     def test_no_quantization_keeps_dense_vector_type(self, propagator, config):
         result = self._propagate(propagator, config)
+        feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
+        assert feature.type == OperatorConstants.Types.TYPE_VECTOR
+
+    def test_quantization_in_global_config_is_ignored(self, propagator):
+        """quantization is a node-level setting: a global_config value does not change the propagated type."""
+        result = self._propagate(propagator, {}, {OperatorConstants.Config.QUANTIZATION: "binary"})
         feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
         assert feature.type == OperatorConstants.Types.TYPE_VECTOR
 
