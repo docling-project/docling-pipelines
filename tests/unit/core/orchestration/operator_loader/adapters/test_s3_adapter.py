@@ -144,6 +144,8 @@ class TestDownloadAndLoad:
 
         adapter.clear_cache()
 
+        assert not cache.exists()
+
     def test_downloads_without_account_id(self, monkeypatch, bucket: FakeS3Client, tmp_path: Path) -> None:
         """When account ID cannot be resolved, downloads proceed without ExpectedBucketOwner."""
         monkeypatch.setattr(s3_adapter.boto3, "client", lambda service: bucket)

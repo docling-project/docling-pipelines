@@ -36,8 +36,8 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
         self._s3_client_cache: dict[tuple[str | None, ...], Any] = {}
         self._account_id_cache: dict[tuple[str | None, ...], str | None] = {}
 
-    @staticmethod
-    def is_available() -> bool:
+    @classmethod
+    def is_available(cls) -> bool:
         """Return True as boto3 is a core dependency."""
         return True
 
