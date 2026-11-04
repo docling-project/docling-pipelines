@@ -286,25 +286,15 @@ class JsonJobStatsStore(JobStatsStore):
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
-        lock_acquired = False
-        job_stats_found = False
         try:
             with lock.acquire(timeout=self._lock_timeout):
-                lock_acquired = True
-                result = self._read_job_stats_unlocked(job_run_id=job_run_id)
-                if result is not None:
-                    job_stats_found = True
-                return result
+                return self._read_job_stats_unlocked(job_run_id=job_run_id)
         except Timeout as e:
             raise JobStatsStoreReadException(
                 message=f"Failed to acquire lock for job stats read: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
                 operation="get_job_stats",
             ) from e
-        finally:
-            if lock_acquired and not job_stats_found and not self._get_job_dir(job_run_id=job_run_id).exists():
-                with contextlib.suppress(OSError):
-                    lock_path.unlink(missing_ok=True)
 
     def store_node_stats(self, *, job_run_id: str, node_stats: NodeStats) -> None:
         """
@@ -363,18 +353,14 @@ class JsonJobStatsStore(JobStatsStore):
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
-        lock_acquired = False
-        node_stats_dir_exists = False
         try:
             with lock.acquire(timeout=self._lock_timeout):
-                lock_acquired = True
                 result: list[NodeStats] = []
                 node_stats_dir = self._get_node_stats_dir(job_run_id=job_run_id)
 
                 if not node_stats_dir.exists():
                     return result
 
-                node_stats_dir_exists = True
                 try:
                     # Read all JSON files in node_stats directory
                     for json_file in node_stats_dir.glob("*.json"):
@@ -396,14 +382,6 @@ class JsonJobStatsStore(JobStatsStore):
                 job_run_id=job_run_id,
                 operation="get_node_stats",
             ) from e
-        finally:
-            if (
-                lock_acquired
-                and not node_stats_dir_exists
-                and not self._get_node_stats_dir(job_run_id=job_run_id).exists()
-            ):
-                with contextlib.suppress(OSError):
-                    lock_path.unlink(missing_ok=True)
 
     def get_batch_node_stats(self, *, job_run_id: str) -> dict[str, dict[str, NodeStats]]:
         """
@@ -423,18 +401,14 @@ class JsonJobStatsStore(JobStatsStore):
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
-        lock_acquired = False
-        node_stats_dir_exists = False
         try:
             with lock.acquire(timeout=self._lock_timeout):
-                lock_acquired = True
                 result: dict[str, dict[str, NodeStats]] = {}
                 node_stats_dir = self._get_node_stats_dir(job_run_id=job_run_id)
 
                 if not node_stats_dir.exists():
                     return result
 
-                node_stats_dir_exists = True
                 try:
                     # Read all JSON files with batch_id pattern
                     for json_file in node_stats_dir.glob("*_*.json"):
@@ -464,14 +438,6 @@ class JsonJobStatsStore(JobStatsStore):
                 job_run_id=job_run_id,
                 operation="get_batch_node_stats",
             ) from e
-        finally:
-            if (
-                lock_acquired
-                and not node_stats_dir_exists
-                and not self._get_node_stats_dir(job_run_id=job_run_id).exists()
-            ):
-                with contextlib.suppress(OSError):
-                    lock_path.unlink(missing_ok=True)
 
     def get_failed_docs_for_batch(self, *, job_run_id: str, batch_id: str) -> list[str]:
         """Retrieve failed document IDs for all nodes in a single batch."""
@@ -609,18 +575,14 @@ class JsonJobStatsStore(JobStatsStore):
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
-        lock_acquired = False
-        job_stats_found = False
         try:
             with lock.acquire(timeout=self._lock_timeout):
-                lock_acquired = True
                 # Use unlocked helpers — the lock is already held by this frame.
                 job_stats = self._read_job_stats_unlocked(job_run_id=job_run_id)
                 if not job_stats:
                     logger.warning("Job stats not found for atomic update: %s", job_run_id)
                     return
 
-                job_stats_found = True
                 # Apply increments
                 for field_name, increment_value in increments.items():
                     current_value = getattr(job_stats, field_name, 0)
@@ -647,10 +609,6 @@ class JsonJobStatsStore(JobStatsStore):
                 message=f"Failed to acquire lock for atomic update: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
             ) from e
-        finally:
-            if lock_acquired and not job_stats_found and not self._get_job_dir(job_run_id=job_run_id).exists():
-                with contextlib.suppress(OSError):
-                    lock_path.unlink(missing_ok=True)
 
     def get_node_stats_by_batch_and_node(
         self, job_run_id: str, node_id: str, batch_id: str | None = None
@@ -671,18 +629,14 @@ class JsonJobStatsStore(JobStatsStore):
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
-        lock_acquired = False
-        node_stats_found = False
         try:
             with lock.acquire(timeout=self._lock_timeout):
-                lock_acquired = True
                 path = self._get_node_stats_path(job_run_id=job_run_id, node_id=node_id, batch_id=batch_id)
                 data = self._read_json(path=path)
 
                 if data is None:
                     return None
 
-                node_stats_found = True
                 try:
                     return NodeStats(**data)
                 except Exception as e:
@@ -698,10 +652,6 @@ class JsonJobStatsStore(JobStatsStore):
                 job_run_id=job_run_id,
                 operation="get_node_stats_by_batch_and_node",
             ) from e
-        finally:
-            if lock_acquired and not node_stats_found and not self._get_node_stats_dir(job_run_id=job_run_id).exists():
-                with contextlib.suppress(OSError):
-                    lock_path.unlink(missing_ok=True)
 
     def delete_job_stats(self, job_run_id: str) -> None:
         """
@@ -722,11 +672,9 @@ class JsonJobStatsStore(JobStatsStore):
         job_lock = FileLock(str(job_lock_path), timeout=self._lock_timeout)
         node_lock = FileLock(str(node_lock_path), timeout=self._lock_timeout)
 
-        locks_acquired = False
         try:
             with job_lock.acquire(timeout=self._lock_timeout):
                 with node_lock.acquire(timeout=self._lock_timeout):
-                    locks_acquired = True
                     job_dir = self._get_job_dir(job_run_id=job_run_id)
 
                     if not job_dir.exists():
@@ -749,13 +697,6 @@ class JsonJobStatsStore(JobStatsStore):
                 message=f"Failed to acquire lock for job stats deletion: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
             ) from e
-        finally:
-            if locks_acquired:
-                # Best-effort cleanup of lock files after releasing locks.
-                # Done outside the lock blocks so the lock files are not held (critical on Windows).
-                for path in (job_lock_path, node_lock_path):
-                    with contextlib.suppress(OSError):
-                        path.unlink(missing_ok=True)
 
     def get_all_job_run_ids(self) -> list[str]:
         """

@@ -13,14 +13,16 @@ Tests cover:
 """
 
 import json
+import multiprocessing as mp
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from filelock import Timeout
+from filelock import FileLock, Timeout
 
 from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.adapters.stores.json.json_job_stats_store import (
@@ -32,6 +34,26 @@ from docpipe.exceptions.docpipe_exceptions import (
     JobStatsStoreReadException,
     JobStatsStoreWriteException,
 )
+
+
+def _mp_worker_hold_and_signal(lock_path_str: str, acquired_event, can_release_event, done_event) -> None:
+    """Worker process: acquires lock, signals acquisition, waits, then marks done."""
+    lock = FileLock(lock_path_str, timeout=10.0)
+    with lock:
+        acquired_event.set()
+        can_release_event.wait(timeout=5.0)
+        time.sleep(0.5)
+        done_event.set()
+
+
+def _mp_worker_contender(lock_path_str: str, start_event, overlap_flag, holder_done_event) -> None:
+    """Worker process: waits to start, acquires lock, and checks if previous holder is still running."""
+    start_event.wait(timeout=5.0)
+    lock = FileLock(lock_path_str, timeout=10.0)
+    with lock:
+        # If the other holder has not finished, two processes are in the critical section simultaneously!
+        if not holder_done_event.is_set():
+            overlap_flag.value = 1
 
 
 @pytest.fixture
@@ -508,10 +530,10 @@ class TestDeleteOperations:
         with pytest.raises(JobStatsStoreDeleteException, match="Job run not found: nonexistent"):
             store.delete_job_stats("nonexistent")
 
-    def test_delete_job_stats_cleans_up_lock_files_and_preserves_locks_dir(
+    def test_delete_job_stats_removes_job_dir_and_preserves_lock_identity(
         self, *, store, sample_job_stats, sample_node_stats, temp_data_dir
     ):
-        """delete_job_stats cleans up individual lock files while preserving .locks directory."""
+        """delete_job_stats removes job directory while preserving stable lock file in .locks/."""
         job_run_id = sample_job_stats.job_run_id
         store.store_job_stats(sample_job_stats)
         store.store_node_stats(job_run_id=job_run_id, node_stats=sample_node_stats)
@@ -530,26 +552,9 @@ class TestDeleteOperations:
         store.delete_job_stats(job_run_id)
         assert not job_dir.exists()
         assert locks_dir.exists()
-        assert not job_lock_path.exists()
-        assert not node_lock_path.exists()
-
-    def test_delete_job_stats_lock_cleanup_failure_is_suppressed(self, *, store, sample_job_stats):
-        """If unlinking lock files raises OSError, delete_job_stats still succeeds."""
-        job_run_id = sample_job_stats.job_run_id
-        store.store_job_stats(sample_job_stats)
-
-        orig_unlink = Path.unlink
-
-        def failing_unlink(path_obj, *args, **kwargs):
-            if str(path_obj).endswith(".lock"):
-                raise OSError("Simulated lock file unlink failure")
-            return orig_unlink(path_obj, *args, **kwargs)
-
-        with patch.object(Path, "unlink", side_effect=failing_unlink, autospec=True):
-            store.delete_job_stats(job_run_id)
-
-        job_dir = store._get_job_dir(job_run_id=job_run_id)
-        assert not job_dir.exists()
+        # Retaining stable lock file prevents split-inode mutual exclusion breakage across processes
+        assert job_lock_path.exists()
+        assert node_lock_path.exists()
 
     def test_concurrent_delete_job_stats_one_succeeds_one_raises(self, *, store, sample_job_stats):
         """Concurrent deletion: exactly one thread succeeds, the other raises not found."""
@@ -1596,51 +1601,87 @@ class TestLockLayoutAndSanitization:
         with pytest.raises(ValueError, match="Path traversal detected"):
             store.delete_job_stats("../../escape")
 
-    def test_read_nonexistent_job_does_not_create_lock_files(self, *, store, temp_data_dir):
-        """Reading nonexistent job or node stats must not leak empty lock files in .locks/."""
-        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
-        nonexistent_id = f"missing-{uuid.uuid4()}"
+    def test_multiprocess_unlink_breaks_mutual_exclusion(self, tmp_path):
+        """Demonstrates that unlinking a lock file after release breaks mutual exclusion across processes."""
+        ctx = mp.get_context("spawn")
+        lock_path = tmp_path / "hazard.lock"
 
-        assert store.get_job_stats(nonexistent_id) is None
-        assert store.get_node_stats(job_run_id=nonexistent_id) == []
-        assert store.get_batch_node_stats(job_run_id=nonexistent_id) == {}
-        assert store.get_node_stats_by_batch_and_node(nonexistent_id, "node1") is None
+        init_lock = FileLock(str(lock_path))
+        with init_lock:
+            pass
 
-        # .locks should either not exist or have no lock files for this id
-        if locks_dir.exists():
-            lock_files = list(locks_dir.glob(f"*{nonexistent_id}*"))
-            assert lock_files == []
+        b_acquired = ctx.Event()
+        a_unlinked = ctx.Event()
+        c_start = ctx.Event()
+        b_done = ctx.Event()
+        overlap = ctx.Value("i", 0)
 
-    def test_delete_nonexistent_job_cleans_up_acquired_locks(self, *, store, temp_data_dir):
-        """Deleting a nonexistent job raises not found but cleans up its lock files in finally block."""
-        nonexistent_id = f"missing-del-{uuid.uuid4()}"
-        safe_id = store._sanitize_lock_id(nonexistent_id)
-        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        p_b = ctx.Process(
+            target=_mp_worker_hold_and_signal,
+            args=(str(lock_path), b_acquired, a_unlinked, b_done),
+        )
+        p_c = ctx.Process(
+            target=_mp_worker_contender,
+            args=(str(lock_path), c_start, overlap, b_done),
+        )
 
-        with pytest.raises(JobStatsStoreDeleteException, match="Job run not found"):
-            store.delete_job_stats(nonexistent_id)
+        p_b.start()
+        p_c.start()
+        assert b_acquired.wait(timeout=5)
 
-        # Lock files created during acquire must be cleaned up
-        job_lock = locks_dir / f"{safe_id}_job_stats.lock"
-        node_lock = locks_dir / f"{safe_id}_node_stats.lock"
-        assert not job_lock.exists()
-        assert not node_lock.exists()
+        # Process A unlinks the lock file while Process B is actively holding it
+        lock_path.unlink()
+        a_unlinked.set()
 
-    def test_delete_job_stats_lock_timeout_does_not_unlink(self, *, store, sample_job_stats):
-        """When delete_job_stats times out acquiring lock, it does not unlink lock files."""
-        job_run_id = sample_job_stats.job_run_id
-        store.store_job_stats(sample_job_stats)
+        # Process C tries to acquire the same path (gets new inode)
+        c_start.set()
 
-        job_lock_path = store._get_job_stats_lock_path(job_run_id=job_run_id)
-        assert job_lock_path.exists()
+        p_b.join(timeout=5)
+        p_c.join(timeout=5)
 
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("Lock busy")
-            with pytest.raises(JobStatsStoreDeleteException, match="Failed to acquire lock"):
-                store.delete_job_stats(job_run_id)
+        # Hazard reproduced: Process C acquired concurrently with Process B
+        assert overlap.value == 1
 
-        # Because timeout occurred, lock files must NOT be unlinked
-        assert job_lock_path.exists()
+    def test_multiprocess_stable_lock_preserves_mutual_exclusion(self, tmp_path):
+        """Demonstrates that retaining stable lock files guarantees strict mutual exclusion across processes."""
+        ctx = mp.get_context("spawn")
+        lock_path = tmp_path / "stable.lock"
+
+        init_lock = FileLock(str(lock_path))
+        with init_lock:
+            pass
+
+        b_acquired = ctx.Event()
+        can_finish = ctx.Event()
+        c_start = ctx.Event()
+        b_done = ctx.Event()
+        overlap = ctx.Value("i", 0)
+
+        p_b = ctx.Process(
+            target=_mp_worker_hold_and_signal,
+            args=(str(lock_path), b_acquired, can_finish, b_done),
+        )
+        p_c = ctx.Process(
+            target=_mp_worker_contender,
+            args=(str(lock_path), c_start, overlap, b_done),
+        )
+
+        p_b.start()
+        p_c.start()
+        assert b_acquired.wait(timeout=5)
+
+        # Process A does NOT unlink lock_path. The lock path remains stable.
+        c_start.set()
+
+        # Give Process C time to attempt acquisition; it MUST wait until B finishes
+        time.sleep(0.1)
+        can_finish.set()
+
+        p_b.join(timeout=5)
+        p_c.join(timeout=5)
+
+        # No overlap: mutual exclusion is strictly preserved!
+        assert overlap.value == 0
 
 
 class TestAtomicWriteErrorHandling:
