@@ -68,6 +68,39 @@ class TestWeaviateBatchProcessor:
         assert "embeddings" in vecs
         assert vecs["embeddings"] == [0.1, 0.2, 0.3]
 
+    @pytest.mark.parametrize("add_sparse_vector", [True, False])
+    def test_prepare_document_never_stores_sparse_embeddings(
+        self, *, mock_client: MagicMock, add_sparse_vector: bool
+    ) -> None:
+        """A mapped sparse_embeddings value reaches neither properties nor vectors, with the flag on or off."""
+        processor = WeaviateBatchProcessor(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "content", "collection_column": "text"},
+                {"feature_name": "embeddings", "collection_column": "vector_embeddings"},
+                {"feature_name": "sparse_embeddings", "collection_column": "sparse_data"},
+            ],
+            available_features={
+                "content": {"type": "text"},
+                "embeddings": {"type": "vector"},
+                "sparse_embeddings": {"type": "vector_sparse"},
+            },
+            embeddings_column="embeddings",
+            add_sparse_vector=add_sparse_vector,
+        )
+
+        props, vecs = processor.prepare_document(
+            row_data={
+                "content": "hello",
+                "embeddings": [0.1, 0.2],
+                "sparse_embeddings": {"indices": [1], "values": [0.5]},
+            }
+        )
+
+        assert props == {"text": "hello"}
+        assert list(vecs) == ["vector_embeddings"]
+
     def test_create_batches_count_limit_and_uuid_determinism(self, *, mock_client: MagicMock) -> None:
         """Verify create_batches splits by batch_size and generates deterministic UUIDv5."""
         processor = WeaviateBatchProcessor(

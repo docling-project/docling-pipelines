@@ -98,7 +98,9 @@ class WeaviateBatchProcessor:
             if not feature_name or not mapped_name:
                 continue
 
-            if self.add_sparse_vector and feature_name == OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT:
+            # Weaviate has no field for sparse vectors (BM25 runs over the content property), so the
+            # mapping is accepted but never stored, whether or not add_sparse_vector is set.
+            if feature_name == OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT:
                 continue
 
             value = row_data.get(feature_name)

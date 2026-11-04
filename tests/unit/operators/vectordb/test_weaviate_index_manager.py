@@ -343,6 +343,94 @@ class TestWeaviateIndexManagerCollectionOperations:
         )
         manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
 
+    @pytest.mark.parametrize(
+        ("content_mapped", "content_available", "expected_content"),
+        [
+            (True, True, "body"),
+            (True, False, "body"),
+            (False, True, "text"),
+            (False, False, "text"),
+        ],
+    )
+    def test_create_collection_always_declares_a_word_tokenized_content_property(
+        self, *, mock_client: MagicMock, content_mapped: bool, content_available: bool, expected_content: str
+    ) -> None:
+        """The mapped content name is declared, else 'text', whether or not content exists upstream."""
+        mock_client.collections.exists.return_value = False
+        mappings = [{"feature_name": "doc_id_hash", "mapped_column_name": "pk"}]
+        if content_mapped:
+            mappings.append({"feature_name": "content", "mapped_column_name": "body"})
+        features: dict[str, dict] = {"doc_id_hash": {"type": "keyword", "is_primary": True}}
+        if content_available:
+            features["content"] = {"type": "text"}
+        manager = WeaviateIndexManager(
+            client=mock_client, collection_name="TestDocs", feature_mappings=mappings, available_features=features
+        )
+        manager.create_collection(dimension_mapping={})
+        properties = {p.name: p for p in mock_client.collections.create.call_args.kwargs["properties"]}
+        assert set(properties) == {"pk", expected_content}
+        assert properties[expected_content].tokenization == Tokenization.WORD
+        assert properties[expected_content].indexSearchable is True
+
+    def test_validate_existing_collection_canonical_property_name_keeps_interior_case(
+        self, *, mock_client: MagicMock
+    ) -> None:
+        """A property stored with a lower-cased first character is found; interior case is preserved."""
+        self._existing_collection(mock_client=mock_client, content_property="text", tokenization=Tokenization.WORD)
+        collection = mock_client.collections.get.return_value
+        extra = MagicMock()
+        extra.name = "Department"  # reported with the first letter as created
+        extra.data_type = DataType.TEXT
+        extra.tokenization = Tokenization.WORD
+        extra.index_filterable = True
+        extra.index_searchable = True
+        collection.config.get.return_value.properties.append(extra)
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "dept", "mapped_column_name": "department"},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+            ],
+            available_features={"doc_id_hash": {"type": "keyword", "is_primary": True}, "dept": {"type": "text"}},
+        )
+        manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
+        collection.config.add_property.assert_not_called()
+
+    def test_validate_existing_collection_rejects_case_only_spelling_conflict(self, *, mock_client: MagicMock) -> None:
+        """Mapping 'fileName' onto an existing 'filename' is rejected and nothing is added."""
+        self._existing_collection(mock_client=mock_client, content_property="text", tokenization=Tokenization.WORD)
+        collection = mock_client.collections.get.return_value
+        existing = MagicMock()
+        existing.name = "filename"
+        existing.data_type = DataType.TEXT
+        existing.tokenization = Tokenization.WORD
+        existing.index_filterable = True
+        existing.index_searchable = True
+        collection.config.get.return_value.properties.append(existing)
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "file", "mapped_column_name": "fileName"},
+                {"feature_name": "other", "mapped_column_name": "other_prop"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "file": {"type": "text"},
+                "other": {"type": "text"},
+            },
+        )
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 8})
+        message = str(exc_info.value)
+        assert "'fileName'" in message
+        assert "'filename'" in message
+        assert "letter case" in message
+        collection.config.add_property.assert_not_called()
+
     def test_create_collection_word_tokenizes_content_in_custom_column(self, *, mock_client: MagicMock) -> None:
         mock_client.collections.exists.return_value = False
         manager = WeaviateIndexManager(

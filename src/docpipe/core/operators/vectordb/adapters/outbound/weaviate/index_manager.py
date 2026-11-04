@@ -51,6 +51,9 @@ PROPERTY_NAME_REGEX = re.compile(r"^[a-zA-Z][_0-9a-zA-Z]*$")
 
 CONTENT_NAMES: tuple[str, ...] = ("content", "text")
 
+# Content property declared when no feature is mapped to document text (design D7).
+DEFAULT_CONTENT_PROPERTY: str = "text"
+
 DISTANCE_METRIC_MAP: dict[str, VectorDistances] = {
     "cosine": VectorDistances.COSINE,
     "dot": VectorDistances.DOT,
@@ -325,10 +328,10 @@ class WeaviateIndexManager:
             )
             added_props.add(col_name)
 
-        if not content_mapped and "content" in self.available_features and "content" not in added_props:
+        if not content_mapped and DEFAULT_CONTENT_PROPERTY not in added_props:
             properties.append(
                 Property(
-                    name="content",
+                    name=DEFAULT_CONTENT_PROPERTY,
                     data_type=DataType.TEXT,
                     tokenization=Tokenization.WORD,
                     index_filterable=True,
@@ -337,6 +340,11 @@ class WeaviateIndexManager:
             )
 
         return properties
+
+    @staticmethod
+    def canonical_property_name(name: str) -> str:
+        """Return the spelling the server stores: Weaviate lower-cases only the first character."""
+        return name[:1].lower() + name[1:]
 
     def create_collection(self, *, dimension_mapping: dict[str, int]) -> None:
         """Create a new Weaviate collection with configured properties and vectors."""
@@ -486,16 +494,25 @@ class WeaviateIndexManager:
                 )
 
         # 4-6. Scalar properties and tokenization checks (runs for all runs)
-        existing_props = {prop.name.lower(): prop for prop in (coll_cfg.properties or [])}
+        existing_props = {self.canonical_property_name(prop.name): prop for prop in (coll_cfg.properties or [])}
+        existing_by_casefold = {key.casefold(): key for key in existing_props}
 
         missing_props_to_add: list[Property] = []
         expected_properties = self._build_properties(dimension_mapping=dimension_mapping)
-        content_columns = self._content_columns() | set(CONTENT_NAMES)
+        content_columns = self._content_columns() | {DEFAULT_CONTENT_PROPERTY}
 
         for expected_prop in expected_properties:
-            prop_key = expected_prop.name.lower()
+            prop_key = self.canonical_property_name(expected_prop.name)
             if prop_key not in existing_props:
-                missing_props_to_add.append(expected_prop)
+                conflicting = existing_by_casefold.get(prop_key.casefold())
+                if conflicting is not None:
+                    errors.append(
+                        f"Property '{expected_prop.name}' conflicts with existing property '{conflicting}', "
+                        f"which differs only by letter case; Weaviate treats them as the same name. "
+                        f"Map the feature to '{conflicting}' or use a new collection name."
+                    )
+                else:
+                    missing_props_to_add.append(expected_prop)
                 continue
 
             existing_prop = existing_props[prop_key]
