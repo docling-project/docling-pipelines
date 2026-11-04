@@ -46,7 +46,10 @@ def mock_aggregator():
 
 @pytest.fixture
 def service(mock_store, mock_aggregator):
-    return JobTrackerService(job_stats_store=mock_store, node_stats_aggregator=mock_aggregator)
+    svc = JobTrackerService(job_stats_store=mock_store, node_stats_aggregator=mock_aggregator)
+    # No snapshot: keeps write_job_logs off real snapshot storage, whose cached config leaks into later tests
+    svc.get_flow_definition = Mock(return_value=None)
+    return svc
 
 
 def _node(node_id: str, name: str, start_time: int, end_time: int = 0) -> NodeStats:

@@ -42,8 +42,17 @@ def sort_dag_topologically(*, dag: list[dict]) -> list[dict]:
         adjacency[node["id"]]  # ensure every node is present even with no edges
         for edge in node.get(DocpipeConstants.OUTPUT_EDGES, []):
             child_id = edge.get(DocpipeConstants.NODE_ID_REF)
-            if child_id and child_id in by_id:
-                adjacency[node["id"]].append(child_id)
+            if not child_id or child_id not in by_id:
+                raise FlowValidationException(
+                    errors=[
+                        ValidationAlert(
+                            code=ErrorCode.FLOW_VALIDATION_FAILED.value,
+                            message=f"DAG node '{node['id']}' has edge referencing unknown node '{child_id}'",
+                            message_code="INVALID_NODE_REFERENCE",
+                        )
+                    ]
+                )
+            adjacency[node["id"]].append(child_id)
 
     in_degree: dict[str, int] = defaultdict(int)
     for node_id in adjacency:

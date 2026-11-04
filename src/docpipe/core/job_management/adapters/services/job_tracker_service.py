@@ -1376,24 +1376,12 @@ class JobTrackerService(JobStatsService):
 
             # Sort node_stats by topological order if snapshot is available, falling back to chronological order
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
-                node_stats = job_stats_dict["node_stats"]
-                job_run_id = job_stats_dict.get("job_run_id")
-                node_order: list[str] | None = None
-                if job_run_id:
-                    try:
-                        flow_def = self.get_flow_definition(job_run_id=job_run_id)
-                        if flow_def:
-                            from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
-
-                            node_order = get_topologically_sorted_node_ids(
-                                flow_definition=flow_def,
-                                node_stats=node_stats,
-                            )
-                    except Exception as e:
-                        logger.warning("Failed to determine topological node order for job log writing: %s", e)
-
+                # Local import to avoid circular dependency with dag_utils -> elyra_converter -> job_management
                 from docpipe.utils.orchestration.dag_utils import order_node_items
 
+                node_stats = job_stats_dict["node_stats"]
+                job_run_id = job_stats_dict.get("job_run_id")
+                node_order = self._resolve_node_order(job_run_id=job_run_id, node_stats=node_stats)
                 ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
                 job_stats_dict["node_stats"] = dict(ordered_items)
 
@@ -1461,18 +1449,7 @@ class JobTrackerService(JobStatsService):
         if not job_stats:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
-        node_order: list[str] | None = None
-        try:
-            flow_def = self.get_flow_definition(job_run_id=job_run_id)
-            if flow_def:
-                from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
-
-                node_order = get_topologically_sorted_node_ids(
-                    flow_definition=flow_def,
-                    node_stats=job_stats.node_stats,
-                )
-        except Exception as e:
-            logger.warning("Failed to determine topological node order for job_run_id %s: %s", job_run_id, e)
+        node_order = self._resolve_node_order(job_run_id=job_run_id, node_stats=job_stats.node_stats)
 
         # Delegate to mapper for enterprise-compatible model construction
         return JobStatsMapper.to_status_response(
@@ -1480,6 +1457,34 @@ class JobTrackerService(JobStatsService):
             include_logs=include_logs,
             node_order=node_order,
         )
+
+    def _resolve_node_order(
+        self,
+        *,
+        job_run_id: str | None,
+        node_stats: dict[str, Any] | None = None,
+    ) -> list[str] | None:
+        """Resolve topological node order from the flow snapshot for a job run."""
+        if not job_run_id:
+            return None
+        try:
+            # Local import to prevent circular import: job_tracker_service -> dag_utils -> elyra_converter -> abstract_operator -> operator_utils -> job_management
+            from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
+
+            flow_def = self.get_flow_definition(job_run_id=job_run_id)
+            if flow_def:
+                return get_topologically_sorted_node_ids(
+                    flow_definition=flow_def,
+                    node_stats=node_stats,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to determine topological node order for job_run_id %s: %s",
+                job_run_id,
+                e,
+                exc_info=True,
+            )
+        return None
 
     def get_flow_definition(self, *, job_run_id: str) -> dict[str, Any] | None:
         """

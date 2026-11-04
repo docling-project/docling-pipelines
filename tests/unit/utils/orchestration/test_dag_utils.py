@@ -323,6 +323,40 @@ class TestGetTopologicallySortedNodeIds:
         result = get_topologically_sorted_node_ids(flow_definition=flow_definition, node_stats=node_stats)
         assert result == ["node-1", "node-3"]
 
+    def test_elyra_format_returns_topologically_sorted_node_ids(self):
+        """Elyra pipeline format converts and returns topologically sorted node IDs."""
+        elyra_dag = [
+            {"id": "node-uuid-2", "name": "Extract", "output_edges": []},
+            {"id": "node-uuid-1", "name": "Ingest", "output_edges": [{"node_id_ref": "node-uuid-2"}]},
+        ]
+        elyra_flow_definition = {
+            "doc_type": "pipeline",
+            "pipelines": [{"id": "pipe-1", "nodes": []}],
+        }
+        mock_converter = MagicMock()
+        mock_converter.transform_elyra_to_internal.return_value = {"flow": {"dag": elyra_dag}}
+
+        with patch("docpipe.utils.orchestration.dag_utils.ElyraConverter", return_value=mock_converter):
+            result = get_topologically_sorted_node_ids(flow_definition=elyra_flow_definition)
+
+        assert result == ["node-uuid-1", "node-uuid-2"]
+
+    def test_authoring_format_when_no_names_match_returns_empty_list(self):
+        """Authoring flow when no operator names match node_stats returns an empty list."""
+        flow_definition = {
+            "flow": [
+                {"name": "Ingest", "type": "ingest_source", "depends_on": []},
+                {"name": "Extract", "type": "extract_operator", "depends_on": ["Ingest"]},
+            ]
+        }
+        # node_stats with completely unmatched names
+        node_stats = {
+            "uuid-1": SimpleNamespace(name="UnrelatedOp1", start_time=100),
+            "uuid-2": SimpleNamespace(name="UnrelatedOp2", start_time=200),
+        }
+        result = get_topologically_sorted_node_ids(flow_definition=flow_definition, node_stats=node_stats)
+        assert result == []
+
 
 class TestOrderNodeItems:
     """Test order_node_items helper."""

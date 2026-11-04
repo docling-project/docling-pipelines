@@ -2101,9 +2101,6 @@ class TestGetFormattedJobStats:
         self, *, job_tracker_service, mock_store, mock_aggregator
     ):
         """get_formatted_job_stats uses flow snapshot to order node_sequence topologically."""
-        from docpipe.core.job_management.domain.models.job_stats import JobStats
-        from docpipe.core.job_management.domain.models.node_stats import NodeStats
-
         node_ingest = "11111111-0000-0000-0000-000000000001"
         node_extract = "22222222-0000-0000-0000-000000000002"
         node_quality = "33333333-0000-0000-0000-000000000003"
@@ -2139,9 +2136,6 @@ class TestGetFormattedJobStats:
 
     def test_chronological_fallback_when_snapshot_missing(self, *, job_tracker_service, mock_store, mock_aggregator):
         """get_formatted_job_stats falls back to chronological sort when get_flow_definition returns None."""
-        from docpipe.core.job_management.domain.models.job_stats import JobStats
-        from docpipe.core.job_management.domain.models.node_stats import NodeStats
-
         node_1 = "11111111-0000-0000-0000-000000000001"
         node_2 = "22222222-0000-0000-0000-000000000002"
 
@@ -2155,6 +2149,29 @@ class TestGetFormattedJobStats:
         mock_aggregator.get_batch_node_stats.return_value = {}
 
         with patch.object(job_tracker_service, "get_flow_definition", return_value=None):
+            response = job_tracker_service.get_formatted_job_stats(job_run_id=JOB_RUN_ID)
+
+        assert response.node_sequence == [node_1, node_2]
+
+    def test_chronological_fallback_when_get_flow_definition_raises(
+        self, *, job_tracker_service, mock_store, mock_aggregator
+    ):
+        """get_formatted_job_stats falls back to chronological sort when get_flow_definition raises."""
+        node_1 = "11111111-0000-0000-0000-000000000001"
+        node_2 = "22222222-0000-0000-0000-000000000002"
+
+        node_stats = {
+            node_2: NodeStats(id=node_2, name="Node2", start_time=200, end_time=201),
+            node_1: NodeStats(id=node_1, name="Node1", start_time=100, end_time=101),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats)
+        mock_store.get_job_stats.return_value = job_stats
+        mock_aggregator.get_aggregated_node_stats.return_value = node_stats
+        mock_aggregator.get_batch_node_stats.return_value = {}
+
+        with patch.object(
+            job_tracker_service, "get_flow_definition", side_effect=RuntimeError("Store connection failed")
+        ):
             response = job_tracker_service.get_formatted_job_stats(job_run_id=JOB_RUN_ID)
 
         assert response.node_sequence == [node_1, node_2]

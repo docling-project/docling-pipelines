@@ -56,7 +56,7 @@ class TestJobStatsMapperToDto:
         }
         job_stats = _make_job_stats(node_stats)
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert list(dto.node_stats.keys()) == [NODE_A, NODE_B, NODE_C]
 
@@ -68,7 +68,7 @@ class TestJobStatsMapperToDto:
         }
         job_stats = _make_job_stats(node_stats)
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert list(dto.node_stats.keys()) == [NODE_A, NODE_B]
 
@@ -81,7 +81,7 @@ class TestJobStatsMapperToDto:
         }
         job_stats = _make_job_stats(node_stats)
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         keys = list(dto.node_stats.keys())
         apple_idx = keys.index(NODE_A)
@@ -97,7 +97,7 @@ class TestJobStatsMapperToDto:
         }
         job_stats = _make_job_stats(node_stats)
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert list(dto.node_stats.keys()) == [NODE_A, NODE_B, NODE_C]
 
@@ -106,7 +106,7 @@ class TestJobStatsMapperToDto:
         node_stats = {NODE_X: _make_node(NODE_X, "OnlyNode", start_time=500)}
         job_stats = _make_job_stats(node_stats)
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert NODE_X in dto.node_stats
         assert len(dto.node_stats) == 1
@@ -115,7 +115,7 @@ class TestJobStatsMapperToDto:
         """to_dto() with no nodes returns an empty node_stats dict."""
         job_stats = _make_job_stats({})
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.node_stats == {}
 
@@ -128,7 +128,7 @@ class TestJobStatsMapperToDto:
         job_stats.heartbeat_timestamp = 1704067260
         job_stats.progress_timestamp = 1704067200
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.job_id == JOB_ID
         assert dto.job_run_id == JOB_RUN_ID
@@ -146,7 +146,7 @@ class TestJobStatsMapperToDto:
         }
         job_stats = _make_job_stats(node_stats)
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.node_stats[NODE_1].id == NODE_1
         assert dto.node_stats[NODE_1].name == "First"
@@ -166,7 +166,7 @@ class TestJobStatsMapperToStatusResponse:
         }
         job_stats = _make_job_stats(node_stats)
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         assert response.node_sequence == [NODE_A, NODE_B, NODE_C]
 
@@ -179,7 +179,7 @@ class TestJobStatsMapperToStatusResponse:
         }
         job_stats = _make_job_stats(node_stats)
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         assert response.node_sequence == [NODE_A, NODE_B, NODE_C]
 
@@ -192,7 +192,7 @@ class TestJobStatsMapperToStatusResponse:
         }
         job_stats = _make_job_stats(node_stats)
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         metadata_ids = [item.id for item in response.node_metadata]
         assert metadata_ids == response.node_sequence
@@ -205,7 +205,7 @@ class TestJobStatsMapperToStatusResponse:
         }
         job_stats = _make_job_stats(node_stats)
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         assert response.node_metadata[0].operator == "Ingest"
         assert response.node_metadata[1].operator == "Chunker"
@@ -214,7 +214,7 @@ class TestJobStatsMapperToStatusResponse:
         """to_status_response() returns empty node_sequence for no nodes."""
         job_stats = _make_job_stats({})
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         assert response.node_sequence == []
         assert response.node_metadata == []
@@ -228,7 +228,7 @@ class TestJobStatsMapperToStatusResponse:
         }
         job_stats = _make_job_stats(node_stats)
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         assert list(response.job_stats.node_stats.keys()) == [NODE_A, NODE_B, NODE_C]
 
@@ -252,7 +252,7 @@ class TestJobStatsMapperToStatusResponse:
         job_stats = _make_job_stats(node_stats)
         topological_order = [node_ingest, node_extract, node_quality, node_chunk, node_embed]
 
-        response = JobStatsMapper.to_status_response(job_stats, node_order=topological_order)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats, node_order=topological_order)
 
         assert response.node_sequence == topological_order
         assert [m.id for m in response.node_metadata] == topological_order
@@ -272,7 +272,7 @@ class TestJobStatsMapperToStatusResponse:
         job_stats = _make_job_stats(node_stats)
         topological_order = [node_1, node_2]
 
-        response = JobStatsMapper.to_status_response(job_stats, node_order=topological_order)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats, node_order=topological_order)
 
         assert response.node_sequence == [node_1, node_2, node_extra]
 
@@ -284,7 +284,7 @@ class TestJobStatsMapperReportFields:
         """When domain model has no report fields set, DTO fields are None."""
         job_stats = _make_job_stats({})
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.report_status is None
         assert dto.report_generation_started_at is None
@@ -296,7 +296,7 @@ class TestJobStatsMapperReportFields:
         job_stats.report_status = "GENERATING"
         job_stats.report_generation_started_at = 1704067200
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.report_status == "GENERATING"
         assert dto.report_generation_started_at == 1704067200
@@ -309,7 +309,7 @@ class TestJobStatsMapperReportFields:
         job_stats.report_generation_started_at = 1704067200
         job_stats.report_generation_completed_at = 1704067260
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.report_status == "COMPLETED"
         assert dto.report_generation_started_at == 1704067200
@@ -321,7 +321,7 @@ class TestJobStatsMapperReportFields:
         job_stats.report_status = "FAILED"
         job_stats.report_generation_completed_at = 1704067260
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.report_status == "FAILED"
         assert dto.report_generation_completed_at == 1704067260
@@ -331,6 +331,6 @@ class TestJobStatsMapperReportFields:
         job_stats = _make_job_stats({})
         job_stats.report_status = "NOT_AVAILABLE"
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.report_status == "NOT_AVAILABLE"

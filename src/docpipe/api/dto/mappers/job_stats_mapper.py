@@ -8,7 +8,7 @@ JobStatsMapper module for converting JobStats domain models to enterprise-compat
 from docpipe.api.dto.job_run_dto import JobRunStatusResponse
 from docpipe.api.dto.job_stats_dto import JobStatsDto
 from docpipe.core.job_management.domain.models import JobStats
-from docpipe.utils.orchestration.dag_utils import get_node_sort_key, order_node_items
+from docpipe.utils.orchestration.dag_utils import order_node_items
 
 from .node_stats_mapper import NodeStatsMapper
 
@@ -20,13 +20,10 @@ MAX_DURATION_LIMIT_SECONDS = 31536000
 class JobStatsMapper:
     """Mapper for JobStats domain models to DTOs."""
 
-    _get_node_sort_key = staticmethod(get_node_sort_key)
-    _order_node_items = staticmethod(order_node_items)
-
     @staticmethod
-    def to_dto(job_stats: JobStats, *, node_order: list[str] | None = None) -> JobStatsDto:
+    def to_dto(*, job_stats: JobStats, node_order: list[str] | None = None) -> JobStatsDto:
         """Convert JobStats domain model to JobStatsDto with topologically or chronologically sorted node_stats."""
-        sorted_node_items = JobStatsMapper._order_node_items(
+        sorted_node_items = order_node_items(
             node_stats=job_stats.node_stats,
             node_order=node_order,
         )
@@ -84,8 +81,8 @@ class JobStatsMapper:
 
     @staticmethod
     def to_status_response(
-        job_stats: JobStats,
         *,
+        job_stats: JobStats,
         include_logs: bool = False,
         node_order: list[str] | None = None,
     ) -> JobRunStatusResponse:
@@ -103,7 +100,7 @@ class JobStatsMapper:
         from docpipe.api.dto.job_run_dto import JobRunStatusResponse
 
         # Calculate node_sequence (topological order if provided, otherwise chronological)
-        sorted_nodes = JobStatsMapper._order_node_items(
+        sorted_nodes = order_node_items(
             node_stats=job_stats.node_stats,
             node_order=node_order,
         )
@@ -113,7 +110,7 @@ class JobStatsMapper:
         node_metadata = [NodeStatsMapper.to_node_metadata_item(node_id, stats) for node_id, stats in sorted_nodes]
 
         # Convert to DTO with matching node ordering
-        job_stats_dto = JobStatsMapper.to_dto(job_stats, node_order=node_order)
+        job_stats_dto = JobStatsMapper.to_dto(job_stats=job_stats, node_order=node_order)
 
         response = JobRunStatusResponse(
             node_sequence=node_sequence, job_stats=job_stats_dto, node_metadata=node_metadata
