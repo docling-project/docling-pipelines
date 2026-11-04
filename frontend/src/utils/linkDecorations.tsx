@@ -100,7 +100,7 @@ export function applyAllLinkDecorations(
   controller: CanvasController,
   readOnly = false
 ): void {
-  const flow = controller.getPipelineFlow() as { pipelines?: Array<{ nodes?: PipelineNode[] }> } | undefined;
+  const flow = controller.getPipelineFlow() as unknown as { pipelines?: Array<{ nodes?: PipelineNode[] }> } | undefined;
   const nodes: PipelineNode[] = flow?.pipelines?.[0]?.nodes ?? [];
 
   const branchingNodeIds = new Set(

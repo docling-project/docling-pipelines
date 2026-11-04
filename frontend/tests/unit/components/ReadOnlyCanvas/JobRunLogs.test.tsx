@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import React from 'react';
 import { JobRunLogs } from '@/components/ReadOnlyCanvas/RunSidePanel/JobRunLogs/JobRunLogs';
 import type { JobRunStatusResponse } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
@@ -266,10 +265,6 @@ describe('JobRunLogs', () => {
       getBoundingClientRect: vi.fn(() => ({ top: 0, bottom: 500 })),
       scrollTop: 100,
       scrollTo: mockScrollTo,
-    };
-    const mockElement = {
-      getBoundingClientRect: vi.fn(() => ({ top: 600, bottom: 650 })),
-      closest: vi.fn(() => mockContainer),
     };
 
     // Spy on Element.prototype.closest before render so our mock is used
