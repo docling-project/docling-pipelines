@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for execute_flow() early-exit behaviour when the ingest table is empty.
 
@@ -74,7 +77,7 @@ def _run_execute_flow(orchestrator, op_flow, global_config, ingest_result):
         patch.object(PythonOrchestrator, "_get_ingest_summary_message", return_value=""),
         patch(
             "docpipe.core.orchestration.abstract_orchestrator.get_incremental_update_service",
-            return_value=MagicMock(),
+            return_value=MagicMock(get_soft_deleted_doc_ids=MagicMock(return_value=set())),
         ),
         patch("docpipe.core.orchestration.abstract_orchestrator.clean_up_prefect_home") as mock_cleanup,
         patch.object(PythonOrchestrator, "_finalize_dag_flow") as mock_finalize,
@@ -155,7 +158,7 @@ class TestExecuteFlowEmptyIngest:
             patch.object(PythonOrchestrator, "_get_ingest_summary_message", return_value=""),
             patch(
                 "docpipe.core.orchestration.abstract_orchestrator.get_incremental_update_service",
-                return_value=MagicMock(),
+                return_value=MagicMock(get_soft_deleted_doc_ids=MagicMock(return_value=set())),
             ),
             patch.object(orchestrator.batch_manager, "prepare_batches", return_value=([MagicMock()], {})),
             patch("docpipe.core.orchestration.abstract_orchestrator.clean_up_prefect_home"),

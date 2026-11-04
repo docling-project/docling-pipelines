@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 PostgreSQL-based implementation of IncrementalMetadataStore.
 
@@ -15,7 +18,7 @@ from typing import Any, cast
 
 from sqlalchemy import MetaData, delete, text
 from sqlalchemy import Table as SATable
-from sqlmodel import select
+from sqlmodel import col, select
 
 from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_factory import (
     register_incremental_update_store,
@@ -145,7 +148,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                 result = {
                     row.doc_id: {"modified_time": row.modified_time, "job_run_id": row.job_run_id} for row in rows
                 }
-                logger.debug(f"Retrieved {len(result)} processed docs for job_id={job_id}")
+                logger.debug("Retrieved %s processed docs for job_id=%s", len(result), job_id)
                 return result
 
         except Exception as exc:
@@ -175,7 +178,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                     session.add(model)
 
                 session.commit()
-                logger.info(f"Upserted {len(records)} records for job_id={job_id}")
+                logger.info("Upserted %s records for job_id=%s", len(records), job_id)
 
         except Exception as exc:
             raise FlowExecutionFailedException(f"Failed to upsert records for job_id={job_id}: {exc}") from exc
@@ -195,7 +198,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                     .all()
                 )
                 result = set(rows)
-                logger.debug(f"Retrieved {len(result)} soft-deleted docs for job_id={job_id}")
+                logger.debug("Retrieved %s soft-deleted docs for job_id=%s", len(result), job_id)
                 return result
 
         except Exception as exc:
@@ -233,7 +236,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                 session.commit()
 
                 if deleted_ids:
-                    logger.info(f"Marked {len(deleted_ids)} docs as deleted for job_id={job_id}")
+                    logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
 
                 return deleted_ids
 
@@ -241,6 +244,48 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
             raise FlowExecutionFailedException(
                 f"Failed to mark missing docs as deleted for job_id={job_id}: {exc}"
             ) from exc
+
+    def unmark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str] | None = None) -> None:
+        """Unmark soft-deleted documents, setting deleted flag back to False."""
+        try:
+            with self._session_factory() as session:
+                query = select(IncrementalMetadataPostgresModel).where(
+                    IncrementalMetadataPostgresModel.job_id == job_id,
+                    IncrementalMetadataPostgresModel.deleted == True,  # noqa: E712
+                )
+                if doc_ids is not None:
+                    query = query.where(col(IncrementalMetadataPostgresModel.doc_id).in_(doc_ids))
+
+                rows = session.execute(query).scalars().all()
+                for row in rows:
+                    row.deleted = False
+                    session.add(row)
+
+                session.commit()
+                if rows:
+                    logger.info("Unmarked %s soft-deleted docs for job_id=%s", len(rows), job_id)
+
+        except Exception as exc:
+            raise FlowExecutionFailedException(
+                f"Failed to unmark soft-deleted docs for job_id={job_id}: {exc}"
+            ) from exc
+
+    def purge_soft_deleted_docs(self, *, job_id: str) -> None:
+        """Permanently delete all soft-deleted records for a given job."""
+        try:
+            with self._session_factory() as session:
+                table_c = cast(SATable, IncrementalMetadataPostgresModel.__table__).c  # type: ignore[attr-defined]
+                session.execute(
+                    delete(IncrementalMetadataPostgresModel).where(
+                        table_c.job_id == job_id,
+                        table_c.deleted == True,  # noqa: E712
+                    )
+                )
+                session.commit()
+                logger.info("Purged soft-deleted records for job_id=%s", job_id)
+
+        except Exception as exc:
+            raise FlowExecutionFailedException(f"Failed to purge soft-deleted docs for job_id={job_id}: {exc}") from exc
 
     def delete_docs(self, *, job_id: str, doc_ids: list[str]) -> None:
         """Permanently delete metadata records for specified documents."""

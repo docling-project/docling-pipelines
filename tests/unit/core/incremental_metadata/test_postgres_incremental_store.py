@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for PostgreSQL-based incremental metadata store."""
 
 from contextlib import contextmanager
@@ -420,3 +423,64 @@ class TestClear:
         # The execute was called — job_id is passed via the SQLAlchemy expression;
         # what we can verify is that commit was called exactly once with no error.
         mock_session.commit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# unmark_soft_deleted_docs
+# ---------------------------------------------------------------------------
+
+
+class TestUnmarkSoftDeletedDocs:
+    def test_unmarks_all_when_doc_ids_none(self, *, store):
+        mock_row = MagicMock(deleted=True, doc_id="doc-1")
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalars.return_value.all.return_value = [mock_row]
+        store._session_factory = _session_factory_for(mock_session)
+
+        store.unmark_soft_deleted_docs(job_id="job-1")
+
+        assert mock_row.deleted is False
+        mock_session.commit.assert_called_once()
+
+    def test_unmarks_specific_doc_ids(self, *, store):
+        mock_row = MagicMock(deleted=True, doc_id="doc-1")
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalars.return_value.all.return_value = [mock_row]
+        store._session_factory = _session_factory_for(mock_session)
+
+        store.unmark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1"])
+
+        assert mock_row.deleted is False
+        mock_session.commit.assert_called_once()
+
+    def test_raises_flow_exception_on_db_error(self, *, store):
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = Exception("unmark failed")
+        store._session_factory = _session_factory_for(mock_session)
+
+        with pytest.raises(FlowExecutionFailedException, match="job-1"):
+            store.unmark_soft_deleted_docs(job_id="job-1")
+
+
+# ---------------------------------------------------------------------------
+# purge_soft_deleted_docs
+# ---------------------------------------------------------------------------
+
+
+class TestPurgeSoftDeletedDocs:
+    def test_executes_delete_and_commits(self, *, store):
+        mock_session = MagicMock()
+        store._session_factory = _session_factory_for(mock_session)
+
+        store.purge_soft_deleted_docs(job_id="job-1")
+
+        mock_session.execute.assert_called_once()
+        mock_session.commit.assert_called_once()
+
+    def test_raises_flow_exception_on_db_error(self, *, store):
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = Exception("purge failed")
+        store._session_factory = _session_factory_for(mock_session)
+
+        with pytest.raises(FlowExecutionFailedException, match="job-1"):
+            store.purge_soft_deleted_docs(job_id="job-1")
