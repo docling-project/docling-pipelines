@@ -41,7 +41,7 @@ op = DocIdHashOperator(config={
 
 | Column | Type | Description |
 | --- | --- | --- |
-| `doc_id_hash` | `string` | SHA-256 hex digest of the document content (via `dpk_doc_id.DocIDTransform`); 64 characters for string content. Used as the primary key in vector databases. |
+| `doc_id_hash` | `string` | Lowercase SHA-256 hex digest of the document content (via `dpk_doc_id.DocIDTransform`). 64 characters for string content; list-typed content yields a 16-character truncated digest. Size storage for up to 64 characters. Used as the primary key in vector databases. |
 
 ## Examples
 
