@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen, act } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { SampleProjectModal } from '@/components/Home/SampleProjectModal/SampleProjectModal';
 
