@@ -11,8 +11,7 @@ The DocIdHashOperator hashes each document's content using SHA-256 and writes th
 
 ## Key Features
 
-- Deterministic SHA-256 hashing — same content always produces the same 64-character hex hash
-- Automatic fallback from `dpk_doc_id.DocIDTransform` to `hashlib.sha256`
+- Deterministic SHA-256 hashing via `dpk_doc_id.DocIDTransform` — same content always produces the same hash
 - Invoked automatically by upstream operators; no manual configuration needed
 - Used as the primary key by `VectorDBOperator`
 
@@ -42,7 +41,7 @@ op = DocIdHashOperator(config={
 
 | Column | Type | Description |
 | --- | --- | --- |
-| `doc_id_hash` | `string` | 64-character SHA-256 hex digest of the document content. Used as the primary key in vector databases. |
+| `doc_id_hash` | `string` | SHA-256 hex digest of the document content (via `dpk_doc_id.DocIDTransform`); 64 characters for string content. Used as the primary key in vector databases. |
 
 ## Examples
 
