@@ -206,6 +206,8 @@ jobs:
     # the publish job.
     permissions:
       contents: read
+    outputs:
+      skip_review: ${{ steps.validate.outputs.skip_review }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         continue-on-error: true
@@ -218,7 +220,11 @@ jobs:
         continue-on-error: true
         with:
           name: ai-triage-context
-          path: .ai-triage
+          path: ${{ runner.temp }}/ai-triage
+
+      - name: Link triage context
+        continue-on-error: true
+        run: ln -s "${RUNNER_TEMP}/ai-triage" .ai-triage
 
       - name: Run Bob Shell (read-only mode)
         id: bob
@@ -235,6 +241,7 @@ jobs:
           output: ${{ runner.temp }}/bob-output.json
 
       - name: Validate the answer
+        id: validate
         continue-on-error: true
         if: steps.bob.outcome == 'success'
         env:
@@ -244,12 +251,20 @@ jobs:
           result="${RUNNER_TEMP}/ai-triage-result/result.json"
           python3 .github/scripts/ai_pr_triage.py extract \
             --bob-output "${RUNNER_TEMP}/bob-output.json" \
-            --context .ai-triage/context.json \
+            --context "${RUNNER_TEMP}/ai-triage/context.json" \
             --out "${result}" || exit 0
           # Defense in depth: never publish text that contains the API key.
-          if grep -qF -- "${BOB_API_KEY}" "${result}"; then
+          if [ -n "${BOB_API_KEY}" ] && grep -qF -- "${BOB_API_KEY}" "${result}"; then
             echo "::error::The answer contains the API key. It is discarded."
             rm -f "${result}"
+          fi
+          if python3 .github/scripts/ai_pr_review.py gate \
+              --triage-result "${result}" \
+              --context "${RUNNER_TEMP}/ai-triage/context.json"; then
+            echo "skip_review=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "The triage rated this PR as a duplicate. Skip review."
+            echo "skip_review=true" >> "${GITHUB_OUTPUT}"
           fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -310,7 +325,8 @@ jobs:
     if: >-
       always() &&
       needs.prepare.result == 'success' &&
-      needs.prepare.outputs.run_review == 'true'
+      needs.prepare.outputs.run_review == 'true' &&
+      (needs.context.outputs.force_review == 'true' || needs.analyze.outputs.skip_review != 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -330,35 +346,14 @@ jobs:
         continue-on-error: true
         with:
           name: ai-triage-context
-          path: .ai-triage
+          path: ${{ runner.temp }}/ai-triage
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Link review context
         continue-on-error: true
-        with:
-          name: ai-triage-result
-          path: ${{ runner.temp }}/ai-triage-result
-
-      - name: Skip duplicates
-        continue-on-error: true
-        id: gate
-        env:
-          FORCE_REVIEW: ${{ needs.context.outputs.force_review }}
-        run: |
-          if [ "${FORCE_REVIEW}" = "true" ]; then
-            echo "A maintainer asked for this review with /ai review."
-            echo "run=true" >> "${GITHUB_OUTPUT}"
-          elif python3 .github/scripts/ai_pr_review.py gate \
-              --triage-result "${RUNNER_TEMP}/ai-triage-result/result.json" \
-              --context .ai-triage/context.json; then
-            echo "run=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "The triage rated this PR as a duplicate. No AI review."
-            echo "run=false" >> "${GITHUB_OUTPUT}"
-          fi
+        run: ln -s "${RUNNER_TEMP}/ai-triage" .ai-triage
 
       - name: Run Bob Shell (read-only review mode)
         id: bob
-        if: steps.gate.outputs.run == 'true'
         continue-on-error: true
         timeout-minutes: 25
         uses: ./.github/actions/run-bobshell
@@ -381,9 +376,9 @@ jobs:
           result="${RUNNER_TEMP}/ai-review-result/review.json"
           python3 .github/scripts/ai_pr_review.py extract \
             --bob-output "${RUNNER_TEMP}/bob-review-output.json" \
-            --context-dir .ai-triage \
+            --context-dir "${RUNNER_TEMP}/ai-triage" \
             --out "${result}" || exit 0
-          if grep -qF -- "${BOB_API_KEY}" "${result}"; then
+          if [ -n "${BOB_API_KEY}" ] && grep -qF -- "${BOB_API_KEY}" "${result}"; then
             echo "::error::The review contains the API key. It is discarded."
             rm -f "${result}"
           fi
