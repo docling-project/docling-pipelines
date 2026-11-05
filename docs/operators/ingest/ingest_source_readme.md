@@ -468,7 +468,7 @@ The operator validates and filters files by extension using centralized constant
 - **Text**: MD, TXT, HTML, HTM, XHTML, MHTML, MHT, MARKDOWN, TEXT, QMD, RMD, TEX, LATEX, ADOC, ASCIIDOC, ASC, VTT
 - **Images**: PNG, JPEG, JPG, TIFF, TIF, BMP, WebP, GIF, JFIF
 - **Audio** (with ASR): WAV, MP3, M4A, AAC, OGG, FLAC
-- **Video**: MP4, AVI, MOV (conversion requires video dependencies and ffmpeg)
+- **Video**: MP4, AVI, MOV, MKV, WebM (conversion requires video dependencies and ffmpeg)
 
 **Filter Parameters:**
 - **include_filter**: Comma-separated list of extensions to include (e.g., "pdf,txt,docx")

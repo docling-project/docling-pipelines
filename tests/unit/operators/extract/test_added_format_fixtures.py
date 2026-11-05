@@ -10,7 +10,7 @@ import olefile
 import pytest
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "file_formats"
-EXTENSIONS = "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht markdown text qmd rmd pptm xlsm xltx xltm".split()
+EXTENSIONS = "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht markdown text qmd rmd pptm xlsm xltx xltm mkv webm".split()
 
 
 @pytest.mark.parametrize("extension", EXTENSIONS)

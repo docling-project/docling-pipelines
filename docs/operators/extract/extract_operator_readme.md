@@ -63,7 +63,7 @@ Local extraction supports CSV, EPUB, EML, MSG, LaTeX (`tex`, `latex`), AsciiDoc 
 
 Word variants `.dotx`, `.docm`, `.dotm` and PowerPoint variants `.potx`, `.ppsx`, `.potm`, `.ppsm` are not supported because Docling 2.142.1's underlying readers reject their internal content types.
 
-MKV and WebM are not supported for now. Direct Docling conversion transcribed one speech sample in each format using a real Whisper model without diarization, but broader codec coverage and end-to-end pipeline support have not been verified. Optional speaker diarization has a dependency incompatibility with the current setuptools version.
+MKV and WebM are supported for video transcription. Available codecs depend on the ffmpeg installation. Optional speaker diarization has a dependency incompatibility with the current setuptools version.
 
 `docling_serve` keeps the original PDF, DOCX, PPTX, XLSX, MD, TXT, HTML and image extensions. The additional document formats and audio/video formats are local-library only.
 
@@ -1054,7 +1054,7 @@ Install the optional group for audio and video processing:
 uv pip install -e '.[vlm_asr]'
 ```
 
-Audio support covers WAV, MP3, M4A, AAC, OGG, and FLAC when audio dependencies are available. MP4, AVI, and MOV files are accepted by extension; processing requires the video dependencies, an ASR model, and ffmpeg on `PATH`. Missing conversion dependencies are reported as document failures and do not disable audio processing.
+Audio support covers WAV, MP3, M4A, AAC, OGG, and FLAC when audio dependencies are available. MP4, AVI, MOV, MKV, and WebM files are accepted by extension; processing requires the video dependencies, an ASR model, and ffmpeg on `PATH`. Missing conversion dependencies are reported as document failures and do not disable audio processing.
 
 When the ASR pipeline is enabled, the selected ASR model is applied to both Docling audio and video input formats. If the model name is explicitly empty or null, video uses Docling's default model.
 
@@ -1064,7 +1064,7 @@ When the ASR pipeline is enabled, the selected ASR model is applied to both Docl
 
 **Required For:**
 - Audio formats: M4A, AAC, OGG, FLAC
-- All video formats: MP4, AVI, MOV
+- All video formats: MP4, AVI, MOV, MKV, WebM
 
 **Not Required For:**
 - Audio formats: WAV, MP3
@@ -1295,7 +1295,7 @@ Complete sample flows are available in [`sample_flows/`](../../../sample_flows/)
 - Install ffmpeg if missing:
   - macOS: `brew install ffmpeg`
   - Linux: `sudo apt install ffmpeg` or `sudo dnf install ffmpeg`
-- Supported formats requiring ffmpeg: M4A, AAC, OGG, FLAC (audio), MP4, AVI, MOV (video)
+- Supported formats requiring ffmpeg: M4A, AAC, OGG, FLAC (audio), MP4, AVI, MOV, MKV, WebM (video)
 - WAV and MP3 audio files do not require ffmpeg
 
 **Issue: Extraction workers stall or memory stays high after a job**

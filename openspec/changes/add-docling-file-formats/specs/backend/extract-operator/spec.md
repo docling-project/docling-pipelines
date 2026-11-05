@@ -33,12 +33,16 @@ The extraction operator in `docling_serve` mode SHALL continue to accept only th
 - **WHEN** the provider is `docling_serve` and the input `pa.Table` contains `data.csv` or `mail.eml`
 - **THEN** the documents are skipped during extension validation and recorded in `skipped_docs` metadata
 
-### Requirement: Exclude MKV and WebM from the current scope
-The extraction operator SHALL reject `.mkv` and `.webm` under the current scope decision. Direct Docling conversion succeeded for one real-model speech sample in each container without diarization. Optional diarization dependency compatibility, broader codec coverage, and end-to-end pipeline support remain unresolved; see the design for details.
+### Requirement: Support MKV and WebM video extraction
+The extraction operator SHALL accept `.mkv` and `.webm` with the `docling_library` provider and route them through the video conversion pipeline. Conversion errors SHALL be reported per document.
 
-#### Scenario: MKV and WebM are skipped
-- **WHEN** an input document has a `.mkv` or `.webm` extension
-- **THEN** it is skipped as unsupported and recorded in skipped document metadata
+#### Scenario: MKV and WebM are accepted
+- **WHEN** an input document has a `.mkv` or `.webm` extension and the provider is `docling_library`
+- **THEN** it proceeds to video conversion instead of being skipped as unsupported
+
+#### Scenario: MKV and WebM remain unsupported by Docling Serve
+- **WHEN** an input document has a `.mkv` or `.webm` extension and the provider is `docling_serve`
+- **THEN** it is skipped as unsupported
 
 #### Scenario: Video dependencies are unavailable but audio dependencies are installed
 - **WHEN** audio dependencies are available and a supported video document cannot be converted because video dependencies are missing

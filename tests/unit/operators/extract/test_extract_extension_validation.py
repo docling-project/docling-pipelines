@@ -404,7 +404,7 @@ def test_new_formats_respect_extraction_provider(provider, expected_skips):
     assert operator._validate_extensions(table=table, metadata=metadata) == expected_skips
     constants = OperatorConstants.FileExtensions
     assert {f".{ext}" for ext in extensions} <= set(constants.DOCLING_LIBRARY_BASE_EXTENSIONS)
-    assert not {".mkv", ".webm"} & set(constants.DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS)
+    assert {".mkv", ".webm"} <= set(constants.DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS)
     assert not ({f".{ext}" for ext in extensions} | {".mkv", ".webm"}) & set(constants.DOCLING_SERVE_EXTENSIONS)
 
 
@@ -412,7 +412,7 @@ def test_supported_video_remains_eligible_without_asr(docling_library_config):
     with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=False):
         extensions = ExtractOperator(config=docling_library_config)._get_supported_extensions()
     assert ".mp3" not in extensions
-    assert {".mp4", ".avi", ".mov"} <= extensions
+    assert {".mp4", ".avi", ".mov", ".mkv", ".webm"} <= extensions
 
 
 def test_document_format_precedes_filename_and_is_normalized(docling_library_config):
@@ -438,9 +438,11 @@ def test_unreadable_office_variants_are_skipped(extension, docling_library_confi
 
 
 @pytest.mark.parametrize("extension", ["mkv", "webm"])
-def test_new_video_formats_are_skipped_even_with_video_dependencies(extension, docling_library_config):
+@pytest.mark.parametrize("provider,expected", [("docling_library", set()), ("docling_serve", {0})])
+def test_new_video_formats_follow_provider_support(extension, provider, expected):
     table = pa.table({"id": ["1"], "name": [f"sample.{extension}"]})
-    operator = ExtractOperator(config=docling_library_config)
+    config = {"text_extraction": {"provider": provider, "provider_config": {"base_url": "http://localhost:5001"}}}
+    operator = ExtractOperator(config=config)
     metadata = operator.create_base_metadata(total_docs_count=1)
-    assert operator._validate_extensions(table=table, metadata=metadata) == {0}
-    assert metadata["skipped_docs_count"] == 1
+    assert operator._validate_extensions(table=table, metadata=metadata) == expected
+    assert metadata["skipped_docs_count"] == len(expected)

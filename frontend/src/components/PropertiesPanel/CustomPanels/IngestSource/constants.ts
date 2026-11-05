@@ -104,4 +104,6 @@ export const SUPPORTED_FILE_EXTENSIONS = [
   'mp4',
   'avi',
   'mov',
+  'mkv',
+  'webm',
 ] as const;

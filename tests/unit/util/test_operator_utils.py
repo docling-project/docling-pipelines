@@ -2353,8 +2353,8 @@ def test_supported_video_extensions_do_not_require_asr():
 
     with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=False):
         extensions = set(get_supported_file_extensions().split(","))
-    assert {"mp4", "avi", "mov"} <= extensions
-    assert not {"mp3", "mkv", "webm"} & extensions
+    assert {"mp4", "avi", "mov", "mkv", "webm"} <= extensions
+    assert "mp3" not in extensions
     with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=True):
         assert "mp3" in get_supported_file_extensions().split(",")
 

@@ -18,9 +18,9 @@ The supported file extension discovery helper SHALL return a comma-separated lis
 - **WHEN** supported extensions are discovered or include filters are validated
 - **THEN** `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, and `.ppsm` are not offered or accepted because Docling's underlying readers reject their internal content types
 
-#### Scenario: MKV and WebM are excluded
+#### Scenario: MKV and WebM are supported
 - **WHEN** supported extensions are discovered or include filters are validated
-- **THEN** `.mkv` and `.webm` are not offered or accepted under the current scope decision; direct real-model conversion succeeded for one speech sample in each container, but optional diarization dependency compatibility, broader codec coverage, and end-to-end pipeline support remain unresolved
+- **THEN** `.mkv` and `.webm` are offered and accepted independently of optional dependency imports
 
 #### Scenario: Video extensions are independent of optional dependency imports
 - **WHEN** video dependencies are unavailable

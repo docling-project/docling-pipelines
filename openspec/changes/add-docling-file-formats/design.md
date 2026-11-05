@@ -20,7 +20,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 
 ## Goals / Non-Goals
 
-**Excluded new video containers:** `.mkv` and `.webm` remain outside the current scope. Direct Docling conversion with a real Whisper model and diarization disabled successfully transcribed one locally generated speech sample in each container with `setuptools==84.1.0`. Optional speaker diarization remains affected by the dependency chain through `resemblyzer` and `webrtcvad`, which imports `pkg_resources` removed from that setuptools version. Downgrading setuptools would introduce a known security issue. The direct tests do not establish broader codec coverage or end-to-end pipeline support.
+**Video containers:** Support `.mkv` and `.webm` alongside `.mp4`, `.avi`, and `.mov`. Filesystem ingest followed by Docling extraction using a real Whisper model and diarization disabled successfully transcribed one locally generated speech sample in each container with `setuptools==84.1.0`. Optional speaker diarization remains affected by the dependency chain through `resemblyzer` and `webrtcvad`, which imports `pkg_resources` removed from that setuptools version. Downgrading setuptools would introduce a known security issue. Support still depends on the codecs available to ffmpeg and the installed speech model.
 
 **Excluded Office variants:** `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, and `.ppsm` are not supported in ingestion, extraction, classification, or UI filters. Docling 2.142.1 recognizes the extensions but its Word and PowerPoint libraries reject the corresponding internal content types. No package rewriting or macro execution is introduced. `.pptm`, `.xlsm`, `.xltx`, and `.xltm` remain in scope.
 

@@ -11,3 +11,6 @@ The files are intentionally small and contain no real personal data. A static
 inspection checked the Office and EPUB archives for VBA projects, embedded
 objects, external links and ActiveX parts, and the MSG compound file for
 attachments. This inspection is not an antivirus scan.
+
+The MKV and WebM fixtures were generated locally from synthetic speech and a
+plain video frame using ffmpeg. They contain no real personal data.

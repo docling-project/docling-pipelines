@@ -593,6 +593,8 @@ class OperatorConstants:
         EXT_MP4: Final[str] = ".mp4"
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
+        EXT_MKV: Final[str] = ".mkv"
+        EXT_WEBM: Final[str] = ".webm"
 
         # Archive formats (filesystem ingest only)
         ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
@@ -651,6 +653,8 @@ class OperatorConstants:
             EXT_MP4,
             EXT_AVI,
             EXT_MOV,
+            EXT_MKV,
+            EXT_WEBM,
         ]
 
         AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_EXTENSIONS, *VIDEO_EXTENSIONS]

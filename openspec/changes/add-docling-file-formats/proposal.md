@@ -28,6 +28,7 @@ Docling `2.142.1` natively supports a much broader set of pure-Python document f
   - Expand `CLASSIFICATION_FILE_EXTENSIONS` with the Tier 1 formats except the plain-markdown variants (`.markdown`, `.text`, `.qmd`, `.rmd`), consistent with `.md` and `.txt` already being excluded.
   - Fix `get_supported_file_extensions()` in `src/docpipe/core/operators/operator_utils.py` so it copies `BASE_EXTENSIONS` (`[*OperatorConstants.FileExtensions.BASE_EXTENSIONS]`) instead of mutating the class-level constant list in-place when ASR is available.
 - **Tier 4 video format completion & `InputFormat.VIDEO` pipeline fix**:
+  - Add `.mkv` and `.webm` to the existing supported video formats for local extraction and ingest filters.
   - Add `docling-slim[format-video]==2.142.1` to the `vlm_asr` extra, regenerate `uv.lock`, and sync the development environment. Recognize supported video extensions without a separate dependency probe; report missing conversion dependencies per document and keep audio independent.
   - Fix `OperatorUtils.extract_content()` so `audio_video_suffixes` unions both `FormatToExtensions[InputFormat.AUDIO]` and `FormatToExtensions[InputFormat.VIDEO]`, and write the payload to a uniquely named file inside a `tempfile.TemporaryDirectory` (not the process working directory) before invoking `converter.convert()`.
   - Update `DoclingAdapter` (`extract_single_document()` and `_build_gpu_converter_config()`) so that when `use_asr_pipeline` is enabled and Docling video classes can be imported, `InputFormat.VIDEO` is also configured via `VideoFormatOption` / `VideoPipeline` / `VideoPipelineOptions` with `generate_frame_images=False` and, when `asr_model_name` is set, the selected ASR model spec.
@@ -39,8 +40,6 @@ Docling `2.142.1` natively supports a much broader set of pure-Python document f
   - Update `SUPPORTED_FILE_EXTENSIONS` feeding the `include_filter` / `exclude_filter` `FilterableMultiSelect` controls to match the expanded backend `AUDIO_VIDEO_EXTENSIONS` and `BASE_EXTENSIONS`. No frontend spec delta.
 
 ## Non-goals
-
-- Supporting `.mkv` and `.webm` is outside the current scope. Direct Docling conversion of one locally generated speech sample in each container succeeded with a real Whisper model and diarization disabled, using the existing setuptools pin. Optional speaker diarization still has a dependency incompatibility: `resemblyzer` and `webrtcvad` depend on `pkg_resources`, which is absent from that setuptools version. Broader codec coverage and end-to-end pipeline support have not been verified; downgrading setuptools would introduce a known security issue.
 
 - Supporting `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, and `.ppsm`: Docling 2.142.1 advertises these extensions, but its Word and PowerPoint readers reject their internal content types. Do not normalize or rewrite the Office packages as a workaround.
 

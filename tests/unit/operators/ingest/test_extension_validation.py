@@ -181,6 +181,18 @@ def test_unreadable_office_variants_are_not_accepted_in_include_filter(tmp_path,
 
 
 @pytest.mark.parametrize("extension", ["mkv", "webm"])
-def test_new_video_formats_are_not_accepted_in_include_filter(tmp_path, extension):
-    with pytest.raises(ValueError, match="Unsupported file extensions"):
-        IngestSourceOperator(_filesystem_config(tmp_path, include_filter=extension))
+def test_new_video_formats_are_accepted_in_include_filter(tmp_path, extension):
+    operator = IngestSourceOperator(_filesystem_config(tmp_path, include_filter=extension))
+    assert operator.included_extensions == [f".{extension}"]
+
+
+@pytest.mark.parametrize("extension", ["mkv", "webm"])
+def test_filesystem_ingests_video_fixtures(tmp_path, extension):
+    from pathlib import Path
+    from shutil import copyfile
+
+    fixtures = Path(__file__).resolve().parents[3] / "fixtures" / "file_formats"
+    copyfile(fixtures / f"sample.{extension}", tmp_path / f"sample.{extension}")
+    config = {"provider": "filesystem", "provider_config": {"paths": [str(tmp_path)]}, "force_ingest": True}
+    tables, _ = IngestSourceOperator(config).transform(None)
+    assert f"sample.{extension}" in tables[0]["name"].to_pylist()
