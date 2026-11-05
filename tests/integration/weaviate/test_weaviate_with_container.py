@@ -389,7 +389,7 @@ def test_new_collection_is_created_and_chunks_are_written(
     assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
     assert count(sdk, collection_name) == 6
     cfg = sdk.collections.get(collection_name).config.get()
-    assert list(cfg.vector_config) == ["vector_embeddings"]
+    assert list(cfg.vector_config or {}) == ["vector_embeddings"]
     for obj in stored(sdk, collection_name, vectors=True):
         assert len(obj.vector["vector_embeddings"]) == DENSE_DIM
         assert obj.properties["text"]
@@ -406,7 +406,7 @@ def test_two_dense_columns_create_two_named_vectors(
 
     assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
     cfg = sdk.collections.get(collection_name).config.get()
-    assert sorted(cfg.vector_config) == ["vector_embeddings", "vector_embeddings_alt"]
+    assert sorted(cfg.vector_config or {}) == ["vector_embeddings", "vector_embeddings_alt"]
     for obj in stored(sdk, collection_name, vectors=True):
         assert len(obj.vector["vector_embeddings"]) == DENSE_DIM
         assert len(obj.vector["vector_embeddings_alt"]) == ALT_DIM
@@ -638,7 +638,7 @@ def test_sparse_and_dense_collection_answers_keyword_and_hybrid_queries(
         query=target, vector=vector, target_vector="vector_embeddings", limit=5
     ).objects
     assert hybrid_hits
-    assert target in hybrid_hits[0].properties["text"]
+    assert target in str(hybrid_hits[0].properties["text"])
 
 
 def _sparse_only_table() -> pa.Table:
@@ -657,7 +657,7 @@ def test_sparse_only_run_creates_a_keyword_only_collection(
 
     assert first[Metrics.External.NODE_STATUS] != ExecutionStatus.FAILED.value
     collection = sdk.collections.get(collection_name)
-    vector_config = collection.config.get().vector_config
+    vector_config = collection.config.get().vector_config or {}
     assert list(vector_config) == ["keyword_only"]
     assert all(getattr(v.vector_index_config, "skip", False) for v in vector_config.values())
     assert count(sdk, collection_name) == 3
@@ -681,7 +681,7 @@ def test_hand_made_keyword_only_collection_serves_sparse_runs_but_not_dense_runs
     )
     cfg = sdk.collections.get(collection_name).config.get()
     assert not cfg.vector_config
-    assert cfg.vector_index_config.skip is True
+    assert getattr(cfg.vector_index_config, "skip", None) is True
 
     sparse = run(
         config=vectordb_config(server=server, collection=collection_name, embeddings=(), sparse=True),
