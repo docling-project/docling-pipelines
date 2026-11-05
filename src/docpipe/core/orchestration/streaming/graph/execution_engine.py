@@ -57,13 +57,14 @@ class GraphExecutionEngine:
                     operator_output = self._execute_simple_node(node=node, input_table=input_table)
                 self._raise_if_node_failed(node=node, metadata=operator_output.metadata)
                 self.output_buffer.put_output(node_id=node_id, output=operator_output)
+                node = None
 
             terminal_ids = [
                 node_id for node_id in self.ordered_operator_ids if not self.flow_graph.get_output_edges(node_id)
             ]
             return {node_id: self.output_buffer.get_output(node_id) for node_id in terminal_ids}
         except Exception as exc:
-            context = f"node_id={node.id} node={node.name} operator={node.operator_name}" if node else ""
+            context = f"node_id={node.id} node={node.name} operator={node.operator_name}" if node else "Graph execution"
             raise FlowExecutionFailedException(f"{context}: {exc}") from exc
         finally:
             self.output_buffer.clear()
