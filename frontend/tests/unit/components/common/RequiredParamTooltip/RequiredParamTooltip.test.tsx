@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import React from 'react';
 import { RequiredParamTooltip } from '@/components/common/RequiredParamTooltip/RequiredParamTooltip';
 import type { OperatorFeature } from '@/types';
 
@@ -25,30 +24,26 @@ const optionalAttr: OperatorFeature = {
 describe('RequiredParamTooltip', () => {
   it('isRequired: true → appends "(required)" to label text', () => {
     render(
-      React.createElement(
-        RequiredParamTooltip,
-        {
-          paramId: 'provider',
-          nodeAttributes: { provider: requiredAttr },
-          definition: 'Choose provider',
-        },
-        'Provider'
-      )
+      <RequiredParamTooltip
+        paramId="provider"
+        nodeAttributes={{ provider: requiredAttr }}
+        definition="Choose provider"
+      >
+        Provider
+      </RequiredParamTooltip>
     );
     expect(screen.getByText(/\(required\)/)).toBeDefined();
   });
 
   it('isRequired: false → no "(required)" indicator', () => {
     render(
-      React.createElement(
-        RequiredParamTooltip,
-        {
-          paramId: 'name',
-          nodeAttributes: { name: optionalAttr },
-          definition: 'Enter name',
-        },
-        'Name'
-      )
+      <RequiredParamTooltip
+        paramId="name"
+        nodeAttributes={{ name: optionalAttr }}
+        definition="Enter name"
+      >
+        Name
+      </RequiredParamTooltip>
     );
     expect(screen.queryByText('(required)')).toBeNull();
   });

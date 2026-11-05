@@ -17,6 +17,7 @@ import {
   ErrorFilled,
   WarningAltFilled,
   InformationFilled,
+  type CarbonIconType,
 } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import { useAppSelector } from '@/hooks/useAppSelector';
@@ -35,15 +36,15 @@ interface NotificationHistoryProps {
 // ─── Kind → icon + CSS class ──────────────────────────────────────────────────
 
 type KindMeta = {
-  Icon: React.ComponentType<{ size?: number; className?: string }>;
+  Icon: CarbonIconType;
   iconClass: string;
 };
 
 const KIND_META: Record<Notification['kind'], KindMeta> = {
-  success: { Icon: CheckmarkFilled,   iconClass: styles.iconSuccess },
-  error:   { Icon: ErrorFilled,       iconClass: styles.iconError   },
-  warning: { Icon: WarningAltFilled,  iconClass: styles.iconWarning },
-  info:    { Icon: InformationFilled, iconClass: styles.iconInfo    },
+  success: { Icon: CheckmarkFilled,   iconClass: styles.iconSuccess ?? '' },
+  error:   { Icon: ErrorFilled,       iconClass: styles.iconError ?? ''   },
+  warning: { Icon: WarningAltFilled,  iconClass: styles.iconWarning ?? '' },
+  info:    { Icon: InformationFilled, iconClass: styles.iconInfo ?? ''    },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
