@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 from docpipe.utils.orchestration.dag_utils import (
     extract_dag_nodes,
     get_topologically_sorted_node_ids,
+    map_node_order_to_stats,
     order_node_items,
 )
 
@@ -356,6 +357,52 @@ class TestGetTopologicallySortedNodeIds:
         }
         result = get_topologically_sorted_node_ids(flow_definition=flow_definition, node_stats=node_stats)
         assert result == []
+
+    def test_nested_runtime_dag_under_flow_key_is_sorted(self):
+        """Compiled flow saved whole ({"flow": {"dag": [...]}}) is treated as runtime, not authoring."""
+        flow_definition = {
+            "flow": {
+                "id": "flow-1",
+                "name": "nested",
+                "global_config": {},
+                "dag": [
+                    {"id": "node-2", "output_edges": [{"node_id_ref": "node-3"}]},
+                    {"id": "node-3", "output_edges": []},
+                    {"id": "node-1", "output_edges": [{"node_id_ref": "node-2"}]},
+                ],
+            }
+        }
+        node_stats: dict[str, dict] = {"node-3": {}, "node-1": {}, "node-2": {}}
+
+        result = get_topologically_sorted_node_ids(flow_definition=flow_definition, node_stats=node_stats)
+
+        assert result == ["node-1", "node-2", "node-3"]
+
+    def test_without_node_stats_authoring_returns_operator_names(self):
+        """Unfiltered order for an authoring snapshot is operator names (mapped to UUIDs later)."""
+        flow_definition = {
+            "flow": [
+                {"name": "Extract", "depends_on": ["Ingest"]},
+                {"name": "Ingest", "depends_on": []},
+            ]
+        }
+
+        assert get_topologically_sorted_node_ids(flow_definition=flow_definition) == ["Ingest", "Extract"]
+
+
+class TestMapNodeOrderToStats:
+    """Test map_node_order_to_stats helper."""
+
+    def test_keeps_ids_maps_names_and_drops_unknown(self):
+        """IDs present in node_stats pass through, operator names map to UUIDs, others are dropped."""
+        node_stats = {
+            "uuid-ingest": SimpleNamespace(name="Ingest"),
+            "uuid-extract": {"name": "Extract"},
+        }
+
+        result = map_node_order_to_stats(node_order=["Ingest", "uuid-extract", "Missing"], node_stats=node_stats)
+
+        assert result == ["uuid-ingest", "uuid-extract"]
 
 
 class TestOrderNodeItems:

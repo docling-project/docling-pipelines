@@ -253,15 +253,16 @@ def get_topologically_sorted_node_ids(
 ) -> list[str]:
     """Extract and topologically sort node IDs from a flow definition snapshot.
 
-    For runtime and Elyra flow formats, sorts the complete DAG definition first
-    and filters to nodes present in node_stats (if provided).
-    For authoring flow formats, sorts the full authoring DAG by operator name
-    and maps the sorted names to the real node UUIDs from node_stats.
-    This guarantees that intermediate skipped or failed nodes missing from
-    node_stats do not break the relative topological ordering of remaining nodes.
+    The full DAG is sorted first, so intermediate skipped or failed nodes missing
+    from node_stats do not break the relative topological ordering of remaining nodes.
+    Without node_stats, the result is the unfiltered snapshot order: node IDs for
+    runtime and Elyra formats, operator names for the authoring format. That order
+    depends only on the immutable snapshot, so callers may cache it per job run and
+    map it with :func:`map_node_order_to_stats` as node_stats grows.
 
     Args:
-        flow_definition: Flow definition snapshot dict (Runtime, Authoring, or Elyra format).
+        flow_definition: Flow definition snapshot dict (Runtime, nested Runtime
+            ``{"flow": {"dag": [...]}}``, Authoring, or Elyra format).
         node_stats: Optional node stats mapping keyed by node_id.
 
     Returns:
@@ -270,44 +271,57 @@ def get_topologically_sorted_node_ids(
     if not flow_definition:
         return []
     try:
-        from docpipe.utils.orchestration.flow_utils import sort_dag_topologically
-
-        # Runtime DAG format
-        dag = flow_definition.get(DocpipeConstants.DAG)
-        if isinstance(dag, list):
-            if not dag:
-                return []
-            sorted_nodes = sort_dag_topologically(dag=dag)
-            sorted_ids = [node[OperatorConstants.Misc.ID] for node in sorted_nodes if OperatorConstants.Misc.ID in node]
-            if node_stats is not None:
-                return [nid for nid in sorted_ids if nid in node_stats]
-            return sorted_ids
-
-        # Elyra / CPD pipeline format
-        if flow_definition.get(ElyraConstants.DOC_TYPE) == "pipeline" and ElyraConstants.PIPELINES in flow_definition:
-            converted = _convert_elyra_to_dag(flow_definition=flow_definition)
-            if converted:
-                sorted_nodes = sort_dag_topologically(dag=converted)
-                sorted_ids = [
-                    node[OperatorConstants.Misc.ID] for node in sorted_nodes if OperatorConstants.Misc.ID in node
-                ]
-                if node_stats is not None:
-                    return [nid for nid in sorted_ids if nid in node_stats]
-                return sorted_ids
-
-        # Authoring format
-        if DocpipeConstants.FLOW in flow_definition:
-            authoring_ops = flow_definition.get(DocpipeConstants.FLOW, [])
-            sorted_names = _sort_authoring_ops_topologically(authoring_ops)
-            if node_stats is not None:
-                name_to_uuid = _build_name_to_uuid(node_stats)
-                return [name_to_uuid[name] for name in sorted_names if name in name_to_uuid]
-            return sorted_names
-
-        return []
+        node_order = _sort_snapshot_node_keys(flow_definition=flow_definition)
     except Exception as exc:
         logger.warning("Failed to topologically sort flow snapshot nodes: %s", exc)
         return []
+    if node_stats is None:
+        return node_order
+    return map_node_order_to_stats(node_order=node_order, node_stats=node_stats)
+
+
+def _sort_snapshot_node_keys(*, flow_definition: dict[str, Any]) -> list[str]:
+    """Return snapshot node keys in topological order: node IDs, or operator names for authoring flows."""
+    from docpipe.utils.orchestration.flow_utils import sort_dag_topologically
+
+    # Runtime DAG format, either top-level or nested under "flow" (compiled flow saved whole)
+    dag = flow_definition.get(DocpipeConstants.DAG)
+    nested_flow = flow_definition.get(DocpipeConstants.FLOW)
+    if dag is None and isinstance(nested_flow, dict):
+        dag = nested_flow.get(DocpipeConstants.DAG)
+    if isinstance(dag, list):
+        sorted_nodes = sort_dag_topologically(dag=dag) if dag else []
+        return [node[OperatorConstants.Misc.ID] for node in sorted_nodes if OperatorConstants.Misc.ID in node]
+
+    # Elyra / CPD pipeline format
+    if flow_definition.get(ElyraConstants.DOC_TYPE) == "pipeline" and ElyraConstants.PIPELINES in flow_definition:
+        converted = _convert_elyra_to_dag(flow_definition=flow_definition)
+        if not converted:
+            return []
+        sorted_nodes = sort_dag_topologically(dag=converted)
+        return [node[OperatorConstants.Misc.ID] for node in sorted_nodes if OperatorConstants.Misc.ID in node]
+
+    # Authoring format
+    if isinstance(nested_flow, list):
+        return _sort_authoring_ops_topologically(nested_flow)
+
+    return []
+
+
+def map_node_order_to_stats(*, node_order: list[str], node_stats: dict[str, Any]) -> list[str]:
+    """Map a snapshot node order onto node_stats keys.
+
+    Node IDs present in node_stats are kept as-is; authoring operator names are
+    translated to their node UUIDs. Entries matching neither are dropped.
+    """
+    name_to_uuid = _build_name_to_uuid(node_stats)
+    mapped: list[str] = []
+    for key in node_order:
+        if key in node_stats:
+            mapped.append(key)
+        elif key in name_to_uuid:
+            mapped.append(name_to_uuid[key])
+    return mapped
 
 
 def get_node_sort_key(node_item: tuple[str, Any]) -> tuple[int, int, int, int, str]:
