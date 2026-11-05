@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Utility functions and helpers shared across docpipe operators."""
 
 import datetime
@@ -7,6 +10,8 @@ import io
 import json
 import os
 import sys
+import tempfile
+import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -202,17 +207,17 @@ def is_asr_available() -> bool:
 
 def get_supported_file_extensions() -> str:
     """Get comma-separated list of supported file extensions based on available dependencies.
-    Returns base document formats always, and adds audio/video formats only if ASR is available.
+    Returns base and supported video formats always; audio formats require ASR.
     Returns:
         Comma-separated string of file extensions (e.g., "pdf,docx,mp3,wav")
     """
 
     # Base extensions always supported
-    supported_extensions: list[str] = OperatorConstants.FileExtensions.BASE_EXTENSIONS
+    supported_extensions: list[str] = [*OperatorConstants.FileExtensions.BASE_EXTENSIONS]
 
-    # Add audio/video extensions only if ASR is available
+    supported_extensions.extend(OperatorConstants.FileExtensions.VIDEO_EXTENSIONS)
     if is_asr_available():
-        supported_extensions.extend(OperatorConstants.FileExtensions.AUDIO_VIDEO_EXTENSIONS)
+        supported_extensions.extend(OperatorConstants.FileExtensions.AUDIO_EXTENSIONS)
 
     # Strip leading dots before joining (constants have dots, but return format should not)
     return ",".join(ext.lstrip(".") for ext in supported_extensions)
@@ -1102,6 +1107,12 @@ class OperatorUtils:
         return doc_metadata
 
     @staticmethod
+    def resolve_file_extension(*, doc_name: str, document_format: str | None = None) -> str:
+        """Resolve one normalized extension, preferring an explicit document format."""
+        value = (document_format or "").strip()
+        return f".{value.lstrip('.').lower()}" if value else Path(doc_name or "").suffix.lower()
+
+    @staticmethod
     def _prepare_single_document(
         *,
         table: pa.Table,
@@ -1118,8 +1129,10 @@ class OperatorUtils:
             else f"document_{row_idx}"
         )
 
+        document_format = table["document_format"][row_idx].as_py() if "document_format" in table.column_names else None
+        file_ext = OperatorUtils.resolve_file_extension(doc_name=doc_name, document_format=document_format)
+
         if supported_extensions:
-            file_ext = Path(doc_name).suffix.lower()
             if file_ext not in supported_extensions:
                 return {
                     "idx": row_idx,
@@ -1143,7 +1156,13 @@ class OperatorUtils:
                 msg = f"Failed to fetch binary content for document {doc_name}"
                 raise ValueError(msg)
 
-        return {"idx": row_idx, "doc_id": doc_id, "doc_name": doc_name, "binary_content": binary_content}
+        return {
+            "idx": row_idx,
+            "doc_id": doc_id,
+            "doc_name": doc_name,
+            "binary_content": binary_content,
+            "file_extension": file_ext,
+        }
 
     @staticmethod
     def prepare_document_content_fetch(
@@ -1411,6 +1430,10 @@ class OperatorUtils:
         if binary_content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
             return ".doc"
 
+        # WebP is a RIFF container.
+        if binary_content[:4] == b"RIFF" and binary_content[8:12] == b"WEBP":
+            return ".webp"
+
         # PNG
         if binary_content[:8] == b"\x89PNG\r\n\x1a\n":
             return ".png"
@@ -1451,6 +1474,13 @@ class OperatorUtils:
 
         Returns:
             Dotted extension string: '.docx', '.xlsx', or '.pptx'."""
+        try:
+            with zipfile.ZipFile(io.BytesIO(binary_content)) as archive:
+                with archive.open("mimetype") as mime_file:
+                    if mime_file.read(128) == b"application/epub+zip":
+                        return ".epub"
+        except (zipfile.BadZipFile, KeyError):
+            pass
         content_sample = binary_content[:2048]
         if b"word/" in content_sample:
             return ".docx"
@@ -1771,6 +1801,7 @@ class OperatorUtils:
         additional_formats: list[str] | None = None,
         converter: Any = None,
         doc_format: str = OperatorConstants.DocFormat.MARKDOWN,
+        file_extension: str | None = None,
     ) -> dict[str, Any]:
         """
         Common method for document extraction using Docling's DocumentConverter.
@@ -1833,7 +1864,7 @@ class OperatorUtils:
             from docling_core.types.io import DocumentStream
 
             # Determine the effective file extension
-            file_suffix = Path(file_path).suffix.lower()
+            file_suffix = OperatorUtils.resolve_file_extension(doc_name=file_path, document_format=file_extension)
             if not file_suffix:
                 file_suffix = OperatorUtils.detect_extension_from_bytes(binary_content)
 
@@ -1847,20 +1878,23 @@ class OperatorUtils:
                 )
 
             # Create DocumentStream from binary content (no temporary file needed)
-            audio_video_suffixes = {f".{extension.lower()}" for extension in FormatToExtensions[InputFormat.AUDIO]}
-            doc_name = Path(file_path).name if file_path else f"document{file_suffix}"
+            audio_video_suffixes = {
+                f".{extension.lower().lstrip('.')}"
+                for input_format in (InputFormat.AUDIO, InputFormat.VIDEO)
+                for extension in FormatToExtensions.get(input_format, [])
+            }
+            doc_name = Path(file_path).name if file_path else "document"
+            if file_suffix and Path(doc_name).suffix.lower() != file_suffix:
+                doc_name = str(Path(doc_name).with_suffix(file_suffix))
 
             # Use the supplied converter when provided; otherwise lease a pooled converter
             # for this config exclusively for the duration of the conversion only.
             with _use_converter(converter=converter, converter_config=converter_config) as active_converter:
                 if file_suffix in audio_video_suffixes:
-                    current_path_file = Path.cwd() / doc_name
-                    try:
-                        current_path_file.write_bytes(binary_content)
-                        result = active_converter.convert(current_path_file)
-                    finally:
-                        if current_path_file.exists():
-                            current_path_file.unlink()
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir) / Path(doc_name).name
+                        temp_path.write_bytes(binary_content)
+                        result = active_converter.convert(temp_path)
                 else:
                     # Create DocumentStream from binary content (no temporary file needed)
                     doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(binary_content))

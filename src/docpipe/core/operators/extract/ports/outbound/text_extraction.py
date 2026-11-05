@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Text extraction port interface.
 
 This module defines the port interface for text extraction operations following
@@ -481,7 +484,10 @@ class TextExtractionPort(ABC):
         """
         # Submit task to executor
         return executor.submit(
-            self.extract_single_document, file_path=task["doc_name"], binary_content=task["binary_content"]
+            self.extract_single_document,
+            file_path=task["doc_name"],
+            binary_content=task["binary_content"],
+            file_extension=task.get("file_extension"),
         )
 
     @abstractmethod

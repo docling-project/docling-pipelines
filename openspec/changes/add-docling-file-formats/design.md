@@ -20,6 +20,10 @@ Currently, file format eligibility across ingestion, extraction, classification,
 
 ## Goals / Non-Goals
 
+**Excluded new video containers:** `.mkv` and `.webm` remain outside the current scope. Direct Docling conversion with a real Whisper model and diarization disabled successfully transcribed one locally generated speech sample in each container with `setuptools==84.1.0`. Optional speaker diarization remains affected by the dependency chain through `resemblyzer` and `webrtcvad`, which imports `pkg_resources` removed from that setuptools version. Downgrading setuptools would introduce a known security issue. The direct tests do not establish broader codec coverage or end-to-end pipeline support.
+
+**Excluded Office variants:** `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, and `.ppsm` are not supported in ingestion, extraction, classification, or UI filters. Docling 2.142.1 recognizes the extensions but its Word and PowerPoint libraries reject the corresponding internal content types. No package rewriting or macro execution is introduced. `.pptm`, `.xlsm`, `.xltx`, and `.xltm` remain in scope.
+
 **Goals:**
 - Maintain a single, consistent set of Tier 1 pure-Python and Tier 4 audio/video extensions across `OperatorConstants.FileExtensions`, `IngestSourceOperator`, `ExtractOperator` (`docling_library`), `DocumentClassifierOperator`, and the `IngestSource` frontend constants.
 - Ensure `get_supported_file_extensions()` is side-effect-free and never mutates `OperatorConstants.FileExtensions.BASE_EXTENSIONS`.
@@ -77,8 +81,8 @@ Currently, file format eligibility across ingestion, extraction, classification,
 - **Alternatives considered**: Converting `BASE_EXTENSIONS` to a `tuple[str, ...]`. Rejected to maintain backward compatibility with any external caller or test asserting `isinstance(BASE_EXTENSIONS, list)`.
 
 ### Decision 2: Widen the default `include_filter` instead of pinning it
-- **Choice**: Leave `IngestSourceOperator` defaulting `included_extensions` to `get_supported_file_extensions()`, so Tier 1 formats, audio when ASR is available, and video when video dependencies are available are ingested by default.
-- **Rationale**: Matches the existing behavior where audio/video are ingested by default when ASR is installed. Users who want the old behavior set `include_filter` explicitly.
+- **Choice**: Leave `IngestSourceOperator` defaulting `included_extensions` to `get_supported_file_extensions()`, so Tier 1 formats, audio when ASR is available, and supported video extensions without a separate dependency check are ingested by default.
+- **Rationale**: Video acceptance follows the configured extension list without probing optional dependencies; conversion reports missing dependencies per document. Audio remains gated by ASR. Users who want a narrower set can set `include_filter` explicitly.
 - **Trade-off**: Existing flows without `include_filter` ingest more file types after upgrade. This is documented in the ingest README and the proposal.
 
 ### Decision 3: Keep `docling_serve` on the original 16 extensions
@@ -94,12 +98,12 @@ Currently, file format eligibility across ingestion, extraction, classification,
 - **Media without an effective format is out of scope**: the temp-file path is selected from the effective extension supplied by validation, or from magic bytes if extraction is called directly. Magic-byte detection is extended only for `.epub` and `.webp`, not for audio/video signatures. A media document whose name has no suffix and no `document_format` is therefore skipped by `ExtractOperator._validate_extensions`, and if it reaches `extract_content()` it is not written to a temp file, so no resolved extension is appended. Adding audio/video signatures to `detect_extension_from_bytes()` is a separate change.
 
 ### Decision 5: Configure `VideoFormatOption` in `DoclingAdapter`
-- **Choice**: In `_build_gpu_converter_config()` and `extract_single_document()`, when `self.use_asr_pipeline` and video dependencies are available, additionally import `VideoFormatOption`, `VideoPipeline`, and `VideoPipelineOptions` and set `format_options[InputFormat.VIDEO] = VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=VideoPipelineOptions(...))`, where:
+- **Choice**: In `_build_gpu_converter_config()` and `extract_single_document()`, when `self.use_asr_pipeline` is enabled and Docling video classes are importable, additionally import `VideoFormatOption`, `VideoPipeline`, and `VideoPipelineOptions` and set `format_options[InputFormat.VIDEO] = VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=VideoPipelineOptions(...))`, where:
   - `generate_frame_images=False`, because the extract operator emits text/markdown and sampled frame images would add image placeholders and memory cost.
   - Omitted `asr_model_name` selects `whisper_turbo`. Explicit empty string or null leaves the video ASR model at Docling defaults, while still configuring `VideoFormatOption`; audio retains its existing default behavior.
   - VLM and ASR options are independent: with both flags enabled VLM handles PDF/images, while ASR handles audio/video, in both standard and GPU converter paths.
   - The imports are guarded with `try / except (ImportError, AttributeError)` so unit tests that mock only `AudioFormatOption` on `docling.document_converter` continue to pass.
-- **Dependencies and gating**: `docling[asr]` installs `format-audio`, not `format-video`. Add `docling-slim[format-video]==2.142.1` to `vlm_asr`, run `uv lock` and `uv pip install -e ".[dev]"`, and implement a separate video dependency availability check used by ingestion and extraction. Gate audio and video extensions independently; unavailable video support must not disable audio. Verify the probe against isolated audio-only and video-enabled environments. Do not infer ffmpeg availability from Python imports.
+- **Dependencies and gating**: Keep `docling-slim[format-video]==2.142.1` in `vlm_asr` and preserve `setuptools==84.1.0`. Video extensions are accepted without a separate dependency probe. Attempt to import and configure Docling video classes at conversion time, preserving audio if the classes are missing; missing ffmpeg, models, or other required dependencies are surfaced as document failures. Do not require `resemblyzer` for ordinary transcription; it is used by optional speaker diarization. Verify supported video eligibility and per-document errors without downgrading setuptools.
 - **Rationale**: Docling `2.142.1` separates `InputFormat.VIDEO` (`VideoPipeline`) from `InputFormat.AUDIO` (`AsrPipeline`). Without this, user-configured `asr_model_name` applies to audio but not to video. The code comment in `extract_single_document()` claiming Docling has no separate VIDEO format is wrong for this version and is replaced.
 
 ### Decision 6: Extend `detect_extension_from_bytes()` and `detect_extension_zip_based_office_formats()` for `.webp` and `.epub`
@@ -110,7 +114,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 - **Rationale**: EPUB packages commonly contain paths that match the Office markers, so the EPUB check must run first. Both formats have deterministic signatures in the first 2048 bytes.
 
 ### Decision 7: Classification gets Tier 1 minus plain-markdown variants
-- **Choice**: Add to `CLASSIFICATION_FILE_EXTENSIONS`: `.csv`, `.epub`, `.tex`, `.latex`, `.adoc`, `.asciidoc`, `.asc`, `.eml`, `.msg`, `.vtt`, `.htm`, `.xhtml`, `.mhtml`, `.mht`, `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.pptm`, `.potm`, `.ppsm`, `.xlsm`, `.xltx`, `.xltm`. Do not add `.markdown`, `.text`, `.qmd`, `.rmd`.
+- **Choice**: Add to `CLASSIFICATION_FILE_EXTENSIONS`: `.csv`, `.epub`, `.tex`, `.latex`, `.adoc`, `.asciidoc`, `.asc`, `.eml`, `.msg`, `.vtt`, `.htm`, `.xhtml`, `.mhtml`, `.mht`, `.pptm`, `.xlsm`, `.xltx`, `.xltm`. Do not add `.markdown`, `.text`, `.qmd`, `.rmd`.
 - **Rationale**: `.md` and `.txt` are already excluded from the list, so the equivalent variants stay out for consistency.
 
 ### Decision 8: Web adapter MIME mapping limited to text-safe types
@@ -121,7 +125,7 @@ Currently, file format eligibility across ingestion, extraction, classification,
 
 - **[Risk] Plain `.txt` vs `.text` handling in `OperatorUtils.extract_content()`** -> **Mitigation**: Keep `.txt` on the fast `OperatorUtils.extract_text_file()` path (which existing unit tests expect) while `.text`, `.markdown`, `.qmd`, and `.rmd` flow through Docling's Markdown backend (verified to convert, including `.Rmd`, since suffixes are lower-cased).
 - **[Risk] Existing unit tests mocking `docling.document_converter` with only `AudioFormatOption`** -> **Mitigation**: Guard the video imports as described in Decision 5.
-- **[Risk] `VideoPipeline` requires `ffmpeg` on system `PATH` at runtime** -> **Mitigation**: Extension validation gates video on the separate video dependency check, and Docling 2.142.1's `VideoPipeline` records a structured conversion error if `ffmpeg` is absent; test that docpipe surfaces it as a per-document failure. `USER_GUIDE_PIPELINE_SETUP.md` and `docs/reference/OPERATORS.md` list MKV and WebM among ffmpeg-dependent formats.
+- **[Risk] `VideoPipeline` requires `ffmpeg` on system `PATH` at runtime** -> **Mitigation**: Video extensions are accepted independently of optional dependency imports, and Docling 2.142.1's `VideoPipeline` records a structured conversion error if `ffmpeg` is absent; test that docpipe surfaces it as a per-document failure. `USER_GUIDE_PIPELINE_SETUP.md` and `docs/reference/OPERATORS.md` describe ffmpeg requirements for supported video formats.
 - **[Risk] `.eml` / `.msg` on slim installs** -> **Mitigation**: Docling raises an actionable import error for `mail-parser` / `python-oxmsg` only when such a file is parsed; the failure is recorded per document.
 - **[Risk] More files ingested by default** -> **Mitigation**: Decision 2; documented behavior change.
 

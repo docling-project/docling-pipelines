@@ -681,8 +681,8 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 - **Extension Detection**: Files without extensions are automatically detected using magic byte analysis (supports PDF, DOCX, XLSX, PPTX, images, HTML, and text formats)
 - Audio/Video Support: Processes audio (WAV, MP3, M4A, AAC, OGG, FLAC) and video (MP4, AVI, MOV) files using ASR. Requires ffmpeg for M4A, AAC, OGG, FLAC, and all video formats
 - **Extension Validation**: Files with unsupported extensions are automatically skipped and logged. Supported extensions vary by provider:
-  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, HTML, Markdown, AsciiDoc, TXT, and audio/video (with ASR)
-  - `docling_serve`: Same as docling_library except NO audio/video support
+  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, CSV, EPUB, EML, MSG, LaTeX, AsciiDoc, WebVTT, HTML and Markdown variants, PPTM, XLSM, XLTX, XLTM, plus MP4, AVI, MOV, and audio when ASR is available; media conversion requires its dependencies
+  - `docling_serve`: PDF, DOCX, PPTX, XLSX, MD, TXT, HTML and the original image formats; no added document formats or audio/video
   - `docling` entity extraction: PDF, DOCX, PPTX, HTML, images (excludes XLSX, TXT, MD, WEBP)
 - See [ExtractOperator](../operators/extract/extract_operator_readme.md) for complete documentation including detailed extension support
 
@@ -1244,8 +1244,8 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 - **Extension Detection**: Files without extensions are automatically detected using magic byte analysis (supports PDF, DOCX, XLSX, PPTX, images, HTML, and text formats)
 - Audio/Video Support: Processes audio (WAV, MP3, M4A, AAC, OGG, FLAC) and video (MP4, AVI, MOV) files using ASR. Requires ffmpeg for M4A, AAC, OGG, FLAC, and all video formats
 - **Extension Validation**: Files with unsupported extensions are automatically skipped and logged. Supported extensions vary by provider:
-  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, HTML, Markdown, AsciiDoc, TXT, and audio/video (with ASR)
-  - `docling_serve`: Same as docling_library except NO audio/video support
+  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, CSV, EPUB, EML, MSG, LaTeX, AsciiDoc, WebVTT, HTML and Markdown variants, PPTM, XLSM, XLTX, XLTM, plus MP4, AVI, MOV, and audio when ASR is available; media conversion requires its dependencies
+  - `docling_serve`: PDF, DOCX, PPTX, XLSX, MD, TXT, HTML and the original image formats; no added document formats or audio/video
   - `docling` entity extraction: PDF, DOCX, PPTX, HTML, images (excludes XLSX, TXT, MD, WEBP)
 - See [ExtractOperator](../operators/extract/extract_operator_readme.md) for complete documentation including detailed extension support
 

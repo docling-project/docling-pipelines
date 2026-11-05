@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for file extension validation in ingestion operators."""
 
 import pytest
@@ -132,3 +135,52 @@ class TestIngestSourceExtensionValidation:
 
         with pytest.raises(ValueError, match="Unsupported file extensions"):
             IngestSourceOperator(config)
+
+
+def test_tier_one_include_filter_accepted(tmp_path):
+    formats = (
+        "csv,epub,eml,msg,tex,latex,adoc,asciidoc,asc,vtt,htm,xhtml,mhtml,mht,markdown,text,qmd,rmd,pptm,xlsm,xltx,xltm"
+    )
+    operator = IngestSourceOperator(_filesystem_config(tmp_path, include_filter=formats))
+    assert set(operator.included_extensions) == {f".{ext}" for ext in formats.split(",")}
+
+
+@pytest.mark.parametrize("exclude, expected", [(None, True), ("csv", False)])
+def test_default_and_excluded_csv(tmp_path, exclude, expected):
+    from langchain_core.documents import Document
+
+    config = _filesystem_config(tmp_path, **({"exclude_filter": exclude} if exclude else {}))
+    operator = IngestSourceOperator(config)
+    metadata = operator.create_base_metadata(total_docs_count=1)
+    document = Document(
+        page_content="name,value\ntest,1", metadata={"source": str(tmp_path / "sample.csv"), "name": "sample.csv"}
+    )
+    result = operator.process_document(document, 0, metadata)
+    assert (result is not None) is expected
+    assert metadata["skipped_docs_count"] == (0 if expected else 1)
+
+
+@pytest.mark.parametrize("exclude, expected", [(None, True), ("csv", False)])
+def test_filesystem_ingests_or_excludes_csv(tmp_path, exclude, expected):
+    (tmp_path / "sample.csv").write_text("name,value\ntest,1\n", encoding="utf-8")
+    config = {"provider": "filesystem", "provider_config": {"paths": [str(tmp_path)]}, "force_ingest": True}
+    if exclude:
+        config["exclude_filter"] = exclude
+    operator = IngestSourceOperator(config)
+    tables, metadata = operator.transform(None)
+    names = tables[0]["name"].to_pylist() if tables[0].num_rows else []
+    assert ("sample.csv" in names) is expected
+    if not expected:
+        assert metadata["skipped_docs_count"] >= 1
+
+
+@pytest.mark.parametrize("extension", ["dotx", "docm", "dotm", "potx", "ppsx", "potm", "ppsm"])
+def test_unreadable_office_variants_are_not_accepted_in_include_filter(tmp_path, extension):
+    with pytest.raises(ValueError, match="Unsupported file extensions"):
+        IngestSourceOperator(_filesystem_config(tmp_path, include_filter=extension))
+
+
+@pytest.mark.parametrize("extension", ["mkv", "webm"])
+def test_new_video_formats_are_not_accepted_in_include_filter(tmp_path, extension):
+    with pytest.raises(ValueError, match="Unsupported file extensions"):
+        IngestSourceOperator(_filesystem_config(tmp_path, include_filter=extension))

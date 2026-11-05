@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Docling library text extraction adapter.
 
 This adapter implements the unified docling_library provider for document extraction.
@@ -243,6 +246,9 @@ class DoclingAdapter(TextExtractionPort):
                 except ImportError as asr_exc:
                     logger.warning("Could not add ASR to GPU converter: %s", asr_exc)
 
+            if self.use_asr_pipeline:
+                self._add_video_format_option(format_options=format_options)
+
             logger.info(
                 "Built GPU-accelerated DocumentConverter options (device=%s, num_threads=%s)",
                 self.gpu_device,
@@ -368,6 +374,23 @@ class DoclingAdapter(TextExtractionPort):
             logger.warning("ASR pipeline dependencies not available: %s", str(e))
             return None
 
+    def _add_video_format_option(self, *, format_options: dict[Any, Any]) -> None:
+        """Configure video independently so missing video extras do not affect audio."""
+        try:
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import VideoPipelineOptions
+            from docling.document_converter import VideoFormatOption
+            from docling.pipeline.video_pipeline import VideoPipeline
+
+            options = VideoPipelineOptions(generate_frame_images=False)
+            if self.asr_model_name:
+                asr_options = self._configure_asr_engine()
+                if asr_options is not None:
+                    options.asr_options = asr_options.asr_options
+            format_options[InputFormat.VIDEO] = VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=options)
+        except (ImportError, AttributeError) as exc:
+            logger.warning("Could not configure video pipeline: %s", exc)
+
     @staticmethod
     def get_config_schema() -> type[BaseModel]:
         """Return the Pydantic config model class for this adapter."""
@@ -443,13 +466,12 @@ class DoclingAdapter(TextExtractionPort):
                 # Configure ASR pipeline options
                 asr_options = self._configure_asr_engine()
 
-                # Set up ASR pipeline for audio and video formats
-                # Note: Docling does not have a separate VIDEO InputFormat or VideoFormatOption
-                # Video files are handled through AUDIO format with ASR pipeline
+                # Configure audio and video separately.
                 format_options[InputFormat.AUDIO] = AudioFormatOption(
                     pipeline_cls=AsrPipeline,
                     pipeline_options=asr_options,
                 )
+                self._add_video_format_option(format_options=format_options)
 
             # Apply OCR configuration for standard (non-VLM) pipeline
             if not self.use_vlm_pipeline and (
@@ -476,11 +498,20 @@ class DoclingAdapter(TextExtractionPort):
             # When GPU acceleration is active use the pre-built GPU configuration; the
             # pooled converter for it keeps its model weights loaded across documents.
             if self.gpu_device and self._gpu_converter_config is not None:
+                gpu_config = self._gpu_converter_config
+                if self.use_vlm_pipeline and converter_config:
+                    gpu_config = {
+                        OperatorConstants.Config.FORMAT_OPTIONS: {
+                            **gpu_config.get(OperatorConstants.Config.FORMAT_OPTIONS, {}),
+                            **converter_config[OperatorConstants.Config.FORMAT_OPTIONS],
+                        }
+                    }
                 result = OperatorUtils.extract_content(
                     file_path=file_path,
                     binary_content=binary_content,
-                    converter_config=self._gpu_converter_config or None,
+                    converter_config=gpu_config or None,
                     additional_formats=self.additional_formats,
+                    file_extension=kwargs.get("file_extension"),
                     doc_format=self.global_config.get(
                         OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT
                     ),
@@ -492,6 +523,7 @@ class DoclingAdapter(TextExtractionPort):
                     binary_content=binary_content,
                     converter_config=converter_config,
                     additional_formats=self.additional_formats,
+                    file_extension=kwargs.get("file_extension"),
                     doc_format=self.global_config.get(
                         OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT
                     ),

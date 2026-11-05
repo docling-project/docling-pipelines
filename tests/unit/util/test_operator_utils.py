@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for operator_utils module.
 Tests utility functions for table manipulation, validation, and feature management.
@@ -2258,3 +2261,136 @@ def test_extract_content_doclang_primary_format():
     assert result[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] == "<doc>test</doc>"
     mock_doc.export_to_doclang.assert_called_once()
     mock_doc.export_to_markdown.assert_not_called()
+
+
+def test_supported_extensions_do_not_mutate_base():
+    from unittest.mock import patch
+
+    from docpipe.core.constants.operator_constants import OperatorConstants
+    from docpipe.core.operators.operator_utils import get_supported_file_extensions
+
+    original = list(OperatorConstants.FileExtensions.BASE_EXTENSIONS)
+    with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=True):
+        first = get_supported_file_extensions().split(",")
+        assert get_supported_file_extensions().split(",") == first
+        assert "mp3" in first and "csv" in first
+    with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=False):
+        assert "mp3" not in get_supported_file_extensions().split(",")
+    assert OperatorConstants.FileExtensions.BASE_EXTENSIONS == original
+
+
+def test_detect_epub_before_office_and_webp():
+    import io
+    import zipfile
+
+    from docpipe.core.operators.operator_utils import OperatorUtils
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr("word/document.xml", "example")
+    assert OperatorUtils.detect_extension_from_bytes(data.getvalue()) == ".epub"
+    assert OperatorUtils.detect_extension_from_bytes(b"RIFF\x04\x00\x00\x00WEBP") == ".webp"
+
+
+@pytest.mark.parametrize("name", ["clip.mp4", "clip.avi", "clip.mov", "../../clip.mp4"])
+def test_media_conversion_uses_cleaned_temporary_directory(name):
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from docpipe.core.operators.operator_utils import OperatorUtils
+
+    converter = MagicMock()
+    paths = []
+
+    def convert(path):
+        assert isinstance(path, Path)
+        assert path.name == Path(name).name
+        assert path.read_bytes() == b"media"
+        paths.append(path)
+        return MagicMock()
+
+    converter.convert.side_effect = convert
+    OperatorUtils.extract_content(file_path=name, binary_content=b"media", converter=converter)
+    assert len(paths) == 1 and not paths[0].parent.exists()
+
+
+def test_media_temporary_directories_are_unique_and_cleaned_on_error():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from unittest.mock import MagicMock
+
+    from docpipe.core.operators.operator_utils import OperatorUtils
+
+    barrier = Barrier(2)
+    paths = []
+    converter = MagicMock()
+
+    def convert(path):
+        paths.append(path)
+        barrier.wait(timeout=5)
+        raise RuntimeError("conversion failed")
+
+    converter.convert.side_effect = convert
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda _: OperatorUtils.extract_content(
+                    file_path="same.mp4", binary_content=b"media", converter=converter
+                ),
+                range(2),
+            )
+        )
+    assert len(paths) == 2 and paths[0].parent != paths[1].parent
+    assert all(not path.parent.exists() for path in paths)
+    assert all(not result["success"] for result in results)
+
+
+def test_supported_video_extensions_do_not_require_asr():
+    from unittest.mock import patch
+
+    from docpipe.core.operators.operator_utils import get_supported_file_extensions
+
+    with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=False):
+        extensions = set(get_supported_file_extensions().split(","))
+    assert {"mp4", "avi", "mov"} <= extensions
+    assert not {"mp3", "mkv", "webm"} & extensions
+    with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=True):
+        assert "mp3" in get_supported_file_extensions().split(",")
+
+
+@pytest.mark.parametrize("name", ["extensionless", "incorrect.pdf", "../../incorrect.pdf"])
+def test_effective_media_format_controls_temporary_suffix(name):
+    from unittest.mock import MagicMock
+
+    from docpipe.core.operators.operator_utils import OperatorUtils
+
+    converter = MagicMock()
+    paths = []
+
+    def capture_path(path):
+        paths.append(path)
+        return MagicMock()
+
+    converter.convert.side_effect = capture_path
+    OperatorUtils.extract_content(file_path=name, binary_content=b"video", converter=converter, file_extension=".MP4")
+    assert len(paths) == 1
+    assert paths[0].suffix == ".mp4"
+    assert not paths[0].parent.exists()
+
+
+def test_document_format_is_carried_to_extraction_task():
+    import pyarrow as pa
+
+    from docpipe.core.operators.operator_utils import OperatorUtils
+
+    table = pa.table(
+        {
+            "id": ["1", "2"],
+            "name": ["extensionless", "wrong.pdf"],
+            "document_format": [".CSV", "MP4"],
+            "binary_content": [b"a", b"b"],
+        }
+    )
+    tasks = OperatorUtils.prepare_document_content_fetch(table=table)
+    assert [task["file_extension"] for task in tasks] == [".csv", ".mp4"]

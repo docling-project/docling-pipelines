@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for ExtractOperator extension validation.
 
@@ -84,9 +87,9 @@ class TestExtractOperatorExtensionValidation:
             assert ".txt" in extensions
             assert ".md" in extensions
 
-            # Should NOT include audio/video without ASR
+            # Audio is gated by ASR; supported video extensions remain eligible
             assert ".mp3" not in extensions
-            assert ".mp4" not in extensions
+            assert ".mp4" in extensions
             assert ".wav" not in extensions
 
     def test_get_supported_extensions_docling_library_with_asr(self, docling_library_config):
@@ -129,10 +132,10 @@ class TestExtractOperatorExtensionValidation:
 
             skipped_indices = operator._validate_extensions(table=mock_table_with_extensions, metadata=metadata)
 
-            # Should skip audio/video (no ASR) and unsupported extension
-            assert len(skipped_indices) == 3  # .mp3, .mp4, .xyz
+            # Should skip audio without ASR and unsupported extensions
+            assert len(skipped_indices) == 2  # .mp3, .xyz
             assert 2 in skipped_indices  # audio.mp3
-            assert 3 in skipped_indices  # video.mp4
+            assert 3 not in skipped_indices  # video.mp4
             assert 4 in skipped_indices  # unsupported.xyz
 
             # Should NOT skip supported files
@@ -168,13 +171,13 @@ class TestExtractOperatorExtensionValidation:
             assert "skipped_docs" in metadata
             skipped_docs = metadata["skipped_docs"]
 
-            # Should have 3 skipped documents
-            assert len(skipped_docs) == 3
+            # Should have 2 skipped documents
+            assert len(skipped_docs) == 2
 
             # Verify skipped document details
             skipped_names = [doc["name"] for doc in skipped_docs]
             assert "audio.mp3" in skipped_names
-            assert "video.mp4" in skipped_names
+            assert "video.mp4" not in skipped_names
             assert "unsupported.xyz" in skipped_names
 
     def test_validate_extensions_with_missing_name_column(self, docling_library_config):
@@ -388,3 +391,56 @@ class TestExtensionConstants:
         assert ".html" not in extensions
         assert ".txt" not in extensions
         assert ".md" not in extensions
+
+
+@pytest.mark.parametrize("provider, expected_skips", [("docling_library", set()), ("docling_serve", set(range(22)))])
+def test_new_formats_respect_extraction_provider(provider, expected_skips):
+    """New document formats are local-library only."""
+    extensions = "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht markdown text qmd rmd pptm xlsm xltx xltm".split()
+    table = pa.table({"id": [str(i) for i in range(len(extensions))], "name": [f"sample.{ext}" for ext in extensions]})
+    config = {"text_extraction": {"provider": provider, "provider_config": {"base_url": "http://localhost:5001"}}}
+    operator = ExtractOperator(config=config)
+    metadata = operator.create_base_metadata(total_docs_count=len(extensions))
+    assert operator._validate_extensions(table=table, metadata=metadata) == expected_skips
+    constants = OperatorConstants.FileExtensions
+    assert {f".{ext}" for ext in extensions} <= set(constants.DOCLING_LIBRARY_BASE_EXTENSIONS)
+    assert not {".mkv", ".webm"} & set(constants.DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS)
+    assert not ({f".{ext}" for ext in extensions} | {".mkv", ".webm"}) & set(constants.DOCLING_SERVE_EXTENSIONS)
+
+
+def test_supported_video_remains_eligible_without_asr(docling_library_config):
+    with patch("docpipe.core.operators.operator_utils.is_asr_available", return_value=False):
+        extensions = ExtractOperator(config=docling_library_config)._get_supported_extensions()
+    assert ".mp3" not in extensions
+    assert {".mp4", ".avi", ".mov"} <= extensions
+
+
+def test_document_format_precedes_filename_and_is_normalized(docling_library_config):
+    table = pa.table(
+        {
+            "id": ["1", "2", "3"],
+            "name": ["extensionless", "wrong.xyz", "file.pdf"],
+            "document_format": [".CSV", "CSV", "xyz"],
+        }
+    )
+    operator = ExtractOperator(config=docling_library_config)
+    metadata = operator.create_base_metadata(total_docs_count=3)
+    assert operator._validate_extensions(table=table, metadata=metadata) == {2}
+
+
+@pytest.mark.parametrize("extension", ["dotx", "docm", "dotm", "potx", "ppsx", "potm", "ppsm"])
+def test_unreadable_office_variants_are_skipped(extension, docling_library_config):
+    table = pa.table({"id": ["1"], "name": [f"sample.{extension}"]})
+    operator = ExtractOperator(config=docling_library_config)
+    metadata = operator.create_base_metadata(total_docs_count=1)
+    assert operator._validate_extensions(table=table, metadata=metadata) == {0}
+    assert metadata["skipped_docs_count"] == 1
+
+
+@pytest.mark.parametrize("extension", ["mkv", "webm"])
+def test_new_video_formats_are_skipped_even_with_video_dependencies(extension, docling_library_config):
+    table = pa.table({"id": ["1"], "name": [f"sample.{extension}"]})
+    operator = ExtractOperator(config=docling_library_config)
+    metadata = operator.create_base_metadata(total_docs_count=1)
+    assert operator._validate_extensions(table=table, metadata=metadata) == {0}
+    assert metadata["skipped_docs_count"] == 1

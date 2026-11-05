@@ -325,7 +325,7 @@ This command:
 > If you intend to use VLM-based text extraction (`text_extraction.provider_config.vlm_pipeline`),
 > ASR transcription (`text_extraction.provider_config.asr_pipeline`), or Docling template-based
 > entity extraction (`entity_extraction.provider: "docling"`), install the `vlm_asr` optional
-> dependency group which provides `docling[vlm,asr]`:
+> dependency group which provides `docling[vlm,asr]` and the separate video dependencies:
 >
 > ```bash
 > uv sync --extra vlm_asr

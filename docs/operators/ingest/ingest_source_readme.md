@@ -464,15 +464,15 @@ for i in range(result_table.num_rows):
 The operator validates and filters files by extension using centralized constants from [`OperatorConstants.FileExtensions`](../../../src/docpipe/core/constants/operator_constants.py):
 
 **Supported Extensions:**
-- **Documents**: PDF, DOCX, PPTX, XLSX
-- **Text**: Markdown, Plain Text, HTML
+- **Documents**: PDF, DOCX, PPTX, XLSX, CSV, EPUB, EML, MSG; Office variants PPTM, XLSM, XLTX, XLTM
+- **Text**: MD, TXT, HTML, HTM, XHTML, MHTML, MHT, MARKDOWN, TEXT, QMD, RMD, TEX, LATEX, ADOC, ASCIIDOC, ASC, VTT
 - **Images**: PNG, JPEG, JPG, TIFF, TIF, BMP, WebP, GIF, JFIF
 - **Audio** (with ASR): WAV, MP3, M4A, AAC, OGG, FLAC
-- **Video** (with ASR): MP4, AVI, MOV
+- **Video**: MP4, AVI, MOV (conversion requires video dependencies and ffmpeg)
 
 **Filter Parameters:**
 - **include_filter**: Comma-separated list of extensions to include (e.g., "pdf,txt,docx")
-  - If not specified, defaults to all supported extensions
+  - If not specified, defaults to all supported extensions. This includes the added document formats and widens default ingestion; specify an explicit filter to retain a narrower set.
   - Must be a subset of supported extensions (validation enforced)
 - **exclude_filter**: Comma-separated list of extensions to exclude (e.g., "tmp,log")
   - Must be a subset of supported extensions (validation enforced)

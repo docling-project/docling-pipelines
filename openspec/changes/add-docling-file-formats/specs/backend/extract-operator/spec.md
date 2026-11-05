@@ -8,7 +8,11 @@ In this specification, **Tier 1** means pure-Python Docling formats that require
 ## ADDED Requirements
 
 ### Requirement: Tier 1 pure-Python format support in docling_library extraction
-The extraction operator in `docling_library` mode SHALL accept all Tier 1 pure-Python Docling formats, covering tabular (`.csv`), publishing (`.epub`, `.tex`, `.latex`, `.adoc`, `.asciidoc`, `.asc`), email (`.eml`, `.msg`), subtitles (`.vtt`), web/markup (`.htm`, `.xhtml`, `.mhtml`, `.mht`, `.markdown`, `.text`, `.qmd`, `.rmd`), and OpenXML macro/template variants (`.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.pptm`, `.potm`, `.ppsm`, `.xlsm`, `.xltx`, `.xltm`).
+The extraction operator in `docling_library` mode SHALL accept all Tier 1 pure-Python Docling formats, covering tabular (`.csv`), publishing (`.epub`, `.tex`, `.latex`, `.adoc`, `.asciidoc`, `.asc`), email (`.eml`, `.msg`), subtitles (`.vtt`), web/markup (`.htm`, `.xhtml`, `.mhtml`, `.mht`, `.markdown`, `.text`, `.qmd`, `.rmd`), and OpenXML macro/template variants (`.pptm`, `.xlsm`, `.xltx`, `.xltm`).
+
+#### Scenario: Unsupported Office variants are skipped
+- **WHEN** an input document has extension `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, or `.ppsm`
+- **THEN** extraction skips it as unsupported because Docling 2.142.1's underlying Word and PowerPoint readers reject those formats' internal content types
 
 #### Scenario: Tier 1 document passes pre-extraction extension validation
 - **WHEN** an input `pa.Table` with columns `id`, `name`, and `path` (or `document_format`) contains rows with Tier 1 extensions such as `.csv`, `.epub`, `.eml`, `.tex`, `.adoc`, `.vtt`, `.mhtml`, or `.xlsm` in `docling_library` mode
@@ -29,20 +33,16 @@ The extraction operator in `docling_serve` mode SHALL continue to accept only th
 - **WHEN** the provider is `docling_serve` and the input `pa.Table` contains `data.csv` or `mail.eml`
 - **THEN** the documents are skipped during extension validation and recorded in `skipped_docs` metadata
 
-### Requirement: Tier 4 video container support with ASR availability gating
-When video dependencies are installed, the extraction operator in `docling_library` mode SHALL support `.mkv` and `.webm` video containers in addition to `.mp4`, `.avi`, `.mov`, `.wav`, `.mp3`, `.m4a`, `.aac`, `.ogg`, and `.flac`.
+### Requirement: Exclude MKV and WebM from the current scope
+The extraction operator SHALL reject `.mkv` and `.webm` under the current scope decision. Direct Docling conversion succeeded for one real-model speech sample in each container without diarization. Optional diarization dependency compatibility, broader codec coverage, and end-to-end pipeline support remain unresolved; see the design for details.
 
-#### Scenario: MKV and WebM accepted in docling_library mode when video dependencies are available
-- **WHEN** video dependencies are available and an input `pa.Table` contains `video.mkv` and `clip.webm` in `docling_library` mode
-- **THEN** both documents pass extension validation and are processed rather than recorded in `skipped_docs`
-
-#### Scenario: MKV and WebM skipped when video dependencies are unavailable or in docling_serve mode
-- **WHEN** video dependencies are unavailable or the provider is `docling_serve` and the input `pa.Table` contains `video.mkv` or `clip.webm`
-- **THEN** the documents are skipped during extension validation and recorded in `skipped_docs` metadata
+#### Scenario: MKV and WebM are skipped
+- **WHEN** an input document has a `.mkv` or `.webm` extension
+- **THEN** it is skipped as unsupported and recorded in skipped document metadata
 
 #### Scenario: Video dependencies are unavailable but audio dependencies are installed
-- **WHEN** audio dependencies are available and video dependencies are unavailable
-- **THEN** supported audio remains accepted and video is skipped with a recorded reason
+- **WHEN** audio dependencies are available and a supported video document cannot be converted because video dependencies are missing
+- **THEN** audio remains accepted and the video conversion failure is recorded for the document
 
 #### Scenario: ffmpeg is absent during video conversion
 - **WHEN** video dependencies are installed but ffmpeg is absent from PATH
@@ -52,7 +52,7 @@ When video dependencies are installed, the extraction operator in `docling_libra
 During `docling_library` extraction, all audio and video extensions from both `InputFormat.AUDIO` and `InputFormat.VIDEO` SHALL be written to a uniquely named temporary directory (never the process working directory) before invoking conversion, using only the base name of the document, and the directory SHALL be removed after conversion completes or fails.
 
 #### Scenario: Video binary content is written to an isolated temporary file for conversion
-- **WHEN** `extract_content` processes binary content for a video file (`.mp4`, `.avi`, `.mov`, `.mkv`, or `.webm`)
+- **WHEN** `extract_content` processes binary content for a video file (`.mp4`, `.avi`, or `.mov`)
 - **THEN** the binary payload is materialized to a file inside a newly created temporary directory for `DocumentConverter.convert()`, and that directory is removed after conversion completes
 
 #### Scenario: Explicit document format determines the media suffix
@@ -76,7 +76,7 @@ During `docling_library` extraction, all audio and video extensions from both `I
 - **THEN** the document is skipped during extension validation and recorded in `skipped_docs` metadata, and no temporary file is created; if such a stream reaches `extract_content`, it is not written to a temporary file and no extension is appended to its name
 
 ### Requirement: ASR pipeline configuration for video formats
-Enabling `use_asr_pipeline` on `docling_library` SHALL configure `InputFormat.VIDEO` alongside `InputFormat.AUDIO`, in both the standard converter path and the GPU converter path, applying the selected ASR model to both.
+Enabling `use_asr_pipeline` on `docling_library` SHALL configure `InputFormat.VIDEO` alongside `InputFormat.AUDIO` when the Docling video classes are available, in both the standard converter path and the GPU converter path, applying the selected ASR model to both. Supported video extensions remain eligible without probing optional speaker-identification dependencies; conversion errors are recorded per document.
 
 #### Scenario: ASR model configuration applies to both audio and video format options
 - **WHEN** `use_asr_pipeline` is enabled on `docling_library` with an `asr_model_name` (e.g. `whisper_turbo`)

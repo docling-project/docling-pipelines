@@ -8,22 +8,30 @@ In this specification, **Tier 1** means pure-Python Docling formats that require
 ## ADDED Requirements
 
 ### Requirement: Immutable supported file extension discovery across Tier 1 and Tier 4 formats
-The supported file extension discovery helper SHALL return a comma-separated list of all Tier 1 base extensions plus audio extensions when ASR is available and video extensions (including `mkv` and `webm`) when video dependencies are available, without mutating the underlying `BASE_EXTENSIONS` constant list across repeated invocations.
+The supported file extension discovery helper SHALL return a comma-separated list of all Tier 1 base extensions plus audio extensions when ASR is available and supported video extensions independently of optional dependency imports, without mutating the underlying `BASE_EXTENSIONS` constant list across repeated invocations.
 
 #### Scenario: Supported extensions list includes Tier 1 formats without ASR
-- **WHEN** `get_supported_file_extensions()` is called when both audio and video dependencies are unavailable
-- **THEN** the returned comma-separated string includes Tier 1 extensions (`csv`, `epub`, `eml`, `msg`, `tex`, `latex`, `adoc`, `asciidoc`, `asc`, `vtt`, `htm`, `xhtml`, `mhtml`, `mht`, `markdown`, `text`, `qmd`, `rmd`, `dotx`, `docm`, `dotm`, `potx`, `ppsx`, `pptm`, `potm`, `ppsm`, `xlsm`, `xltx`, `xltm`) and excludes audio/video extensions
+- **WHEN** `get_supported_file_extensions()` is called when ASR dependencies are unavailable
+- **THEN** the returned comma-separated string includes Tier 1 extensions (`csv`, `epub`, `eml`, `msg`, `tex`, `latex`, `adoc`, `asciidoc`, `asc`, `vtt`, `htm`, `xhtml`, `mhtml`, `mht`, `markdown`, `text`, `qmd`, `rmd`, `pptm`, `xlsm`, `xltx`, `xltm`) and excludes audio extensions; supported video extensions remain included
 
-#### Scenario: Audio-only installation excludes video
-- **WHEN** audio dependencies are available but video dependencies are unavailable
-- **THEN** the supported extensions include audio and exclude video
+#### Scenario: Unsupported Office variants are excluded
+- **WHEN** supported extensions are discovered or include filters are validated
+- **THEN** `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, and `.ppsm` are not offered or accepted because Docling's underlying readers reject their internal content types
+
+#### Scenario: MKV and WebM are excluded
+- **WHEN** supported extensions are discovered or include filters are validated
+- **THEN** `.mkv` and `.webm` are not offered or accepted under the current scope decision; direct real-model conversion succeeded for one speech sample in each container, but optional diarization dependency compatibility, broader codec coverage, and end-to-end pipeline support remain unresolved
+
+#### Scenario: Video extensions are independent of optional dependency imports
+- **WHEN** video dependencies are unavailable
+- **THEN** supported video extensions remain in the supported list and audio eligibility depends only on ASR availability
 
 #### Scenario: Repeated calls with ASR available do not mutate BASE_EXTENSIONS
-- **WHEN** `get_supported_file_extensions()` is called with both audio and video dependencies available followed by a call with both unavailable
-- **THEN** `OperatorConstants.FileExtensions.BASE_EXTENSIONS` remains unmutated and the second call does not contain any audio or video extensions
+- **WHEN** `get_supported_file_extensions()` is called with ASR available followed by a call with ASR unavailable
+- **THEN** `OperatorConstants.FileExtensions.BASE_EXTENSIONS` remains unmutated and the second call does not contain audio extensions
 
 ### Requirement: Default include filter covers all supported extensions
-When `include_filter` is not configured, `IngestSourceOperator` SHALL ingest every file whose extension is in the supported extension list, including all Tier 1 formats and, when their respective dependencies are available, Tier 4 audio/video formats. An explicit `include_filter` SHALL restrict ingestion to the listed extensions only.
+When `include_filter` is not configured, `IngestSourceOperator` SHALL ingest every file whose extension is in the supported extension list, including all Tier 1 formats, supported video formats, and audio formats when ASR is available. An explicit `include_filter` SHALL restrict ingestion to the listed extensions only.
 
 #### Scenario: Tier 1 file is ingested when no include_filter is set
 - **WHEN** a filesystem path contains `data.csv` and `report.pdf` and `IngestSourceOperator` runs without `include_filter`
@@ -34,7 +42,7 @@ When `include_filter` is not configured, `IngestSourceOperator` SHALL ingest eve
 - **THEN** only `report.pdf` is emitted and `data.csv` is recorded in `metadata["skipped_docs"]`
 
 ### Requirement: Include and exclude filter validation for Tier 1 and Tier 4 extensions
-`IngestSourceOperator` SHALL accept any Tier 1 extension (and each Tier 4 audio/video extension when its respective dependencies are available) in `include_filter` and `exclude_filter`, emitting matching documents into the output `pa.Table` and recording filtered-out files in `skipped_docs` transform metadata.
+`IngestSourceOperator` SHALL accept any Tier 1 extension or supported video extension in `include_filter` and `exclude_filter`. It SHALL also accept Tier 4 audio extensions when ASR is available, emitting matching documents into the output `pa.Table` and recording filtered-out files in `skipped_docs` transform metadata.
 
 #### Scenario: Ingest source accepts Tier 1 extensions in include_filter
 - **WHEN** `IngestSourceOperator` is initialized with `include_filter="csv,epub,eml,tex,adoc,vtt"`

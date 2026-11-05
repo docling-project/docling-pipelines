@@ -176,6 +176,7 @@ tesserocr = [
 
 vlm_asr = [
     "docling[vlm,asr]==2.142.1",
+    "docling-slim[format-video]==2.142.1",
 ]
 
 [project.urls]
