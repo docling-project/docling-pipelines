@@ -9,12 +9,13 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 ## Features
 
 ### Core Capabilities
-- **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX
-- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_FLAT, GPU_BRUTE_FORCE with automatic GPU detection and CPU fallback
-- **Quantization**: SQ8, PQ and PRQ variants to reduce memory
-- **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE
+- **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX, BIN_FLAT, BIN_IVF_FLAT
+- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE with automatic GPU detection and CPU fallback
+- **Index Quantization**: SQ8, PQ and PRQ index variants to reduce memory (the `quantization` setting in `provider_config`)
+- **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE, HAMMING, JACCARD
+- **Binary Vector Support**: 1-bit quantized compact vector embeddings (`BIN_FLAT`, `BIN_IVF_FLAT`) for 32x memory and storage savings
 - **Hybrid Search**: Dense + sparse vector support with BM25
-- **Multi-Model Embeddings**: Multiple embedding models with different dimensions in same collection
+- **Multi-Model Embeddings**: Multiple embedding models with different dimensions in same collection (including mixing dense float and binary vectors)
 - **Batch Processing**: Configurable batch sizes for optimal performance
 - **Incremental Updates**: Query and delete capabilities
 - **Error Handling**: Detailed failure tracking and retry logic
@@ -22,21 +23,61 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 
 ### Supported Index Types
 
-| Index Type | Speed | Accuracy | Memory | Use Case |
-|-----------|-------|----------|--------|----------|
-| HNSW | Fast | High | Medium | General purpose, recommended |
-| IVF_FLAT | Very Fast | Medium | Low | Large datasets, speed priority |
-| IVF_SQ8 | Very Fast | Medium | Very Low | Memory-constrained environments |
-| FLAT | Slow | Perfect | High | Small datasets, exact search |
-| AUTOINDEX | Varies | High | Varies | Automatic optimization |
+| Index Type | Vector Type | Speed | Accuracy | Memory | Use Case |
+|-----------|-------------|-------|----------|--------|----------|
+| HNSW | Dense Float | Fast | High | Medium | General purpose, recommended |
+| IVF_FLAT | Dense Float | Very Fast | Medium | Low | Large datasets, speed priority |
+| IVF_SQ8 | Dense Float | Very Fast | Medium | Very Low | Memory-constrained environments |
+| FLAT | Dense Float | Slow | Perfect | High | Small datasets, exact search |
+| AUTOINDEX | Dense Float | Varies | High | Varies | Automatic optimization |
+| BIN_FLAT | Binary | Brute force | Perfect | Very Low | Exact search for 1-bit quantized binary vectors |
+| BIN_IVF_FLAT | Binary | Very Fast | High | Very Low | Inverted index for large-scale binary vector retrieval |
+
+> [!NOTE]
+> Milvus Lite (`auth_type: "lite"`) does not support binary vectors or binary index types (`BIN_FLAT`,
+> `BIN_IVF_FLAT`). For binary vector storage, use a remote Milvus server (`auth_type` of `standalone`, `grpc`, `uri`
+> or `token`).
+
+#### How `index_type`, `metric_type` and `index_parameters` apply to each vector field
+
+Whether a vector field is dense (`FLOAT_VECTOR`) or binary (`BINARY_VECTOR`) is decided only by the feature's own
+type (`vector` vs `vector_binary`) -- never by `index_type`. The single `index_type` / `metric_type` /
+`index_parameters` configuration is applied to every vector field according to that kind:
+
+| Configured `index_type` | Dense field | Binary field |
+|---|---|---|
+| Dense (`HNSW`, `IVF_FLAT`, ...) | Used as configured | `BIN_FLAT` + `HAMMING` (dense metrics and parameters are not valid for binary fields) |
+| Binary (`BIN_FLAT`, `BIN_IVF_FLAT`) | `HNSW` + `L2` defaults (mixed collections only) | Used as configured, with a binary `metric_type` |
+
+A `BIN_*` `index_type` on a collection with no binary vector field is rejected, as is a dense `index_type` paired
+with a binary-only `metric_type` (`HAMMING`, `JACCARD`). The `BIN_*`
+check also runs during flow validation (`POST /api/v1/validation/validate_flow`): it fails when no upstream feature is
+typed `vector_binary`, for example when the embeddings operator has no `quantization: "binary"` or `"ubinary"`.
+
+When `EmbeddingsOperator` runs with `quantization: "binary"` or `"ubinary"`, the flow's feature propagation types its
+`embeddings` feature as `vector_binary`, so the binary schema and index are selected automatically.
+
+> [!NOTE]
+> 1-bit quantization keeps only the sign of each dimension, so it works best with zero-centred (for example
+> normalized) embedding models. `quantization: ubinary` behaves identically to `binary`. Set `quantization` on the
+> embeddings node's `config`.
+
+For a complete flow that quantizes embeddings and indexes them with `BIN_IVF_FLAT`, see
+[`sample_flows/vectordb/milvus_binary_integration.json`](../../../sample_flows/vectordb/milvus_binary_integration.json).
 
 ### Similarity Metrics
 
-| Metric | Description | Use Case |
-|--------|-------------|----------|
-| L2 | Euclidean distance | General embeddings, default |
-| IP | Inner product | Pre-normalized vectors |
-| COSINE | Cosine similarity | Text embeddings, normalized similarity |
+| Metric | Applicable Vector Type | Description | Use Case |
+|--------|------------------------|-------------|----------|
+| L2 | Dense Float | Euclidean distance | General embeddings, default |
+| IP | Dense Float | Inner product | Pre-normalized vectors |
+| COSINE | Dense Float | Cosine similarity | Text embeddings, normalized similarity |
+| HAMMING | Binary | Bitwise Hamming distance | General 1-bit quantized binary vector retrieval |
+| JACCARD | Binary | Jaccard distance | Set similarity & binary token overlap |
+
+> [!NOTE]
+> Milvus 2.6 supports only `HAMMING` and `JACCARD` for binary indexes. The `TANIMOTO`, `SUBSTRUCTURE` and
+> `SUPERSTRUCTURE` metrics were removed upstream and are rejected during validation.
 
 ## Configuration Parameters
 
@@ -64,8 +105,8 @@ Connection and index-specific parameters are configured inside the `provider_con
 | `password` | string | No | `"Milvus"` | Password/API key for authentication |
 | `database` | string | No | `"default"` | Database name (not used for `lite`) |
 | `secure` | boolean | No | false | Enable TLS/SSL (not used for `lite`) |
-| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, GPU_CAGRA, etc.; only `FLAT` is supported for `lite`) |
-| `metric_type` | string | No | `"L2"` | Similarity metric (L2, IP, COSINE) |
+| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, `GPU_CAGRA`, `BIN_FLAT`, `BIN_IVF_FLAT`, etc.; only `FLAT` is supported for `lite`) |
+| `metric_type` | string | No | `"L2"` | Similarity metric: L2, IP, COSINE for dense vectors; HAMMING, JACCARD for binary vectors. A `BIN_*` `index_type` requires a binary metric, so the default `L2` is rejected. GPU index types do not support COSINE |
 | `index_parameters` | object | No | {} | Custom index-specific parameters |
 | `quantization` | string | No | - | `SQ8`, `PQ`, `PRQ` or `NONE`; see [GPU Indexes and Quantization](#gpu-indexes-and-quantization) |
 | `quantization_parameters` | object | No | {} | Quantization tuning parameters (e.g. `m`, `nbits`) |
@@ -92,6 +133,16 @@ Connection and index-specific parameters are configured inside the `provider_con
 ```
 
 #### IVF_SQ8
+```json
+{
+  "nlist": 128
+}
+```
+
+#### BIN_FLAT
+No parameters (exact search over binary vectors).
+
+#### BIN_IVF_FLAT
 ```json
 {
   "nlist": 128
@@ -384,6 +435,59 @@ config = {
 }
 ```
 
+### Example 5: Binary Vector Indexing (1-bit Quantized)
+
+Binary vectors store 1-bit quantized embeddings as raw byte strings (bit dimension must be a multiple of 8, e.g. 768 bits = 96 bytes).
+
+```python
+config = {
+    "provider": "milvus",
+    OperatorConstants.Config.PROVIDER_CONFIG: {
+        "collection_name": "binary_docs",
+        "host": "localhost",
+        "port": 19530,
+        "index_type": "BIN_IVF_FLAT",
+        "metric_type": "HAMMING",
+        "index_parameters": {
+            "nlist": 128
+        }
+    },
+    "available_features": {
+        "doc_id_hash": {
+            "available_for_vector_db": True,
+            "mandatory_for_vector_db": True,
+            "type": "string",
+            "is_primary": True
+        },
+        "content": {
+            "available_for_vector_db": True,
+            "type": "string"
+        },
+        "embeddings": {
+            "available_for_vector_db": True,
+            "mandatory_for_vector_db": True,
+            "type": "vector_binary"
+        }
+    },
+    "feature_mappings": [
+        {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+        {"feature_name": "content", "mapped_column_name": "text"},
+        {"feature_name": "embeddings", "mapped_column_name": "binary_vector"}
+    ]
+}
+
+# Ingest packed bytes (e.g. 384 bits = 48 bytes per document)
+data = {
+    "doc_id_hash": ["doc1", "doc2"],
+    "content": ["First document", "Second document"],
+    "embeddings": [b"\xff" * 48, b"\x00" * 48]
+}
+
+table = pa.table(data)
+operator = VectorDBOperator(config)
+result_tables, metadata = operator.transform(table)
+```
+
 ## Flow Configuration
 
 ### Complete Flow Example
@@ -483,6 +587,133 @@ OperatorConstants.Config.PROVIDER_CONFIG: {
     }
 }
 ```
+
+## GPU Indexes and Quantization
+
+Large collections can use GPU-accelerated indexes and index quantization to improve build and query speed and to reduce memory use. These options apply to dense vectors on standalone or remote Milvus. Milvus Lite supports only `FLAT`, and a GPU index type with `auth_type: "lite"` raises a configuration error.
+
+> [!NOTE]
+> The `quantization` setting in `provider_config` (`SQ8`, `PQ`, `PRQ`) picks a quantized **index type** on the Milvus side.
+> It is unrelated to the `quantization: "binary"` option on `EmbeddingsOperator`, which converts the embeddings themselves to
+> 1-bit binary vectors (see [Example 5](#example-5-binary-vector-indexing-1-bit-quantized)).
+
+### Prerequisites
+
+Per the Milvus GPU requirements:
+
+1. A Linux host with an NVIDIA GPU of compute capability 6.0, 7.0, 7.5, 8.0, 8.6 or 9.0, and NVIDIA driver 545 or newer.
+2. The NVIDIA Container Toolkit, and a GPU build of Milvus, for example the `milvusdb/milvus:<version>-gpu` image (such as `v2.6.16-gpu`). The regular image has no GPU index support.
+3. The GPU device assigned to the Milvus service in Docker Compose:
+   ```yaml
+   milvus-standalone:
+     image: milvusdb/milvus:v2.6.16-gpu
+     deploy:
+       resources:
+         reservations:
+           devices:
+             - driver: nvidia
+               capabilities: ["gpu"]
+               device_ids: ["0"]
+   ```
+4. GPU memory large enough for the collection. Milvus loads the data into GPU memory, so `maxMemSize` in the Milvus config must be at least the data size.
+
+macOS and Podman on Apple Silicon cannot run GPU indexes.
+
+Docling Pipelines also checks for a GPU on the host that runs the pipeline, in this order: `torch.cuda`, `pynvml`, then `nvidia-smi -L`. Two environment variables override the check: `DOCPIPE_DISABLE_GPU=true` forces the CPU path, and `DOCPIPE_FORCE_GPU=true` skips probing and assumes a GPU. `DOCPIPE_DISABLE_GPU` wins if both are set. If Milvus runs on a different machine from the pipeline, set `DOCPIPE_FORCE_GPU=true` on the pipeline host.
+
+### GPU index types and CPU fallback
+
+| GPU index | CPU fallback | Notes |
+|-----------|--------------|-------|
+| `GPU_CAGRA` | `HNSW` | Graph-based index with the highest query throughput in Milvus benchmarks |
+| `GPU_IVF_FLAT` | `IVF_FLAT` | Good balance of speed and recall |
+| `GPU_IVF_PQ` | `IVF_PQ` | Lower GPU memory through product quantization |
+| `GPU_BRUTE_FORCE` | `FLAT` | Exact search with recall of 1 |
+
+If a GPU index type is requested and no GPU is detected, the adapter logs a warning and builds the CPU fallback index instead, so ingestion still succeeds. CAGRA-only parameters (`graph_degree`, `intermediate_graph_degree`, `build_algo`, `cache_dataset_on_device`, `adapt_for_cpu`) are dropped on fallback and other `index_parameters` are kept.
+
+`use_gpu` controls this behaviour:
+
+| `use_gpu` | Behaviour |
+|-----------|-----------|
+| unset | The `index_type` is used as given |
+| `true` | A CPU index is upgraded to its GPU equivalent (`HNSW` to `GPU_CAGRA`, `IVF_FLAT` to `GPU_IVF_FLAT`, `IVF_PQ` to `GPU_IVF_PQ`, `FLAT` to `GPU_BRUTE_FORCE`) |
+| `false` | A GPU index is downgraded to its CPU equivalent |
+
+Set `gpu_device_id` to check for a specific device instead of any GPU.
+
+### GPU index limits
+
+These come from Milvus:
+
+- **No `COSINE`.** GPU indexes do not support the `COSINE` metric. A GPU index with `metric_type: "COSINE"` is rejected with a configuration error. Normalize the vectors and use `IP`, or use `L2`. `COSINE` is accepted when the index fell back to a CPU index.
+- GPU indexes do not support range search or grouping search.
+- The maximum search `limit` is 1,024 for `GPU_IVF_FLAT`, `GPU_IVF_PQ` and `GPU_CAGRA`.
+- A GPU index does not always lower latency compared with a CPU index. The gain is largest with heavy query load or large query batches.
+
+### Index quantization
+
+The `quantization` setting resolves the base `index_type` to a quantized variant. Unsupported combinations keep the base index type.
+
+| `index_type` | `quantization` | Resulting index |
+|--------------|----------------|-----------------|
+| `HNSW` | `SQ8` | `HNSW_SQ` |
+| `HNSW` | `PQ` | `HNSW_PQ` |
+| `HNSW` | `PRQ` | `HNSW_PRQ` |
+| `IVF_FLAT`, `FLAT` | `SQ8` | `IVF_SQ8` |
+| `IVF_FLAT`, `FLAT` | `PQ` | `IVF_PQ` |
+| `GPU_IVF_FLAT`, `GPU_BRUTE_FORCE` | `PQ` | `GPU_IVF_PQ` |
+
+Tune with `quantization_parameters`, for example `{"m": 16, "nbits": 8}` for PQ. These are merged into `index_parameters`.
+
+### Examples
+
+GPU index:
+
+```json
+{
+  "provider": "milvus",
+  "provider_config": {
+    "collection_name": "docs_gpu",
+    "auth_type": "standalone",
+    "host": "localhost",
+    "index_type": "GPU_CAGRA",
+    "metric_type": "IP",
+    "index_parameters": {
+      "intermediate_graph_degree": 64,
+      "graph_degree": 32
+    },
+    "search_parameters": {
+      "itopk_size": 64
+    },
+    "gpu_device_id": 0
+  }
+}
+```
+
+Memory-constrained CPU index:
+
+```json
+{
+  "provider_config": {
+    "collection_name": "docs_pq",
+    "index_type": "HNSW",
+    "quantization": "PQ",
+    "quantization_parameters": {"m": 16, "nbits": 8}
+  }
+}
+```
+
+A complete flow is in [`sample_flows/vectordb/gpu_milvus.json`](../../../sample_flows/vectordb/gpu_milvus.json).
+
+### Tuning guidance
+
+- `GPU_CAGRA`: raise `graph_degree` for recall at the cost of GPU memory and build time. `intermediate_graph_degree` should be at least `graph_degree`.
+- `GPU_IVF_FLAT` and `GPU_IVF_PQ`: `nlist` defaults to 1024. Roughly `sqrt(n)` to `4*sqrt(n)` for `n` vectors is a common starting range.
+- Index quantization trades recall for memory. `SQ8` typically gives about 4x smaller vectors with small recall loss, and `PQ` gives much higher compression with more loss. Validate recall on your own data before choosing.
+- For small collections, `HNSW` on CPU is often as fast as a GPU index.
+- `search_parameters` (for example `ef` for HNSW, `nprobe` for IVF, `itopk_size` for CAGRA) are stored on the index manager. This operator only ingests, so apply them in the query client you use against the collection.
+- Check the log for `Falling back to CPU index` to confirm which index was actually built.
 
 ## Error Handling
 

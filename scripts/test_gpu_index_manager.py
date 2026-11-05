@@ -146,7 +146,7 @@ cases = [
     ("IVF_FLAT", "PQ", "IVF_PQ"),
     ("FLAT", "SQ8", "IVF_SQ8"),
     ("GPU_IVF_FLAT", "PQ", "GPU_IVF_PQ"),
-    ("GPU_FLAT", "PQ", "GPU_IVF_PQ"),
+    ("GPU_BRUTE_FORCE", "PQ", "GPU_IVF_PQ"),
     ("HNSW", None, "HNSW"),
     ("HNSW", "NONE", "HNSW"),
 ]

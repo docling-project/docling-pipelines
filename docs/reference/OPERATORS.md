@@ -1722,6 +1722,7 @@ Schemas are defined with `target_tables` specifying field mappings and transform
 | `provider`          | string  |      Yes | `litellm`     | Provider type: `litellm`, `watsonx`, `huggingface`                                               |
 | `provider_config`   | object  |      Yes | -             | Provider-specific configuration (see table below)                                                |
 | `embeddings_column` | string  |       No | `embeddings`  | Output vector column                                                                             |
+| `quantization`      | string  |       No | `none`        | Vector quantization method: `"none"`, `"binary"` (1-bit sign thresholding packed to bytes), or `"ubinary"` |
 | `doc_column`        | string  |       No | `content`     | Input content column                                                                             |
 | `doc_id_hash`       | string  |       No | `doc_id_hash` | Hash column name                                                                                 |
 | `overlap_ratio`     | float   |       No | `0.2`         | Long-text chunk overlap ratio                                                                    |
@@ -2067,11 +2068,14 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
    - **Index Types**:
      - Dense: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX
      - Sparse: SPARSE_INVERTED_INDEX, SPARSE_WAND
+     - Binary: BIN_FLAT, BIN_IVF_FLAT (1-bit quantized binary vectors)
    - **Metric Types**:
      - Dense: L2 (Euclidean), IP (Inner Product), COSINE
      - Sparse: BM25 (required for sparse mode)
+     - Binary: HAMMING, JACCARD
    - **Vector Modes**:
      - Dense vectors only (default)
+     - Binary vectors (1-bit quantized with `BIN_FLAT` / `BIN_IVF_FLAT`), set automatically when `EmbeddingsOperator` uses `quantization: binary|ubinary`. Not supported by Milvus Lite. See the [Milvus operator guide](../operators/vectordb/milvus.md) for how index settings apply to each vector field
      - Sparse + Dense vectors (dual storage with BM25 function)
    - **Deployment Options**:
      - Standalone Milvus (local or remote)
@@ -2240,8 +2244,8 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 - **password**: Authentication password/API key (optional for `standalone`, required for `grpc` - should be API key)
 - `database`: Database name (default: "default")
 - `secure` : Required for IBM watsonx.data MilvusDB for https connection and is set to true in this case.
-- `index_type`: Index algorithm (HNSW, HNSW_SQ, HNSW_PQ, HNSW_PRQ, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX, GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_FLAT, GPU_BRUTE_FORCE for dense; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse). GPU types fall back to a CPU index when no GPU is detected.
-- `metric_type`: Distance metric (L2, IP, COSINE for dense; BM25 required for sparse mode)
+- `index_type`: Index algorithm (HNSW, HNSW_SQ, HNSW_PQ, HNSW_PRQ, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX, GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for dense; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). GPU types fall back to a CPU index when no GPU is detected. Milvus Lite supports only FLAT
+- `metric_type`: Distance metric (L2, IP, COSINE for dense; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode). GPU index types do not support COSINE
 - `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW)
 - `quantization`: `SQ8`, `PQ`, `PRQ` or `NONE`. Resolves the base `index_type` to its quantized variant to reduce memory
 - `quantization_parameters`: Quantization tuning parameters merged into the index parameters (e.g., `m`, `nbits`)

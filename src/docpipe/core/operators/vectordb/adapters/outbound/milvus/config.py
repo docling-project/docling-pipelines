@@ -82,24 +82,33 @@ class MilvusConfig(BaseModel):
         "HNSW_PRQ",
         "DISKANN",
         "AUTOINDEX",
-        "GPU_FLAT",
         "GPU_IVF_FLAT",
         "GPU_IVF_PQ",
         "GPU_CAGRA",
         "GPU_BRUTE_FORCE",
         "SPARSE_INVERTED_INDEX",
         "SPARSE_WAND",
+        "BIN_FLAT",
+        "BIN_IVF_FLAT",
     ] = Field(
         default="HNSW",
         description=(
             "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
-            "Use HNSW, HNSW_SQ, HNSW_PQ for standalone/remote deployments, or "
-            "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ for GPU-accelerated deployments."
+            "Use HNSW, HNSW_SQ, HNSW_PQ for standalone/remote deployments, "
+            "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ for GPU-accelerated deployments, "
+            "or BIN_FLAT / BIN_IVF_FLAT for binary vectors."
         ),
     )
-    metric_type: Literal["L2", "IP", "COSINE", "BM25"] = Field(
+    metric_type: Literal[
+        "L2",
+        "IP",
+        "COSINE",
+        "BM25",
+        "HAMMING",
+        "JACCARD",
+    ] = Field(
         default="L2",
-        description="Vector similarity metric.",
+        description="Vector similarity metric. HAMMING and JACCARD are for binary vectors (Milvus 2.6).",
     )
     index_parameters: dict = Field(
         default_factory=dict,
