@@ -9,12 +9,12 @@
 ## 2. Resumption Service & Checkpoint Management
 
 - [ ] 2.1 [backend] Create `ResumptionPlan` domain model in `src/docpipe/core/orchestration/domain/models/resumption_plan.py` to hold per-node deferred document injection descriptors.
-- [ ] 2.2 [backend] Implement `ResumptionService` in `src/docpipe/core/orchestration/application/services/resumption_service.py` to query past failures from `JobStatsStore`, check `max_retry_attempts`, and locate upstream intermediate checkpoint parquet files.
+- [ ] 2.2 [backend] Implement `ResumptionService` in `src/docpipe/core/orchestration/application/services/resumption_service.py` to query past failures and saved `modification_time` from `JobStatsStore`, check `max_retry_attempts` (allowing `max_retry_attempts + 1` total attempts), and locate upstream intermediate checkpoint parquet files.
 - [ ] 2.3 [backend] Add unit tests for `ResumptionService` in `tests/unit/core/orchestration/test_resumption_service.py` covering retry thresholds and missing checkpoint fallbacks. Verify with `pytest tests/unit/core/orchestration/test_resumption_service.py`.
 
 ## 3. Ingest Source & Unified Batching
 
-- [ ] 3.1 [backend] Update `IngestSourceOperator` in `src/docpipe/core/operators/ingest/ingest_source.py` to compare source file `modified_time` against checkpoint timestamps, emit `deferred_execution_docs`, and calculate total `documents_in_scope = fresh + deferred + failed + skipped`.
+- [ ] 3.1 [backend] Update `IngestSourceOperator` in `src/docpipe/core/operators/ingest/ingest_source.py` to save `modification_time` on failure, compare source file `modified_time` against saved `modification_time`, emit `deferred_execution_docs`, and calculate total `documents_in_scope = fresh + deferred + failed + skipped`.
 - [ ] 3.2 [backend] Update `BatchManager` in `src/docpipe/core/orchestration/batch_manager.py` to distribute deferred document metadata alongside fresh documents across micro-batches.
 - [ ] 3.3 [backend] Add unit tests for `IngestSourceOperator` deferred doc emission in `tests/unit/operators/ingest/test_ingest_source_resumption.py`. Verify with `pytest tests/unit/operators/ingest/test_ingest_source_resumption.py`.
 
@@ -26,7 +26,7 @@
 
 ## 5. Exhausted Retries Persistence & Report Generation
 
-- [ ] 5.1 [backend] Update `ResumptionService` and `IncrementalUpdateService` to persist metadata records for retry-exhausted documents to `IncrementalMetadataStore` to prevent automated re-execution.
+- [ ] 5.1 [backend] Update `ResumptionService` and `IncrementalUpdateService` to persist metadata records for retry-exhausted documents to `IncrementalMetadataStore` without purging their checkpoints, preventing automated re-execution.
 - [ ] 5.2 [backend] Update `JobReportGenerator` in `src/docpipe/core/job_management/application/services/report_generator.py` to format retry-exhausted documents with status `Failed` and reason indicating maximum retries were exhausted. Verify with `pytest tests/unit/core/job_management/test_report_generator.py`.
 
 ## 6. End-to-End Flow Execution & Integration Testing

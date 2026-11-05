@@ -11,13 +11,14 @@ This design introduces a pre-execution **Resumption Planner** that identifies fa
 **Goals:**
 - Provide automated resumption of previously failed documents at their point of failure during standard incremental runs.
 - Maintain mathematical consistency across node-level metrics: $\text{documents\_in\_scope} = \text{processed} + \text{deferred} + \text{failed} + \text{skipped}$.
-- Validate source file timestamps so modified files automatically bypass stale checkpoints and re-ingest fresh.
-- Enforce `max_retry_attempts` to prevent persistent poisons from retrying indefinitely.
+- Validate source file timestamps against saved failure-time modification timestamps so modified files automatically bypass checkpoints and re-ingest fresh.
+- Enforce `max_retry_attempts` (allowing `max_retry_attempts + 1` total attempts) to prevent persistent poisons from retrying indefinitely.
 - Persist metadata for retry-exhausted documents to `IncrementalMetadataStore` and report them in the post-execution job run CSV report.
 
 **Non-Goals:**
 - Cross-job checkpoint sharing.
 - Structural DAG changes or schema mismatch recovery across versions.
+- Concurrent runs of the same `job_id` (a `job_id` is assumed to execute sequentially; concurrent runs of the same `job_id` are out of scope).
 
 ## Architecture & DDD Layer Boundaries
 
@@ -67,11 +68,11 @@ graph TD
 
 ### 2. Application Layer (`src/docpipe/core/orchestration/application/` & `job_management/application/`)
 - `ResumptionService`:
-  - Queries `JobStatsStore` for the latest failed documents of the job.
-  - Queries retry counts and compares against `max_retry_attempts`.
-  - Checks existence and timestamps of upstream checkpoint files.
+  - Queries `JobStatsStore` for the latest failed documents of the job and their saved `modification_time`.
+  - Queries consecutive failure counts and compares against `max_retry_attempts` (allows `max_retry_attempts + 1` total tries: 1 initial attempt plus `max_retry_attempts` retries).
+  - Checks existence of upstream checkpoint files.
   - Generates the `ResumptionPlan`.
-  - Flags documents that reached `max_retry_attempts` for non-recoverable incremental metadata persistence.
+  - Flags documents that exceeded `max_retry_attempts` retries for non-recoverable incremental metadata persistence, while preserving their checkpoint files.
 - `JobReportGenerator` / `ReportGenerator`:
   - Formats report rows for retry-exhausted documents with status `Failed` and reason `Maximum retries exhausted at <node_name>: <reason>`.
 - `NodeStatsAggregator` / `BatchAggregator`:
@@ -80,7 +81,7 @@ graph TD
 ### 3. Orchestrator & Executor Layer (`src/docpipe/core/orchestration/`)
 - `IngestSourceOperator`:
   - Ingests fresh documents.
-  - For documents in `bypass_ingest_ids`, verifies `source_modified_time <= checkpoint_time`. If newer, marks as fresh; otherwise, marks as `deferred_execution_docs`.
+  - For documents in `bypass_ingest_ids`, verifies `source_modified_time == saved_modified_time`. If newer (`source_modified_time > saved_modified_time`), marks as fresh and discards checkpoint; otherwise, marks as `deferred_execution_docs`.
   - Sets `documents_in_scope = len(fresh) + len(deferred) + skipped + failed`.
 - `AbstractOperatorExecutor`:
   - Before executing node $K$:
@@ -96,17 +97,17 @@ graph TD
 - **Alternative Considered**: Injecting documents at Node $K$ without informing Ingest or upstream nodes. Rejected because upstream reports would show $M$ docs in scope while downstream reports show $M + D$, causing confusion in monitoring dashboards.
 
 ### 2. Source Modified Timestamp Comparison
-- **Decision**: If source `modified_time > checkpoint_time`, invalidate checkpoint and ingest fresh from Node 1.
-- **Rationale**: If a file was updated in source storage to fix an error, the upstream checkpoint is stale and the entire document must be re-extracted.
+- **Decision**: Save the source `modification_time` for failed documents at failure/ingest time. On subsequent runs, compare the current source `modification_time` against the saved `modification_time`. If current `modification_time > saved_modification_time`, invalidate checkpoint and ingest fresh from Node 1.
+- **Rationale**: Comparing source clock directly against saved source clock eliminates cross-system clock skew between external storage systems (e.g. S3, remote storage) and pipeline infrastructure, and ensures modified files are re-ingested from scratch.
 
 ### 3. Retry Threshold via `max_retry_attempts` & Failure Reporting
-- **Decision**: Introduce `global_config.max_retry_attempts` (default: 3). When exhausted, persist document metadata as non-recoverable in `IncrementalMetadataStore` and report explicitly in the job run report.
-- **Rationale**: Prevents unparseable or malicious files from cycling through retries on every scheduled incremental run, and gives operators clear visibility into permanently failed documents in the post-execution CSV report.
+- **Decision**: Introduce `global_config.max_retry_attempts` (default: 3). A document is allowed 1 initial execution plus up to `max_retry_attempts` retries (total `max_retry_attempts + 1` attempts). When retries are exhausted (consecutive failure count reaches `max_retry_attempts + 1`), persist document metadata as non-recoverable in `IncrementalMetadataStore`, retain checkpoint files for debugging/manual recovery, and report explicitly in the job run report.
+- **Rationale**: Prevents unparseable or malicious files from cycling through retries on every scheduled incremental run, while giving operators clear visibility and preserving checkpoints for offline investigation.
 
 ## Risks / Trade-offs
 
 - **[Risk] Checkpoint file missing or corrupted on disk** $\rightarrow$ **Mitigation**: If the checkpoint file cannot be read or deserialized, `ResumptionService` logs a warning and falls back to full root ingestion for those document IDs.
-- **[Risk] Storage growth from retaining checkpoints** $\rightarrow$ **Mitigation**: Checkpoints are purged once all downstream nodes complete successfully or when `max_retry_attempts` is exceeded.
+- **[Risk] Storage growth from retaining checkpoints** $\rightarrow$ **Mitigation**: Checkpoints are purged once all downstream nodes complete successfully. Checkpoints are NOT purged when `max_retry_attempts` is exceeded so that failure artifacts remain available for inspection or manual recovery.
 
 ## Migration Plan
 

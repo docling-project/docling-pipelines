@@ -8,12 +8,12 @@ By automatically detecting previously failed documents during standard increment
 
 ## What Changes
 
-- **Automatic Pre-Execution Resumption Planning**: Before flow execution, the orchestrator inspects `JobStatsStore` for failed documents from prior runs of the same `job_id`, checks retry thresholds against `max_retry_attempts` (default: 3), and locates upstream checkpoint tables.
-- **Source Timestamp Validation**: Ingest compares the source file's `modified_time` against the checkpoint timestamp. If the file was modified since the failure, the stale checkpoint is invalidated and the document is re-ingested fresh from the root.
+- **Automatic Pre-Execution Resumption Planning**: Before flow execution, the orchestrator inspects `JobStatsStore` for failed documents from prior runs of the same `job_id`, checks retry thresholds against `max_retry_attempts` (default: 3, allowing `max_retry_attempts + 1` total attempts), and locates upstream checkpoint tables.
+- **Source Modification Validation**: When documents fail, their source `modification_time` is recorded. During subsequent runs, Ingest compares the current source file's `modification_time` against the saved `modification_time`. If the file was modified in the source, the checkpoint is invalidated and the document is re-ingested fresh from the root.
 - **Deferred Execution Accounting**: Documents scheduled for downstream resumption are counted in `documents_in_scope` at the Ingest node and categorized as `deferred_execution_docs`. Upstream nodes carry this count forward without performing duplicate compute.
 - **Node-Level Checkpoint Injection**: When execution reaches the failed node, the orchestrator retrieves the upstream parent checkpoint rows for the deferred documents, combines them with incoming batch tables, and clears them from `deferred_execution_docs`.
 - **Micro-Batching Integration**: Fresh and deferred documents are partitioned into micro-batches after Ingest so that each batch carries its respective deferred document metadata until the resumption node.
-- **Persistence & Metrics Updates**: `NodeStats` and storage stores (DuckDB, PostgreSQL, JSON) persist `deferred_execution_docs`. Successfully resumed documents are finalized in `IncrementalMetadataStore` and their intermediate checkpoints purged.
+- **Persistence & Metrics Updates**: `NodeStats` and storage stores (DuckDB, PostgreSQL, JSON) persist `deferred_execution_docs`. Successfully resumed documents are finalized in `IncrementalMetadataStore` and their intermediate checkpoints purged (checkpoints are retained for retry-exhausted documents).
 - **Exhausted Retry Persistence & Reporting**: Documents that exhaust `max_retry_attempts` are permanently persisted to `IncrementalMetadataStore` with non-recoverable failure metadata and explicitly reported as `Failed (Max retries exhausted)` in the post-execution job run report.
 
 ## Non-goals
@@ -21,6 +21,7 @@ By automatically detecting previously failed documents during standard increment
 - Dynamic DAG structural modification or handling schema changes between runs (deferred to a future change).
 - Creating new REST endpoints or CLI subcommands to trigger retries (resumption is entirely automatic during normal incremental execution).
 - Cross-job checkpoint sharing (checkpoints are strictly scoped to the same `job_id`).
+- Concurrent runs of the same `job_id` (executions of a given `job_id` are assumed to be sequential; concurrent runs of the same `job_id` are out of scope).
 
 ## Capabilities
 
