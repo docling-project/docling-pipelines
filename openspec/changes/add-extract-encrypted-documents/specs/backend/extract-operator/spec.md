@@ -8,7 +8,7 @@ Defines how the `extract_operator` handles password-protected documents: the `do
 
 ### Requirement: Document Passwords Configuration
 
-The `extract_operator` SHALL accept an optional top-level `document_passwords` object with an optional ordered `rules` list and an optional `default` list. Each rule SHALL have a non-empty string `match` and a non-empty `passwords` list. Every password SHALL be a non-empty string. Unknown keys SHALL be rejected. When `document_passwords` is omitted, no passwords are configured.
+The `extract_operator` SHALL accept an optional top-level `document_passwords` object with an optional ordered `rules` list and an optional `default` list. Each rule SHALL have a non-empty string `match` and a non-empty `passwords` list. Every password SHALL be a non-empty string, and no `passwords` list or `default` list SHALL have more than 10 entries. Unknown keys SHALL be rejected. When `document_passwords` is omitted, no passwords are configured.
 
 #### Scenario: Valid configuration accepted
 - **WHEN** a flow configures `extract_operator` with `document_passwords: {"rules": [{"match": "*.pdf", "passwords": ["vault://org/pdf-key"]}], "default": ["vault://org/shared-key"]}`
@@ -17,6 +17,10 @@ The `extract_operator` SHALL accept an optional top-level `document_passwords` o
 #### Scenario: Malformed configuration rejected
 - **WHEN** `document_passwords` contains an unknown key, a rule without `match`, a rule with an empty `passwords` list, or a password that is not a non-empty string
 - **THEN** flow validation SHALL report an error naming the offending location within `document_passwords`
+
+#### Scenario: Oversized candidate list rejected
+- **WHEN** a rule's `passwords` list or the `default` list has more than 10 entries
+- **THEN** flow validation SHALL report an error naming the offending location
 
 #### Scenario: Validation errors do not echo passwords
 - **WHEN** flow validation reports an error for a malformed `document_passwords` object
@@ -59,7 +63,7 @@ The operator SHALL detect, after fetching document bytes and before extraction, 
 - **THEN** the operator SHALL treat the document as encrypted and SHALL NOT pass it to the text extraction provider
 
 #### Scenario: Owner-password-only PDF not treated as encrypted
-- **WHEN** a PDF has an owner password but no user password
+- **WHEN** a PDF has an owner password but no user password, including one whose permission flags deny content extraction
 - **THEN** the operator SHALL pass the original bytes to the text extraction provider unchanged
 
 ### Requirement: In-Memory Decryption
@@ -125,6 +129,10 @@ Documents that fail with `password_required`, `password_incorrect` or `decryptio
 #### Scenario: Corrected password after a failed run
 - **WHEN** an incremental run fails a document with `password_incorrect`, and a later run of the same flow, with the document unchanged, configures the correct password
 - **THEN** the later run SHALL extract the document
+
+#### Scenario: Not counted against a retry limit
+- **WHEN** the engine limits how many times a failing document is retried automatically, and a document fails with `password_required`, `password_incorrect` or `decryption_unavailable`
+- **THEN** those failures SHALL NOT count toward that limit
 
 #### Scenario: Other non-recoverable failures unchanged
 - **WHEN** a document that is not encrypted fails extraction with an error that was classified as non-recoverable before this change
