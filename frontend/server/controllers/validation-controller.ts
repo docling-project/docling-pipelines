@@ -1,7 +1,6 @@
-import axios from 'axios';
 import type { Request, Response, Router } from 'express';
-import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS } from './http-headers';
+import { log4js } from '../../src/utils/logger';
+import { handleProxyError, proxyRequest } from '../utils/proxy';
 
 const logger = log4js.getLogger('validation.controller');
 
@@ -9,29 +8,24 @@ const logger = log4js.getLogger('validation.controller');
  * Validate a flow definition (without persisting it)
  * BFF controller that proxies flow validation to Python FastAPI backend
  */
-const validateFlow = async (req: Request, res: Response) => {
+const validateFlow = async (req: Request, res: Response): Promise<void> => {
   try {
     const { is_elyra = true } = req.query;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/validation/validate_flow?is_elyra=${is_elyra}`;
-    logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
-
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await proxyRequest({
+      method: 'POST',
+      path: `/api/v1/validation/validate_flow?is_elyra=${String(is_elyra)}`,
+      body: req.body,
+    });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error validating flow', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to validate flow' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to validate flow' });
   }
 };
 
 /**
  * Export routes function that registers all validation endpoints
  */
-export const routes = (router: Router) => {
+export const routes = (router: Router): void => {
   router.post('/validation/validate', validateFlow);
 };
