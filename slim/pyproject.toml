@@ -65,7 +65,7 @@ dependencies = [
     "polars==2.1.0",
     "prefect==3.8.4",
     "psycopg2-binary==2.9.12",
-    "pyarrow==26.0.0",
+    "pyarrow==26.0.1",
     "pyasn1==0.6.5",
     "pydantic==2.12.5",
     "pydantic-settings==2.16.1",
