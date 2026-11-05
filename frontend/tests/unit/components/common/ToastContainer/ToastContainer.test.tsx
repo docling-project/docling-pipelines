@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { ToastContainer } from '@/components/common/ToastContainer/ToastContainer';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 
