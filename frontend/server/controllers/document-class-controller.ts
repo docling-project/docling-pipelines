@@ -10,11 +10,11 @@ const logger = log4js.getLogger('document-class.controller');
  */
 const fetchDocumentClasses = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'GET', path: '/api/v1/document_classes' });
+    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'document_classes'] });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch document classes' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch document classes' });
   }
 };
 

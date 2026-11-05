@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import { log4js } from '../../src/utils/logger';
 import { handleProxyError, proxyRequest } from '../utils/proxy';
-import { queryString, queryStringList } from '../utils/query';
+import { queryString, queryStringList, routeParam } from '../utils/query';
 
 const logger = log4js.getLogger('flow.controller');
 
@@ -11,11 +11,11 @@ const logger = log4js.getLogger('flow.controller');
  */
 const createFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'POST', path: '/api/v1/flows?is_elyra=true', body: req.body });
+    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'flows'], query: { is_elyra: 'true' }, body: req.body });
 
     res.status(response.status).json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create flow' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create flow' });
   }
 };
 
@@ -25,13 +25,13 @@ const createFlow = async (req: Request, res: Response): Promise<void> => {
  */
 const getFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
+    const flowId = routeParam(req.params.flowId);
 
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/flows/${flowId}` });
+    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'flows', flowId] });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch flow' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch flow' });
   }
 };
 
@@ -43,24 +43,22 @@ const getFlows = async (req: Request, res: Response): Promise<void> => {
   try {
     const { limit, offset, name, tags, is_hidden } = req.query;
 
-    const params = new URLSearchParams({
-      limit: queryString(limit) ?? '100',
-      offset: queryString(offset) ?? '0',
-      is_elyra: 'true',
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'flows'],
+      query: {
+        limit: queryString(limit) ?? '100',
+        offset: queryString(offset) ?? '0',
+        is_elyra: 'true',
+        name: queryString(name) || undefined,
+        tags: queryStringList(tags),
+        is_hidden: queryString(is_hidden),
+      },
     });
-
-    const flowName = queryString(name);
-    const flowTags = queryString(tags);
-    const isHidden = queryString(is_hidden);
-    if (flowName) params.append('name', flowName);
-    if (flowTags) params.append('tags', flowTags);
-    if (isHidden !== undefined) params.append('is_hidden', isHidden);
-
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/flows?${params.toString()}` });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list flows' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list flows' });
   }
 };
 
@@ -70,13 +68,13 @@ const getFlows = async (req: Request, res: Response): Promise<void> => {
  */
 const updateFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
+    const flowId = routeParam(req.params.flowId);
 
-    const response = await proxyRequest({ method: 'PUT', path: `/api/v1/flows/${flowId}?is_elyra=true`, body: req.body });
+    const response = await proxyRequest({ method: 'PUT', path: ['api', 'v1', 'flows', flowId], query: { is_elyra: 'true' }, body: req.body });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to update flow' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to update flow' });
   }
 };
 
@@ -110,24 +108,24 @@ const syncElyraDefinitionName = (definition: Record<string, unknown>, newName: s
  */
 const patchFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
-    const path = `/api/v1/flows/${flowId}?is_elyra=true`;
+    const flowId = routeParam(req.params.flowId);
+    const target = { path: ['api', 'v1', 'flows', flowId], query: { is_elyra: 'true' } };
 
     let body = req.body;
 
     if (req.body.name) {
-      const current = await proxyRequest({ method: 'GET', path });
+      const current = await proxyRequest({ method: 'GET', ...target });
       body = {
         ...req.body,
         definition: syncElyraDefinitionName(current.data.definition, req.body.name),
       };
     }
 
-    const response = await proxyRequest({ method: 'PATCH', path, body });
+    const response = await proxyRequest({ method: 'PATCH', ...target, body });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to partially update flow' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to partially update flow' });
   }
 };
 
@@ -137,13 +135,13 @@ const patchFlow = async (req: Request, res: Response): Promise<void> => {
  */
 const deleteFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
+    const flowId = routeParam(req.params.flowId);
 
-    const response = await proxyRequest({ method: 'DELETE', path: `/api/v1/flows/${flowId}` });
+    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'flows', flowId] });
 
     res.status(response.status).send();
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete flow' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete flow' });
   }
 };
 
@@ -160,13 +158,15 @@ const bulkDeleteFlows = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const params = new URLSearchParams({ flow_ids: flowIds });
-
-    const response = await proxyRequest({ method: 'DELETE', path: `/api/v1/flows?${params.toString()}` });
+    const response = await proxyRequest({
+      method: 'DELETE',
+      path: ['api', 'v1', 'flows'],
+      query: { flow_ids: flowIds },
+    });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to bulk delete flows' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to bulk delete flows' });
   }
 };
 
@@ -176,24 +176,24 @@ const bulkDeleteFlows = async (req: Request, res: Response): Promise<void> => {
  */
 const getFlowsByProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectId } = req.params;
+    const projectId = routeParam(req.params.projectId);
     const { limit, offset, name, tags } = req.query;
 
-    const params = new URLSearchParams({
-      limit: queryString(limit) ?? '100',
-      offset: queryString(offset) ?? '0',
-      is_elyra: 'true',
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'projects', projectId, 'flows'],
+      query: {
+        limit: queryString(limit) ?? '100',
+        offset: queryString(offset) ?? '0',
+        is_elyra: 'true',
+        name: queryString(name) || undefined,
+        tags: queryStringList(tags),
+      },
     });
-
-    const flowName = queryString(name);
-    if (flowName) params.append('name', flowName);
-    queryStringList(tags).forEach((tag) => params.append('tags', tag));
-
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/projects/${projectId}/flows?${params.toString()}` });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list flows for project' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list flows for project' });
   }
 };
 
