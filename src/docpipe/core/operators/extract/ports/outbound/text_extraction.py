@@ -235,7 +235,7 @@ class TextExtractionPort(ABC):
             table=table, global_config=self.global_config
         )
         if self.document_decryptor is not None:
-            self.document_decryptor.decrypt_tasks(tasks=doc_tasks, table=table)
+            self.document_decryptor.decrypt_tasks(tasks=doc_tasks)
         doc_contents: list[str] = [""] * table.num_rows
         doc_metadata_list: list[dict[str, Any]] = [{}] * table.num_rows
 

@@ -96,14 +96,14 @@ def _decryptor(config: dict[str, Any] | None) -> DocumentDecryptor:
 
 def _run_decrypt(*, decryptor: DocumentDecryptor, docs: list[tuple[str, str | None, bytes]]) -> list[dict[str, Any]]:
     """Run decrypt_tasks over (name, path, bytes) documents and return the tasks."""
-    tasks = [
-        {"idx": i, "doc_id": f"doc_{i}", "doc_name": name, OperatorConstants.Columns.BINARY_CONTENT: data}
-        for i, (name, _, data) in enumerate(docs)
-    ]
-    columns: dict[str, list[Any]] = {"name": [name for name, _, _ in docs]}
-    if any(path is not None for _, path, _ in docs):
-        columns["path"] = [path for _, path, _ in docs]
-    decryptor.decrypt_tasks(tasks=tasks, table=pa.table(columns))
+    tasks = []
+    for i, (name, path, data) in enumerate(docs):
+        task: dict[str, Any] = {"idx": i, "doc_id": f"doc_{i}", "doc_name": name}
+        task[OperatorConstants.Columns.BINARY_CONTENT] = data
+        if path is not None:
+            task[OperatorConstants.Columns.PATH] = path
+        tasks.append(task)
+    decryptor.decrypt_tasks(tasks=tasks)
     return tasks
 
 
@@ -161,6 +161,26 @@ def test_config_malformed_input_names_location_without_echoing_passwords(value: 
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "expected_location"),
+    [
+        ({"rules": [{"match": "*", "passwords": ["p"] * 11}]}, "document_passwords.rules[0].passwords"),
+        ({"default": ["p"] * 11}, "document_passwords.default"),
+    ],
+)
+def test_config_rejects_more_than_ten_candidates(value: Any, expected_location: str) -> None:
+    with pytest.raises(DocumentPasswordsConfigError) as exc_info:
+        DocumentPasswordsConfig.from_config(value)
+    assert any(message.startswith(f"{expected_location}:") for message in exc_info.value.messages)
+
+
+@pytest.mark.unit
+def test_config_accepts_exactly_ten_candidates() -> None:
+    config = DocumentPasswordsConfig.from_config({"default": ["p"] * 10})
+    assert len(config.default) == 10
+
+
+@pytest.mark.unit
 def test_plain_text_password_locations_ignores_vault_references_and_placeholder() -> None:
     config = DocumentPasswordsConfig.from_config(
         {
@@ -191,6 +211,20 @@ def test_candidates_match_on_path() -> None:
     config = DocumentPasswordsConfig.from_config({"rules": [{"match": "*/finance/*", "passwords": ["a"]}]})
     candidates = config.candidates_for(name="report.pdf", path="s3://finance/q1/report.pdf")
     assert [c.get_secret_value() for c in candidates] == ["a"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["C:\\data\\finance\\report.pdf", "C:/data/finance/report.pdf"])
+def test_candidates_match_windows_style_path_with_posix_pattern(path: str) -> None:
+    config = DocumentPasswordsConfig.from_config({"rules": [{"match": "*/finance/*", "passwords": ["a"]}]})
+    candidates = config.candidates_for(name="report.pdf", path=path)
+    assert [c.get_secret_value() for c in candidates] == ["a"]
+
+
+@pytest.mark.unit
+def test_candidates_pattern_is_not_rewritten_and_name_is_matched_as_is() -> None:
+    config = DocumentPasswordsConfig.from_config({"rules": [{"match": "*\\finance\\*", "passwords": ["a"]}]})
+    assert config.candidates_for(name="report.pdf", path="C:\\data\\finance\\report.pdf") == []
 
 
 @pytest.mark.unit
@@ -287,6 +321,37 @@ def test_owner_password_only_pdf_passes_through_unchanged() -> None:
 
     assert _failure_reason(tasks[0]) is None
     assert tasks[0][OperatorConstants.Columns.BINARY_CONTENT] is original
+
+
+@pytest.mark.unit
+def test_owner_password_pdf_with_extraction_denied_still_extracts_text() -> None:
+    """PDFium and Docling do not enforce permission flags, so no special handling is needed.
+
+    If an upgrade starts honouring them, this fails and the design (Decision 4) must be revisited.
+    """
+    import pypdf
+    from pypdf.constants import UserAccessPermissions
+
+    original = _pdf()
+    writer = pypdf.PdfWriter(clone_from=pypdf.PdfReader(io.BytesIO(original)))
+    writer.encrypt(
+        user_password="", owner_password=PASSWORD, permissions_flag=UserAccessPermissions(0), algorithm="AES-256"
+    )
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    restricted = buffer.getvalue()
+
+    tasks = _run_decrypt(decryptor=_decryptor(None), docs=[("a.pdf", None, restricted)])
+
+    assert _failure_reason(tasks[0]) is None
+    assert tasks[0][OperatorConstants.Columns.BINARY_CONTENT] is restricted
+    import pypdfium2 as pdfium
+
+    document = pdfium.PdfDocument(restricted)
+    try:
+        assert len(document) == 1
+    finally:
+        document.close()
 
 
 @pytest.mark.unit
@@ -422,8 +487,78 @@ def test_unsupported_formats_pass_through_unchanged(name: str) -> None:
 @pytest.mark.unit
 def test_tasks_with_fetch_errors_are_left_alone() -> None:
     task = {"idx": 0, "doc_id": "doc_0", "doc_name": "a.pdf", "error": "fetch failed"}
-    _decryptor(None).decrypt_tasks(tasks=[task], table=pa.table({"name": ["a.pdf"]}))
+    _decryptor(None).decrypt_tasks(tasks=[task])
     assert task == {"idx": 0, "doc_id": "doc_0", "doc_name": "a.pdf", "error": "fetch failed"}
+
+
+@pytest.mark.unit
+def test_remembered_winner_is_tried_first_for_later_documents_of_the_rule() -> None:
+    candidates = [f"wrong-{i}" for i in range(4)] + [PASSWORD]  # pragma: allowlist secret
+    decryptor = _decryptor({"rules": [{"match": "*.pdf", "passwords": candidates}]})
+    attempts: list[str] = []
+    import pypdfium2 as pdfium
+
+    real_open = pdfium.PdfDocument
+
+    def _recording_open(data: Any, password: str | None = None, **kwargs: Any) -> Any:
+        if password is not None:
+            attempts.append(password)
+        return real_open(data, password=password, **kwargs)
+
+    with patch.object(pdfium, "PdfDocument", side_effect=_recording_open):
+        _run_decrypt(decryptor=decryptor, docs=[("a.pdf", None, _pdf(user_password=PASSWORD))])
+        first_run = list(attempts)
+        attempts.clear()
+        _run_decrypt(decryptor=decryptor, docs=[("b.pdf", None, _pdf(user_password=PASSWORD))])
+
+    assert first_run == candidates
+    assert attempts == [PASSWORD]
+
+
+@pytest.mark.unit
+def test_remembered_winner_falls_through_when_it_stops_working() -> None:
+    decryptor = _decryptor({"default": [WRONG_PASSWORD, PASSWORD]})
+    _run_decrypt(decryptor=decryptor, docs=[("a.pdf", None, _pdf(user_password=PASSWORD))])
+    other = "another-pass"  # pragma: allowlist secret
+    tasks = _run_decrypt(decryptor=decryptor, docs=[("b.pdf", None, _pdf(user_password=other))])
+    assert _failure_reason(tasks[0]) == OperatorConstants.Extraction.PASSWORD_INCORRECT
+
+    tasks = _run_decrypt(decryptor=decryptor, docs=[("c.pdf", None, _pdf(user_password=WRONG_PASSWORD))])
+    assert _failure_reason(tasks[0]) is None
+
+
+@pytest.mark.unit
+def test_remembered_winners_are_kept_per_rule() -> None:
+    decryptor = _decryptor(
+        {
+            "rules": [
+                {"match": "*/hr/*", "passwords": [WRONG_PASSWORD, PASSWORD]},
+                {"match": "*/finance/*", "passwords": [PASSWORD, WRONG_PASSWORD]},
+            ]
+        }
+    )
+    _run_decrypt(decryptor=decryptor, docs=[("a.pdf", "/data/hr/a.pdf", _pdf(user_password=PASSWORD))])
+
+    assert decryptor._winners == {0: 1}
+    _run_decrypt(decryptor=decryptor, docs=[("b.pdf", "/data/finance/b.pdf", _pdf(user_password=WRONG_PASSWORD))])
+    assert decryptor._winners == {0: 1, 1: 1}
+
+
+@pytest.mark.unit
+def test_zip_based_office_file_exits_at_the_signature_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unencrypted OOXML is a zip, so the OLE signature check ends it before any OOXML handling runs."""
+    original = _docx()
+    assert not original.startswith(encrypted_documents._OLE_SIGNATURE)
+
+    def _must_not_run(*args: Any, **kwargs: Any) -> bytes:
+        raise AssertionError("OOXML handling (including the EncryptedPackage scan) must not run for zip files")
+
+    monkeypatch.setattr(DocumentDecryptor, "_decrypt_ooxml", _must_not_run)
+
+    tasks = _run_decrypt(decryptor=_decryptor({"default": [PASSWORD]}), docs=[("w.docx", None, original)])
+
+    assert _failure_reason(tasks[0]) is None
+    assert tasks[0][OperatorConstants.Columns.BINARY_CONTENT] is original
 
 
 @pytest.mark.unit
@@ -598,6 +733,52 @@ def test_operator_rejects_malformed_passwords_without_echoing_them() -> None:
 
     assert "document_passwords.rules[0].match" in str(exc_info.value)
     assert PASSWORD not in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_operator_stores_parse_errors_during_validation_and_validate_reports_them() -> None:
+    from docpipe.core.operators.extract.extract_operator import ExtractOperator
+
+    operator = ExtractOperator(
+        config=_operator_config(
+            document_passwords={"rules": [{"passwords": [PASSWORD]}]}, **{DocpipeConstants.VALIDATING_FLOW: True}
+        )
+    )
+    errors: list[Any] = []
+    operator.validate(errors, [], ["content"])
+
+    assert any(str(e).startswith("document_passwords.rules[0].match:") for e in errors)
+    assert PASSWORD not in str(errors)
+
+
+@pytest.mark.unit
+def test_flow_validator_reports_malformed_passwords_as_field_level_error() -> None:
+    """FlowValidator builds the operator before validate(); malformed config must not become a generic alert."""
+    from docpipe.core.orchestration.flow_validator import FlowValidator, ValidateStepResults
+    from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
+
+    validator = FlowValidator(orchestrator=OrchestratorFactory.create_orchestrator(orchestrator_name="python"))
+    results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+    op_def = {
+        "id": "extract-1",
+        "name": "extract_documents",
+        "operator": "extract_operator",
+        "config": {
+            "text_extraction": {"provider": "docling_library"},
+            "document_passwords": {"rules": [{"passwords": ["vault://org/key", PASSWORD]}]},
+        },
+        "input_edges": [],
+        "output_edges": [],
+    }
+
+    validator._validate_node(
+        op_def=op_def, prev_result=None, global_config={}, validate_results=results, session_info=None
+    )
+
+    rendered = " ".join(str(e) for e in results.errors)
+    assert "document_passwords.rules[0].match" in rendered
+    assert "OPERATOR_VALIDATION_FAILED" not in rendered
+    assert PASSWORD not in rendered
 
 
 @pytest.mark.unit

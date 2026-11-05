@@ -340,6 +340,47 @@ class TestOperatorUtilsExtensionValidation:
             assert "error" not in doc_tasks[0]
             assert "error" not in doc_tasks[1]
 
+    def test_prepare_document_content_fetch_adds_path_when_column_exists(self):
+        """The row's path is added to the task so path-based rules can match it."""
+        from docpipe.core.operators.operator_utils import OperatorUtils
+
+        table = pa.table(
+            {
+                "id": ["doc1", "doc2"],
+                "name": ["a.pdf", "b.pdf"],
+                "path": ["/data/hr/a.pdf", None],
+                "binary_content": [b"a", b"b"],
+            }
+        )
+
+        doc_tasks = OperatorUtils.prepare_document_content_fetch(table=table, global_config={})
+
+        assert doc_tasks[0]["path"] == "/data/hr/a.pdf"
+        assert "path" not in doc_tasks[1]
+
+    def test_prepare_document_content_fetch_omits_path_without_column(self):
+        """Tables without a path column produce tasks without a path key."""
+        from docpipe.core.operators.operator_utils import OperatorUtils
+
+        table = pa.table({"id": ["doc1"], "name": ["a.pdf"], "binary_content": [b"a"]})
+
+        doc_tasks = OperatorUtils.prepare_document_content_fetch(table=table, global_config={})
+
+        assert doc_tasks == [{"idx": 0, "doc_id": "doc1", "doc_name": "a.pdf", "binary_content": b"a"}]
+
+    def test_prepare_document_content_fetch_error_tasks_have_no_path(self):
+        """Unsupported-extension tasks are unchanged and carry no path."""
+        from docpipe.core.operators.operator_utils import OperatorUtils
+
+        table = pa.table({"id": ["doc1"], "name": ["x.xyz"], "path": ["/data/x.xyz"]})
+
+        doc_tasks = OperatorUtils.prepare_document_content_fetch(
+            table=table, global_config={}, supported_extensions={".pdf"}
+        )
+
+        assert "error" in doc_tasks[0]
+        assert "path" not in doc_tasks[0]
+
 
 class TestExtensionConstants:
     """Test suite for extension constants."""

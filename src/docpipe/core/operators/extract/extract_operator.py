@@ -250,14 +250,20 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
 
         # Candidate passwords for encrypted documents. Detection runs even when none are
         # configured, so an encrypted document fails with an explicit, recoverable reason.
+        # Malformed values are reported by validate() as field-level errors during flow validation
+        # (FlowValidator builds the operator before calling validate()); at runtime they fail the node.
+        self.document_passwords_errors: list[str] = []
         try:
             self.document_passwords_config = DocumentPasswordsConfig.from_config(
                 config.get(OperatorConstants.Config.DOCUMENT_PASSWORDS)
             )
         except DocumentPasswordsConfigError as e:
-            raise FlowExecutionFailedException(
-                f"Invalid '{OperatorConstants.Config.DOCUMENT_PASSWORDS}' configuration: {e}"
-            ) from None
+            if not config.get(DocpipeConstants.VALIDATING_FLOW):
+                raise FlowExecutionFailedException(
+                    f"Invalid '{OperatorConstants.Config.DOCUMENT_PASSWORDS}' configuration: {e}"
+                ) from None
+            self.document_passwords_errors = e.messages
+            self.document_passwords_config = DocumentPasswordsConfig()
         self.document_decryptor = DocumentDecryptor(passwords_config=self.document_passwords_config)
 
         # Parse text extraction mode
@@ -926,7 +932,7 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
             table=table, global_config=self.text_adapter.global_config
         )
         # Decrypt before submission so both the text adapter and binary entity adapters get plain bytes
-        self.document_decryptor.decrypt_tasks(tasks=doc_tasks, table=table)
+        self.document_decryptor.decrypt_tasks(tasks=doc_tasks)
         total_docs = len(doc_tasks)
 
         # Per-row accumulators (positional, same length as table)
@@ -1547,6 +1553,8 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
 
         # Validate configuration against metadata
         validate_config_from_metadata(config=self.config, attributes=attributes, errors=errors)
+
+        errors.extend(self.document_passwords_errors)
 
         # Vault references are replaced by a placeholder during validation, so anything else is plain text
         for location in self.document_passwords_config.plain_text_password_locations():

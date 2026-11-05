@@ -647,11 +647,13 @@ Encrypted PDF and Office (`.docx`, `.pptx`, `.xlsx`) documents are detected afte
 |-----------|------|----------|-------------|
 | `document_passwords.rules` | array | No | Ordered rules. The first rule whose `match` pattern matches the document's `name` or its source `path` supplies the candidate passwords. |
 | `document_passwords.rules[].match` | string | Yes | Pattern matched against the whole name or path, case-sensitive. `*` matches any characters including `/`, `?` matches one character, `[...]` matches a set. Use a leading `*` to match a folder anywhere in a path, for example `*/finance/*`. |
-| `document_passwords.rules[].passwords` | array of strings | Yes | Candidate passwords, tried in order. At least one. |
-| `document_passwords.default` | array of strings | No | Candidates used when no rule matches. |
+| `document_passwords.rules[].passwords` | array of strings | Yes | Candidate passwords, tried in order. Between 1 and 10 entries. |
+| `document_passwords.default` | array of strings | No | Candidates used when no rule matches. At most 10 entries. |
 
-- **Secrets**: use `vault://` references in production. Flow validation warns about every plain-text password, without showing it. Values are resolved before the operator runs.
-- **Unencrypted documents** and other formats pass through unchanged, even when a rule matches them. PDFs protected only by an owner (permissions) password open without one and are extracted as before.
+- **Matching**: patterns are case-sensitive, so `*.pdf` does not match `REPORT.PDF` (the document then fails with `password_required`). `*` also matches `/`. A pattern containing a separator, such as `*/finance/*`, can only match the document's `path`; a bare pattern such as `invoice-*.pdf` matches the `name` in any directory, so scope rules with a folder segment when the same file name occurs in several places. Backslashes in a `path` are treated as `/`, so one `/` pattern also matches Windows paths.
+- **Candidate order and cost**: candidates are tried in order, and the one that last worked for a rule is tried first for later documents of that rule. Each rejected candidate on an encrypted Office file costs a full key derivation (tens of milliseconds), so keep lists short. Lists are limited to 10 entries; a longer list fails flow validation.
+- **Secrets**: use `vault://` references in production. Flow validation warns about every plain-text password, without showing it. Values are resolved before the operator runs. Passwords are kept out of `repr` output and logs, but resolved passwords and decrypted bytes necessarily exist in process memory, so a core dump or heap snapshot of a running worker would contain them.
+- **Unencrypted documents** and other formats pass through unchanged, even when a rule matches them. PDFs protected only by an owner (permissions) password open without one and are extracted as before, including ones whose permission flags deny content extraction, because neither PDFium nor Docling enforces those flags.
 - **Failures**: an encrypted document that cannot be decrypted is removed from the output and recorded as failed with a reason starting with `password_required` (no password applies), `password_incorrect` (none of the candidates opened it) or `decryption_unavailable` (Office decryption is not installed, or the file uses an encryption scheme it cannot decrypt). These failures are **recoverable**: the next incremental run tries the document again, so adding or fixing a password takes effect without `force_ingest`. Detection happens before any model work, so a retry is cheap.
 - **`docling_serve`**: the serve endpoint receives the decrypted document bytes.
 - **Slim package**: decrypting Office documents needs `msoffcrypto-tool`, which `docling-pipelines` installs by default and `docling-pipelines-slim` installs with the `extract` group.
@@ -1364,7 +1366,7 @@ Complete sample flows are available in [`sample_flows/`](../../../sample_flows/)
 - `password_required`: the document is encrypted and no rule in `document_passwords` matches its name or path, and there is no `default`. Add a rule or a `default` list.
 - `password_incorrect`: none of the candidate passwords opened it. Check which rule matched (the first match wins) and the secret the `vault://` reference points to.
 - `decryption_unavailable`: an encrypted Office file was found but `msoffcrypto-tool` is not installed (install `docling-pipelines-slim[extract]`), or the file uses an encryption scheme that cannot be decrypted.
-- These documents are retried on the next run, so no `force_ingest` is needed after fixing the configuration.
+- These documents are retried on the next run, so no `force_ingest` is needed after fixing the configuration. They are also never counted against an engine-level retry limit (such as `max_retry_attempts`), because retrying cannot help until the configuration or environment changes.
 
 **Issue: "ffmpeg not found" error during audio/video extraction**
 - Verify ffmpeg installation: `ffmpeg -version`

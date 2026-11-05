@@ -307,8 +307,8 @@ For full details on the priority system, override behaviour, and registering cus
 | `document_passwords`                                          | object |          No | `null`                  | All                             | Candidate passwords for password-protected PDF, DOCX, PPTX and XLSX documents, decrypted in memory before extraction. Sensitive; use `vault://` references. See the Password-Protected Documents section of extract_operator_readme.md |
 | `document_passwords.rules`                                    | array  |          No | `[]`                    | All                             | Ordered rules; the first whose `match` pattern matches the document's name or path supplies the candidates |
 | `document_passwords.rules[].match`                            | string |         Yes | -                       | All                             | Whole-string, case-sensitive pattern (`*` matches any characters including `/`, `?`, `[...]`) |
-| `document_passwords.rules[].passwords`                        | array  |         Yes | -                       | All                             | Candidate passwords, tried in order (at least one)                                                 |
-| `document_passwords.default`                                  | array  |          No | `[]`                    | All                             | Candidates used when no rule matches                                                               |
+| `document_passwords.rules[].passwords`                        | array  |         Yes | -                       | All                             | Candidate passwords, tried in order (1 to 10)                                                      |
+| `document_passwords.default`                                  | array  |          No | `[]`                    | All                             | Candidates used when no rule matches (at most 10)                                                  |
 
 **Input Schema**
 

@@ -1158,13 +1158,19 @@ class OperatorUtils:
                 msg = f"Failed to fetch binary content for document {doc_name}"
                 raise ValueError(msg)
 
-        return {
+        task: dict[str, Any] = {
             "idx": row_idx,
             "doc_id": doc_id,
             "doc_name": doc_name,
             "binary_content": binary_content,
             "file_extension": file_ext,
         }
+        # Source path, when the table has one; used to match path-based rules (e.g. document_passwords)
+        if OperatorConstants.Columns.PATH in table.column_names:
+            path = table[OperatorConstants.Columns.PATH][row_idx].as_py()
+            if path is not None:
+                task[OperatorConstants.Columns.PATH] = path
+        return task
 
     @staticmethod
     def prepare_document_content_fetch(
@@ -1194,7 +1200,8 @@ class OperatorUtils:
                 If provided, documents with unsupported extensions will be marked with error and skip_reason.
 
         Returns:
-            List of dicts with keys: idx, doc_id, doc_name, binary_content or error
+            List of dicts with keys: idx, doc_id, doc_name, binary_content or error, plus an
+            optional path when the table has a non-null path value for the row
             If supported_extensions is provided and extension is unsupported, dict will contain:
                 - error: Error message describing unsupported extension
                 - skip_reason: "unsupported_extension" flag
