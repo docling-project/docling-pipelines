@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import { log4js } from '../../src/utils/logger';
 import { handleProxyError, proxyRequest } from '../utils/proxy';
-import { queryString, queryStringList } from '../utils/query';
+import { queryString, queryStringList, routeParam } from '../utils/query';
 
 const logger = log4js.getLogger('projects.controller');
 
@@ -11,11 +11,11 @@ const logger = log4js.getLogger('projects.controller');
  */
 const createProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'POST', path: '/api/v1/projects', body: req.body });
+    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'projects'], body: req.body });
 
     res.status(response.status).json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create project' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create project' });
   }
 };
 
@@ -27,20 +27,20 @@ const getProjects = async (req: Request, res: Response): Promise<void> => {
   try {
     const { limit, offset, name, tags } = req.query;
 
-    const params = new URLSearchParams({
-      limit: queryString(limit) ?? '100',
-      offset: queryString(offset) ?? '0',
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'projects'],
+      query: {
+        limit: queryString(limit) ?? '100',
+        offset: queryString(offset) ?? '0',
+        name: queryString(name) || undefined,
+        tags: queryStringList(tags),
+      },
     });
-
-    const projectName = queryString(name);
-    if (projectName) params.append('name', projectName);
-    queryStringList(tags).forEach((tag) => params.append('tags', tag));
-
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/projects?${params.toString()}` });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list projects' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list projects' });
   }
 };
 
@@ -50,13 +50,13 @@ const getProjects = async (req: Request, res: Response): Promise<void> => {
  */
 const getProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectId } = req.params;
+    const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/projects/${projectId}` });
+    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'projects', projectId] });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch project' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch project' });
   }
 };
 
@@ -66,13 +66,13 @@ const getProject = async (req: Request, res: Response): Promise<void> => {
  */
 const replaceProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectId } = req.params;
+    const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'PUT', path: `/api/v1/projects/${projectId}`, body: req.body });
+    const response = await proxyRequest({ method: 'PUT', path: ['api', 'v1', 'projects', projectId], body: req.body });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to replace project' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to replace project' });
   }
 };
 
@@ -82,13 +82,13 @@ const replaceProject = async (req: Request, res: Response): Promise<void> => {
  */
 const patchProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectId } = req.params;
+    const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'PATCH', path: `/api/v1/projects/${projectId}`, body: req.body });
+    const response = await proxyRequest({ method: 'PATCH', path: ['api', 'v1', 'projects', projectId], body: req.body });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to partially update project' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to partially update project' });
   }
 };
 
@@ -98,13 +98,13 @@ const patchProject = async (req: Request, res: Response): Promise<void> => {
  */
 const deleteProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectId } = req.params;
+    const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'DELETE', path: `/api/v1/projects/${projectId}` });
+    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'projects', projectId] });
 
     res.status(response.status).send();
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete project' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete project' });
   }
 };
 

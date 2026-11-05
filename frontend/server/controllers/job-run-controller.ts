@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
 import { handleProxyError, proxyRequest } from '../utils/proxy';
-import { queryString } from '../utils/query';
+import { queryString, routeParam } from '../utils/query';
 
 const logger = log4js.getLogger('job-run.controller');
 
@@ -11,11 +11,11 @@ const logger = log4js.getLogger('job-run.controller');
  */
 const createJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'POST', path: '/api/v1/job_runs', body: req.body });
+    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'job_runs'], body: req.body });
 
     res.status(response.status).json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create job run' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create job run' });
   }
 };
 
@@ -27,18 +27,19 @@ const getJobRuns = async (req: Request, res: Response): Promise<void> => {
   try {
     const { job_id, status, limit } = req.query;
 
-    const params = new URLSearchParams({ limit: queryString(limit) ?? '100' });
-
-    const jobId = queryString(job_id);
-    const jobStatus = queryString(status);
-    if (jobId) params.append('job_id', jobId);
-    if (jobStatus) params.append('status', jobStatus);
-
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/job_runs?${params.toString()}` });
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'job_runs'],
+      query: {
+        limit: queryString(limit) ?? '100',
+        job_id: queryString(job_id) || undefined,
+        status: queryString(status) || undefined,
+      },
+    });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list job runs' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list job runs' });
   }
 };
 
@@ -48,14 +49,16 @@ const getJobRuns = async (req: Request, res: Response): Promise<void> => {
  */
 const getJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { jobRunId } = req.params;
-    const params = new URLSearchParams({ include_logs: queryString(req.query.include_logs) ?? 'false' });
-
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/job_runs/${jobRunId}?${params.toString()}` });
+    const jobRunId = routeParam(req.params.jobRunId);
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'job_runs', jobRunId],
+      query: { include_logs: queryString(req.query.include_logs) ?? 'false' },
+    });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch job run' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch job run' });
   }
 };
 
@@ -65,13 +68,13 @@ const getJobRun = async (req: Request, res: Response): Promise<void> => {
  */
 const cancelJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { jobRunId } = req.params;
+    const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ method: 'POST', path: `/api/v1/job_runs/${jobRunId}/cancel`, body: {} });
+    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'job_runs', jobRunId, 'cancel'], body: {} });
 
     res.status(response.status).json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to cancel job run' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to cancel job run' });
   }
 };
 
@@ -81,13 +84,13 @@ const cancelJobRun = async (req: Request, res: Response): Promise<void> => {
  */
 const deleteJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { jobRunId } = req.params;
+    const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ method: 'DELETE', path: `/api/v1/job_runs/${jobRunId}` });
+    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'job_runs', jobRunId] });
 
     res.status(response.status).send();
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete job run' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete job run' });
   }
 };
 
@@ -97,11 +100,11 @@ const deleteJobRun = async (req: Request, res: Response): Promise<void> => {
  */
 const downloadJobRunReport = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { jobRunId } = req.params;
+    const jobRunId = routeParam(req.params.jobRunId);
 
     const response = await proxyRequest({
       method: 'GET',
-      path: `/api/v1/job_runs/${jobRunId}/report`,
+      path: ['api', 'v1', 'job_runs', jobRunId, 'report'],
       accept: 'text/csv',
       responseType: 'stream',
     });
@@ -117,7 +120,7 @@ const downloadJobRunReport = async (req: Request, res: Response): Promise<void> 
 
     response.data.pipe(res);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to download job run report' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to download job run report' });
   }
 };
 
@@ -127,13 +130,13 @@ const downloadJobRunReport = async (req: Request, res: Response): Promise<void> 
  */
 const getJobRunFlowDefinition = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { jobRunId } = req.params;
+    const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ method: 'GET', path: `/api/v1/job_runs/${jobRunId}/flow_definition` });
+    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'job_runs', jobRunId, 'flow_definition'] });
 
     res.json(response.data);
   } catch (err) {
-    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch flow definition snapshot' });
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch flow definition snapshot' });
   }
 };
 
