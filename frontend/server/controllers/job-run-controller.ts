@@ -1,7 +1,7 @@
-import axios from 'axios';
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from './http-headers';
+import { handleProxyError, proxyRequest } from '../utils/proxy';
+import { queryString } from '../utils/query';
 
 const logger = log4js.getLogger('job-run.controller');
 
@@ -9,21 +9,13 @@ const logger = log4js.getLogger('job-run.controller');
  * Create a new job run
  * BFF controller that proxies job run creation to Python FastAPI backend
  */
-const createJobRun = async (req: Request, res: Response) => {
+const createJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs`;
-
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await proxyRequest({ method: 'POST', path: '/api/v1/job_runs', body: req.body });
 
     res.status(response.status).json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error creating job run', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to create job run' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create job run' });
   }
 };
 
@@ -31,29 +23,22 @@ const createJobRun = async (req: Request, res: Response) => {
  * List job runs
  * BFF controller that proxies job run listing to Python FastAPI backend
  */
-const getJobRuns = async (req: Request, res: Response) => {
+const getJobRuns = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { job_id, status, limit = 100 } = req.query;
+    const { job_id, status, limit } = req.query;
 
-    const params = new URLSearchParams({ limit: limit.toString() });
+    const params = new URLSearchParams({ limit: queryString(limit) ?? '100' });
 
-    if (job_id) params.append('job_id', job_id);
-    if (status) params.append('status', status);
+    const jobId = queryString(job_id);
+    const jobStatus = queryString(status);
+    if (jobId) params.append('job_id', jobId);
+    if (jobStatus) params.append('status', jobStatus);
 
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs?${params.toString()}`;
-    logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
-
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({ method: 'GET', path: `/api/v1/job_runs?${params.toString()}` });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error listing job runs', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to list job runs' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list job runs' });
   }
 };
 
@@ -61,25 +46,16 @@ const getJobRuns = async (req: Request, res: Response) => {
  * Get job run status
  * BFF controller that proxies job run retrieval to Python FastAPI backend
  */
-const getJobRun = async (req: Request, res: Response) => {
+const getJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const { jobRunId } = req.params;
-    const { include_logs = false } = req.query;
+    const params = new URLSearchParams({ include_logs: queryString(req.query.include_logs) ?? 'false' });
 
-    const params = new URLSearchParams({ include_logs: include_logs.toString() });
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}?${params.toString()}`;
-
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({ method: 'GET', path: `/api/v1/job_runs/${jobRunId}?${params.toString()}` });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error fetching job run', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to fetch job run' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch job run' });
   }
 };
 
@@ -87,22 +63,15 @@ const getJobRun = async (req: Request, res: Response) => {
  * Cancel a job run
  * BFF controller that proxies job run cancellation to Python FastAPI backend
  */
-const cancelJobRun = async (req: Request, res: Response) => {
+const cancelJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const { jobRunId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}/cancel`;
 
-    const response = await axios.post(requestUrl, {}, { headers: BODY_HEADERS });
+    const response = await proxyRequest({ method: 'POST', path: `/api/v1/job_runs/${jobRunId}/cancel`, body: {} });
 
     res.status(response.status).json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error cancelling job run', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to cancel job run' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to cancel job run' });
   }
 };
 
@@ -110,22 +79,15 @@ const cancelJobRun = async (req: Request, res: Response) => {
  * Delete a job run
  * BFF controller that proxies job run deletion to Python FastAPI backend
  */
-const deleteJobRun = async (req: Request, res: Response) => {
+const deleteJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const { jobRunId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}`;
 
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({ method: 'DELETE', path: `/api/v1/job_runs/${jobRunId}` });
 
     res.status(response.status).send();
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error deleting job run', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to delete job run' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete job run' });
   }
 };
 
@@ -133,13 +95,14 @@ const deleteJobRun = async (req: Request, res: Response) => {
  * Download job run report
  * BFF controller that proxies job run report download to Python FastAPI backend
  */
-const downloadJobRunReport = async (req: Request, res: Response) => {
+const downloadJobRunReport = async (req: Request, res: Response): Promise<void> => {
   try {
     const { jobRunId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}/report`;
 
-    const response = await axios.get(requestUrl, {
-      headers: { 'Accept': 'text/csv' },
+    const response = await proxyRequest({
+      method: 'GET',
+      path: `/api/v1/job_runs/${jobRunId}/report`,
+      accept: 'text/csv',
       responseType: 'stream',
     });
 
@@ -153,14 +116,8 @@ const downloadJobRunReport = async (req: Request, res: Response) => {
     });
 
     response.data.pipe(res);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error downloading job run report', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to download job run report' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to download job run report' });
   }
 };
 
@@ -168,29 +125,22 @@ const downloadJobRunReport = async (req: Request, res: Response) => {
  * Get flow definition snapshot for a job run
  * BFF controller that proxies flow definition retrieval to Python FastAPI backend
  */
-const getJobRunFlowDefinition = async (req: Request, res: Response) => {
+const getJobRunFlowDefinition = async (req: Request, res: Response): Promise<void> => {
   try {
     const { jobRunId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}/flow_definition`;
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({ method: 'GET', path: `/api/v1/job_runs/${jobRunId}/flow_definition` });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error fetching flow definition snapshot', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to fetch flow definition snapshot' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch flow definition snapshot' });
   }
 };
 
 /**
  * Export routes function that registers all job run endpoints
  */
-export const routes = (router: Router) => {
+export const routes = (router: Router): void => {
   router.post('/job_runs', createJobRun);
   router.get('/job_runs', getJobRuns);
   router.get('/job_runs/:jobRunId', getJobRun);
