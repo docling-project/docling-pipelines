@@ -14,6 +14,14 @@ never a blocking check: every step uses `continue-on-error`, so an error (for
 example a missing secret, an API outage, or an invalid model answer) shows as
 a warning annotation on the run, and the PR check stays green.
 
+A failure is not silent. If the collection of the PR data fails (an API error
+or a rate limit), the `publish` job still runs. It removes the `ai:*` labels of
+an older commit and posts a notice that the triage did not run, so that
+maintainers do not read a missing result as a clean PR. A maintainer can
+comment `/ai triage` to run it again. If the job itself cannot start, the
+workflow run shows the error. The duplicate scan reads at most 30 open PRs and
+skips a PR that the API cannot return, with a warning.
+
 ## Labels
 
 Triage labels:
@@ -79,8 +87,47 @@ author, for PRs with more than 60 source files or 2000 changed source lines
 for a commit that it already reviewed. A PR gets at most two automatic AI
 reviews: the first review, and one review of the next push. That review covers
 only the new commits, if the history was not rewritten, and gives the status of
-each earlier finding: `open`, `fixed`, or `answered`. Use `/ai review` for more
-reviews. The size limits also apply to `/ai review`.
+each earlier finding: `open`, `fixed`, or `answered`. After a rebase or
+force-push the new commits cannot be isolated, so the review covers the full
+diff. It still gets the earlier AI findings, must not repeat them as new
+findings, and says in its body that the history changed. Use `/ai review` for
+more reviews. The size limits also apply to `/ai review`.
+
+## PRs that change `.github/`
+
+The model runs with `BOB_API_KEY` in its environment, and a change to
+`.github/` is the most likely way to steer it or to run code in CI. So neither
+the triage nor the review sends such a PR to the model when its author is not a
+maintainer (`author_association` is not `OWNER`, `MEMBER`, or `COLLABORATOR`).
+A rename out of `.github/` counts as a change to it.
+
+The comment still shows the deterministic checks and says that the AI analysis
+was skipped. A maintainer can lift the skip with `/ai triage`, `/ai review`, or
+a manual run, after reading the change.
+
+If a maintainer's organization membership is private, GitHub reports them as
+`CONTRIBUTOR` and the rule treats them as an outside author. They can use
+`/ai review` on their own PR.
+
+## Secret handling
+
+`bob run` needs `BOB_API_KEY` in its environment, and the model can read files
+with the `read` tools. The workflow limits what the model can reach:
+
+- `bob` starts with `env -i` and an allowlist (`PATH`, a private `HOME`,
+  `TMPDIR`, `LANG`, `CI`, `NO_COLOR`, `BOB_API_KEY`, and the team ID as an
+  argument). No other runner variable is in its environment.
+- The model result is checked by `.github/scripts/ai_pr_leak_check.py` before
+  it is uploaded. It looks for the key as plain text, reversed, as hex, as
+  base64 (any alignment, also the URL-safe form), and split by spaces or
+  punctuation. A result with a match is deleted.
+- Use a dedicated key with the `Inference` scope and a spending limit, so that
+  a leak has a small impact and the key can be revoked at once.
+
+The check cannot find every transformation of a key. The remaining protection
+is the dedicated key, the cost limits, and the read-only modes. It is not known
+whether the Bob Shell `read` tools stay inside the workspace. Treat the model
+as able to read files that the runner user can read.
 
 ## `/ai` commands
 
@@ -139,6 +186,7 @@ until it is merged to `main`.
 | `.github/workflows/ai-pr-triage.yml` | The workflow and its jobs |
 | `.github/scripts/ai_pr_common.py` | Helpers that triage and review share: GitHub access, text escaping, Bob output |
 | `.github/scripts/ai_pr_event.py` | Which PR and mode an event runs for |
+| `.github/scripts/ai_pr_leak_check.py` | Checks a model result for the API key in plain and encoded forms |
 | `.github/scripts/ai_pr_triage.py` | Triage: data collection, answer validation, labels, comment |
 | `.github/scripts/ai_pr_review.py` | First review: data collection, validation, posting |
 | `.github/scripts/pr_topic_labels.py` | Topic label rules |

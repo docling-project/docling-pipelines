@@ -286,6 +286,7 @@ def build_review(
     anchors: dict[str, list[int]],
     head_sha: str,
     incremental_base: str | None,
+    history_changed: bool = False,
 ) -> dict[str, Any]:
     comments: list[dict[str, Any]] = []
     unanchored: list[Finding] = []
@@ -312,6 +313,13 @@ def build_review(
         f"This review covers {scope} at `{head_sha[:10]}`. It read the code and did not run it.",
         "",
     ]
+    if history_changed:
+        lines += [
+            "> [!NOTE]",
+            "> The history changed after the earlier AI review (a rebase or force-push), so the changes since then"
+            " could not be compared. This review covers the full diff and checks the earlier findings again.",
+            "",
+        ]
     if result.summary:
         lines += [markdown_inline(text=result.summary), ""]
     if result.earlier_findings:
@@ -449,12 +457,18 @@ def prepare(*, repo: str, context_dir: Path, git_dir: Path, force: bool) -> bool
     )
 
     incremental_base: str | None = None
+    history_changed = False
     if reviewed is not None:
         compare = gh_api(path=f"repos/{repo}/compare/{reviewed}...{pr.head_sha}")
         if compare.get("status") == "ahead":
             incremental_base = reviewed
             diff, _ = build_diff(files=compare.get("files") or [], max_chars=MAX_INCREMENTAL_DIFF_CHARS)
             (review_dir / "incremental.diff").write_text(diff, encoding="utf-8")
+        else:
+            # After a rebase or force-push the new commits cannot be isolated.
+            # The review covers the full diff, but the discussion still holds
+            # the earlier AI findings, so the model must not repeat them.
+            history_changed = True
 
     stored: dict[str, str] = {}
     if fetch_pr_commits(git_dir=git_dir, pr_number=pr.number, merge_base=pr.merge_base_sha):
@@ -470,7 +484,12 @@ def prepare(*, repo: str, context_dir: Path, git_dir: Path, force: bool) -> bool
             target.write_bytes(content)
             stored[item["filename"]] = f".ai-triage/review/files/{name}"
 
-    meta = {"incremental_base": incremental_base, "head_files": stored}
+    meta = {
+        "incremental_base": incremental_base,
+        "earlier_ai_review": bool(reviewed_shas),
+        "history_changed": history_changed,
+        "head_files": stored,
+    }
     (review_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return True
 
@@ -536,6 +555,7 @@ def publish(*, repo: str, pr_number: int, context_dir: Path, result_path: Path) 
         anchors=anchors,
         head_sha=context.pr.head_sha,
         incremental_base=meta["incremental_base"],
+        history_changed=bool(meta.get("history_changed", False)),
     )
     gh_write(method="POST", path=f"repos/{repo}/pulls/{pr_number}/reviews", payload=review)
 

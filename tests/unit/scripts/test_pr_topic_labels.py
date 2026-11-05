@@ -75,6 +75,14 @@ def test_documentation_label_only_when_all_source_changes_are_docs() -> None:
     assert labels == ["dependencies", "documentation"]
 
 
+def test_nested_markdown_files_are_not_documentation_only_changes() -> None:
+    for path in ("src/docpipe/some_module/README.md", "frontend/src/NOTES.md", "tests/unit/README.md"):
+        assert "documentation" not in topics.deterministic_topics(title="chore: x", paths=[path])
+    # Root-level Markdown and anything under docs/ still count, also when nested.
+    assert "documentation" in topics.deterministic_topics(title="chore: x", paths=["CONTRIBUTING.md"])
+    assert "documentation" in topics.deterministic_topics(title="chore: x", paths=["docs/guides/deep/X.md"])
+
+
 def test_unknown_title_types_and_scopes_add_nothing() -> None:
     assert topics.deterministic_topics(title="chore(release): 2.0", paths=[]) == []
     assert topics.deterministic_topics(title="Not a conventional title", paths=[]) == []

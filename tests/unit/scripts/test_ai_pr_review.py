@@ -8,6 +8,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -310,3 +311,84 @@ def test_duplicates_of_an_open_pr_from_another_author_skip_the_review(
     result.write_text(json.dumps({"duplicates": [{"pr": 1, "verdict": "related"}]}))
     write("open", "bob")
     assert review.should_review(result_path=result, context_path=context_path)
+
+
+def _prepare_with_compare(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, status: str, reviewed_sha: str | None
+) -> dict[str, Any]:
+    context_dir = tmp_path / "ctx"
+    context_dir.mkdir()
+    context = {
+        "pr": {
+            "number": 2,
+            "title": "",
+            "body": "",
+            "author": "alice",
+            "author_association": "NONE",
+            "base_sha": HEAD,
+            "head_sha": HEAD,
+            "merge_base_sha": HEAD,
+            "changed_files": [],
+            "additions": 0,
+            "deletions": 0,
+        },
+        "issue_refs": [],
+        "candidates": [],
+        "risk": {"forced": [], "hints": []},
+        "diff_truncated": False,
+        "topic_labels": [],
+    }
+    (context_dir / "context.json").write_text(json.dumps(context), encoding="utf-8")
+    files = [{"filename": "src/docpipe/a.py", "status": "modified", "patch": PATCH}]
+    reviews = []
+    if reviewed_sha:
+        body = f"{common.REVIEW_MARKER_PREFIX}{reviewed_sha} -->"
+        reviews = [{"user": {"login": common.BOT_LOGIN, "type": "Bot"}, "body": body, "commit_id": reviewed_sha}]
+
+    def fake_api(*, path: str, paginate: bool = False, jq: str | None = None) -> Any:
+        if "/compare/" in path:
+            return {"status": status, "files": files}
+        if path.endswith("/reviews?per_page=100"):
+            return reviews
+        return []
+
+    monkeypatch.setattr(review, "gh_api", fake_api)
+    monkeypatch.setattr(review, "pr_files", lambda *, repo, number: files)
+    monkeypatch.setattr(review, "fetch_pr_commits", lambda **kwargs: False)
+    assert review.prepare(repo="o/r", context_dir=context_dir, git_dir=tmp_path, force=False)
+    return json.loads((context_dir / "review/meta.json").read_text("utf-8"))
+
+
+def test_a_diverged_history_is_a_full_review_that_still_knows_the_earlier_findings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    older = "1" * 40
+    meta = _prepare_with_compare(monkeypatch, tmp_path, status="diverged", reviewed_sha=older)
+    assert meta["incremental_base"] is None
+    assert meta["earlier_ai_review"] is True
+    assert meta["history_changed"] is True
+
+    (tmp_path / "b").mkdir()
+    ahead = _prepare_with_compare(monkeypatch, tmp_path / "b", status="ahead", reviewed_sha=older)
+    assert ahead["incremental_base"] == older
+    assert ahead["history_changed"] is False
+
+
+def test_a_first_review_has_no_earlier_review_and_no_history_note(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    meta = _prepare_with_compare(monkeypatch, tmp_path, status="ahead", reviewed_sha=None)
+    assert (meta["incremental_base"], meta["earlier_ai_review"], meta["history_changed"]) == (None, False, False)
+
+
+def test_the_review_body_says_when_the_history_changed() -> None:
+    result = review.parse_review_result(data=answer(), changed_paths={"src/docpipe/a.py"})
+
+    def body(*, changed: bool) -> str:
+        payload = review.build_review(
+            result=result, anchors={}, head_sha=HEAD, incremental_base=None, history_changed=changed
+        )
+        return payload["body"]
+
+    assert "force-push" in body(changed=True)
+    assert "force-push" not in body(changed=False)

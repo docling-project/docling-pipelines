@@ -91,6 +91,8 @@ class TriageContext:
     risk: RiskReport
     diff_truncated: bool
     topic_labels: list[str]
+    # Not empty when the AI model must not read this PR. The text says why.
+    llm_skip_reason: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TriageContext:
@@ -105,6 +107,7 @@ class TriageContext:
             ),
             diff_truncated=data["diff_truncated"],
             topic_labels=list(data["topic_labels"]),
+            llm_skip_reason=str(data.get("llm_skip_reason", "")),
         )
 
 

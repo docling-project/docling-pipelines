@@ -78,6 +78,7 @@ jobs:
       pr: ${{ steps.resolve.outputs.pr }}
       run: ${{ steps.resolve.outputs.run }}
       force_review: ${{ steps.resolve.outputs.force_review }}
+      maintainer_requested: ${{ steps.resolve.outputs.maintainer_requested }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         continue-on-error: true
@@ -120,25 +121,10 @@ jobs:
           gh api --method POST "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
             -f content=eyes > /dev/null
 
-  reset-labels:
-    # A new push makes the previous verdict stale.
-    if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    continue-on-error: true
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Remove stale AI labels
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          for label in ai:ci-safe ai:ci-needs-care ai:possible-duplicate ai:review-lgtm ai:review-changes; do
-            gh pr edit "${PR_NUMBER}" --remove-label "${label}" || true
-          done
+  # There is no separate job that removes the labels on a push. That left the PR
+  # without AI labels for the whole run, and for good when the run failed. The
+  # publish job replaces the labels of an older commit when the new result is
+  # ready, or removes them and posts a notice when the triage did not run.
 
   prepare:
     needs: context
@@ -170,10 +156,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.context.outputs.pr }}
+          # A maintainer command or manual run lifts the skip of the AI model
+          # for a PR that changes .github/ from a non-maintainer.
+          MAINTAINER_REQUESTED: ${{ needs.context.outputs.maintainer_requested == 'true' && '--maintainer-requested' || '' }}
         run: |
           python3 .github/scripts/ai_pr_triage.py prepare \
             --repo "${REPO}" --pr "${PR_NUMBER}" \
-            --out "${RUNNER_TEMP}/ai-triage"
+            --out "${RUNNER_TEMP}/ai-triage" ${MAINTAINER_REQUESTED}
 
       - name: Collect review data
         continue-on-error: true
@@ -253,11 +242,9 @@ jobs:
             --bob-output "${RUNNER_TEMP}/bob-output.json" \
             --context "${RUNNER_TEMP}/ai-triage/context.json" \
             --out "${result}" || exit 0
-          # Defense in depth: never publish text that contains the API key.
-          if [ -n "${BOB_API_KEY}" ] && grep -qF -- "${BOB_API_KEY}" "${result}"; then
-            echo "::error::The answer contains the API key. It is discarded."
-            rm -f "${result}"
-          fi
+          # Defense in depth: never publish text that contains the API key,
+          # also as base64, hex, reversed, or split into parts.
+          python3 .github/scripts/ai_pr_leak_check.py --file "${result}" || rm -f "${result}"
           if python3 .github/scripts/ai_pr_review.py gate \
               --triage-result "${result}" \
               --context "${RUNNER_TEMP}/ai-triage/context.json"; then
@@ -277,8 +264,9 @@ jobs:
 
   publish:
     needs: [context, prepare, analyze]
-    # run_llm is set only when the prepare step succeeded.
-    if: always() && needs.prepare.outputs.run_llm != ''
+    # Also runs after a failure of prepare. The script then posts a notice that
+    # the triage did not run, so a failure is not mistaken for a clean PR.
+    if: always() && needs.context.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
@@ -378,10 +366,7 @@ jobs:
             --bob-output "${RUNNER_TEMP}/bob-review-output.json" \
             --context-dir "${RUNNER_TEMP}/ai-triage" \
             --out "${result}" || exit 0
-          if [ -n "${BOB_API_KEY}" ] && grep -qF -- "${BOB_API_KEY}" "${result}"; then
-            echo "::error::The review contains the API key. It is discarded."
-            rm -f "${result}"
-          fi
+          python3 .github/scripts/ai_pr_leak_check.py --file "${result}" || rm -f "${result}"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         continue-on-error: true

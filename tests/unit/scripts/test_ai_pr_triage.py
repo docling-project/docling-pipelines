@@ -432,13 +432,145 @@ def test_prepare_writes_the_context_and_diffs(monkeypatch: pytest.MonkeyPatch, t
     assert (tmp_path / "candidates/7.diff").is_file()
 
 
+def _skip(files: list[dict[str, Any]], association: str = "CONTRIBUTOR", requested: bool = False) -> str:
+    return triage.llm_skip_reason(files=files, author_association=association, maintainer_requested=requested)
+
+
+def test_the_model_skips_github_changes_of_a_non_maintainer() -> None:
+    workflow = [{"filename": ".github/workflows/ci.yml"}]
+    assert _skip(workflow) == triage.LLM_SKIP_REASON
+    assert _skip(workflow, "NONE") == triage.LLM_SKIP_REASON
+    # A rename out of .github/ is still a change to it.
+    renamed = [{"filename": "docs/ci.yml", "previous_filename": ".github/workflows/ci.yml"}]
+    assert _skip(renamed) == triage.LLM_SKIP_REASON
+
+
+def test_the_model_runs_for_maintainers_requests_and_other_paths() -> None:
+    workflow = [{"filename": ".github/workflows/ci.yml"}]
+    for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+        assert _skip(workflow, association) == ""
+    assert _skip(workflow, requested=True) == ""
+    assert _skip([{"filename": "src/docpipe/x.py"}, {"filename": "docs/.github/x.md"}]) == ""
+    assert _skip([{"filename": "github/x.yml"}]) == ""
+
+
+def test_prepare_skips_the_model_for_a_non_maintainer_github_change(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pr = {
+        "title": "ci: change workflow",
+        "body": "",
+        "user": {"login": "alice"},
+        "author_association": "NONE",
+        "base": {"sha": "a" * 40},
+        "head": {"sha": HEAD},
+    }
+    files = [{"filename": ".github/workflows/ci.yml", "status": "modified", "patch": "@@ -1 +1 @@\n+x"}]
+
+    def fake_api(*, path: str, paginate: bool = False, jq: str | None = None) -> Any:
+        if jq is not None:
+            return "c" * 40
+        return [] if "/pulls?state=open" in path else pr
+
+    monkeypatch.setattr(triage, "gh_api", fake_api)
+    monkeypatch.setattr(triage, "pr_files", lambda *, repo, number: files)
+    assert not triage.prepare(repo=REPO, pr_number=10, out_dir=tmp_path)
+    stored = json.loads((tmp_path / "context.json").read_text("utf-8"))
+    assert stored["llm_skip_reason"] == triage.LLM_SKIP_REASON
+    # The deterministic checks still run and the comment says why.
+    assert [f["path"] for f in stored["risk"]["forced"]] == [".github/workflows/ci.yml"]
+    context = common.TriageContext.from_dict(stored)
+    comment = triage.render_comment(context=context, result=None, labels={triage.LABEL_CI_NEEDS_CARE})
+    assert "was skipped" in comment
+    assert "did not finish" not in comment
+
+    assert triage.prepare(repo=REPO, pr_number=10, out_dir=tmp_path, maintainer_requested=True)
+    assert json.loads((tmp_path / "context.json").read_text("utf-8"))["llm_skip_reason"] == ""
+
+
+def test_one_unreadable_open_pr_does_not_fail_the_duplicate_scan(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pr = {
+        "title": "fix: x",
+        "body": "",
+        "user": {"login": "alice"},
+        "author_association": "CONTRIBUTOR",
+        "base": {"sha": "a" * 40},
+        "head": {"sha": HEAD},
+    }
+    files = [{"filename": "src/docpipe/api/x.py", "status": "modified", "patch": "@@ -10,2 +10,3 @@\n+x"}]
+    good = {"number": 7, "title": "other", "state": "open", "html_url": "u", "user": {"login": "bob"}}
+    bad = {"number": 8, "title": "gone", "state": "open", "html_url": "u", "user": {"login": "eve"}}
+
+    def fake_api(*, path: str, paginate: bool = False, jq: str | None = None) -> Any:
+        if jq is not None:
+            return "c" * 40
+        return [bad, good] if "/pulls?state=open" in path else pr
+
+    def fake_files(*, repo: str, number: int) -> list[dict[str, Any]]:
+        if number == 8:
+            raise triage.subprocess.CalledProcessError(1, ["gh"], stderr="HTTP 404")
+        return files
+
+    monkeypatch.setattr(triage, "gh_api", fake_api)
+    monkeypatch.setattr(triage, "pr_files", fake_files)
+    assert triage.prepare(repo=REPO, pr_number=10, out_dir=tmp_path)
+    stored = json.loads((tmp_path / "context.json").read_text("utf-8"))
+    assert [c["number"] for c in stored["candidates"]] == [7]
+
+
+def test_publish_without_a_context_posts_a_notice_and_removes_old_labels(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake = FakeGitHub(comments=[], labels=["ai:ci-safe", "ai:review-lgtm", "bug"])
+    monkeypatch.setattr(triage, "gh_api", fake.api)
+    monkeypatch.setattr(triage, "gh_write", fake.write)
+    triage.publish(repo=REPO, pr_number=10, context_path=tmp_path / "missing.json", result_path=None)
+
+    deleted = {path.rsplit("/", 1)[1] for method, path, _ in fake.writes if method == "DELETE"}
+    assert deleted == {"ai:ci-safe", "ai:review-lgtm"}
+    method, path, payload = fake.writes[-1]
+    assert (method, path.endswith("/comments")) == ("POST", True)
+    assert common.COMMENT_MARKER in payload["body"]
+    assert "did not run" in payload["body"]
+
+    # The notice replaces the sticky comment of an earlier run.
+    marker_comment = {"id": 5, "user": {"login": common.BOT_LOGIN}, "body": common.COMMENT_MARKER}
+    later = FakeGitHub(comments=[marker_comment], labels=[])
+    monkeypatch.setattr(triage, "gh_api", later.api)
+    monkeypatch.setattr(triage, "gh_write", later.write)
+    triage.publish(repo=REPO, pr_number=10, context_path=tmp_path / "missing.json", result_path=None)
+    assert later.writes[-1][0] == "PATCH"
+
+
+def test_the_workflow_publishes_after_a_failed_prepare_and_has_no_reset_job() -> None:
+    root = SCRIPTS_DIR.parents[1]
+    workflow = yaml.safe_load((root / ".github/workflows/ai-pr-triage.yml").read_text("utf-8"))
+    assert "reset-labels" not in workflow["jobs"]
+    condition = workflow["jobs"]["publish"]["if"]
+    assert "needs.context.outputs.run == 'true'" in condition
+    assert "run_llm" not in condition
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".skills/docpipe-custom-operator/SKILL.md", ".coveragerc", "frontend/eslint.config.js"],
+)
+def test_agent_skills_and_ci_tool_configuration_force_care(path: str) -> None:
+    report = triage.assess_risk([{"filename": path, "status": "modified", "patch": "@@ -1 +1 @@\n+x"}])
+    assert [finding.path for finding in report.forced] == [path]
+
+
 def test_the_parser_has_the_three_subcommands_without_a_git_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     seen: dict[str, Any] = {}
     monkeypatch.setattr(triage, "prepare", lambda **kwargs: seen.update(kwargs) or True)
     assert triage.main(["prepare", "--repo", REPO, "--pr", "3", "--out", str(tmp_path)]) == 0
-    assert seen == {"repo": REPO, "pr_number": 3, "out_dir": tmp_path}
+    assert seen == {"repo": REPO, "pr_number": 3, "out_dir": tmp_path, "maintainer_requested": False}
+    assert triage.main(["prepare", "--repo", REPO, "--pr", "3", "--out", str(tmp_path), "--maintainer-requested"]) == 0
+    assert seen["maintainer_requested"] is True
     with pytest.raises(SystemExit):
         triage.main(["prepare", "--repo", REPO, "--pr", "3", "--out", str(tmp_path), "--git-dir", "."])
     with pytest.raises(SystemExit):
