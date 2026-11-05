@@ -115,8 +115,12 @@ The Milvus adapter SHALL enforce that binary vector dimensions represent total b
 - **THEN** batch size estimation counts each value by its byte length so batches split in proportion to the real payload
 
 ### Requirement: Milvus Lite binary vector restriction enforcement
-The Milvus adapter SHALL reject binary vector field creation and binary index types when running under Milvus Lite (`auth_type: "lite"`).
+The Milvus adapter SHALL reject binary vector field creation and binary index types when running under Milvus Lite (`auth_type: "lite"`), and flow validation SHALL reject a binary vector feature for Lite whatever the configured `index_type` is.
 
-#### Scenario: Binary vector configured with Milvus Lite
-- **WHEN** `auth_type="lite"` is configured alongside binary vector fields or binary index types (`BIN_FLAT`, `BIN_IVF_FLAT`)
-- **THEN** adapter initialization or collection creation raises an invalid configuration exception stating that binary vectors are not supported by Milvus Lite
+#### Scenario: Binary index type configured with Milvus Lite
+- **WHEN** `auth_type="lite"` is configured alongside a binary index type (`BIN_FLAT`, `BIN_IVF_FLAT`)
+- **THEN** adapter initialization raises an invalid configuration exception stating that binary vectors are not supported by Milvus Lite
+
+#### Scenario: Binary vector feature with Milvus Lite and a dense index type
+- **WHEN** `auth_type="lite"` is configured with `FLAT` and an upstream embeddings operator sets `quantization` to `binary` or `ubinary`
+- **THEN** flow validation fails with an invalid configuration exception stating that binary vector features are not supported by Milvus Lite

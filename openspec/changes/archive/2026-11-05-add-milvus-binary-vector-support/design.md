@@ -68,7 +68,7 @@ See `proposal.md` for background and motivation.
 
 ### 5. Milvus Lite Enforcement Safeguard
 
-**Decision:** In `MilvusIndexManager._validate_index_type()`, raise `DocpipeException` with `ErrorCode.OPERATOR_CONFIGURATION_INVALID` if `is_lite` is `True` and `index_type in [MilvusIndexTypes.BIN_FLAT, MilvusIndexTypes.BIN_IVF_FLAT]` or if any binary vector field is configured.
+**Decision:** In `MilvusIndexManager._validate_index_type()`, raise `DocpipeException` with `ErrorCode.OPERATOR_CONFIGURATION_INVALID` if `is_lite` is `True` and `index_type in [MilvusIndexTypes.BIN_FLAT, MilvusIndexTypes.BIN_IVF_FLAT]`. In `MilvusIndexManager.validate_vector_feature_types()`, raise the same error when `is_lite` is `True` and any propagated feature is a binary vector, so `FLAT` with `quantization: binary` fails at flow validation instead of when the collection is created.
 
 ## Risks / Trade-offs
 
