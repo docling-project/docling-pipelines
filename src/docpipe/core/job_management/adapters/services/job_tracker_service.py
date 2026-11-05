@@ -42,6 +42,7 @@ from docpipe.exceptions.docpipe_exceptions import (
 )
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.orchestration.node_ordering import map_node_order_to_stats, order_node_items
 
 logger: Logger = get_logger()
 
@@ -1383,9 +1384,6 @@ class JobTrackerService(JobStatsService):
 
             # Sort node_stats by topological order if snapshot is available, falling back to chronological order
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
-                # Local import to avoid circular dependency with dag_utils -> elyra_converter -> job_management
-                from docpipe.utils.orchestration.dag_utils import order_node_items
-
                 node_stats = job_stats_dict["node_stats"]
                 job_run_id = job_stats_dict.get("job_run_id")
                 node_order = self._resolve_node_order(job_run_id=job_run_id, node_stats=node_stats)
@@ -1475,9 +1473,6 @@ class JobTrackerService(JobStatsService):
         if not job_run_id:
             return None
         try:
-            # Local import to prevent circular import: job_tracker_service -> dag_utils -> elyra_converter -> abstract_operator -> operator_utils -> job_management
-            from docpipe.utils.orchestration.dag_utils import map_node_order_to_stats
-
             snapshot_order = self._get_snapshot_node_order(job_run_id=job_run_id)
             if snapshot_order is None:
                 return None
@@ -1512,7 +1507,8 @@ class JobTrackerService(JobStatsService):
         if not flow_def:
             return None
 
-        # Local import to prevent circular import (see _resolve_node_order)
+        # Local import to prevent circular import: dag_utils -> elyra_converter -> abstract_operator
+        # -> operator_utils -> job_management. The node_stats-only helpers live in node_ordering instead.
         from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
 
         snapshot_order = get_topologically_sorted_node_ids(flow_definition=flow_def)
@@ -1682,8 +1678,6 @@ class JobTrackerService(JobStatsService):
     @staticmethod
     def _calculate_node_sequence(*, node_stats: dict, node_order: list[str] | None = None) -> list[str]:
         """Calculate node execution sequence based on topological order with chronological fallback."""
-        from docpipe.utils.orchestration.dag_utils import order_node_items
-
         ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
         return [node_id for node_id, _ in ordered_items]
 

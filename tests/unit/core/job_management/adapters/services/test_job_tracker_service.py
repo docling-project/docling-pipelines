@@ -2333,3 +2333,36 @@ class TestWriteJobLogs:
             written_data = json.load(f)
 
         assert list(written_data["node_stats"].keys()) == [node_ingest, node_extract, extra_early, extra_late]
+
+    def test_writes_authoring_snapshot_order_from_dumped_node_stats(self, *, job_tracker_service, tmp_path):
+        """Authoring snapshot names map onto node_stats after model_dump turns them into plain dicts."""
+        node_ingest = "11111111-0000-0000-0000-000000000001"
+        node_extract = "22222222-0000-0000-0000-000000000002"
+        node_quality = "33333333-0000-0000-0000-000000000003"
+        node_chunk = "44444444-0000-0000-0000-000000000004"
+
+        # Same timestamps everywhere, so neither name nor time order matches the DAG
+        node_stats = {
+            node_chunk: NodeStats(id=node_chunk, name="Chunking", start_time=101, end_time=101),
+            node_quality: NodeStats(id=node_quality, name="Document Quality", start_time=101, end_time=101),
+            node_extract: NodeStats(id=node_extract, name="Extract Content", start_time=101, end_time=101),
+            node_ingest: NodeStats(id=node_ingest, name="Ingest", start_time=101, end_time=101),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats)
+        flow_def = {
+            "flow": [
+                {"name": "Ingest", "type": "ingest_source", "depends_on": []},
+                {"name": "Extract Content", "type": "extract_operator", "depends_on": ["Ingest"]},
+                {"name": "Document Quality", "type": "doc_quality", "depends_on": ["Extract Content"]},
+                {"name": "Chunking", "type": "chunker", "depends_on": ["Document Quality"]},
+            ]
+        }
+
+        log_file = tmp_path / "job_stats.json"
+        with patch.object(job_tracker_service, "get_flow_definition", return_value=flow_def):
+            job_tracker_service.write_job_logs(job_stats=job_stats, job_log_path=str(log_file))
+
+        with log_file.open() as f:
+            written_data = json.load(f)
+
+        assert list(written_data["node_stats"].keys()) == [node_ingest, node_extract, node_quality, node_chunk]

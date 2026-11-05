@@ -8,7 +8,7 @@ JobStatsMapper module for converting JobStats domain models to enterprise-compat
 from docpipe.api.dto.job_run_dto import JobRunStatusResponse
 from docpipe.api.dto.job_stats_dto import JobStatsDto
 from docpipe.core.job_management.domain.models import JobStats
-from docpipe.utils.orchestration.dag_utils import order_node_items
+from docpipe.utils.orchestration.node_ordering import order_node_items
 
 from .node_stats_mapper import NodeStatsMapper
 
