@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config model for the Milvus vector store adapter."""
 
 from typing import Literal
@@ -78,16 +81,25 @@ class MilvusConfig(BaseModel):
         "AUTOINDEX",
         "SPARSE_INVERTED_INDEX",
         "SPARSE_WAND",
+        "BIN_FLAT",
+        "BIN_IVF_FLAT",
     ] = Field(
         default="HNSW",
         description=(
             "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
-            "Use HNSW for standalone/remote deployments."
+            "Use HNSW for standalone/remote deployments, or BIN_FLAT / BIN_IVF_FLAT for binary vectors."
         ),
     )
-    metric_type: Literal["L2", "IP", "COSINE", "BM25"] = Field(
+    metric_type: Literal[
+        "L2",
+        "IP",
+        "COSINE",
+        "BM25",
+        "HAMMING",
+        "JACCARD",
+    ] = Field(
         default="L2",
-        description="Vector similarity metric.",
+        description="Vector similarity metric. HAMMING and JACCARD are for binary vectors (Milvus 2.6).",
     )
     index_parameters: dict = Field(
         default_factory=dict,
