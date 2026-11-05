@@ -428,9 +428,8 @@ class OperatorConstants:
         # GPU and Quantization Configuration
         QUANTIZATION: Final[str] = "quantization"
         QUANTIZATION_PARAMETERS: Final[str] = "quantization_parameters"
-        SEARCH_PARAMETERS: Final[str] = "search_parameters"
         USE_GPU: Final[str] = "use_gpu"
-        GPU_DEVICE_ID: Final[str] = "gpu_device_id"
+        FALLBACK_TO_CPU: Final[str] = "fallback_to_cpu"
 
         # VectorDB Metrics and Configuration
         METRIC_TYPE: Final[str] = "metric_type"

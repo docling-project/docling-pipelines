@@ -3,7 +3,7 @@
 
 """Pydantic config model for the Milvus vector store adapter."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -123,29 +123,28 @@ class MilvusConfig(BaseModel):
             "'PRQ' (Product Residual Quantization), or None."
         ),
     )
-    quantization_parameters: dict = Field(
+    quantization_parameters: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Parameters for vector quantization, e.g. {'m': 16, 'nbits': 8} for PQ or {'sq_type': 'SQ8'} for SQ."
         ),
     )
-    search_parameters: dict = Field(
-        default_factory=dict,
-        description=(
-            "Search and query-time parameters (e.g. {'nprobe': 16} for IVF indexes, "
-            "{'search_width': 4, 'itopk_size': 64} for GPU_CAGRA, or {'ef': 64} for HNSW)."
-        ),
-    )
     use_gpu: bool | None = Field(
         default=None,
         description=(
-            "Whether to enable GPU acceleration. If true, auto-upgrades compatible CPU indexes "
-            "to GPU equivalents if a GPU is available. If None, GPU is used when a GPU index_type is selected."
+            "Whether to use a GPU index. If true, a CPU index (including a quantized one) is upgraded to its "
+            "GPU equivalent (HNSW -> GPU_CAGRA, IVF_FLAT -> GPU_IVF_FLAT, IVF_PQ/HNSW_PQ -> GPU_IVF_PQ, "
+            "FLAT -> GPU_BRUTE_FORCE). If false, a GPU index is downgraded to its CPU equivalent. "
+            "If None, index_type is used as given. The Milvus server must be a GPU build."
         ),
     )
-    gpu_device_id: int | None = Field(
-        default=None,
-        description="Target GPU device index (e.g. 0). Defaults to first available GPU.",
+    fallback_to_cpu: bool = Field(
+        default=False,
+        description=(
+            "If true and the Milvus server rejects a GPU index during index creation (for example a CPU-only "
+            "Milvus image), retry with the CPU equivalent index instead of failing. Off by default so an "
+            "explicitly requested GPU index is never silently downgraded."
+        ),
     )
     add_sparse_vector: bool = Field(
         default=False,

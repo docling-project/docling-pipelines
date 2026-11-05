@@ -253,7 +253,7 @@ class TestMilvusAdapterMissingCollectionName:
 
 
 class TestMilvusAdapterGpuQuantizationWiring:
-    """The adapter must forward GPU / quantization / search options to MilvusIndexManager."""
+    """The adapter must forward GPU / quantization options to MilvusIndexManager."""
 
     @staticmethod
     def _build(extra_config):
@@ -275,23 +275,20 @@ class TestMilvusAdapterGpuQuantizationWiring:
                 "index_type": "GPU_CAGRA",
                 "quantization": "PQ",
                 "quantization_parameters": {"m": 8},
-                "search_parameters": {"itopk_size": 64},
                 "use_gpu": True,
-                "gpu_device_id": 1,
+                "fallback_to_cpu": True,
             }
         )
         kwargs = mock_manager.call_args.kwargs
         assert kwargs["index_type"] == "GPU_CAGRA"
         assert kwargs["quantization"] == "PQ"
         assert kwargs["quantization_parameters"] == {"m": 8}
-        assert kwargs["search_parameters"] == {"itopk_size": 64}
         assert kwargs["use_gpu"] is True
-        assert kwargs["gpu_device_id"] == 1
+        assert kwargs["fallback_to_cpu"] is True
 
     def test_defaults_when_options_absent(self):
         kwargs = self._build({}).call_args.kwargs
         assert kwargs["quantization"] is None
         assert kwargs["quantization_parameters"] == {}
-        assert kwargs["search_parameters"] == {}
         assert kwargs["use_gpu"] is None
-        assert kwargs["gpu_device_id"] is None
+        assert kwargs["fallback_to_cpu"] is False

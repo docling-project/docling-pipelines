@@ -2,37 +2,33 @@
 
 ## Why
 
-The Milvus adapter currently only supports CPU-based dense, sparse, and hybrid vector indexes. Milvus provides GPU-accelerated index types (`GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ`, `GPU_BRUTE_FORCE`) that deliver significantly higher throughput and lower query latency for large-scale document datasets, but they are absent from the adapter entirely. Additionally, the current `add_sparse_vector` boolean does not scale as a mode-selection mechanism: it conflates sparse indexing with dense indexing in a single flag, making it impossible to extend to GPU or binary modes without adding more ad-hoc booleans.
+The Milvus adapter only supports CPU dense, sparse and binary vector indexes. Milvus also provides GPU-accelerated index types (`GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ`, `GPU_BRUTE_FORCE`) and quantized HNSW variants (`HNSW_SQ`, `HNSW_PQ`, `HNSW_PRQ`) that give higher query throughput or lower memory use on large document collections. None of these can be selected today.
 
 ## What Changes
 
-- **New**: `MilvusVectorModes` class in `index_manager.py` with modes `dense`, `sparse`, `binary`, and `gpu`, plus `ALL_MODES`.
-- **New**: GPU index type constants added to `MilvusIndexTypes`: `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ`, `GPU_BRUTE_FORCE`, collected in `ALL_GPU_TYPES`. Included in the existing `ALL_TYPES` list.
-- **New**: `GPU_VALID_METRICS` on `MilvusMetricTypes` (L2 and IP only — Milvus GPU indexes do not support COSINE).
-- **New**: Default index parameters for all four GPU index types in `INDEX_DEFAULT_PARAMETERS`.
-- **New**: `VECTOR_MODE` and `VECTOR_MODE_DEFAULT` constants in `operator_constants.py`.
-- **Modified**: `MilvusIndexManager.__init__` replaces the `add_sparse_vector` parameter with `vector_mode`. Internal `_is_sparse`, `_is_gpu`, and `_is_binary` flags are derived from the mode.
-- **New**: `_validate_vector_mode()`, updated `_validate_index_type()` (mode-aware), updated `_validate_metric_type()` (mode-aware), and `_validate_gpu_config()` (GPU_CAGRA graph-degree constraint) added to `MilvusIndexManager`.
-- **Modified**: All `self.add_sparse_vector` references inside `index_manager.py` replaced with `self._is_sparse` — no behavioral change for existing sparse/dense/hybrid users.
-- **Modified**: `adapter.py` adds `_resolve_vector_mode()` to resolve `vector_mode` from config (with backward-compat mapping from legacy `add_sparse_vector=True → vector_mode="sparse"`). Passes `vector_mode` to `MilvusIndexManager`; continues passing the computed `add_sparse_vector` boolean to `MilvusBatchProcessor` unchanged.
-- **Modified**: `MilvusConfig.index_type` Literal expanded to include the four GPU index type strings.
-- **New**: Unit tests in `test_milvus_index_manager.py` covering GPU initialization, invalid CPU index in GPU mode, COSINE rejection for GPU, GPU_CAGRA constraint, valid custom GPU_CAGRA parameters, GPU default parameters, and unknown mode rejection. Existing index-type and metric-type count assertions updated.
-- **Modified**: `docs/reference/OPERATORS.md` updated with `vector_mode`, GPU index types, GPU metric restrictions, and backward compatibility note.
+- **New**: GPU index types `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ`, `GPU_BRUTE_FORCE` in `MilvusIndexTypes` (`ALL_GPU_TYPES`), included in `ALL_DENSE_TYPES` and `ALL_TYPES`, with default parameters in `INDEX_DEFAULT_PARAMETERS`.
+- **New**: Quantized HNSW index types `HNSW_SQ`, `HNSW_PQ`, `HNSW_PRQ` with default parameters.
+- **New**: `MilvusConfig` fields `quantization` (`SQ8`, `PQ`, `PRQ`, `NONE`), `quantization_parameters`, `use_gpu` and `fallback_to_cpu`, forwarded from `MilvusAdapter` to `MilvusIndexManager`. Constants `QUANTIZATION`, `QUANTIZATION_PARAMETERS`, `USE_GPU`, `FALLBACK_TO_CPU` added to `OperatorConstants.VectorDB`.
+- **New**: `MilvusIndexManager.resolve_quantized_index_type()` maps a base index type and `quantization` to the quantized index type.
+- **New**: `use_gpu=True` upgrades a CPU index (applied after quantization is resolved) to its GPU equivalent; `use_gpu=False` downgrades a GPU index to its CPU equivalent. Index parameters that belong to the previous index type are dropped.
+- **New**: Opt-in `fallback_to_cpu`. When enabled and the Milvus server rejects a GPU index during index creation, the index is created with the CPU equivalent instead.
+- **New**: Config-time validation: GPU indexes reject the `COSINE` metric; `GPU_CAGRA` requires `intermediate_graph_degree >= graph_degree`; GPU index types are rejected for Milvus Lite.
+- **Modified**: `docs/operators/vectordb/milvus.md` and `docs/reference/OPERATORS.md` document the new options, GPU prerequisites and limits.
+- **Added**: `sample_flows/vectordb/milvus_gpu_integration.json`.
 
 ## Capabilities
 
 ### New Capabilities
 
-None. GPU index support is a direct extension of the existing VectorDB operator's Milvus adapter; it does not introduce a new independently observable system capability.
+None. This extends the existing VectorDB operator Milvus adapter.
 
 ### Modified Capabilities
 
-- `backend/vectordb-operator`: The VectorDB operator's Milvus adapter gains a new `vector_mode` configuration parameter and supports GPU-accelerated index types. The behavioral contract for existing dense, sparse, and hybrid modes is unchanged. The `add_sparse_vector` parameter is retained for backward compatibility.
+- `backend/vectordb-operator`: the Milvus adapter accepts GPU and quantized index types and the new configuration fields. Behavior of existing dense, sparse, hybrid and binary configurations is unchanged.
 
 ## Impact
 
-- **Backend only** — no frontend, API route, or domain model changes.
-- **Files changed**: `src/docpipe/core/operators/vectordb/adapters/outbound/milvus/index_manager.py`, `adapter.py`, `config.py`; `src/docpipe/core/constants/operator_constants.py`; `tests/unit/operators/vectordb/test_milvus_index_manager.py`; `docs/reference/OPERATORS.md`.
-- **Files unchanged**: `batch_processor.py`, `vectordb_operator.py`, `vectordb_utils.py`, domain models, OpenSearch adapter.
-- **No breaking changes** for existing flow configurations using `add_sparse_vector`, `index_type`, or `metric_type`.
-- **Dependency**: No new Python packages required. GPU index types are already supported by `pymilvus`; GPU execution requires a Milvus deployment built with GPU support and appropriate CUDA drivers on the Milvus server — not the client.
+- **Backend only.** No frontend, API route or domain model changes.
+- **Files changed**: `index_manager.py`, `adapter.py`, `config.py` (Milvus adapter), `operator_constants.py`, `tests/unit/operators/vectordb/test_milvus_index_manager.py`, `tests/unit/operators/vectordb/test_milvus_adapter.py`, `docs/operators/vectordb/milvus.md`, `docs/reference/OPERATORS.md`, `sample_flows/vectordb/milvus_gpu_integration.json`, `.gitignore`.
+- **No breaking changes.** All new fields default to unset or `false`, so existing flows behave as before.
+- **Dependencies**: none. GPU indexes need a Milvus server built with GPU support (`milvusdb/milvus:<version>-gpu`); no client-side GPU is needed.

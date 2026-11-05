@@ -82,9 +82,8 @@ class MilvusAdapter(VectorStorePort):
                 - index_parameters: Index-specific parameters
                 - quantization: Quantization method (SQ8, PQ, PRQ, NONE) to reduce memory
                 - quantization_parameters: Quantization tuning parameters
-                - search_parameters: Search-time parameters (e.g. nprobe, ef, search_width)
                 - use_gpu: Explicit GPU acceleration flag (None = decided by index_type)
-                - gpu_device_id: Target GPU device index
+                - fallback_to_cpu: Retry with the CPU equivalent if the server rejects a GPU index
         """
         # collection_name is now part of provider_config — read it from config
         self.collection_name = adapter_config.get(OperatorConstants.VectorDB.COLLECTION_NAME)
@@ -123,9 +122,8 @@ class MilvusAdapter(VectorStorePort):
         index_parameters = adapter_config.get(OperatorConstants.VectorDB.INDEX_PARAMETERS, {})
         quantization = adapter_config.get(OperatorConstants.VectorDB.QUANTIZATION)
         quantization_parameters = adapter_config.get(OperatorConstants.VectorDB.QUANTIZATION_PARAMETERS, {})
-        search_parameters = adapter_config.get(OperatorConstants.VectorDB.SEARCH_PARAMETERS, {})
         use_gpu = adapter_config.get(OperatorConstants.VectorDB.USE_GPU)
-        gpu_device_id = adapter_config.get(OperatorConstants.VectorDB.GPU_DEVICE_ID)
+        fallback_to_cpu = adapter_config.get(OperatorConstants.VectorDB.FALLBACK_TO_CPU, False)
 
         # Note: Sparse vector mode uses hardcoded index configuration in MilvusIndexManager
         # The index_type and metric_type parameters here are only used for dense vectors
@@ -163,9 +161,8 @@ class MilvusAdapter(VectorStorePort):
             is_lite=is_lite,
             quantization=quantization,
             quantization_parameters=quantization_parameters,
-            search_parameters=search_parameters,
             use_gpu=use_gpu,
-            gpu_device_id=gpu_device_id,
+            fallback_to_cpu=fallback_to_cpu,
         )
 
         # Initialize batch processor

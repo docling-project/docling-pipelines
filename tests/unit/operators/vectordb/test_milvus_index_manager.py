@@ -6,7 +6,6 @@
 Unit tests for MilvusIndexManager
 """
 
-import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -987,119 +986,219 @@ class TestCreateSchemaFieldsSkipBranches:
         assert field_names.count(OperatorConstants.VectorDB.DENSE_VECTOR_FIELD_NAME) == 0
 
 
-GPU_DETECT = (
-    "docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager.MilvusIndexManager.detect_gpu_available"
-)
+class TestGpuIndexSelection:
+    """GPU index selection: explicit index_type, use_gpu upgrade / downgrade, and parameter handling."""
 
-
-class TestGpuFallback:
-    """GPU detection and graceful CPU fallback."""
-
-    @pytest.mark.parametrize(
-        ("gpu_type", "cpu_type"),
-        [
-            ("GPU_CAGRA", "HNSW"),
-            ("GPU_IVF_FLAT", "IVF_FLAT"),
-            ("GPU_IVF_PQ", "IVF_PQ"),
-            ("GPU_BRUTE_FORCE", "FLAT"),
-        ],
-    )
-    def test_falls_back_to_cpu_when_no_gpu(self, mock_client, gpu_type, cpu_type):
-        with patch(GPU_DETECT, return_value=False):
-            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type)
-        assert manager.index_type == cpu_type
+    @pytest.mark.parametrize("gpu_type", ["GPU_CAGRA", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_BRUTE_FORCE"])
+    def test_explicit_gpu_index_is_never_downgraded_client_side(self, mock_client, gpu_type):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type)
+        assert manager.index_type == gpu_type
         assert manager.requested_index_type == gpu_type
-        assert manager.gpu_fallback_triggered is True
-        assert manager.gpu_fallback_reason
-
-    def test_keeps_gpu_index_when_gpu_available(self, mock_client):
-        with patch(GPU_DETECT, return_value=True):
-            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA")
-        assert manager.index_type == "GPU_CAGRA"
         assert manager.gpu_fallback_triggered is False
-
-    def test_fallback_drops_cagra_only_parameters(self, mock_client):
-        with patch(GPU_DETECT, return_value=False):
-            manager = MilvusIndexManager(
-                client=mock_client,
-                collection_name="c",
-                index_type="GPU_CAGRA",
-                index_parameters={"graph_degree": 32, "M": 24},
-            )
-        params = manager._get_index_parameters()
-        assert "graph_degree" not in params
-        assert params["M"] == 24
 
     def test_gpu_index_rejected_on_lite(self, mock_client):
         with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
             MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA", is_lite=True)
 
-    def test_use_gpu_true_upgrades_cpu_index(self, mock_client):
-        with patch(GPU_DETECT, return_value=True):
-            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", use_gpu=True)
-        assert manager.index_type == "GPU_CAGRA"
+    @pytest.mark.parametrize(
+        ("cpu_type", "gpu_type"),
+        [
+            ("HNSW", "GPU_CAGRA"),
+            ("IVF_FLAT", "GPU_IVF_FLAT"),
+            ("IVF_PQ", "GPU_IVF_PQ"),
+            ("FLAT", "GPU_BRUTE_FORCE"),
+        ],
+    )
+    def test_use_gpu_true_upgrades_cpu_index(self, mock_client, cpu_type, gpu_type):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type=cpu_type, use_gpu=True)
+        assert manager.index_type == gpu_type
 
-    def test_use_gpu_true_without_gpu_falls_back(self, mock_client):
-        with patch(GPU_DETECT, return_value=False):
-            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", use_gpu=True)
-        assert manager.index_type == "HNSW"
-        assert manager.gpu_fallback_triggered is True
+    @pytest.mark.parametrize(
+        ("base", "quant", "gpu_type"),
+        [
+            ("HNSW", "PQ", "GPU_IVF_PQ"),
+            ("IVF_FLAT", "PQ", "GPU_IVF_PQ"),
+            ("FLAT", "PQ", "GPU_IVF_PQ"),
+        ],
+    )
+    def test_use_gpu_true_with_quantization_upgrades_quantized_index(self, mock_client, base, quant, gpu_type):
+        manager = MilvusIndexManager(
+            client=mock_client, collection_name="c", index_type=base, quantization=quant, use_gpu=True
+        )
+        assert manager.index_type == gpu_type
+
+    def test_use_gpu_true_without_gpu_equivalent_raises(self, mock_client):
+        with pytest.raises(DocpipeException, match="no GPU equivalent"):
+            MilvusIndexManager(
+                client=mock_client, collection_name="c", index_type="HNSW", quantization="SQ8", use_gpu=True
+            )
+
+    def test_use_gpu_true_on_lite_raises(self, mock_client):
+        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
+            MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", use_gpu=True, is_lite=True)
 
     def test_use_gpu_false_downgrades_gpu_index(self, mock_client):
         manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_IVF_FLAT", use_gpu=False)
         assert manager.index_type == "IVF_FLAT"
         assert manager.gpu_fallback_triggered is False
 
-    def test_use_gpu_true_upgrades_flat_to_brute_force(self, mock_client):
-        with patch(GPU_DETECT, return_value=True):
-            manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="FLAT", use_gpu=True)
-        assert manager.index_type == "GPU_BRUTE_FORCE"
+    def test_use_gpu_false_drops_cagra_only_parameters(self, mock_client):
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            index_type="GPU_CAGRA",
+            index_parameters={"graph_degree": 32, "build_algo": "NN_DESCENT", "M": 24},
+            use_gpu=False,
+        )
+        params = manager._get_index_parameters()
+        assert manager.index_type == "HNSW"
+        assert "graph_degree" not in params
+        assert "build_algo" not in params
+        assert params["M"] == 24
+
+    def test_use_gpu_true_drops_hnsw_only_parameters(self, mock_client):
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            index_type="HNSW",
+            index_parameters={"M": 24, "efConstruction": 100, "graph_degree": 16, "intermediate_graph_degree": 32},
+            use_gpu=True,
+        )
+        params = manager._get_index_parameters()
+        assert manager.index_type == "GPU_CAGRA"
+        assert "M" not in params
+        assert "efConstruction" not in params
+        assert params["graph_degree"] == 16
 
     @pytest.mark.parametrize("gpu_type", ["GPU_CAGRA", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_BRUTE_FORCE"])
     def test_gpu_index_rejects_cosine(self, mock_client, gpu_type):
-        with patch(GPU_DETECT, return_value=True):
-            with pytest.raises(DocpipeException, match="does not support the COSINE metric"):
-                MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type, metric_type="COSINE")
+        with pytest.raises(DocpipeException, match="does not support the COSINE metric"):
+            MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type, metric_type="COSINE")
 
-    def test_gpu_index_accepts_ip(self, mock_client):
-        with patch(GPU_DETECT, return_value=True):
-            manager = MilvusIndexManager(
-                client=mock_client, collection_name="c", index_type="GPU_CAGRA", metric_type="IP"
+    def test_gpu_index_rejects_cosine_after_use_gpu_upgrade(self, mock_client):
+        with pytest.raises(DocpipeException, match="does not support the COSINE metric"):
+            MilvusIndexManager(
+                client=mock_client, collection_name="c", index_type="HNSW", metric_type="COSINE", use_gpu=True
             )
-        assert manager.index_type == "GPU_CAGRA"
 
-    def test_cosine_allowed_when_gpu_index_falls_back_to_cpu(self, mock_client):
-        with patch(GPU_DETECT, return_value=False):
-            manager = MilvusIndexManager(
-                client=mock_client, collection_name="c", index_type="GPU_CAGRA", metric_type="COSINE"
-            )
-        assert manager.index_type == "HNSW"
+    def test_cpu_index_accepts_cosine(self, mock_client):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", metric_type="COSINE")
         assert manager.metric_type == "COSINE"
 
-    def test_gpu_device_id_passed_to_detection(self, mock_client):
-        with patch(GPU_DETECT, return_value=True) as detect:
-            MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_BRUTE_FORCE", gpu_device_id=2)
-        detect.assert_called_once_with(device_id=2)
+    def test_gpu_index_accepts_ip(self, mock_client):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA", metric_type="IP")
+        assert manager.index_type == "GPU_CAGRA"
+
+    def test_cagra_default_cache_dataset_on_device_is_string(self):
+        assert INDEX_DEFAULT_PARAMETERS["GPU_CAGRA"]["cache_dataset_on_device"] == "false"
 
 
-class TestDetectGpuAvailable:
-    def test_disable_env_wins(self, monkeypatch):
-        monkeypatch.setenv("DOCPIPE_FORCE_GPU", "1")
-        monkeypatch.setenv("DOCPIPE_DISABLE_GPU", "1")
-        assert MilvusIndexManager.detect_gpu_available() is False
+class TestGpuCagraValidation:
+    """GPU_CAGRA requires intermediate_graph_degree >= graph_degree."""
 
-    def test_force_env(self, monkeypatch):
-        monkeypatch.delenv("DOCPIPE_DISABLE_GPU", raising=False)
-        monkeypatch.setenv("DOCPIPE_FORCE_GPU", "true")
-        assert MilvusIndexManager.detect_gpu_available() is True
+    def test_graph_degree_greater_than_intermediate_raises(self, mock_client):
+        with pytest.raises(DocpipeException, match="intermediate_graph_degree"):
+            MilvusIndexManager(
+                client=mock_client,
+                collection_name="c",
+                index_type="GPU_CAGRA",
+                index_parameters={"graph_degree": 64, "intermediate_graph_degree": 32},
+            )
 
-    def test_returns_false_when_nothing_detected(self, monkeypatch):
-        monkeypatch.delenv("DOCPIPE_DISABLE_GPU", raising=False)
-        monkeypatch.delenv("DOCPIPE_FORCE_GPU", raising=False)
-        monkeypatch.setitem(sys.modules, "torch", None)
-        monkeypatch.setitem(sys.modules, "pynvml", None)
-        with patch("shutil.which", return_value=None):
-            assert MilvusIndexManager.detect_gpu_available() is False
+    def test_user_graph_degree_above_default_intermediate_raises(self, mock_client):
+        with pytest.raises(DocpipeException, match="intermediate_graph_degree"):
+            MilvusIndexManager(
+                client=mock_client,
+                collection_name="c",
+                index_type="GPU_CAGRA",
+                index_parameters={"graph_degree": 128},
+            )
+
+    def test_equal_degrees_accepted(self, mock_client):
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            index_type="GPU_CAGRA",
+            index_parameters={"graph_degree": 32, "intermediate_graph_degree": 32},
+        )
+        assert manager.index_type == "GPU_CAGRA"
+
+    def test_defaults_accepted(self, mock_client):
+        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA")
+        assert manager._get_index_parameters()["graph_degree"] == 32
+
+    def test_not_applied_to_other_index_types(self, mock_client):
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            index_type="HNSW",
+            index_parameters={"graph_degree": 64, "intermediate_graph_degree": 32},
+        )
+        assert manager.index_type == "HNSW"
+
+
+class TestGpuFallbackOnServerError:
+    """fallback_to_cpu is opt-in and triggered only by a server error during index creation."""
+
+    @staticmethod
+    def _manager(mock_client, **kwargs: Any) -> MilvusIndexManager:
+        mock_client.has_collection.return_value = False
+        mock_client.prepare_index_params.return_value = MagicMock()
+        mappings = [
+            {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+            {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+            {"feature_name": "content", "mapped_column_name": "text"},
+        ]
+        return MilvusIndexManager(client=mock_client, collection_name="c", feature_mappings=mappings, **kwargs)
+
+    def test_fallback_retries_with_cpu_index_when_server_rejects_gpu(self, mock_client):
+        mock_client.create_index.side_effect = [RuntimeError("index type not supported"), None]
+        manager = self._manager(
+            mock_client,
+            index_type="GPU_CAGRA",
+            index_parameters={"graph_degree": 16, "M": 24},
+            fallback_to_cpu=True,
+        )
+        manager.create_collection(dimension_mapping={"embeddings": 384})
+
+        assert mock_client.create_index.call_count == 2
+        assert manager.index_type == "HNSW"
+        assert manager.requested_index_type == "GPU_CAGRA"
+        assert manager.gpu_fallback_triggered is True
+        assert "index type not supported" in (manager.gpu_fallback_reason or "")
+        assert "graph_degree" not in manager._get_index_parameters()
+        assert manager._get_index_parameters()["M"] == 24
+
+    def test_no_fallback_by_default(self, mock_client):
+        mock_client.create_index.side_effect = RuntimeError("index type not supported")
+        manager = self._manager(mock_client, index_type="GPU_CAGRA")
+        with pytest.raises(DocpipeException, match="Failed to create collection"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert mock_client.create_index.call_count == 1
+        assert manager.index_type == "GPU_CAGRA"
+        assert manager.gpu_fallback_triggered is False
+
+    def test_fallback_not_attempted_for_cpu_index(self, mock_client):
+        mock_client.create_index.side_effect = RuntimeError("boom")
+        manager = self._manager(mock_client, index_type="HNSW", fallback_to_cpu=True)
+        with pytest.raises(DocpipeException, match="Failed to create collection"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert mock_client.create_index.call_count == 1
+
+    def test_fallback_failure_is_reported(self, mock_client):
+        mock_client.create_index.side_effect = RuntimeError("boom")
+        manager = self._manager(mock_client, index_type="GPU_IVF_FLAT", fallback_to_cpu=True)
+        with pytest.raises(DocpipeException, match="Failed to create collection"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert mock_client.create_index.call_count == 2
+        assert manager.index_type == "IVF_FLAT"
+
+    def test_fallback_to_cpu_cosine_after_downgrade_is_allowed(self, mock_client):
+        mock_client.create_index.side_effect = [RuntimeError("no gpu"), None]
+        manager = self._manager(mock_client, index_type="GPU_CAGRA", metric_type="IP", fallback_to_cpu=True)
+        manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert manager.index_type == "HNSW"
+        assert manager.metric_type == "IP"
 
 
 class TestQuantization:
@@ -1132,9 +1231,32 @@ class TestQuantization:
         assert manager.index_type == "HNSW_PQ"
         assert manager._get_index_parameters()["m"] == 32
 
-    def test_search_parameters_stored(self, mock_client):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", search_parameters={"ef": 64})
-        assert manager.search_parameters == {"ef": 64}
+    def test_unsupported_combination_ignores_quantization_parameters(self, mock_client):
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            index_type="DISKANN",
+            quantization="PQ",
+            quantization_parameters={"m": 32},
+        )
+        assert manager.index_type == "DISKANN"
+        assert "m" not in manager._get_index_parameters()
+
+
+class TestFilterParametersForIndexType:
+    def test_keeps_only_valid_keys(self):
+        kept, dropped = MilvusIndexManager.filter_parameters_for_index_type(
+            target_index_type="HNSW", parameters={"M": 8, "graph_degree": 32}
+        )
+        assert kept == {"M": 8}
+        assert dropped == ["graph_degree"]
+
+    def test_cagra_accepts_adapt_for_cpu(self):
+        kept, dropped = MilvusIndexManager.filter_parameters_for_index_type(
+            target_index_type="GPU_CAGRA", parameters={"adapt_for_cpu": "true"}
+        )
+        assert kept == {"adapt_for_cpu": "true"}
+        assert dropped == []
 
 
 class TestBinaryVectorIndexSupport:

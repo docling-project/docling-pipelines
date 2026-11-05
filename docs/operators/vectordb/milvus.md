@@ -10,7 +10,7 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 
 ### Core Capabilities
 - **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX, BIN_FLAT, BIN_IVF_FLAT
-- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE with automatic GPU detection and CPU fallback
+- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE with an opt-in CPU fallback when the Milvus server rejects a GPU index
 - **Index Quantization**: SQ8, PQ and PRQ index variants to reduce memory (the `quantization` setting in `provider_config`)
 - **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE, HAMMING, JACCARD
 - **Binary Vector Support**: 1-bit quantized compact vector embeddings (`BIN_FLAT`, `BIN_IVF_FLAT`) for 32x memory and storage savings
@@ -110,9 +110,8 @@ Connection and index-specific parameters are configured inside the `provider_con
 | `index_parameters` | object | No | {} | Custom index-specific parameters |
 | `quantization` | string | No | - | `SQ8`, `PQ`, `PRQ` or `NONE`; see [GPU Indexes and Quantization](#gpu-indexes-and-quantization) |
 | `quantization_parameters` | object | No | {} | Quantization tuning parameters (e.g. `m`, `nbits`) |
-| `search_parameters` | object | No | {} | Search-time parameters (e.g. `ef`, `nprobe`, `itopk_size`) |
 | `use_gpu` | boolean | No | - | `true` upgrades to a GPU index, `false` forces CPU, unset follows `index_type` |
-| `gpu_device_id` | integer | No | - | GPU device index used for detection |
+| `fallback_to_cpu` | boolean | No | false | Retry with the CPU equivalent index if the Milvus server rejects a GPU index |
 | `add_sparse_vector` | boolean | No | false | Enable hybrid search with BM25 sparse vectors (not supported for `lite`) |
 
 ### Index Parameters
@@ -619,34 +618,35 @@ Per the Milvus GPU requirements:
 
 macOS and Podman on Apple Silicon cannot run GPU indexes.
 
-Docling Pipelines also checks for a GPU on the host that runs the pipeline, in this order: `torch.cuda`, `pynvml`, then `nvidia-smi -L`. Two environment variables override the check: `DOCPIPE_DISABLE_GPU=true` forces the CPU path, and `DOCPIPE_FORCE_GPU=true` skips probing and assumes a GPU. `DOCPIPE_DISABLE_GPU` wins if both are set. If Milvus runs on a different machine from the pipeline, set `DOCPIPE_FORCE_GPU=true` on the pipeline host.
+Docling Pipelines does not probe the pipeline host for a GPU. Index building runs on the Milvus server, so an explicitly requested GPU index type is always sent to the server as configured. If the server is not a GPU build, index creation fails with the server error unless `fallback_to_cpu` is enabled.
 
 ### GPU index types and CPU fallback
 
-| GPU index | CPU fallback | Notes |
-|-----------|--------------|-------|
+| GPU index | CPU equivalent | Notes |
+|-----------|----------------|-------|
 | `GPU_CAGRA` | `HNSW` | Graph-based index with the highest query throughput in Milvus benchmarks |
 | `GPU_IVF_FLAT` | `IVF_FLAT` | Good balance of speed and recall |
 | `GPU_IVF_PQ` | `IVF_PQ` | Lower GPU memory through product quantization |
 | `GPU_BRUTE_FORCE` | `FLAT` | Exact search with recall of 1 |
 
-If a GPU index type is requested and no GPU is detected, the adapter logs a warning and builds the CPU fallback index instead, so ingestion still succeeds. CAGRA-only parameters (`graph_degree`, `intermediate_graph_degree`, `build_algo`, `cache_dataset_on_device`, `adapt_for_cpu`) are dropped on fallback and other `index_parameters` are kept.
+`fallback_to_cpu` is off by default. When it is `true` and the Milvus server rejects the GPU index during index creation (for example a CPU-only Milvus image), the adapter logs a warning and retries with the CPU equivalent. Parameters that do not apply to the CPU index (such as `graph_degree`) are dropped and the other `index_parameters` are kept. Other errors on a CPU index are never retried.
 
-`use_gpu` controls this behaviour:
+`use_gpu` selects the index family before the collection is created:
 
 | `use_gpu` | Behaviour |
 |-----------|-----------|
 | unset | The `index_type` is used as given |
-| `true` | A CPU index is upgraded to its GPU equivalent (`HNSW` to `GPU_CAGRA`, `IVF_FLAT` to `GPU_IVF_FLAT`, `IVF_PQ` to `GPU_IVF_PQ`, `FLAT` to `GPU_BRUTE_FORCE`) |
+| `true` | A CPU index is upgraded to its GPU equivalent (`HNSW` to `GPU_CAGRA`, `IVF_FLAT` to `GPU_IVF_FLAT`, `IVF_PQ` and `HNSW_PQ` to `GPU_IVF_PQ`, `FLAT` to `GPU_BRUTE_FORCE`). The upgrade is applied after `quantization` is resolved, so `index_type: "HNSW"` with `quantization: "PQ"` becomes `GPU_IVF_PQ`. An index type without a GPU equivalent (for example `HNSW_SQ`) is rejected with a configuration error |
 | `false` | A GPU index is downgraded to its CPU equivalent |
 
-Set `gpu_device_id` to check for a specific device instead of any GPU.
+When `use_gpu` changes the index type, `index_parameters` that belong to the previous index type are dropped and a warning lists them.
 
 ### GPU index limits
 
 These come from Milvus:
 
-- **No `COSINE`.** GPU indexes do not support the `COSINE` metric. A GPU index with `metric_type: "COSINE"` is rejected with a configuration error. Normalize the vectors and use `IP`, or use `L2`. `COSINE` is accepted when the index fell back to a CPU index.
+- **No `COSINE`.** GPU indexes do not support the `COSINE` metric. A GPU index with `metric_type: "COSINE"` is rejected with a configuration error. Normalize the vectors and use `IP`, or use `L2`. This check applies to the configured index type, independent of the hardware. If `fallback_to_cpu` later switches to a CPU index, the metric is not changed.
+- For `GPU_CAGRA`, `intermediate_graph_degree` must be greater than or equal to `graph_degree`; otherwise a configuration error is raised before the collection is created.
 - GPU indexes do not support range search or grouping search.
 - The maximum search `limit` is 1,024 for `GPU_IVF_FLAT`, `GPU_IVF_PQ` and `GPU_CAGRA`.
 - A GPU index does not always lower latency compared with a CPU index. The gain is largest with heavy query load or large query batches.
@@ -664,7 +664,7 @@ The `quantization` setting resolves the base `index_type` to a quantized variant
 | `IVF_FLAT`, `FLAT` | `PQ` | `IVF_PQ` |
 | `GPU_IVF_FLAT`, `GPU_BRUTE_FORCE` | `PQ` | `GPU_IVF_PQ` |
 
-Tune with `quantization_parameters`, for example `{"m": 16, "nbits": 8}` for PQ. These are merged into `index_parameters`.
+Tune with `quantization_parameters`, for example `{"m": 16, "nbits": 8}` for PQ. These are merged into `index_parameters`. If the combination has no quantized variant (for example `DISKANN` with `PQ`), a warning is logged and both `quantization` and `quantization_parameters` are ignored.
 
 ### Examples
 
@@ -683,10 +683,7 @@ GPU index:
       "intermediate_graph_degree": 64,
       "graph_degree": 32
     },
-    "search_parameters": {
-      "itopk_size": 64
-    },
-    "gpu_device_id": 0
+    "fallback_to_cpu": false
   }
 }
 ```
@@ -704,7 +701,7 @@ Memory-constrained CPU index:
 }
 ```
 
-A complete flow is in [`sample_flows/vectordb/gpu_milvus.json`](../../../sample_flows/vectordb/gpu_milvus.json).
+A complete flow is in [`sample_flows/vectordb/milvus_gpu_integration.json`](../../../sample_flows/vectordb/milvus_gpu_integration.json).
 
 ### Tuning guidance
 
@@ -712,8 +709,8 @@ A complete flow is in [`sample_flows/vectordb/gpu_milvus.json`](../../../sample_
 - `GPU_IVF_FLAT` and `GPU_IVF_PQ`: `nlist` defaults to 1024. Roughly `sqrt(n)` to `4*sqrt(n)` for `n` vectors is a common starting range.
 - Index quantization trades recall for memory. `SQ8` typically gives about 4x smaller vectors with small recall loss, and `PQ` gives much higher compression with more loss. Validate recall on your own data before choosing.
 - For small collections, `HNSW` on CPU is often as fast as a GPU index.
-- `search_parameters` (for example `ef` for HNSW, `nprobe` for IVF, `itopk_size` for CAGRA) are stored on the index manager. This operator only ingests, so apply them in the query client you use against the collection.
-- Check the log for `Falling back to CPU index` to confirm which index was actually built.
+- Search-time parameters (for example `ef` for HNSW, `nprobe` for IVF, `itopk_size` for CAGRA) are query-time settings. This operator only ingests, so pass them in the `search()` call of your query client.
+- Check the log for `Falling back to CPU index` to confirm which index was actually built when `fallback_to_cpu` is enabled.
 
 ## Error Handling
 
