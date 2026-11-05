@@ -1,7 +1,7 @@
 import axios, { type AxiosResponse, type Method, type ResponseType } from 'axios';
 import type { Response } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from '../controllers/http-headers';
+import { BODY_HEADERS, NO_BODY_HEADERS } from '../constants/http-headers';
 
 const logger = log4js.getLogger('bff.proxy');
 
