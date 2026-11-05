@@ -24,7 +24,7 @@ The `extract_operator` SHALL accept an optional top-level `document_passwords` o
 
 ### Requirement: Password Candidate Resolution
 
-For each encrypted document the operator SHALL use the `passwords` of the first rule, in list order, whose `match` pattern matches the document's `name` or its `path`. If no rule matches, it SHALL use `default`. Patterns SHALL match the whole string, be case-sensitive, and support `*` (any characters, including `/`), `?` and `[...]`.
+For each encrypted document the operator SHALL use the `passwords` of the first rule, in list order, whose `match` pattern matches the document's `name` or its `path`. If no rule matches, it SHALL use `default`. Patterns SHALL match the whole string, be case-sensitive, and support `*` (matching `/` too), `?` and `[...]`. Backslashes in a `path` SHALL be treated as `/`.
 
 #### Scenario: First matching rule wins
 - **WHEN** two rules both match a document and the first rule's `passwords` are `["a"]` and the second's are `["b"]`
@@ -32,6 +32,10 @@ For each encrypted document the operator SHALL use the `passwords` of the first 
 
 #### Scenario: Rule matches on path
 - **WHEN** a document has `name` `"report.pdf"` and `path` `"s3://finance/q1/report.pdf"`, and a rule has `match` `"*/finance/*"`
+- **THEN** that rule SHALL apply to the document
+
+#### Scenario: Rule matches a Windows-style path
+- **WHEN** a document has `path` `"C:\data\finance\report.pdf"` and a rule has `match` `"*/finance/*"`
 - **THEN** that rule SHALL apply to the document
 
 #### Scenario: Rule matches on name
