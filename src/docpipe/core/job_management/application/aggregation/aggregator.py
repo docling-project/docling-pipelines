@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 MetadataAggregator - Handles custom metadata aggregation strategies.
 This class provides flexible aggregation of operator-specific metadata
 """
 
+import json
 from typing import Any, Callable
 
 from docpipe.core.constants.constants import ExecutionStatus
@@ -242,8 +246,8 @@ class MetadataAggregator:
                 self._normalize_status_key(ExecutionStatus.RUNNING.value): 4,
                 self._normalize_status_key(ExecutionStatus.FAILING.value): 3,
                 self._normalize_status_key(ExecutionStatus.FAILED.value): 3,
-                self._normalize_status_key(ExecutionStatus.COMPLETED_WITH_ERRORS.value): 2,
-                self._normalize_status_key(ExecutionStatus.COMPLETED_WITH_WARNINGS.value): 1,
+                self._normalize_status_key(ExecutionStatus.COMPLETED_WITH_ERRORS.value): 3,
+                self._normalize_status_key(ExecutionStatus.COMPLETED_WITH_WARNINGS.value): 2,
                 self._normalize_status_key(ExecutionStatus.COMPLETED.value): 1,
                 self._normalize_status_key(ExecutionStatus.SKIPPED.value): 0,
                 self._normalize_status_key(ExecutionStatus.CANCELED.value): 0,
@@ -268,7 +272,7 @@ class MetadataAggregator:
         for value in values:
             if isinstance(value, list):
                 for item in value:
-                    item_key = str(item) if not isinstance(item, (str, int, float, bool, type(None))) else item
+                    item_key = MetadataAggregator._collection_item_key(item)
                     if item_key not in seen:
                         result.append(item)
                         seen.add(item_key)
@@ -276,7 +280,11 @@ class MetadataAggregator:
 
     @staticmethod
     def _normalize_status_key(status: Any) -> str:
-        """Letters only, then upper, so CamelCase and SCREAMING_SNAKE share one key."""
+        """Letters only, then upper, so CamelCase and SCREAMING_SNAKE share one key.
+
+        Digits are discarded, so values that differ only by numbers (e.g. RETRY_2
+        vs RETRY_3) collide on the same key.
+        """
         return "".join(char for char in str(status) if char.isalpha()).upper()
 
     @staticmethod
@@ -301,9 +309,18 @@ class MetadataAggregator:
 
     @staticmethod
     def _collection_item_key(item: Any) -> Any:
-        """Return a hashable key for a collection item."""
-        if isinstance(item, (str, int, float, bool, type(None))):
+        """Return a hashable key for a collection item.
+
+        bool is checked before int because bool subclasses int and
+        True == 1 with equal hashes. Dicts use a sort_keys JSON form so
+        insertion order does not change equality.
+        """
+        if isinstance(item, bool):
+            return ("bool", item)
+        if isinstance(item, (str, int, float, type(None))):
             return item
+        if isinstance(item, dict):
+            return json.dumps(item, sort_keys=True, default=str)
         return str(item)
 
     def _deep_merge(self, *, dict1: dict, dict2: dict) -> dict:

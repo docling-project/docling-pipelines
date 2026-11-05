@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for MetadataAggregator - nested metadata handling.
 
@@ -213,6 +216,25 @@ class TestAggregationStrategies:
         assert errors_first["status"] == ExecutionStatus.COMPLETED_WITH_ERRORS.value
         assert completed_first["status"] == ExecutionStatus.COMPLETED_WITH_ERRORS.value
 
+    def test_priority_status_completed_with_warnings_beats_completed(self):
+        aggregator = MetadataAggregator()
+
+        warnings_first = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"status": ExecutionStatus.COMPLETED_WITH_WARNINGS.value},
+                {"status": ExecutionStatus.COMPLETED.value},
+            ]
+        )
+        completed_first = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"status": ExecutionStatus.COMPLETED.value},
+                {"status": ExecutionStatus.COMPLETED_WITH_WARNINGS.value},
+            ]
+        )
+
+        assert warnings_first["status"] == ExecutionStatus.COMPLETED_WITH_WARNINGS.value
+        assert completed_first["status"] == ExecutionStatus.COMPLETED_WITH_WARNINGS.value
+
     def test_priority_status_legacy_screaming_keys_still_rank(self):
         aggregator = MetadataAggregator()
 
@@ -239,6 +261,39 @@ class TestAggregationStrategies:
         )
 
         assert result["status"] == ExecutionStatus.COMPLETED.value
+
+    def test_intersection_keeps_bool_distinct_from_int(self):
+        aggregator = MetadataAggregator()
+        aggregator.register_strategy(field_path="tags", strategy=AggregationStrategy.INTERSECTION)
+
+        both_present = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"tags": [1, True]},
+                {"tags": [1, True]},
+            ]
+        )
+        cross_lists = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"tags": [1]},
+                {"tags": [True]},
+            ]
+        )
+
+        assert both_present["tags"] == [1, True]
+        assert cross_lists["tags"] == []
+
+    def test_intersection_treats_dict_insertion_order_as_equal(self):
+        aggregator = MetadataAggregator()
+        aggregator.register_strategy(field_path="meta", strategy=AggregationStrategy.INTERSECTION)
+
+        result = aggregator.aggregate_metadata(
+            metadata_list=[
+                {"meta": [{"a": 1, "b": 2}]},
+                {"meta": [{"b": 2, "a": 1}]},
+            ]
+        )
+
+        assert result["meta"] == [{"a": 1, "b": 2}]
 
     def test_last_strategy_default(self):
         """Test LAST strategy is used as default for unknown fields."""
