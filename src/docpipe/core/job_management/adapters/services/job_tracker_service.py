@@ -19,7 +19,6 @@ from typing import Any
 
 from docpipe.core.constants.constants import (
     TERMINAL_JOB_STATUSES,
-    TERMINAL_NODE_STATES,
     ExecutionStatus,
     Metrics,
 )
@@ -1649,78 +1648,6 @@ class JobTrackerService(JobStatsService):
 
         return metadata_items
 
-    @staticmethod
-    def _unpack_node_stat(*, node_stat: Any) -> tuple[str, float, list, Any, Any, str]:
-        """Extract fields from a node_stat regardless of whether it is a dict or an object."""
-        if isinstance(node_stat, dict):
-            return (
-                node_stat.get("name", "Unknown"),
-                node_stat.get("time_taken", 0) or 0,
-                node_stat.get("col_names", []) or [],
-                node_stat.get(OperatorConstants.Metadata.NODE_METADATA),
-                node_stat.get("node_status", "Completed"),
-                node_stat.get("error", ""),
-            )
-        return (
-            getattr(node_stat, "name", "Unknown"),
-            getattr(node_stat, "time_taken", 0) or 0,
-            getattr(node_stat, "col_names", []) or [],
-            getattr(node_stat, OperatorConstants.Metadata.NODE_METADATA, None),
-            getattr(node_stat, "node_status", "Completed"),
-            getattr(node_stat, "error", ""),
-        )
-
-    @staticmethod
-    def _format_node_log_string(*, node_id: str, node_stat: Any) -> str:
-        name, time_taken, col_names, node_metadata, node_status, error = JobTrackerService._unpack_node_stat(
-            node_stat=node_stat
-        )
-
-        # Handle ExecutionStatus enum vs string
-        terminal_states_values = frozenset(state.value for state in TERMINAL_NODE_STATES)
-        current_status_val = node_status.value if hasattr(node_status, "value") else node_status
-
-        # Build log string parts in correct sequence
-        log_parts = []
-        # 1. Starting execution
-        log_parts.append(f"Starting execution: Step Name: {name}")
-
-        # 2. Schema information
-        if col_names:
-            log_parts.append("\nSchema:")
-            for col_name in col_names:
-                log_parts.append(f"{col_name}: string")
-
-        # 3. Operator metadata if available
-        if node_metadata:
-            log_parts.append("\nOperator Metadata:")
-            log_parts.append(
-                json.dumps(
-                    {
-                        OperatorConstants.Metadata.NODE_METADATA: node_metadata,
-                        "id": node_id,
-                        "operator": name,
-                    },
-                    indent=2,
-                )
-            )
-
-        # 4. Completion status (only for terminal states)
-        if current_status_val in terminal_states_values:
-            if current_status_val == ExecutionStatus.FAILED.value:
-                log_parts.append(f"\nFailed execution: {name}, time= {time_taken:.2f} seconds")
-            elif current_status_val == ExecutionStatus.SKIPPED.value:
-                log_parts.append(f"\nSkipped execution: {name}, time= {time_taken:.2f} seconds")
-            else:
-                log_parts.append(f"\nCompleted execution: {name}, time= {time_taken:.2f} seconds")
-
-        # 5. Error details if available
-        if error:
-            log_parts.append("\nError Details:")
-            log_parts.append(f"  {error}")
-
-        return "\n".join(log_parts)
-
     def create_pending_batch_node_stats(
         self,
         *,
@@ -1810,14 +1737,8 @@ class JobTrackerService(JobStatsService):
             logger.warning("No node stats found for job_run_id=%s", job_run_id)
             return
 
-        # Handle both dict and list return types
-        if isinstance(all_node_stats, dict):
-            records_list = list(all_node_stats.values())
-        elif isinstance(all_node_stats, list):
-            records_list = all_node_stats
-        else:
-            logger.error("Unexpected return type from get_node_stats: %s", type(all_node_stats))
-            return
+        # JobStatsStore.get_node_stats returns a list of NodeStats records
+        records_list = all_node_stats
 
         # Filter for PENDING/QUEUED batch records
         pending_records = [
@@ -1855,11 +1776,10 @@ class JobTrackerService(JobStatsService):
             )
             updated_stats.append(updated_record)
 
-        # Bulk update all pending stats to SKIPPED
-        if updated_stats:
-            self.job_stats_store.bulk_store_node_stats(job_run_id=job_run_id, node_stats_list=updated_stats)
-            logger.info(
-                "Marked %s pending batch node stats as SKIPPED for job_run_id=%s",
-                len(updated_stats),
-                job_run_id,
-            )
+        # Bulk update all pending stats to SKIPPED (pending_records is not empty here)
+        self.job_stats_store.bulk_store_node_stats(job_run_id=job_run_id, node_stats_list=updated_stats)
+        logger.info(
+            "Marked %s pending batch node stats as SKIPPED for job_run_id=%s",
+            len(updated_stats),
+            job_run_id,
+        )
