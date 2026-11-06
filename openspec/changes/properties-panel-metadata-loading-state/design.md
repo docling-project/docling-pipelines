@@ -97,6 +97,21 @@ loaded, pending to failed) through the Redux usage, with no extra update to
 The loading and error state depends on the Redux store, so reading the form options from a
 second source could show a form with empty options at the moment the slice flips to loaded.
 
+### Spec delta modifies three existing requirements
+
+The delta uses `ADDED Requirements` for the loading and error state, which have no canonical
+equivalent. It also uses `MODIFIED Requirements` for three canonical requirements whose
+current wording would contradict the new behavior once archived:
+
+- `Three-tab structure`: the "Configuration tab is default" scenario currently says the
+  operator-specific form is visible when the panel opens. That is no longer true while the
+  metadata is pending or failed.
+- `Operator-specific configuration panel`: currently says the Configuration tab always renders
+  the operator-specific form. It will render the form once the metadata is available.
+- `General operator configuration lifecycle`: step 1 currently reads metadata from controller
+  `appData`. It will read operator metadata from the Redux `operators` slice with a new
+  scenario for it.
+
 ### State derivation
 
 The Configuration tab will derive its branch from slice state, in this order:

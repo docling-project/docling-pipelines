@@ -54,3 +54,46 @@ fields cannot overwrite the node's existing configuration.
 #### Scenario: Existing node configuration is preserved
 - **WHEN** the user opens a node that already has saved parameters while the Configuration tab is in the loading or error state, and then closes the panel
 - **THEN** the node's saved parameters are unchanged
+
+## MODIFIED Requirements
+
+### Requirement: Three-tab structure
+The panel SHALL always render three tabs — Configuration, Input, and Output — for every selected node.
+
+#### Scenario: Configuration tab is default
+- **WHEN** the user opens the panel by selecting a node
+- **THEN** the Configuration tab is active, and it shows the operator-specific form once the operator metadata is available, or the loading or error state while the operator metadata is pending or has failed to load
+
+#### Scenario: Input tab shows upstream features
+- **WHEN** the user selects the Input tab
+- **THEN** the features flowing into the selected node from upstream operators are displayed
+
+#### Scenario: Output tab shows downstream features
+- **WHEN** the user selects the Output tab
+- **THEN** the combined set of features the node will emit to downstream operators is displayed
+
+### Requirement: Operator-specific configuration panel
+The Configuration tab SHALL render the operator-specific form registered for the selected operator type once the operator metadata is available. While the operator metadata is pending or has failed to load, the Configuration tab SHALL show the loading or error state instead of the form. When no panel is registered for an operator, a placeholder message SHALL be shown.
+
+#### Scenario: Known operator shows its form
+- **WHEN** the selected node is a known operator (e.g. ingest_source, chunker) and the operator metadata is available
+- **THEN** the operator's custom configuration form is rendered in the Configuration tab
+
+#### Scenario: Unknown operator shows placeholder
+- **WHEN** the selected node has no registered configuration panel
+- **THEN** a placeholder message is shown in the Configuration tab
+
+### Requirement: General operator configuration lifecycle
+The properties panel SHALL execute a unified 5-step lifecycle for all operator nodes: reading operator metadata from the Redux `operators` slice and other node data from controller `appData`, loading persisted property values via `controller.getPropertyValue()`, rendering metadata-driven fields, evaluating required fields to toggle save readiness via `controller.setSaveButtonDisable()`, and writing modifications back via `controller.updatePropertyValue()`.
+
+#### Scenario: Form loaded with initial node data
+- **WHEN** an operator node is selected on the canvas
+- **THEN** the panel retrieves its existing configuration from the canvas controller and populates the active inputs
+
+#### Scenario: Value changes update canvas controller property
+- **WHEN** the user updates a form field
+- **THEN** the change is validated against operator schema and written to the canvas controller property cache
+
+#### Scenario: Operator metadata is read from the Redux store
+- **WHEN** the panel needs the operator metadata to render fields or evaluate required fields
+- **THEN** it reads the metadata from the Redux `operators` slice and not from controller `appData`

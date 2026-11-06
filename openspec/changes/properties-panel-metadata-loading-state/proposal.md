@@ -52,7 +52,8 @@ None
 ### Modified Capabilities
 
 - `frontend/properties-panel`: will add requirements for the Configuration tab loading state
-  and error state driven by the operator metadata fetch.
+  and error state driven by the operator metadata fetch, and will modify three existing
+  requirements (`Three-tab structure`, `Operator-specific configuration panel`, `General operator configuration lifecycle`) whose current wording conflicts with that behavior.
 
 ## Impact
 

@@ -68,4 +68,6 @@ Implementation groups 1 and 2 will continue against the canonical spec after arc
   the spec artifacts are reviewed and stable to merge the spec delta into
   `openspec/specs/frontend/properties-panel/spec.md` and move this change to
   `openspec/changes/archive/`. Implementation of PRs 1 and 2 continues against the canonical
-  spec after archiving. Verify the canonical spec contains both new requirements.
+  spec after archiving. Verify the canonical spec contains both new requirements and the
+  three modified requirements (`Three-tab structure`, `Operator-specific configuration
+  panel`, `General operator configuration lifecycle`), each with all of its scenarios.
