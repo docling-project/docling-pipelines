@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobManagementService - High-level API for job management operations.
 
@@ -6,6 +9,7 @@ coordinating between JobStatsService and JobRunManager.
 """
 
 import json
+import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -13,6 +17,7 @@ from typing import Any
 from docpipe.core.assets.flows.application.services import FlowService
 from docpipe.core.constants.constants import (
     DocpipeConstants,
+    EnvironmentVariables,
     ExecutionStatus,
     OrchestratorType,
 )
@@ -98,7 +103,9 @@ class JobManagementService:
         self.job_stats_service = job_stats_service
         self.job_run_manager = job_run_manager
         self.flow_service = flow_service
-        self.executor = executor or ThreadPoolExecutor(max_workers=10)
+        self.executor = executor or ThreadPoolExecutor(
+            max_workers=int(os.getenv(EnvironmentVariables.DOCPIPE_JOB_WORKERS, "10"))
+        )
 
     def create_job_run_from_request(self, *, request_body: Any) -> dict[str, Any]:
         """
