@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { FlowMetrics } from '@/components/FlowDetail/FlowMetrics/FlowMetrics';
 import type { RunMetrics } from '@/components/FlowDetail/FlowMetrics/FlowMetrics';

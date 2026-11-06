@@ -15,6 +15,8 @@
  * @module conditionTypes
  */
 
+import { messages } from './conditionTypes.messages';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -74,23 +76,26 @@ export const LOGICAL = { AND: 'AND', OR: 'OR' } as const;
  * All SQL comparison operators available in the condition builder dropdown,
  * ordered from most common to least common.
  *
+ * `label` is a react-intl message descriptor; format it with
+ * `intl.formatMessage(op.label)` at the call site.
+ *
  * Null-check operators (`is null`, `is not null`) suppress the value input
  * in the condition row UI.
  */
 export const SQL_OPERATORS = [
-  { label: 'Equals (==)', value: '==' },
-  { label: 'Not equals (!=)', value: '!=' },
-  { label: 'Greater than (>)', value: '>' },
-  { label: 'Less than (<)', value: '<' },
-  { label: 'Greater than or equal (>=)', value: '>=' },
-  { label: 'Less than or equal (<=)', value: '<=' },
-  { label: 'In', value: 'in' },
-  { label: 'Not In', value: 'not in' },
-  { label: 'Like', value: 'like' },
-  { label: 'Not Like', value: 'not like' },
-  { label: 'Is Null', value: 'is null' },
-  { label: 'Is Not Null', value: 'is not null' },
-  { label: 'Between', value: 'between' },
+  { label: messages.equals, value: '==' },
+  { label: messages.notEquals, value: '!=' },
+  { label: messages.greaterThan, value: '>' },
+  { label: messages.lessThan, value: '<' },
+  { label: messages.greaterThanOrEqual, value: '>=' },
+  { label: messages.lessThanOrEqual, value: '<=' },
+  { label: messages.in, value: 'in' },
+  { label: messages.notIn, value: 'not in' },
+  { label: messages.like, value: 'like' },
+  { label: messages.notLike, value: 'not like' },
+  { label: messages.isNull, value: 'is null' },
+  { label: messages.isNotNull, value: 'is not null' },
+  { label: messages.between, value: 'between' },
 ] as const;
 
 /** Union of all valid SQL operator value strings. */

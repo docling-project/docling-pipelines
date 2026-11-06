@@ -4,6 +4,7 @@ Unit tests for IngestSourceOperator (filesystem provider) output schema.
 Tests that the operator produces the expected columns and metadata.
 """
 
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,29 @@ class TestIngestSourceOperatorOutput:
         assert table.num_rows == 0
         assert "path" in table.column_names
         assert metadata["processed_docs"] == 0
+
+    def test_transform_expands_archive_entries_with_synthetic_source_id(self, tmp_path):
+        archive_path = tmp_path / "documents.zip"
+        with zipfile.ZipFile(archive_path, mode="w") as archive:
+            archive.writestr("folder/report.txt", b"report")
+
+        operator = IngestSourceOperator(
+            {
+                "provider": "filesystem",
+                "provider_config": {"paths": [str(tmp_path)]},
+                "include_filter": "zip,txt",
+                "force_ingest": True,
+            }
+        )
+
+        tables, metadata = operator.transform(None)
+        row = tables[0].to_pylist()[0]
+
+        assert metadata["processed_docs"] == 1
+        assert row["path"].startswith("zip://")
+        assert row["source_id"] == row["path"]
+        assert row["name"] == "folder/report.txt"
+        assert row["document_format"] == ".txt"
 
 
 def test_table_output_basic():

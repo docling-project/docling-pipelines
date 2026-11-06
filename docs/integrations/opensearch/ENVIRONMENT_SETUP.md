@@ -43,4 +43,3 @@ cp .env.example .env
 | `OPENSEARCH_DOC_ID_COLUMN` | string | `doc_id_hash` | Column name for document IDs |
 | `OPENSEARCH_EMBEDDINGS_COLUMN` | string | `embeddings` | Column name for vector embeddings |
 | `OPENSEARCH_BATCH_SIZE` | integer | `100` | Documents per batch |
-| `OPENSEARCH_CREATE_INDEX` | boolean | `true` | Create index if it doesn't exist |

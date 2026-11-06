@@ -579,6 +579,12 @@ All user-visible strings are externalised via [react-intl](https://formatjs.io/d
 The app root (`main.tsx`) is wrapped in `<IntlProvider>` which supplies the active locale and its
 message map. Message maps live in `src/i18n/messages_<locale>.json` and are loaded dynamically at startup via `src/i18n/index.ts`. Only the required locale file is downloaded by the client.
 
+### Strings outside the translation catalog
+
+Text served by the backend is not part of the react-intl catalog and is shown as received
+(English only). This includes the operator metadata `description` fields used for field
+tooltips, operator labels and valid-value lists.
+
 ### Adding strings to a component
 
 Every component that contains user-visible text must have a companion `<ComponentName>.messages.ts`

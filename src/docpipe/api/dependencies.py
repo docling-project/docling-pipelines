@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Application-level dependency providers for FastAPI.
 
@@ -9,10 +12,10 @@ from functools import lru_cache
 
 from fastapi import Depends
 
+from docpipe.core.assets.common.domain.ports import AttachmentRepository
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
-from docpipe.core.assets.common.domain.ports.attachment_repository import AttachmentRepository
-from docpipe.core.assets.common.factories.attachment_repository_factory import AttachmentRepositoryFactory
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory, RepositoryType
+from docpipe.core.assets.common.factories import AttachmentRepositoryFactory
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory, RepositoryType
 from docpipe.core.assets.document_libraries.application.services.document_library_service import (
     DocumentLibraryService,
 )
@@ -60,7 +63,7 @@ def get_flow_repository() -> AssetRepository[Flow]:
     Returns:
         AssetRepository[Flow]: Configured flow repository instance (cached singleton)
     """
-    return RepositoryFactory.create_repository(asset_type=Flow)
+    return AssetRepositoryFactory.create_repository(asset_type=Flow)
 
 
 def get_flow_service(
@@ -146,13 +149,13 @@ def get_document_set_repository() -> AssetRepository[DocumentSet]:
 
     Uses RepositoryFactory to create repository based on configuration from
     docling-pipelines-config.yaml. This enables:
-    - OSS: DuckDBDocumentSetMetadataRepository (database-based)
-    - Future: PostgreSQL or other storage backends
+    - DuckDBAssetRepository[DocumentSet] (type: duckdb, single-process)
+    - PostgresAssetRepository[DocumentSet] (type: postgres, multi-replica safe)
 
     Returns:
         AssetRepository[DocumentSet]: Configured document set repository instance (cached singleton)
     """
-    return RepositoryFactory.create_repository(asset_type=DocumentSet)
+    return AssetRepositoryFactory.create_repository(asset_type=DocumentSet)
 
 
 @lru_cache(maxsize=1)
@@ -173,7 +176,7 @@ def get_document_set_data_store() -> DocumentSetDataStore:
     """
     from typing import cast
 
-    _, repo_config = RepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
+    _, repo_config = AssetRepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
     adapter_name: str = repo_config.get("storage_adapter", RepositoryType.DUCKDB.value)
     database_path: str = repo_config.get("database_path", DocpipeConstants.DOCUMENT_SET_DEFAULT_DB_PATH)
     data_config: DataStoreConfig = {"database_path": database_path}
@@ -189,12 +192,21 @@ def get_document_set_attachment_repository() -> AttachmentRepository:
     repository so that the attachment KV store lives alongside the metadata store.
     Falls back to "duckdb" / DOCUMENT_SET_DEFAULT_DB_PATH if not configured.
 
+    When the document set repository type is ``postgres`` the attachments are
+    stored in PostgreSQL as well (same connection config), matching what
+    ``DocumentSetOperator`` writes during flow runs.
+
     Returns:
         AttachmentRepository: Configured attachment repository instance (cached singleton)
     """
-    _, repo_config = RepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
-    adapter_name: str = repo_config.get("storage_adapter", RepositoryType.DUCKDB.value)
+    repo_type, repo_config = AssetRepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
     database_path: str = repo_config.get("database_path", DocpipeConstants.DOCUMENT_SET_DEFAULT_DB_PATH)
+    if repo_type.lower() == RepositoryType.POSTGRES.value:
+        return AttachmentRepositoryFactory.create(
+            adapter_name=RepositoryType.POSTGRES.value,
+            config={**repo_config, "database_path": database_path},
+        )
+    adapter_name: str = repo_config.get("storage_adapter", RepositoryType.DUCKDB.value)
     return AttachmentRepositoryFactory.create(
         adapter_name=adapter_name,
         config={"database_path": database_path},
@@ -233,7 +245,7 @@ def get_document_library_repository() -> AssetRepository[DocumentLibrary]:
     Returns:
         AssetRepository[DocumentLibrary]: Configured repository instance (cached singleton)
     """
-    return RepositoryFactory.create_repository(asset_type=DocumentLibrary)
+    return AssetRepositoryFactory.create_repository(asset_type=DocumentLibrary)
 
 
 def get_document_library_service(

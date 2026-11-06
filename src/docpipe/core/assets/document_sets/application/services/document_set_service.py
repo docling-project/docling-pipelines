@@ -354,8 +354,7 @@ class DocumentSetService(AssetService[DocumentSet]):
 
         if offset > 0:
             data = data.slice(offset)
-        if limit is not None:
-            data = data.slice(0, limit)
+        data = data.slice(0, limit)
 
         logger.info(
             "Retrieved %d rows from document set %s (limit=%d, offset=%d)",

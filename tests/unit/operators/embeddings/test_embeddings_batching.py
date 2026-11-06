@@ -669,8 +669,8 @@ class TestErrorClassification:
         assert EmbeddingsOperator._error_chain(first) == [first, second]
 
 
-# WatsonxRestEmbeddingClient.generate_embeddings_batch is decorated with retry_with_backoff(max_retries=5)
-_WATSONX_CLIENT_ATTEMPTS = 5
+# WatsonxRestEmbeddingClient.generate_embeddings_batch is decorated with retry_with_backoff(max_retries=3)
+_WATSONX_CLIENT_ATTEMPTS = 3
 
 
 class TestWrappedClientErrors:
@@ -775,7 +775,7 @@ class TestWrappedClientErrors:
 
         class _WatsonxBackedAdapter(_RecordingAdapter):
             def generate_embeddings_batch(self, *, texts: list[str]) -> list[list[float]]:
-                # The client retries each request itself (5 attempts); skip its backoff waits
+                # The client retries each request itself (3 attempts); skip its backoff waits
                 with patch("docpipe.integrations.base_llm_client.time.sleep"):
                     return client.generate_embeddings_batch(texts=texts)
 
@@ -787,7 +787,7 @@ class TestWrappedClientErrors:
 
         result_tables, metadata = operator.transform(_unchunked_table(contents=[f"text {i}" for i in range(10)]))
 
-        # 3 shared requests, each tried 5 times by the watsonx client; no per-document re-sends
+        # 3 shared requests, each tried 3 times by the watsonx client; no per-document re-sends
         assert len(sent) == 3 * _WATSONX_CLIENT_ATTEMPTS
         assert result_tables[0].num_rows == 0
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 10

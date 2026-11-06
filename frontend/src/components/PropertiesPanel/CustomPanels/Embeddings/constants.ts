@@ -53,7 +53,8 @@ export const EMBEDDINGS_PROVIDERS = [
 export type EmbeddingsProvider = typeof EMBEDDINGS_PROVIDERS[number];
 
 /**
- * Maps provider identifiers to the human-readable labels shown in the UI.
+ * Maps provider identifiers to their display names. These are brand names and
+ * are intentionally not translated.
  */
 export const EMBEDDINGS_PROVIDER_LABELS: Record<EmbeddingsProvider, string> = {
   [EMBEDDINGS_PROVIDER.LITELLM]: 'LiteLLM',
@@ -69,21 +70,6 @@ export const EMBEDDINGS_DEFAULTS = {
   PROVIDER_CONFIG: '',
   OVERLAP_RATIO: 0.2,
   TOKEN_LIMIT: 8192,
-} as const;
-
-/**
- * Human-readable labels for Embeddings panel inputs.
- */
-export const EMBEDDINGS_LABELS = {
-  PROVIDER: 'Provider',
-  MODEL_ID: 'Model ID',
-  API_BASE: 'API base URL',
-  API_KEY: 'API key', // pragma: allowlist secret
-  URL: 'Watsonx URL',
-  CONTAINER_KIND: 'Container type',
-  CONTAINER_ID: 'Container ID',
-  OVERLAP_RATIO: 'Overlap ratio',
-  TOKEN_LIMIT: 'Token limit',
 } as const;
 
 /**

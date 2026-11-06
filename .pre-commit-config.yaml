@@ -31,6 +31,18 @@ repos:
       - id: nbstripout
         files: \.ipynb$
 
+  # License header enforcement
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.6
+    hooks:
+      - id: insert-license
+        name: "Insert license header"
+        args:
+          - --license-filepath=.github/license-header.txt
+          - --comment-style=#
+          - --detect-license-in-X-top-lines=5
+        files: '^(src|tests)/.*\.py$'
+
   # Python linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20
@@ -76,3 +88,23 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
+
+  # OpenSpec spec and change validation
+  - repo: local
+    hooks:
+      - id: openspec-validate
+        name: OpenSpec validate (strict)
+        entry: openspec validate --all --strict --no-interactive
+        language: node
+        language_version: 22.15.1
+        additional_dependencies: ["@fission-ai/openspec@1.15.0"]
+        files: ^openspec/
+        pass_filenames: false
+      - id: openspec-validate-archived
+        name: OpenSpec validate archived changes
+        entry: openspec validate --archived --no-interactive
+        language: node
+        language_version: 22.15.1
+        additional_dependencies: ["@fission-ai/openspec@1.15.0"]
+        files: ^openspec/changes/archive/
+        pass_filenames: false

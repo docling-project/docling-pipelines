@@ -20,6 +20,7 @@ from docpipe.core.orchestration.models.execution_event_context import (
     NodeSkipContext,
     NodeStartContext,
     NodeTableSummary,
+    SinkDatasetInfo,
 )
 
 
@@ -117,6 +118,66 @@ class TestEmitFlowComplete:
         call_kwargs = mock_publisher.publish.call_args[1]
         assert call_kwargs["event_type"] == LineageEventType.COMPLETE
         assert len(call_kwargs["outputs"]) == 1
+        assert call_kwargs["outputs"][0].namespace == "inmemory://"
+        assert call_kwargs["outputs"][0].name == "test-flow/output"
+
+    def test_publishes_complete_event_with_sink_dataset(
+        self, service: LineageService, mock_publisher: MagicMock, sample_table: pa.Table
+    ) -> None:
+        context = FlowCompleteContext(
+            flow_id="flow-1",
+            flow_name="test-flow",
+            job_run_id="run-1",
+            flow_def={},
+            output_tables=[sample_table],
+            sink_datasets=[
+                SinkDatasetInfo(
+                    namespace="opensearch://localhost:9200",
+                    name="my_index",
+                    summary=NodeTableSummary(schema_fields=[("id", "string")], row_count=2),
+                )
+            ],
+        )
+        service.emit_flow_complete(context=context)
+        call_kwargs = mock_publisher.publish.call_args[1]
+        assert call_kwargs["event_type"] == LineageEventType.COMPLETE
+        assert len(call_kwargs["outputs"]) == 1
+        assert call_kwargs["outputs"][0].namespace == "opensearch://localhost:9200"
+        assert call_kwargs["outputs"][0].name == "my_index"
+
+    def test_each_sink_reports_its_own_schema_and_row_count(
+        self, service: LineageService, mock_publisher: MagicMock, sample_table: pa.Table
+    ) -> None:
+        """Sinks fed by different tables must not inherit the last node's schema and row count."""
+        context = FlowCompleteContext(
+            flow_id="flow-1",
+            flow_name="test-flow",
+            job_run_id="run-1",
+            flow_def={},
+            output_tables=[sample_table],
+            sink_datasets=[
+                SinkDatasetInfo(
+                    namespace="opensearch://localhost:9200",
+                    name="idx_a",
+                    summary=NodeTableSummary(schema_fields=[("id", "string")], row_count=10),
+                ),
+                SinkDatasetInfo(
+                    namespace="milvus://localhost:19530",
+                    name="default.coll_b",
+                    summary=NodeTableSummary(schema_fields=[("id", "string"), ("vec", "list<float>")], row_count=7),
+                ),
+            ],
+        )
+        service.emit_flow_complete(context=context)
+        outputs = mock_publisher.publish.call_args[1]["outputs"]
+        assert [(o.namespace, o.name) for o in outputs] == [
+            ("opensearch://localhost:9200", "idx_a"),
+            ("milvus://localhost:19530", "default.coll_b"),
+        ]
+        assert outputs[0].facets["outputStatistics"]["rowCount"] == 10
+        assert outputs[1].facets["outputStatistics"]["rowCount"] == 7
+        assert len(outputs[0].facets["schema"]["fields"]) == 1
+        assert len(outputs[1].facets["schema"]["fields"]) == 2
 
 
 class TestEmitFlowFail:
@@ -244,13 +305,92 @@ class TestEmitNodeComplete:
         call_kwargs = mock_publisher.publish.call_args[1]
         assert call_kwargs["event_type"] == LineageEventType.COMPLETE
         assert len(call_kwargs["outputs"]) == 1
-        # output dataset name uses chained pattern: flow_name/node_name/output
+        # in-memory dataset
+        assert call_kwargs["outputs"][0].namespace == "inmemory://"
         assert call_kwargs["outputs"][0].name == "test-flow/chunker/output"
         assert call_kwargs["outputs"][0].facets["outputStatistics"]["rowCount"] == 2
         # operator surfaced in job facet
         jt = call_kwargs["job"].facets["jobType"]
         assert jt["operator"] == "chunker"
         assert jt["operatorCategory"] == "Functional"
+
+    def test_publishes_node_complete_with_sink_dataset(
+        self, service: LineageService, mock_publisher: MagicMock, sample_summary: NodeTableSummary
+    ) -> None:
+        context = NodeCompleteContext(
+            flow_id="flow-1",
+            flow_name="test-flow",
+            job_run_id="run-1",
+            node_id="n1",
+            node_name="vectordb",
+            operator_type="vectordb",
+            output_summaries=[sample_summary],
+            sink_dataset_namespace="opensearch://localhost:9200",
+            sink_dataset_name="kb_index",
+        )
+        service.emit_node_complete(context=context)
+        call_kwargs = mock_publisher.publish.call_args[1]
+        assert call_kwargs["outputs"][0].namespace == "opensearch://localhost:9200"
+        assert call_kwargs["outputs"][0].name == "kb_index"
+        # Terminal sink: only the external dataset, no dangling in-memory dataset
+        assert len(call_kwargs["outputs"]) == 1
+
+    def test_sink_with_downstream_also_emits_in_memory_output(
+        self, service: LineageService, mock_publisher: MagicMock, sample_summary: NodeTableSummary
+    ) -> None:
+        """A sink followed by other operators must keep the in-memory edge to its successor."""
+        context = NodeCompleteContext(
+            flow_id="flow-1",
+            flow_name="test-flow",
+            job_run_id="run-1",
+            node_id="n1",
+            node_name="store_in_document_set",
+            operator_type="document_set",
+            output_summaries=[sample_summary],
+            sink_dataset_namespace="docpipe://document_set",
+            sink_dataset_name="my_set",
+            has_downstream=True,
+        )
+        service.emit_node_complete(context=context)
+        outputs = mock_publisher.publish.call_args[1]["outputs"]
+        assert [(o.namespace, o.name) for o in outputs] == [
+            ("docpipe://document_set", "my_set"),
+            ("inmemory://", "test-flow/store_in_document_set/output"),
+        ]
+
+    def test_downstream_start_input_matches_sink_pass_through_output(
+        self, service: LineageService, mock_publisher: MagicMock, sample_summary: NodeTableSummary
+    ) -> None:
+        """The successor's START input dataset must equal the sink's in-memory output dataset."""
+        service.emit_node_complete(
+            context=NodeCompleteContext(
+                flow_id="flow-1",
+                flow_name="test-flow",
+                job_run_id="run-1",
+                node_id="n1",
+                node_name="store_in_document_set",
+                operator_type="document_set",
+                output_summaries=[sample_summary],
+                sink_dataset_namespace="docpipe://document_set",
+                sink_dataset_name="my_set",
+                has_downstream=True,
+            )
+        )
+        sink_outputs = mock_publisher.publish.call_args[1]["outputs"]
+        service.emit_node_start(
+            context=NodeStartContext(
+                flow_id="flow-1",
+                flow_name="test-flow",
+                job_run_id="run-1",
+                node_id="n2",
+                node_name="store_in_opensearch",
+                operator_type="vectordb",
+                input_summary=sample_summary,
+                predecessor_node_ids=["store_in_document_set"],
+            )
+        )
+        start_inputs = mock_publisher.publish.call_args[1]["inputs"]
+        assert (start_inputs[0].namespace, start_inputs[0].name) in {(o.namespace, o.name) for o in sink_outputs}
 
     def test_node_complete_end_time_populated(
         self, service: LineageService, mock_publisher: MagicMock, sample_summary: NodeTableSummary

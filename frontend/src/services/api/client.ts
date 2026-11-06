@@ -60,6 +60,10 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error: AxiosError) => {
+    if (axios.isCancel(error)) {
+      // Deliberately aborted request - not an error worth logging.
+      return Promise.reject(error);
+    }
     if (error.response) {
       logUtil.error({
         logger,

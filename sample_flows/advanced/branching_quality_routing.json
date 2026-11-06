@@ -161,7 +161,6 @@
         "doc_id_column": "doc_id_hash",
         "embeddings_column": "embeddings",
         "vector_dimension": 2560,
-        "create_index": "true",
         "provider_config": {
           "index_name": "high_quality_docs",
           "host": "localhost",
@@ -255,7 +254,6 @@
         "doc_id_column": "doc_id_hash",
         "embeddings_column": "embeddings",
         "vector_dimension": 2560,
-        "create_index": "true",
         "provider_config": {
           "index_name": "low_quality_docs",
           "host": "localhost",

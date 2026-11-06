@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import React from 'react';
 import { AnnotationFilterPanelBody } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/AnnotationFilter';
 import type { CriteriaJson } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
 
@@ -91,8 +90,8 @@ describe('AnnotationFilterPanelBody', () => {
         nodeFeatureMap: {},
       })),
     });
-    renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
-    expect(container => container).toBeDefined();
+    const { container } = renderWithProviders(<AnnotationFilterPanelBody controller={controller as any} />);
+    expect(container).toBeDefined();
   });
 
   it('renders no-features empty state when input_features is missing', () => {

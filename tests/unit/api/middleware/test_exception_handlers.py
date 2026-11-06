@@ -1,10 +1,12 @@
 """Tests for exception handlers."""
 
+import errno
 import json
+from typing import Annotated
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -16,6 +18,7 @@ from docpipe.api.middleware.error_handler import (
     http_exception_handler,
     validation_exception_handler,
 )
+from docpipe.api.middleware.transaction_middleware import TransactionMiddleware
 from docpipe.exceptions.docpipe_exceptions import (
     DOCLING_PIPELINES_DOCS_URL,
     TROUBLESHOOTING_DOCS_URL,
@@ -373,3 +376,69 @@ def test_repository_configuration_exception_has_status_code_in_response(
 
     assert "status_code" in data
     assert data["status_code"] == 400
+
+
+# ---------------------------------------------------------------------------
+# Handlers registered on a real app (as in docpipe.api.main)
+# ---------------------------------------------------------------------------
+
+TRACE_ID = "9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"
+
+
+@pytest.fixture
+def handlers_client():
+    """App with TransactionMiddleware and the four handlers registered like docpipe.api.main."""
+    test_app = FastAPI()
+    test_app.add_middleware(TransactionMiddleware)
+    test_app.add_exception_handler(DocpipeException, docpipe_exception_handler)
+    test_app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    test_app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    test_app.add_exception_handler(Exception, generic_exception_handler)
+
+    @test_app.get("/versioned")
+    async def versioned(x_api_version: Annotated[str, Header()]):
+        return {"version": x_api_version}
+
+    @test_app.get("/storage")
+    async def storage():
+        raise OSError(errno.ENOSPC, "No space left on device", "/srv/docpipe/flows/private.json")
+
+    @test_app.get("/directory")
+    async def directory():
+        raise IsADirectoryError(errno.EISDIR, "Is a directory", "/srv/docpipe/flows")
+
+    # The Exception handler runs in ServerErrorMiddleware, which re-raises after responding.
+    return TestClient(test_app, raise_server_exceptions=False)
+
+
+def test_missing_required_header_is_reported_with_header_target(handlers_client):
+    response = handlers_client.get("/versioned", headers={"X-Global-Transaction-Id": TRACE_ID})
+
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status_code"] == 400
+    assert data["trace"] == TRACE_ID
+    assert len(data["errors"]) == 1
+    error = data["errors"][0]
+    assert error["code"] == "validation_error"
+    assert error["target"] == {"type": "header", "name": "header -> x-api-version"}
+    assert error["message"].startswith("Error in Field: header -> x-api-version: ")
+
+
+def test_valid_header_passes_through_handlers(handlers_client):
+    response = handlers_client.get("/versioned", headers={"X-API-Version": "2"})
+
+    assert response.status_code == 200
+    assert response.json() == {"version": "2"}
+
+
+@pytest.mark.parametrize("path", ["/storage", "/directory"])
+def test_os_error_returns_sanitized_internal_error(handlers_client, path):
+    response = handlers_client.get(path, headers={"X-Global-Transaction-Id": TRACE_ID})
+
+    assert response.status_code == 500
+    data = response.json()
+    assert data["status_code"] == 500
+    assert data["trace"] == TRACE_ID
+    assert data["errors"] == [{"code": "internal_error", "message": "An internal storage error occurred"}]
+    assert "/srv/docpipe" not in response.text
