@@ -1,5 +1,7 @@
 """Unit tests for SecretProvider base, reference parsing, and resolve_value."""
 
+from typing import Any
+
 import pytest
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
@@ -7,6 +9,7 @@ from docpipe.integrations.secrets.secret_provider import (
     SecretProvider,
     SecretReference,
     clear_providers,
+    has_vault_references,
     is_vault_reference,
     parse_reference,
     register_provider,
@@ -83,6 +86,27 @@ class TestIsVaultReference:
         assert is_vault_reference(123) is False
         assert is_vault_reference(None) is False
         assert is_vault_reference({"key": "value"}) is False
+
+
+class TestHasVaultReferences:
+    """Tests for has_vault_references()."""
+
+    def test_reference_inside_list_of_nested_config_is_detected(self):
+        config = {
+            "hosts": ["https://opensearch:9200"],
+            "auth": {"api_keys": ["plain-key", "vault://hashicorp/opensearch/creds#api_key"]},
+        }
+        assert has_vault_references(config) is True
+
+    def test_lists_and_dicts_without_references_are_not_flagged(self):
+        config = {"hosts": ["https://a:9200", "https://b:9200"], "port": 9200, "tags": [], "ssl": {"verify": True}}
+        assert has_vault_references(config) is False
+
+    def test_scalar_values(self):
+        assert has_vault_references("vault://hashicorp/api/token") is True
+        assert has_vault_references("plain") is False
+        assert has_vault_references(42) is False
+        assert has_vault_references(None) is False
 
 
 class TestRegisterProvider:
@@ -199,3 +223,14 @@ class TestResolveValue:
 
         resolved = resolve_value("vault://hashicorp/app/raw#data")
         assert resolved == "{invalid-json"
+
+    def test_non_string_secret_from_custom_provider_returned_unchanged(self):
+        class TypedValueProvider(FakeProvider):
+            """Provider that hands back the backend's native value instead of a string."""
+
+            def get_secret(self, *, path: str, key: str | None = None) -> Any:
+                return 5432
+
+        register_provider(name="typed", provider=TypedValueProvider(secrets={}))
+
+        assert resolve_value({"port": "vault://typed/db/postgres#port"}) == {"port": 5432}
