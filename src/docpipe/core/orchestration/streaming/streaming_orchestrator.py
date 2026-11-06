@@ -24,10 +24,15 @@ class StreamingOrchestrator:
         Raises:
             ValueError: If the flow definition is invalid, contains cycles, or references unknown operators.
         """
+        from docpipe.core.event_streaming.kafka_producer import KafkaProducer
+
         logger.info("Starting streaming flow execution.")
+        event_id = params["input_event"]["event_id"]
+        KafkaProducer.notify(event_id=event_id, operation="flow", status="Started")
         builder = FlowBuilder(flow=flow, params=params)
         flow_graph = builder.build_graph()
         ordered_operator_ids = FlowBuilder.sort_graph(flow_graph=flow_graph)
         engine = GraphExecutionEngine(flow_graph=flow_graph, ordered_operator_ids=ordered_operator_ids)
         engine.execute()
         logger.info("Finished streaming flow execution.")
+        KafkaProducer.notify(event_id=event_id, operation="flow", status="Completed")
