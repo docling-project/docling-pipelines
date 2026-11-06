@@ -24,6 +24,29 @@ from docpipe.utils.operators.vectordb_utils import (
 logger = get_logger()
 
 
+class MilvusVectorModes:
+    """Vector modes supported by the Milvus vector store adapter."""
+
+    DENSE: str = "dense"
+    SPARSE: str = "sparse"
+    BINARY: str = "binary"
+    GPU: str = "gpu"
+
+    ALL_MODES: ClassVar[list[str]] = [DENSE, SPARSE, BINARY, GPU]
+
+    @staticmethod
+    def infer_from_index_type(*, index_type: str | None) -> str:
+        """Infer the vector mode from the index type when no mode is configured explicitly.
+
+        Keeps existing flows that only set a ``BIN_*`` or ``GPU_*`` ``index_type`` working.
+        """
+        if index_type in MilvusIndexTypes.ALL_BINARY_TYPES:
+            return MilvusVectorModes.BINARY
+        if index_type in MilvusIndexTypes.ALL_GPU_TYPES:
+            return MilvusVectorModes.GPU
+        return MilvusVectorModes.DENSE
+
+
 class MilvusMetricTypes:
     """Vector similarity metrics supported by Milvus"""
 
@@ -39,6 +62,9 @@ class MilvusMetricTypes:
     JACCARD: str = "JACCARD"
     ALL_BINARY_METRIC_TYPES: ClassVar[list[str]] = [HAMMING, JACCARD]
 
+    # GPU vector similarity metrics (Milvus GPU indexes support only L2 and IP)
+    GPU_VALID_METRICS: ClassVar[list[str]] = [L2, IP]
+
     ALL_TYPES: ClassVar[list[str]] = [L2, IP, COSINE, BM25, *ALL_BINARY_METRIC_TYPES]
 
 
@@ -51,16 +77,13 @@ class MilvusIndexTypes:
     IVF_SQ8: str = "IVF_SQ8"
     IVF_PQ: str = "IVF_PQ"
     HNSW: str = "HNSW"
-    HNSW_SQ: str = "HNSW_SQ"
-    HNSW_PQ: str = "HNSW_PQ"
-    HNSW_PRQ: str = "HNSW_PRQ"
     DISKANN: str = "DISKANN"
     AUTOINDEX: str = "AUTOINDEX"
 
     # Dense vector index types - GPU
+    GPU_CAGRA: str = "GPU_CAGRA"
     GPU_IVF_FLAT: str = "GPU_IVF_FLAT"
     GPU_IVF_PQ: str = "GPU_IVF_PQ"
-    GPU_CAGRA: str = "GPU_CAGRA"
     GPU_BRUTE_FORCE: str = "GPU_BRUTE_FORCE"
 
     # Sparse vector index types
@@ -71,65 +94,27 @@ class MilvusIndexTypes:
     BIN_FLAT: str = "BIN_FLAT"
     BIN_IVF_FLAT: str = "BIN_IVF_FLAT"
 
-    ALL_CPU_DENSE_TYPES: ClassVar[list[str]] = [
+    ALL_DENSE_TYPES: ClassVar[list[str]] = [
         FLAT,
         IVF_FLAT,
         IVF_SQ8,
         IVF_PQ,
         HNSW,
-        HNSW_SQ,
-        HNSW_PQ,
-        HNSW_PRQ,
         DISKANN,
         AUTOINDEX,
     ]
     ALL_GPU_TYPES: ClassVar[list[str]] = [
+        GPU_CAGRA,
         GPU_IVF_FLAT,
         GPU_IVF_PQ,
-        GPU_CAGRA,
         GPU_BRUTE_FORCE,
     ]
-    ALL_DENSE_TYPES: ClassVar[list[str]] = ALL_CPU_DENSE_TYPES + ALL_GPU_TYPES
     ALL_SPARSE_TYPES: ClassVar[list[str]] = [SPARSE_INVERTED_INDEX, SPARSE_WAND]
     ALL_BINARY_TYPES: ClassVar[list[str]] = [BIN_FLAT, BIN_IVF_FLAT]
-    ALL_TYPES: ClassVar[list[str]] = ALL_DENSE_TYPES + ALL_SPARSE_TYPES + ALL_BINARY_TYPES
+    ALL_TYPES: ClassVar[list[str]] = ALL_DENSE_TYPES + ALL_GPU_TYPES + ALL_SPARSE_TYPES + ALL_BINARY_TYPES
     # Milvus Lite only supports FLAT for dense vectors
     LITE_SUPPORTED_DENSE_TYPES: ClassVar[list[str]] = [FLAT]
 
-
-# Mapping from GPU index types to their CPU counterparts (used by use_gpu=False and fallback_to_cpu)
-GPU_TO_CPU_FALLBACK_MAP: dict[str, str] = {
-    MilvusIndexTypes.GPU_CAGRA: MilvusIndexTypes.HNSW,
-    MilvusIndexTypes.GPU_IVF_FLAT: MilvusIndexTypes.IVF_FLAT,
-    MilvusIndexTypes.GPU_IVF_PQ: MilvusIndexTypes.IVF_PQ,
-    MilvusIndexTypes.GPU_BRUTE_FORCE: MilvusIndexTypes.FLAT,
-}
-
-# Mapping from CPU index types to GPU counterparts (used by use_gpu=True, applied after quantization is resolved)
-CPU_TO_GPU_UPGRADE_MAP: dict[str, str] = {
-    MilvusIndexTypes.HNSW: MilvusIndexTypes.GPU_CAGRA,
-    MilvusIndexTypes.IVF_FLAT: MilvusIndexTypes.GPU_IVF_FLAT,
-    MilvusIndexTypes.IVF_PQ: MilvusIndexTypes.GPU_IVF_PQ,
-    MilvusIndexTypes.HNSW_PQ: MilvusIndexTypes.GPU_IVF_PQ,
-    MilvusIndexTypes.FLAT: MilvusIndexTypes.GPU_BRUTE_FORCE,
-}
-
-# Index types that are already quantized variants
-QUANTIZED_INDEX_TYPES: frozenset[str] = frozenset(
-    {
-        MilvusIndexTypes.IVF_SQ8,
-        MilvusIndexTypes.IVF_PQ,
-        MilvusIndexTypes.HNSW_SQ,
-        MilvusIndexTypes.HNSW_PQ,
-        MilvusIndexTypes.HNSW_PRQ,
-        MilvusIndexTypes.GPU_IVF_PQ,
-    }
-)
-
-# Parameters that are valid for an index type but are not part of its default parameters
-INDEX_EXTRA_PARAMETER_KEYS: dict[str, frozenset[str]] = {
-    MilvusIndexTypes.GPU_CAGRA: frozenset({"adapt_for_cpu"}),
-}
 
 # Default parameters for index types
 INDEX_DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
@@ -139,20 +124,17 @@ INDEX_DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
     MilvusIndexTypes.IVF_SQ8: {"nlist": 128},
     MilvusIndexTypes.IVF_PQ: {"nlist": 128, "m": 8, "nbits": 8},
     MilvusIndexTypes.HNSW: {"M": 16, "efConstruction": 200},
-    MilvusIndexTypes.HNSW_SQ: {"M": 16, "efConstruction": 200, "sq_type": "SQ8"},
-    MilvusIndexTypes.HNSW_PQ: {"M": 16, "efConstruction": 200, "m": 16, "nbits": 8},
-    MilvusIndexTypes.HNSW_PRQ: {"M": 16, "efConstruction": 200, "m": 16, "nbits": 8},
     MilvusIndexTypes.DISKANN: {},
     MilvusIndexTypes.AUTOINDEX: {},
     # Dense vector index parameters - GPU
-    MilvusIndexTypes.GPU_IVF_FLAT: {"nlist": 1024},
-    MilvusIndexTypes.GPU_IVF_PQ: {"nlist": 1024, "m": 16, "nbits": 8},
     MilvusIndexTypes.GPU_CAGRA: {
         "intermediate_graph_degree": 64,
         "graph_degree": 32,
         "build_algo": "IVF_PQ",
         "cache_dataset_on_device": "false",
     },
+    MilvusIndexTypes.GPU_IVF_FLAT: {"nlist": 1024},
+    MilvusIndexTypes.GPU_IVF_PQ: {"nlist": 1024, "m": 16, "nbits": 8},
     MilvusIndexTypes.GPU_BRUTE_FORCE: {},
     # Sparse vector index parameters
     MilvusIndexTypes.SPARSE_INVERTED_INDEX: {"drop_ratio_build": 0.2},
@@ -173,71 +155,9 @@ class MilvusIndexManager:
     - Schema mapping generation
     - Index-specific parameter management
     - Vector dimension detection
-    - GPU index selection (use_gpu) and opt-in CPU fallback when the server rejects a GPU index
-    - Quantization resolution and configuration
+    - Mode-aware index and metric validation (dense, sparse, binary, gpu)
+    - GPU-specific constraint validation (GPU_CAGRA graph degrees)
     """
-
-    @staticmethod
-    def resolve_quantized_index_type(
-        *,
-        base_index_type: str,
-        quantization: str | None,
-    ) -> str:
-        """Resolve base index type and quantization setting into the appropriate index algorithm.
-
-        Args:
-            base_index_type: Base index type (e.g. 'HNSW', 'IVF_FLAT', 'GPU_IVF_FLAT').
-            quantization: Quantization option ('SQ8', 'PQ', 'PRQ', 'NONE', or None).
-
-        Returns:
-            Resolved index type string.
-        """
-        if not quantization or quantization.upper() in ("NONE", ""):
-            return base_index_type
-
-        q_upper = quantization.upper()
-        if q_upper == "SQ8":
-            if base_index_type == MilvusIndexTypes.HNSW:
-                return MilvusIndexTypes.HNSW_SQ
-            if base_index_type in (MilvusIndexTypes.IVF_FLAT, MilvusIndexTypes.FLAT):
-                return MilvusIndexTypes.IVF_SQ8
-        elif q_upper == "PQ":
-            if base_index_type == MilvusIndexTypes.HNSW:
-                return MilvusIndexTypes.HNSW_PQ
-            if base_index_type in (MilvusIndexTypes.IVF_FLAT, MilvusIndexTypes.FLAT):
-                return MilvusIndexTypes.IVF_PQ
-            if base_index_type in (MilvusIndexTypes.GPU_IVF_FLAT, MilvusIndexTypes.GPU_BRUTE_FORCE):
-                return MilvusIndexTypes.GPU_IVF_PQ
-        elif q_upper == "PRQ":
-            if base_index_type == MilvusIndexTypes.HNSW:
-                return MilvusIndexTypes.HNSW_PRQ
-
-        return base_index_type
-
-    @staticmethod
-    def filter_parameters_for_index_type(
-        *,
-        target_index_type: str,
-        parameters: dict[str, Any],
-    ) -> tuple[dict[str, Any], list[str]]:
-        """Keep only the parameters that are valid for ``target_index_type``.
-
-        Used when the index type changes (``use_gpu`` upgrade or downgrade, CPU fallback) so that
-        parameters of the previous index algorithm are not sent to the new one.
-
-        Args:
-            target_index_type: Index type the parameters will be used with.
-            parameters: User supplied index parameters.
-
-        Returns:
-            Tuple of (kept parameters, sorted names of the dropped parameters).
-        """
-        valid_keys = set(INDEX_DEFAULT_PARAMETERS.get(target_index_type, {})) | INDEX_EXTRA_PARAMETER_KEYS.get(
-            target_index_type, frozenset()
-        )
-        kept = {key: value for key, value in parameters.items() if key in valid_keys}
-        dropped = sorted(set(parameters) - set(kept))
-        return kept, dropped
 
     def __init__(
         self,
@@ -251,44 +171,28 @@ class MilvusIndexManager:
         feature_mappings: list[dict[str, str]] | None = None,
         primary_key_field: str = OperatorConstants.VectorDB.DEFAULT_PRIMARY_KEY_FIELD,
         auto_id: bool = False,
-        add_sparse_vector: bool = False,
+        vector_mode: str | None = None,
         is_lite: bool = False,
-        quantization: str | None = None,
-        quantization_parameters: dict[str, Any] | None = None,
-        use_gpu: bool | None = None,
-        fallback_to_cpu: bool = False,
     ) -> None:
         """
         Initialize the index manager.
 
-        Whether a vector field is dense (``FLOAT_VECTOR``) or binary (``BINARY_VECTOR``) is decided
-        only by the feature's own type. ``index_type`` / ``metric_type`` / ``index_parameters`` are
-        applied to each field according to its kind: dense fields use them as configured; binary
-        fields use them when ``index_type`` is a ``BIN_*`` type, otherwise ``BIN_FLAT`` / ``HAMMING``.
-
         Args:
             client: Milvus client instance
             collection_name: Name of the collection
-            index_type: Index type for dense fields (FLAT, IVF_FLAT, HNSW, GPU_CAGRA, etc.), or a BIN_* type
-                for collections that only hold binary vectors
-            metric_type: Similarity metric for dense fields (L2, IP, COSINE), or a binary metric
+            index_type: Index type for dense or GPU fields, or a BIN_* type
+            metric_type: Similarity metric
             index_parameters: Custom index-specific parameters
             available_features: Feature configuration
             feature_mappings: Column to field mappings
             primary_key_field: Name of primary key field
             auto_id: Whether to auto-generate IDs
-            add_sparse_vector: Whether to use sparse vectors instead of dense vectors
+            vector_mode: Vector mode ('dense', 'sparse', 'binary', 'gpu'); inferred from index_type when None
             is_lite: Whether the collection lives in Milvus Lite
-            quantization: Quantization option ('SQ8', 'PQ', 'PRQ', 'NONE')
-            quantization_parameters: Quantization tuning parameters
-            use_gpu: ``True`` upgrades the index to its GPU equivalent, ``False`` forces the CPU equivalent,
-                ``None`` uses ``index_type`` as given
-            fallback_to_cpu: When ``True`` and the Milvus server rejects a GPU index during index creation,
-                retry with the CPU equivalent instead of failing
         """
         self.client = client
         self.collection_name = collection_name
-        self.requested_index_type = index_type
+        self.index_type = index_type
         self.metric_type = metric_type
         self.index_parameters = (index_parameters or {}).copy()
         self.available_features = available_features or {}
@@ -296,166 +200,155 @@ class MilvusIndexManager:
         self._mapping_dict: dict[str, str] = build_mapping_dict(self.feature_mappings)
         self.primary_key_field = primary_key_field
         self.auto_id = auto_id
-        self.add_sparse_vector = add_sparse_vector
         self.is_lite = is_lite
-        self.quantization = quantization
-        self.quantization_parameters = quantization_parameters or {}
-        self.use_gpu = use_gpu
-        self.fallback_to_cpu = fallback_to_cpu
-        self.gpu_fallback_triggered: bool = False
-        self.gpu_fallback_reason: str | None = None
 
-        # 1. Resolve the quantized index type; merge quantization parameters only when quantization applies
-        self.index_type = self.resolve_quantized_index_type(base_index_type=index_type, quantization=quantization)
-        quantization_requested = bool(quantization) and str(quantization).upper() != "NONE"
-        quantization_applies = self.index_type != index_type or index_type in QUANTIZED_INDEX_TYPES
-        if quantization_requested and not quantization_applies:
-            logger.warning(
-                "quantization '%s' has no quantized variant for index_type '%s'; "
-                "quantization and quantization_parameters are ignored.",
-                quantization,
-                index_type,
-            )
-        elif quantization_applies and self.quantization_parameters:
-            self.index_parameters.update(self.quantization_parameters)
+        if vector_mode is None:
+            vector_mode = MilvusVectorModes.infer_from_index_type(index_type=index_type)
 
-        # 2. Handle explicit use_gpu flag (applied after quantization so quantized types are upgraded too)
-        if self.use_gpu is True and self.index_type not in MilvusIndexTypes.ALL_GPU_TYPES:
-            if self.index_type not in CPU_TO_GPU_UPGRADE_MAP:
-                raise DocpipeException(
-                    message=(
-                        f"MilvusDB Error: use_gpu=true is not supported for index type '{self.index_type}' "
-                        f"because it has no GPU equivalent. Supported: {sorted(CPU_TO_GPU_UPGRADE_MAP)}."
-                    ),
-                    status_code=400,
-                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-                )
-            self._switch_index_type(target_index_type=CPU_TO_GPU_UPGRADE_MAP[self.index_type])
-        elif self.use_gpu is False and self.index_type in GPU_TO_CPU_FALLBACK_MAP:
-            self._switch_index_type(target_index_type=GPU_TO_CPU_FALLBACK_MAP[self.index_type])
+        self.vector_mode = vector_mode
+        self._is_sparse: bool = vector_mode == MilvusVectorModes.SPARSE
+        self._is_gpu: bool = vector_mode == MilvusVectorModes.GPU
+        self._is_binary: bool = vector_mode == MilvusVectorModes.BINARY
 
-        # 3. Enforce Milvus Lite restrictions on GPU index types
-        if self.is_lite and self.index_type in MilvusIndexTypes.ALL_GPU_TYPES:
+        self.validate_index_config(
+            vector_mode=vector_mode,
+            index_type=index_type,
+            metric_type=metric_type,
+            index_parameters=self.index_parameters,
+            is_lite=is_lite,
+        )
+
+    @staticmethod
+    def validate_index_config(
+        *,
+        vector_mode: str,
+        index_type: str,
+        metric_type: str,
+        index_parameters: dict[str, Any] | None = None,
+        is_lite: bool = False,
+    ) -> None:
+        """Validate the mode, index type, metric and GPU settings without a Milvus connection.
+
+        Called by ``__init__`` and by ``MilvusAdapter`` before it connects, so invalid configurations are
+        reported during flow validation even when Milvus is unreachable.
+
+        Raises:
+            DocpipeException: The combination of vector mode, index type, metric or parameters is invalid.
+        """
+        MilvusIndexManager._validate_vector_mode(vector_mode=vector_mode)
+        MilvusIndexManager._validate_index_type(vector_mode=vector_mode, index_type=index_type, is_lite=is_lite)
+        MilvusIndexManager._validate_metric_type(
+            vector_mode=vector_mode, index_type=index_type, metric_type=metric_type
+        )
+        MilvusIndexManager._validate_gpu_config(
+            vector_mode=vector_mode, index_type=index_type, index_parameters=index_parameters
+        )
+
+    @staticmethod
+    def _validate_vector_mode(*, vector_mode: str) -> None:
+        """Validate vector mode."""
+        if vector_mode not in MilvusVectorModes.ALL_MODES:
             raise DocpipeException(
                 message=(
-                    f"MilvusDB Error: GPU index type '{self.index_type}' is not supported by Milvus Lite. "
-                    "Milvus Lite runs as an embedded local database without GPU acceleration. "
-                    "Set index_type to 'FLAT' or use a standalone/remote Milvus deployment with GPU."
+                    f"MilvusDB Error: Invalid vector_mode '{vector_mode}'. "
+                    f"Supported modes: {MilvusVectorModes.ALL_MODES}"
                 ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        self._validate_metric_type()
-        self._validate_gpu_metric_type()
-        self._validate_index_type()
-        self._validate_gpu_config()
-
-    def _switch_index_type(self, *, target_index_type: str) -> None:
-        """Switch to another index type and drop index parameters that do not belong to it.
-
-        Args:
-            target_index_type: Index type to switch to.
-        """
-        self.index_parameters, dropped = self.filter_parameters_for_index_type(
-            target_index_type=target_index_type,
-            parameters=self.index_parameters,
-        )
-        if dropped:
-            logger.warning(
-                "Index type changed from '%s' to '%s'; dropping index parameters that do not apply: %s",
-                self.index_type,
-                target_index_type,
-                dropped,
-            )
-        self.index_type = target_index_type
-
-    def _validate_gpu_config(self) -> None:
-        """Validate GPU_CAGRA parameters: ``intermediate_graph_degree`` must be >= ``graph_degree``."""
-        if self.index_type != MilvusIndexTypes.GPU_CAGRA:
+    @staticmethod
+    def _validate_gpu_config(*, vector_mode: str, index_type: str, index_parameters: dict[str, Any] | None) -> None:
+        """Validate GPU-specific configuration constraints before collection creation."""
+        if vector_mode != MilvusVectorModes.GPU or index_type != MilvusIndexTypes.GPU_CAGRA:
             return
-        params = self._get_index_parameters()
+
+        params = {**INDEX_DEFAULT_PARAMETERS.get(index_type, {}), **(index_parameters or {})}
         intermediate = params.get("intermediate_graph_degree")
         graph = params.get("graph_degree")
+
         if (
             isinstance(intermediate, int)
             and isinstance(graph, int)
             and not isinstance(intermediate, bool)
             and not isinstance(graph, bool)
-            and intermediate < graph
+            and graph > intermediate
         ):
             raise DocpipeException(
                 message=(
-                    f"MilvusDB Error: GPU_CAGRA requires intermediate_graph_degree ({intermediate}) "
-                    f"to be greater than or equal to graph_degree ({graph})."
+                    f"MilvusDB Error: GPU_CAGRA requires graph_degree ({graph}) "
+                    f"to be less than or equal to intermediate_graph_degree ({intermediate})."
                 ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-    def _apply_cpu_fallback(self, *, reason: str) -> None:
-        """Replace the GPU index type with its CPU equivalent after the server rejected the GPU index.
-
-        Args:
-            reason: Error reported by the Milvus server.
-        """
-        cpu_index_type = GPU_TO_CPU_FALLBACK_MAP.get(self.index_type, MilvusIndexTypes.FLAT)
-        logger.warning(
-            "Milvus rejected GPU index type '%s' (%s). Falling back to CPU index '%s'.",
-            self.index_type,
-            reason,
-            cpu_index_type,
-        )
-        self._switch_index_type(target_index_type=cpu_index_type)
-        self.gpu_fallback_triggered = True
-        self.gpu_fallback_reason = reason
-
-    def _validate_gpu_metric_type(self) -> None:
-        """Reject metrics that Milvus GPU indexes do not support.
-
-        Milvus GPU indexes do not support COSINE. Normalize the vectors and use IP instead.
-        """
-        if self.index_type in MilvusIndexTypes.ALL_GPU_TYPES and self.metric_type == MilvusMetricTypes.COSINE:
-            raise DocpipeException(
-                message=(
-                    f"MilvusDB Error: GPU index type '{self.index_type}' does not support the COSINE metric. "
-                    "Normalize the vectors and set metric_type to 'IP', or use 'L2'."
-                ),
-                status_code=400,
-                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-            )
-
-    def _validate_index_type(self) -> None:
-        """Validate index type. Skip validation in sparse mode as index type is set programmatically."""
+    @staticmethod
+    def _validate_index_type(*, vector_mode: str, index_type: str, is_lite: bool) -> None:
+        """Validate index type based on the active vector mode."""
+        is_sparse = vector_mode == MilvusVectorModes.SPARSE
+        is_gpu = vector_mode == MilvusVectorModes.GPU
+        is_binary = vector_mode == MilvusVectorModes.BINARY
         logger.info(
-            "Validating index type: index_type=%s, add_sparse_vector=%s, is_lite=%s",
-            self.index_type,
-            self.add_sparse_vector,
-            self.is_lite,
+            "Validating index type: index_type=%s, vector_mode=%s, is_lite=%s",
+            index_type,
+            vector_mode,
+            is_lite,
         )
 
-        # Skip validation in sparse mode
-        if self.add_sparse_vector:
-            logger.info("Sparse mode enabled, skipping index type validation (using %s)", self.index_type)
+        if is_sparse:
+            logger.info("Sparse mode enabled, skipping index type validation (using %s)", index_type)
             return
 
-        # Milvus Lite does not support binary vector indexes
-        if self.is_lite and self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES:
-            raise DocpipeException(
-                message=(
-                    f"MilvusDB Error: Binary vector index type '{self.index_type}' is not supported by Milvus Lite. "
-                    "Milvus Lite only supports dense vectors with FLAT index. "
-                    "Use standalone Milvus or watsonx.data for binary vector indexing."
-                ),
-                status_code=400,
-                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-            )
+        if is_gpu:
+            if is_lite:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: GPU index type '{index_type}' is not supported by Milvus Lite. "
+                        "Milvus Lite runs as an embedded local database without GPU acceleration. "
+                        "Set index_type to 'FLAT' or use a standalone/remote Milvus deployment with GPU."
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            if index_type not in MilvusIndexTypes.ALL_GPU_TYPES:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: Index type '{index_type}' is not supported in vector_mode='gpu'. "
+                        f"Supported GPU index types: {MilvusIndexTypes.ALL_GPU_TYPES}"
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            return
 
-        # Milvus Lite only supports FLAT
-        if self.is_lite and self.index_type not in MilvusIndexTypes.LITE_SUPPORTED_DENSE_TYPES:
+        if is_binary:
+            if is_lite:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: Binary vector index type '{index_type}' is not supported by Milvus Lite. "
+                        "Milvus Lite only supports dense vectors with FLAT index. "
+                        "Use standalone Milvus or watsonx.data for binary vector indexing."
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            if index_type not in MilvusIndexTypes.ALL_BINARY_TYPES:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: Index type '{index_type}' is not supported in vector_mode='binary'. "
+                        f"Supported binary index types: {MilvusIndexTypes.ALL_BINARY_TYPES}"
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            return
+
+        # Dense mode
+        if is_lite and index_type not in MilvusIndexTypes.LITE_SUPPORTED_DENSE_TYPES:
             raise DocpipeException(
                 message=(
-                    f"MilvusDB Error: index_type '{self.index_type}' is not supported by Milvus Lite. "
+                    f"MilvusDB Error: index_type '{index_type}' is not supported by Milvus Lite. "
                     f"Supported index types for Lite: {MilvusIndexTypes.LITE_SUPPORTED_DENSE_TYPES}. "
                     "Set index_type to 'FLAT' in your provider_config when using auth_type='lite'."
                 ),
@@ -463,39 +356,57 @@ class MilvusIndexManager:
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        # Validate index types
-        if self.index_type not in MilvusIndexTypes.ALL_TYPES:
+        if index_type not in MilvusIndexTypes.ALL_DENSE_TYPES:
             raise DocpipeException(
                 message=(
-                    f"MilvusDB Error: Invalid index type '{self.index_type}'. Supported: {MilvusIndexTypes.ALL_TYPES}"
+                    f"MilvusDB Error: Invalid index type '{index_type}' for vector_mode='dense'. "
+                    f"Supported dense index types: {MilvusIndexTypes.ALL_DENSE_TYPES}"
                 ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        # Validate binary index type pairs with binary metric type
-        if (
-            self.index_type in MilvusIndexTypes.ALL_BINARY_TYPES
-            and self.metric_type not in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES
-        ):
-            raise DocpipeException(
-                message=(
-                    f"MilvusDB Error: Binary index type '{self.index_type}' requires a binary metric type. "
-                    f"Supported binary metrics: {MilvusMetricTypes.ALL_BINARY_METRIC_TYPES}, got: '{self.metric_type}'"
-                ),
-                status_code=400,
-                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-            )
+    @staticmethod
+    def _validate_metric_type(*, vector_mode: str, index_type: str, metric_type: str) -> None:
+        """Validate metric type based on the active vector mode."""
+        is_sparse = vector_mode == MilvusVectorModes.SPARSE
+        is_gpu = vector_mode == MilvusVectorModes.GPU
+        is_binary = vector_mode == MilvusVectorModes.BINARY
+        if is_sparse:
+            return
 
-        # Dense index types must not be paired with a binary-only metric
-        if (
-            self.index_type in MilvusIndexTypes.ALL_DENSE_TYPES
-            and self.metric_type in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES
-        ):
+        if is_gpu:
+            if metric_type not in MilvusMetricTypes.GPU_VALID_METRICS:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: GPU index type '{index_type}' does not support metric '{metric_type}'. "
+                        f"Supported metrics for GPU mode: {MilvusMetricTypes.GPU_VALID_METRICS}. "
+                        "Normalize the vectors and set metric_type to 'IP', or use 'L2'."
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            return
+
+        if is_binary:
+            if metric_type not in MilvusMetricTypes.ALL_BINARY_METRIC_TYPES:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: Invalid metric type '{metric_type}': binary index type "
+                        f"'{index_type}' requires a binary metric type. "
+                        f"Supported binary metrics: {MilvusMetricTypes.ALL_BINARY_METRIC_TYPES}"
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            return
+
+        # Dense mode
+        if metric_type not in MilvusMetricTypes.ALL_DENSE_METRIC_TYPES:
             raise DocpipeException(
                 message=(
-                    f"MilvusDB Error: Dense index type '{self.index_type}' cannot use binary metric "
-                    f"'{self.metric_type}'. Use a dense metric ({MilvusMetricTypes.ALL_DENSE_METRIC_TYPES})."
+                    f"MilvusDB Error: Invalid metric type '{metric_type}' for dense mode. "
+                    f"Supported dense metrics: {MilvusMetricTypes.ALL_DENSE_METRIC_TYPES}"
                 ),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
@@ -507,14 +418,16 @@ class MilvusIndexManager:
         Milvus Lite cannot hold binary vectors, so a binary vector feature is rejected for Lite whatever the
         ``index_type`` is. A ``BIN_*`` ``index_type`` needs at least one binary vector feature, which only
         exists when an upstream operator emits one (e.g. embeddings with ``quantization: binary``). Without it
-        the collection cannot be created. Both mismatches are reported at validation time.
+        the collection cannot be created. GPU indexes only apply to dense float vectors, so ``vector_mode='gpu'``
+        with only binary vector features is rejected too. Sparse mode skips the index/feature checks. All
+        mismatches are reported at validation time.
 
         Args:
             feature_types: Mapping of input feature name to its propagated feature type.
 
         Raises:
-            DocpipeException: Milvus Lite receives a binary vector feature, or a ``BIN_*`` index type is
-                configured but no binary vector feature is available.
+            DocpipeException: Milvus Lite receives a binary vector feature, a ``BIN_*`` index type is
+                configured but no binary vector feature is available, or GPU mode has no dense vector feature.
         """
         has_binary_feature = any(
             is_binary_vector_feature(feature_config={"type": ftype}) for ftype in feature_types.values()
@@ -530,7 +443,22 @@ class MilvusIndexManager:
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
-        if self.add_sparse_vector or self.index_type not in MilvusIndexTypes.ALL_BINARY_TYPES:
+        if self._is_sparse:
+            return
+        if self._is_gpu:
+            has_dense_feature = any(ftype == OperatorConstants.Types.TYPE_VECTOR for ftype in feature_types.values())
+            if has_binary_feature and not has_dense_feature:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: GPU index type '{self.index_type}' only applies to dense float vectors, "
+                        "but the only vector features available are binary. Use vector_mode='binary' with a "
+                        "BIN_* index type, or remove 'quantization' from the embeddings operator."
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            return
+        if self.index_type not in MilvusIndexTypes.ALL_BINARY_TYPES:
             return
         if has_binary_feature:
             return
@@ -629,18 +557,6 @@ class MilvusIndexManager:
             applied_metric_type,
         )
 
-    def _validate_metric_type(self) -> None:
-        """Validate metric type and ensure sparse mode uses BM25."""
-        if self.metric_type not in MilvusMetricTypes.ALL_TYPES:
-            raise DocpipeException(
-                message=f"MilvusDB Error: Invalid metric type '{self.metric_type}'. Supported: {MilvusMetricTypes.ALL_TYPES}",
-                status_code=400,
-                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-            )
-
-        # Note: In sparse mode, metric_type applies to dense vectors only
-        # Sparse vectors always use BM25 (hardcoded in create_collection)
-
     def _get_index_parameters(self) -> dict[str, Any]:
         """Get index parameters, merging defaults with custom parameters."""
         default_params = INDEX_DEFAULT_PARAMETERS.get(self.index_type, {}).copy()
@@ -649,7 +565,7 @@ class MilvusIndexManager:
             default_params.update(self.index_parameters)
 
         # Remove dimension for sparse vectors (not needed for BM25)
-        if self.add_sparse_vector and "dim" in default_params:
+        if self._is_sparse and "dim" in default_params:
             del default_params["dim"]
 
         return default_params
@@ -682,7 +598,7 @@ class MilvusIndexManager:
         added_vector_columns: set[str] = set()
 
         # Add sparse vector field if in sparse mode
-        if self.add_sparse_vector:
+        if self._is_sparse:
             # Sparse vector field - auto-generated by BM25 function
             # Get Milvus field name (sparse_embeddings -> sparse_vector)
             sparse_vector_field_name = self._mapping_dict.get(
@@ -771,9 +687,9 @@ class MilvusIndexManager:
             "name": content_field_name,
             "dtype": DataType.VARCHAR,
             "max_length": 65535,
-            "enable_analyzer": self.add_sparse_vector,  # Enable analyzer only for BM25 sparse mode
+            "enable_analyzer": self._is_sparse,  # Enable analyzer only for BM25 sparse mode
         }
-        if not self.add_sparse_vector:
+        if not self._is_sparse:
             # BM25 sparse mode requires the field to be non-nullable (analyser needs it);
             # dense mode allows NULL so chunk rows without text can still be inserted.
             content_field_params["nullable"] = True
@@ -1023,6 +939,7 @@ class MilvusIndexManager:
                 error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
             )
 
+        collection_created = False
         try:
             # Create schema fields with dimension mapping
             fields = self._create_schema_fields(dimension_mapping=dimension_mapping)
@@ -1037,7 +954,7 @@ class MilvusIndexManager:
             )
 
             # Create collection schema
-            if self.add_sparse_vector:
+            if self._is_sparse:
                 logger.info(
                     "[MILVUS COLLECTION] Sparse vector mode enabled - creating BM25 function for text-to-sparse-vector conversion"
                 )
@@ -1070,11 +987,12 @@ class MilvusIndexManager:
                 collection_name=self.collection_name,
                 schema=schema,
             )
+            collection_created = True
 
             logger.info("[MILVUS COLLECTION] Collection '%s' created successfully", self.collection_name)
 
             # Create sparse vector index if in sparse mode
-            if self.add_sparse_vector:
+            if self._is_sparse:
                 sparse_vector_field_name = self._mapping_dict.get(
                     OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT,
                     OperatorConstants.VectorDB.SPARSE_VECTOR_FIELD_NAME,
@@ -1107,20 +1025,10 @@ class MilvusIndexManager:
 
             # Create vector indexes for ALL vector fields (dense, binary, and multi-model)
             dense_index_params = self._build_dense_index_params(dimension_mapping=dimension_mapping)
-            try:
-                self.client.create_index(
-                    collection_name=self.collection_name,
-                    index_params=dense_index_params,
-                )
-            except Exception as index_error:
-                if not (self.fallback_to_cpu and self.index_type in MilvusIndexTypes.ALL_GPU_TYPES):
-                    raise
-                self._apply_cpu_fallback(reason=str(index_error))
-                dense_index_params = self._build_dense_index_params(dimension_mapping=dimension_mapping)
-                self.client.create_index(
-                    collection_name=self.collection_name,
-                    index_params=dense_index_params,
-                )
+            self.client.create_index(
+                collection_name=self.collection_name,
+                index_params=dense_index_params,
+            )
 
             logger.info(
                 "[MILVUS COLLECTION] Vector indexes created for %s field(s) (dense index_type=%s, metric=%s)",
@@ -1130,11 +1038,28 @@ class MilvusIndexManager:
             )
 
         except Exception as e:
+            if collection_created:
+                self._drop_partial_collection()
             raise DocpipeException(
                 message=f"MilvusDB Error: Failed to create collection '{self.collection_name}': {e}",
                 status_code=500,
                 error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
             ) from e
+
+    def _drop_partial_collection(self) -> None:
+        """Best-effort drop of a collection left without its index after a failed create_collection."""
+        try:
+            self.client.drop_collection(collection_name=self.collection_name)
+            logger.warning(
+                "[MILVUS COLLECTION] Dropped partially created collection '%s' after index creation failure",
+                self.collection_name,
+            )
+        except Exception as drop_error:
+            logger.warning(
+                "[MILVUS COLLECTION] Failed to drop partially created collection '%s': %s",
+                self.collection_name,
+                drop_error,
+            )
 
     def get_collection_info(self) -> dict[str, Any]:
         """

@@ -2244,17 +2244,15 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 - **password**: Authentication password/API key (optional for `standalone`, required for `grpc` - should be API key)
 - `database`: Database name (default: "default")
 - `secure` : Required for IBM watsonx.data MilvusDB for https connection and is set to true in this case.
-- `index_type`: Index algorithm (HNSW, HNSW_SQ, HNSW_PQ, HNSW_PRQ, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX, GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for dense; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). GPU types are sent to the Milvus server as configured (see `fallback_to_cpu`). Milvus Lite supports only FLAT
-- `metric_type`: Distance metric (L2, IP, COSINE for dense; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode). GPU index types do not support COSINE
-- `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW)
-- `quantization`: `SQ8`, `PQ`, `PRQ` or `NONE`. Resolves the base `index_type` to its quantized variant to reduce memory
-- `quantization_parameters`: Quantization tuning parameters merged into the index parameters (e.g., `m`, `nbits`)
-- `use_gpu`: `true` upgrades a CPU index (including a resolved quantized one) to its GPU equivalent, `false` forces the CPU equivalent, unset follows `index_type`
-- `fallback_to_cpu`: Default `false`. When `true`, a GPU index rejected by the Milvus server during index creation is retried with the CPU equivalent
+- `vector_mode`: `dense` (default), `sparse`, `binary` or `gpu`. If omitted, it is `sparse` when `add_sparse_vector: true`, otherwise inferred from `index_type` (`BIN_*` gives `binary`, `GPU_*` gives `gpu`, anything else `dense`). An `index_type` that does not belong to the mode is rejected
+- `index_type`: Index algorithm (HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX for dense; GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for `gpu` mode; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). GPU types are sent to the Milvus server as configured. Milvus Lite supports only FLAT
+- `metric_type`: Distance metric (L2, IP, COSINE for dense; L2 and IP only for `gpu` mode; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode)
+- `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW). For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree`
+- `add_sparse_vector`: Kept for backward compatibility. `true` is equivalent to `vector_mode: "sparse"`; an explicit `vector_mode` takes precedence
 - `batch_size`: Batch size for bulk operations (default: 100)
 - `primary_key_field`: Name of the primary key field in Milvus collection (default: "pk")
 
-See [Milvus GPU indexes and quantization](../operators/vectordb/milvus.md#gpu-indexes-and-quantization) for setup and tuning guidance.
+See [Milvus GPU indexes](../operators/vectordb/milvus.md#gpu-indexes) for setup and tuning guidance.
 
 **Milvus Authentication Types:**
 

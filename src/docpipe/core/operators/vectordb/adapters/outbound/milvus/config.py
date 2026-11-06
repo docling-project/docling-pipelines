@@ -3,7 +3,7 @@
 
 """Pydantic config model for the Milvus vector store adapter."""
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,15 +71,16 @@ class MilvusConfig(BaseModel):
         default=100,
         description="Number of documents to insert per batch.",
     )
+    vector_mode: Literal["dense", "sparse", "binary", "gpu"] | None = Field(
+        default=None,
+        description="Vector indexing mode: 'dense' (default CPU), 'sparse' (BM25), 'binary' (1-bit), or 'gpu' (GPU-accelerated).",
+    )
     index_type: Literal[
         "FLAT",
         "IVF_FLAT",
         "IVF_SQ8",
         "IVF_PQ",
         "HNSW",
-        "HNSW_SQ",
-        "HNSW_PQ",
-        "HNSW_PRQ",
         "DISKANN",
         "AUTOINDEX",
         "GPU_IVF_FLAT",
@@ -94,8 +95,8 @@ class MilvusConfig(BaseModel):
         default="HNSW",
         description=(
             "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
-            "Use HNSW, HNSW_SQ, HNSW_PQ for standalone/remote deployments, "
-            "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ for GPU-accelerated deployments, "
+            "Use HNSW for standalone/remote deployments, "
+            "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for GPU-accelerated deployments, "
             "or BIN_FLAT / BIN_IVF_FLAT for binary vectors."
         ),
     )
@@ -114,39 +115,7 @@ class MilvusConfig(BaseModel):
         default_factory=dict,
         description='Index-specific parameters (e.g. {"M": 16, "efConstruction": 256} for HNSW).',
     )
-    quantization: Literal["SQ8", "PQ", "PRQ", "NONE"] | None = Field(
-        default=None,
-        description=(
-            "Vector quantization method to reduce memory consumption. "
-            "Options: 'SQ8' (Scalar Quantization, ~75% memory reduction), "
-            "'PQ' (Product Quantization, up to 90%+ memory reduction), "
-            "'PRQ' (Product Residual Quantization), or None."
-        ),
-    )
-    quantization_parameters: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Parameters for vector quantization, e.g. {'m': 16, 'nbits': 8} for PQ or {'sq_type': 'SQ8'} for SQ."
-        ),
-    )
-    use_gpu: bool | None = Field(
-        default=None,
-        description=(
-            "Whether to use a GPU index. If true, a CPU index (including a quantized one) is upgraded to its "
-            "GPU equivalent (HNSW -> GPU_CAGRA, IVF_FLAT -> GPU_IVF_FLAT, IVF_PQ/HNSW_PQ -> GPU_IVF_PQ, "
-            "FLAT -> GPU_BRUTE_FORCE). If false, a GPU index is downgraded to its CPU equivalent. "
-            "If None, index_type is used as given. The Milvus server must be a GPU build."
-        ),
-    )
-    fallback_to_cpu: bool = Field(
-        default=False,
-        description=(
-            "If true and the Milvus server rejects a GPU index during index creation (for example a CPU-only "
-            "Milvus image), retry with the CPU equivalent index instead of failing. Off by default so an "
-            "explicitly requested GPU index is never silently downgraded."
-        ),
-    )
     add_sparse_vector: bool = Field(
         default=False,
-        description="Enable sparse vector support using BM25. When true, a sparse vector field and BM25 function are added alongside dense vectors.",
+        description="Enable sparse vector support using BM25. Kept for backward compatibility (maps to vector_mode='sparse').",
     )

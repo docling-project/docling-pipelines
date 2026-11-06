@@ -85,9 +85,9 @@
           "password": "${MILVUS_PASSWORD}",
           "database": "default",
           "batch_size": 100,
+          "vector_mode": "gpu",
           "index_type": "GPU_CAGRA",
-          "metric_type": "L2",
-          "fallback_to_cpu": true
+          "metric_type": "L2"
         },
         "feature_mappings": [
           {

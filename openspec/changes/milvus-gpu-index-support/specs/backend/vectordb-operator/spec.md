@@ -2,28 +2,48 @@
 
 ## Purpose
 
-Extends the VectorDB operator specification for the Milvus adapter with GPU index types, quantized index types, and the `quantization`, `quantization_parameters`, `use_gpu` and `fallback_to_cpu` configuration fields.
+Extends the VectorDB operator specification for the Milvus adapter with the `vector_mode` option and GPU index types.
 
 ## ADDED Requirements
 
+### Requirement: Milvus vector mode
+
+The Milvus adapter SHALL accept `vector_mode` with the values `dense`, `sparse`, `binary` and `gpu`. When `vector_mode` is not provided, the adapter SHALL resolve it from `add_sparse_vector` (`true` -> `sparse`), then from `index_type` (`BIN_*` -> `binary`, `GPU_*` -> `gpu`), and otherwise use `dense`.
+
+#### Scenario: Explicit vector mode
+- **WHEN** `vector_mode="gpu"` is configured
+- **THEN** the adapter uses the GPU mode regardless of `add_sparse_vector`
+
+#### Scenario: Legacy sparse flag
+- **WHEN** `vector_mode` is unset and `add_sparse_vector=true`
+- **THEN** the adapter resolves `vector_mode="sparse"`
+
+#### Scenario: Unknown vector mode
+- **WHEN** `vector_mode` is not one of `dense`, `sparse`, `binary`, `gpu`
+- **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`)
+
 ### Requirement: Milvus GPU index types
 
-The Milvus adapter SHALL accept the dense index types `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ` and `GPU_BRUTE_FORCE` for standalone and remote Milvus deployments. The adapter SHALL NOT probe the host running the pipeline for a GPU and SHALL NOT change an explicitly configured index type based on local hardware.
+The Milvus adapter SHALL accept the index types `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ` and `GPU_BRUTE_FORCE` in `vector_mode="gpu"` for standalone and remote Milvus deployments. The adapter SHALL NOT probe the host running the pipeline for a GPU and SHALL NOT change an explicitly configured index type based on local hardware.
 
 #### Scenario: GPU index type is sent to the server as configured
-- **WHEN** `index_type="GPU_CAGRA"` is configured and `use_gpu` and `fallback_to_cpu` are unset
+- **WHEN** `vector_mode="gpu"` and `index_type="GPU_CAGRA"` are configured
 - **THEN** the collection index is created with `GPU_CAGRA` and its default or configured parameters, regardless of the GPU hardware on the pipeline host
+
+#### Scenario: CPU index type rejected in GPU mode
+- **WHEN** `vector_mode="gpu"` is configured with `index_type="HNSW"`
+- **THEN** the adapter raises a `DocpipeException` (status 400) listing the supported GPU index types
 
 #### Scenario: GPU index type rejected for Milvus Lite
 - **WHEN** a GPU index type is configured with `auth_type="lite"`
 - **THEN** the adapter raises a `DocpipeException` (status 400) stating that GPU indexes are not supported by Milvus Lite
 
-### Requirement: Milvus GPU index metric and parameter validation
+### Requirement: Milvus GPU metric and parameter validation
 
-The adapter SHALL validate GPU index configuration before any collection is created.
+The adapter SHALL validate vector mode, index type, metric type and GPU parameters before connecting to Milvus, so the errors are also reported by flow validation when Milvus is unreachable.
 
 #### Scenario: GPU index rejects COSINE
-- **WHEN** a GPU index type is configured with `metric_type="COSINE"`
+- **WHEN** `vector_mode="gpu"` is configured with `metric_type="COSINE"`
 - **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`) suggesting `IP` on normalized vectors or `L2`
 
 #### Scenario: GPU_CAGRA graph degree constraint violated
@@ -34,54 +54,46 @@ The adapter SHALL validate GPU index configuration before any collection is crea
 - **WHEN** `index_type="GPU_CAGRA"` is configured with `graph_degree` less than or equal to `intermediate_graph_degree`
 - **THEN** the adapter accepts the configuration
 
-### Requirement: Milvus use_gpu index selection
+#### Scenario: Flow validation without a Milvus connection
+- **WHEN** a flow with an invalid GPU configuration is validated and Milvus is not reachable
+- **THEN** validation reports the configuration error instead of a connection error
 
-The adapter SHALL support `use_gpu` to select between CPU and GPU index families. The upgrade SHALL be applied after `quantization` is resolved.
+### Requirement: Milvus GPU indexes by collection kind
 
-#### Scenario: use_gpu upgrades a CPU index
-- **WHEN** `use_gpu=true` and `index_type` is `HNSW`, `IVF_FLAT`, `IVF_PQ` or `FLAT`
-- **THEN** the index type becomes `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ` or `GPU_BRUTE_FORCE` respectively
+GPU indexes SHALL apply only to dense `FLOAT_VECTOR` fields. Each vector field SHALL be indexed according to its own data type.
 
-#### Scenario: use_gpu with quantization
-- **WHEN** `use_gpu=true`, `index_type="HNSW"` and `quantization="PQ"`
-- **THEN** the index type becomes `GPU_IVF_PQ`
+#### Scenario: Dense-only collection
+- **WHEN** `vector_mode="gpu"` and every vector feature is a dense float vector
+- **THEN** each vector field is indexed with the configured GPU index type and metric
 
-#### Scenario: use_gpu without a GPU equivalent
-- **WHEN** `use_gpu=true` and the resolved index type has no GPU equivalent (for example `HNSW_SQ`)
-- **THEN** the adapter raises a `DocpipeException` (status 400)
+#### Scenario: Binary-only collection
+- **WHEN** `vector_mode="gpu"` and the only vector features are binary vectors
+- **THEN** flow validation fails with a `DocpipeException` stating that GPU indexes only apply to dense float vectors
 
-#### Scenario: use_gpu false downgrades a GPU index
-- **WHEN** `use_gpu=false` and a GPU index type is configured
-- **THEN** the index type becomes its CPU equivalent
+#### Scenario: Mixed dense and binary collection
+- **WHEN** `vector_mode="gpu"` and the collection has both dense and binary vector features
+- **THEN** the dense field uses the configured GPU index and the binary field uses `BIN_FLAT` with `HAMMING`
 
-#### Scenario: Parameters follow the index type
-- **WHEN** `use_gpu` changes the index type
-- **THEN** `index_parameters` that are not valid for the new index type are dropped and a warning lists them
+#### Scenario: Sparse-only collection
+- **WHEN** `vector_mode="sparse"`
+- **THEN** the GPU and binary feature checks are skipped and the sparse field uses `SPARSE_INVERTED_INDEX` with `BM25`
 
-### Requirement: Milvus opt-in CPU fallback
+#### Scenario: Hybrid dense and sparse collection
+- **WHEN** `vector_mode="sparse"` and a dense vector feature is present
+- **THEN** the sparse field uses `SPARSE_INVERTED_INDEX` with `BM25` and the dense field uses the configured dense index and metric
 
-The adapter SHALL provide `fallback_to_cpu` (default `false`). The fallback SHALL be triggered only by an error from the Milvus server during index creation.
+### Requirement: Milvus collection cleanup after index failure
 
-#### Scenario: Fallback disabled
-- **WHEN** the server rejects a GPU index and `fallback_to_cpu` is `false`
-- **THEN** collection creation fails with a `DocpipeException` carrying the server error and the index type is unchanged
+When index creation fails after the collection was created, the adapter SHALL drop the collection so that no collection without an index remains.
 
-#### Scenario: Fallback enabled
-- **WHEN** the server rejects a GPU index and `fallback_to_cpu` is `true`
-- **THEN** the adapter logs a warning, creates the index with the CPU equivalent (`GPU_CAGRA` -> `HNSW`, `GPU_IVF_FLAT` -> `IVF_FLAT`, `GPU_IVF_PQ` -> `IVF_PQ`, `GPU_BRUTE_FORCE` -> `FLAT`) without GPU-only parameters, and records the fallback on the index manager
+#### Scenario: Index creation fails
+- **WHEN** `create_index` fails after `create_collection` succeeded
+- **THEN** the adapter drops the collection and raises a `DocpipeException` carrying the original error
 
-#### Scenario: CPU index failures are not retried
-- **WHEN** index creation fails for a CPU index type and `fallback_to_cpu` is `true`
-- **THEN** the error is raised without a retry
+#### Scenario: Collection creation fails
+- **WHEN** `create_collection` itself fails
+- **THEN** no drop is attempted
 
-### Requirement: Milvus index quantization
-
-The adapter SHALL resolve `quantization` (`SQ8`, `PQ`, `PRQ`, `NONE`) together with `index_type` to a quantized index type, and merge `quantization_parameters` into `index_parameters`.
-
-#### Scenario: Supported combination
-- **WHEN** `index_type="HNSW"` and `quantization="PQ"`
-- **THEN** the index type becomes `HNSW_PQ` and `quantization_parameters` are merged into the index parameters
-
-#### Scenario: Unsupported combination
-- **WHEN** `quantization` has no quantized variant for the configured `index_type` (for example `DISKANN` with `PQ`)
-- **THEN** the adapter logs a warning, keeps the configured index type and ignores `quantization_parameters`
+#### Scenario: Cleanup drop fails
+- **WHEN** dropping the collection also fails
+- **THEN** the drop failure is logged and the original index error is still raised

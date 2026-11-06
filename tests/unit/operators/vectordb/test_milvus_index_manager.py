@@ -340,6 +340,8 @@ class TestMetricTypes:
             MilvusMetricTypes.JACCARD,
         ):
             assert metric in MilvusMetricTypes.ALL_TYPES
+        assert MilvusMetricTypes.GPU_VALID_METRICS == ["L2", "IP"]
+        assert len(MilvusMetricTypes.GPU_VALID_METRICS) == 2
 
 
 class TestIndexTypes:
@@ -353,9 +355,6 @@ class TestIndexTypes:
         assert MilvusIndexTypes.IVF_SQ8 == "IVF_SQ8"
         assert MilvusIndexTypes.IVF_PQ == "IVF_PQ"
         assert MilvusIndexTypes.HNSW == "HNSW"
-        assert MilvusIndexTypes.HNSW_SQ == "HNSW_SQ"
-        assert MilvusIndexTypes.HNSW_PQ == "HNSW_PQ"
-        assert MilvusIndexTypes.HNSW_PRQ == "HNSW_PRQ"
         assert MilvusIndexTypes.DISKANN == "DISKANN"
         assert MilvusIndexTypes.AUTOINDEX == "AUTOINDEX"
         # GPU dense
@@ -371,7 +370,7 @@ class TestIndexTypes:
         assert MilvusIndexTypes.BIN_IVF_FLAT == "BIN_IVF_FLAT"
         assert MilvusIndexTypes.BIN_FLAT in MilvusIndexTypes.ALL_TYPES
         assert MilvusIndexTypes.BIN_IVF_FLAT in MilvusIndexTypes.ALL_TYPES
-        assert len(MilvusIndexTypes.ALL_TYPES) == 18
+        assert len(MilvusIndexTypes.ALL_TYPES) == 15
 
     def test_default_parameters_for_all_types(self):
         """Test that default parameters exist for all index types"""
@@ -577,10 +576,10 @@ class TestSparseVectorMode:
         manager = MilvusIndexManager(
             client=mock_client,
             collection_name="sparse_collection",
-            add_sparse_vector=True,
+            vector_mode="sparse",
         )
 
-        assert manager.add_sparse_vector is True
+        assert manager._is_sparse is True
 
     def test_sparse_mode_creates_sparse_vector_field(self, mock_client, basic_features, feature_mappings):
         """Test that sparse mode creates sparse vector field"""
@@ -589,7 +588,7 @@ class TestSparseVectorMode:
             collection_name="sparse_collection",
             available_features=basic_features,
             feature_mappings=feature_mappings,
-            add_sparse_vector=True,
+            vector_mode="sparse",
         )
 
         dimension_mapping = {"embeddings": 384}
@@ -606,7 +605,7 @@ class TestSparseVectorMode:
             collection_name="sparse_collection",
             available_features=basic_features,
             feature_mappings=feature_mappings,
-            add_sparse_vector=True,
+            vector_mode="sparse",
         )
 
         dimension_mapping = {"embeddings": 384}
@@ -624,7 +623,7 @@ class TestSparseVectorMode:
             collection_name="dense_collection",
             available_features=basic_features,
             feature_mappings=feature_mappings,
-            add_sparse_vector=False,
+            vector_mode="dense",
         )
 
         dimension_mapping = {"embeddings": 384}
@@ -709,7 +708,7 @@ class TestValidateExistingCollectionEdgeCases:
 class TestCreateCollectionEdgeCases:
     """create_collection branches not previously covered."""
 
-    def _make_manager(self, mock_client, *, add_sparse_vector: bool = False) -> "MilvusIndexManager":
+    def _make_manager(self, mock_client, *, vector_mode: str = "dense") -> "MilvusIndexManager":
         mock_client.has_collection.return_value = False
         mock_client.prepare_index_params.return_value.add_index = lambda **kw: None
         mappings = [
@@ -721,7 +720,7 @@ class TestCreateCollectionEdgeCases:
             client=mock_client,
             collection_name="test_col",
             feature_mappings=mappings,
-            add_sparse_vector=add_sparse_vector,
+            vector_mode=vector_mode,
         )
 
     def test_create_collection_raises_if_already_exists(self, mock_client):
@@ -742,7 +741,7 @@ class TestCreateCollectionEdgeCases:
         mock_client.has_collection.return_value = False
         index_params_mock = MagicMock()
         mock_client.prepare_index_params.return_value = index_params_mock
-        manager = self._make_manager(mock_client, add_sparse_vector=False)
+        manager = self._make_manager(mock_client, vector_mode="dense")
         manager.create_collection(dimension_mapping={"embeddings": 384})
         mock_client.create_collection.assert_called_once()
         mock_client.create_index.assert_called_once()
@@ -758,6 +757,35 @@ class TestCreateCollectionEdgeCases:
         from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
         with pytest.raises(DocpipeException, match="Failed to create collection"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+
+    def test_index_failure_drops_partial_collection(self, mock_client):
+        """A create_index failure after create_collection drops the dead collection."""
+        mock_client.create_index.side_effect = RuntimeError("index build failed")
+        manager = self._make_manager(mock_client)
+
+        with pytest.raises(DocpipeException, match="index build failed"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+
+        mock_client.drop_collection.assert_called_once_with(collection_name="test_col")
+
+    def test_failure_before_collection_creation_does_not_drop(self, mock_client):
+        """If client.create_collection itself fails, nothing is dropped."""
+        mock_client.create_collection.side_effect = RuntimeError("storage full")
+        manager = self._make_manager(mock_client)
+
+        with pytest.raises(DocpipeException, match="storage full"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+
+        mock_client.drop_collection.assert_not_called()
+
+    def test_drop_failure_does_not_mask_original_error(self, mock_client):
+        """A failing cleanup drop still surfaces the original index error."""
+        mock_client.create_index.side_effect = RuntimeError("index build failed")
+        mock_client.drop_collection.side_effect = RuntimeError("drop failed")
+        manager = self._make_manager(mock_client)
+
+        with pytest.raises(DocpipeException, match="index build failed"):
             manager.create_collection(dimension_mapping={"embeddings": 384})
 
 
@@ -780,7 +808,7 @@ class TestCreateCollectionSparseMode:
             client=mock_client,
             collection_name="test_col",
             feature_mappings=mappings,
-            add_sparse_vector=True,
+            vector_mode="sparse",
         )
         manager.create_collection(dimension_mapping={"embeddings": 384})
 
@@ -902,7 +930,7 @@ class TestGetIndexParametersSparse:
         manager = MilvusIndexManager(
             client=mock_client,
             collection_name="c",
-            add_sparse_vector=True,
+            vector_mode="sparse",
             index_parameters={"dim": 384, "M": 8},
         )
         params = manager._get_index_parameters()
@@ -913,7 +941,7 @@ class TestGetIndexParametersSparse:
         manager = MilvusIndexManager(
             client=mock_client,
             collection_name="c",
-            add_sparse_vector=False,
+            vector_mode="dense",
             index_parameters={"dim": 384},
         )
         params = manager._get_index_parameters()
@@ -986,277 +1014,110 @@ class TestCreateSchemaFieldsSkipBranches:
         assert field_names.count(OperatorConstants.VectorDB.DENSE_VECTOR_FIELD_NAME) == 0
 
 
-class TestGpuIndexSelection:
-    """GPU index selection: explicit index_type, use_gpu upgrade / downgrade, and parameter handling."""
+class TestGPUMode:
+    """Tests for GPU mode (vector_mode='gpu') support, index types, metrics, and validation."""
 
-    @pytest.mark.parametrize("gpu_type", ["GPU_CAGRA", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_BRUTE_FORCE"])
-    def test_explicit_gpu_index_is_never_downgraded_client_side(self, mock_client, gpu_type):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type)
-        assert manager.index_type == gpu_type
-        assert manager.requested_index_type == gpu_type
-        assert manager.gpu_fallback_triggered is False
-
-    def test_gpu_index_rejected_on_lite(self, mock_client):
-        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
-            MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA", is_lite=True)
-
-    @pytest.mark.parametrize(
-        ("cpu_type", "gpu_type"),
-        [
-            ("HNSW", "GPU_CAGRA"),
-            ("IVF_FLAT", "GPU_IVF_FLAT"),
-            ("IVF_PQ", "GPU_IVF_PQ"),
-            ("FLAT", "GPU_BRUTE_FORCE"),
-        ],
-    )
-    def test_use_gpu_true_upgrades_cpu_index(self, mock_client, cpu_type, gpu_type):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type=cpu_type, use_gpu=True)
-        assert manager.index_type == gpu_type
-
-    @pytest.mark.parametrize(
-        ("base", "quant", "gpu_type"),
-        [
-            ("HNSW", "PQ", "GPU_IVF_PQ"),
-            ("IVF_FLAT", "PQ", "GPU_IVF_PQ"),
-            ("FLAT", "PQ", "GPU_IVF_PQ"),
-        ],
-    )
-    def test_use_gpu_true_with_quantization_upgrades_quantized_index(self, mock_client, base, quant, gpu_type):
-        manager = MilvusIndexManager(
-            client=mock_client, collection_name="c", index_type=base, quantization=quant, use_gpu=True
-        )
-        assert manager.index_type == gpu_type
-
-    def test_use_gpu_true_without_gpu_equivalent_raises(self, mock_client):
-        with pytest.raises(DocpipeException, match="no GPU equivalent"):
-            MilvusIndexManager(
-                client=mock_client, collection_name="c", index_type="HNSW", quantization="SQ8", use_gpu=True
-            )
-
-    def test_use_gpu_true_on_lite_raises(self, mock_client):
-        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
-            MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", use_gpu=True, is_lite=True)
-
-    def test_use_gpu_false_downgrades_gpu_index(self, mock_client):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_IVF_FLAT", use_gpu=False)
-        assert manager.index_type == "IVF_FLAT"
-        assert manager.gpu_fallback_triggered is False
-
-    def test_use_gpu_false_drops_cagra_only_parameters(self, mock_client):
+    def test_gpu_mode_initialization(self, mock_client):
+        """GPU mode initializes successfully with GPU index type and valid metric."""
         manager = MilvusIndexManager(
             client=mock_client,
             collection_name="c",
+            vector_mode="gpu",
             index_type="GPU_CAGRA",
-            index_parameters={"graph_degree": 32, "build_algo": "NN_DESCENT", "M": 24},
-            use_gpu=False,
+            metric_type="L2",
         )
-        params = manager._get_index_parameters()
-        assert manager.index_type == "HNSW"
-        assert "graph_degree" not in params
-        assert "build_algo" not in params
-        assert params["M"] == 24
-
-    def test_use_gpu_true_drops_hnsw_only_parameters(self, mock_client):
-        manager = MilvusIndexManager(
-            client=mock_client,
-            collection_name="c",
-            index_type="HNSW",
-            index_parameters={"M": 24, "efConstruction": 100, "graph_degree": 16, "intermediate_graph_degree": 32},
-            use_gpu=True,
-        )
-        params = manager._get_index_parameters()
+        assert manager.vector_mode == "gpu"
         assert manager.index_type == "GPU_CAGRA"
-        assert "M" not in params
-        assert "efConstruction" not in params
-        assert params["graph_degree"] == 16
+        assert manager.metric_type == "L2"
+        assert manager._is_gpu is True
 
-    @pytest.mark.parametrize("gpu_type", ["GPU_CAGRA", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_BRUTE_FORCE"])
-    def test_gpu_index_rejects_cosine(self, mock_client, gpu_type):
-        with pytest.raises(DocpipeException, match="does not support the COSINE metric"):
-            MilvusIndexManager(client=mock_client, collection_name="c", index_type=gpu_type, metric_type="COSINE")
-
-    def test_gpu_index_rejects_cosine_after_use_gpu_upgrade(self, mock_client):
-        with pytest.raises(DocpipeException, match="does not support the COSINE metric"):
-            MilvusIndexManager(
-                client=mock_client, collection_name="c", index_type="HNSW", metric_type="COSINE", use_gpu=True
-            )
-
-    def test_cpu_index_accepts_cosine(self, mock_client):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="HNSW", metric_type="COSINE")
-        assert manager.metric_type == "COSINE"
-
-    def test_gpu_index_accepts_ip(self, mock_client):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA", metric_type="IP")
-        assert manager.index_type == "GPU_CAGRA"
-
-    def test_cagra_default_cache_dataset_on_device_is_string(self):
-        assert INDEX_DEFAULT_PARAMETERS["GPU_CAGRA"]["cache_dataset_on_device"] == "false"
-
-
-class TestGpuCagraValidation:
-    """GPU_CAGRA requires intermediate_graph_degree >= graph_degree."""
-
-    def test_graph_degree_greater_than_intermediate_raises(self, mock_client):
-        with pytest.raises(DocpipeException, match="intermediate_graph_degree"):
+    def test_gpu_mode_rejects_cpu_index_type(self, mock_client):
+        """GPU mode rejects CPU index types."""
+        with pytest.raises(DocpipeException, match="not supported in vector_mode='gpu'"):
             MilvusIndexManager(
                 client=mock_client,
                 collection_name="c",
+                vector_mode="gpu",
+                index_type="HNSW",
+            )
+
+    def test_gpu_mode_rejects_cosine_metric(self, mock_client):
+        """GPU mode rejects COSINE metric."""
+        with pytest.raises(DocpipeException, match="does not support metric 'COSINE'"):
+            MilvusIndexManager(
+                client=mock_client,
+                collection_name="c",
+                vector_mode="gpu",
+                index_type="GPU_CAGRA",
+                metric_type="COSINE",
+            )
+
+    def test_gpu_cagra_graph_degree_validation(self, mock_client):
+        """GPU_CAGRA rejects graph_degree > intermediate_graph_degree."""
+        with pytest.raises(
+            DocpipeException, match=r"graph_degree \(64\) to be less than or equal to intermediate_graph_degree"
+        ):
+            MilvusIndexManager(
+                client=mock_client,
+                collection_name="c",
+                vector_mode="gpu",
                 index_type="GPU_CAGRA",
                 index_parameters={"graph_degree": 64, "intermediate_graph_degree": 32},
             )
 
-    def test_user_graph_degree_above_default_intermediate_raises(self, mock_client):
-        with pytest.raises(DocpipeException, match="intermediate_graph_degree"):
+    def test_gpu_cagra_valid_custom_parameters(self, mock_client):
+        """GPU_CAGRA accepts custom parameters where graph_degree <= intermediate_graph_degree."""
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            vector_mode="gpu",
+            index_type="GPU_CAGRA",
+            index_parameters={"graph_degree": 32, "intermediate_graph_degree": 64},
+        )
+        params = manager._get_index_parameters()
+        assert params["graph_degree"] == 32
+        assert params["intermediate_graph_degree"] == 64
+
+    def test_default_parameters_for_all_gpu_index_types(self):
+        """All GPU index types have entries in INDEX_DEFAULT_PARAMETERS."""
+        for gpu_type in MilvusIndexTypes.ALL_GPU_TYPES:
+            assert gpu_type in INDEX_DEFAULT_PARAMETERS
+        cagra_params = INDEX_DEFAULT_PARAMETERS[MilvusIndexTypes.GPU_CAGRA]
+        assert "intermediate_graph_degree" in cagra_params
+        assert "graph_degree" in cagra_params
+        assert "build_algo" in cagra_params
+        assert "cache_dataset_on_device" in cagra_params
+
+    def test_rejection_of_unknown_vector_mode(self, mock_client):
+        """Unknown vector_mode raises DocpipeException with 400 status code."""
+        with pytest.raises(DocpipeException, match="Invalid vector_mode 'unknown'"):
             MilvusIndexManager(
                 client=mock_client,
                 collection_name="c",
-                index_type="GPU_CAGRA",
-                index_parameters={"graph_degree": 128},
+                vector_mode="unknown",
             )
 
-    def test_equal_degrees_accepted(self, mock_client):
+    def test_gpu_mode_rejected_on_lite(self, mock_client):
+        """GPU mode is rejected on Milvus Lite."""
+        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
+            MilvusIndexManager(
+                client=mock_client,
+                collection_name="c",
+                vector_mode="gpu",
+                index_type="GPU_CAGRA",
+                is_lite=True,
+            )
+
+    def test_gpu_accepts_ip(self, mock_client):
+        """GPU mode accepts IP metric."""
         manager = MilvusIndexManager(
             client=mock_client,
             collection_name="c",
+            vector_mode="gpu",
             index_type="GPU_CAGRA",
-            index_parameters={"graph_degree": 32, "intermediate_graph_degree": 32},
+            metric_type="IP",
         )
-        assert manager.index_type == "GPU_CAGRA"
-
-    def test_defaults_accepted(self, mock_client):
-        manager = MilvusIndexManager(client=mock_client, collection_name="c", index_type="GPU_CAGRA")
-        assert manager._get_index_parameters()["graph_degree"] == 32
-
-    def test_not_applied_to_other_index_types(self, mock_client):
-        manager = MilvusIndexManager(
-            client=mock_client,
-            collection_name="c",
-            index_type="HNSW",
-            index_parameters={"graph_degree": 64, "intermediate_graph_degree": 32},
-        )
-        assert manager.index_type == "HNSW"
-
-
-class TestGpuFallbackOnServerError:
-    """fallback_to_cpu is opt-in and triggered only by a server error during index creation."""
-
-    @staticmethod
-    def _manager(mock_client, **kwargs: Any) -> MilvusIndexManager:
-        mock_client.has_collection.return_value = False
-        mock_client.prepare_index_params.return_value = MagicMock()
-        mappings = [
-            {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
-            {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
-            {"feature_name": "content", "mapped_column_name": "text"},
-        ]
-        return MilvusIndexManager(client=mock_client, collection_name="c", feature_mappings=mappings, **kwargs)
-
-    def test_fallback_retries_with_cpu_index_when_server_rejects_gpu(self, mock_client):
-        mock_client.create_index.side_effect = [RuntimeError("index type not supported"), None]
-        manager = self._manager(
-            mock_client,
-            index_type="GPU_CAGRA",
-            index_parameters={"graph_degree": 16, "M": 24},
-            fallback_to_cpu=True,
-        )
-        manager.create_collection(dimension_mapping={"embeddings": 384})
-
-        assert mock_client.create_index.call_count == 2
-        assert manager.index_type == "HNSW"
-        assert manager.requested_index_type == "GPU_CAGRA"
-        assert manager.gpu_fallback_triggered is True
-        assert "index type not supported" in (manager.gpu_fallback_reason or "")
-        assert "graph_degree" not in manager._get_index_parameters()
-        assert manager._get_index_parameters()["M"] == 24
-
-    def test_no_fallback_by_default(self, mock_client):
-        mock_client.create_index.side_effect = RuntimeError("index type not supported")
-        manager = self._manager(mock_client, index_type="GPU_CAGRA")
-        with pytest.raises(DocpipeException, match="Failed to create collection"):
-            manager.create_collection(dimension_mapping={"embeddings": 384})
-        assert mock_client.create_index.call_count == 1
-        assert manager.index_type == "GPU_CAGRA"
-        assert manager.gpu_fallback_triggered is False
-
-    def test_fallback_not_attempted_for_cpu_index(self, mock_client):
-        mock_client.create_index.side_effect = RuntimeError("boom")
-        manager = self._manager(mock_client, index_type="HNSW", fallback_to_cpu=True)
-        with pytest.raises(DocpipeException, match="Failed to create collection"):
-            manager.create_collection(dimension_mapping={"embeddings": 384})
-        assert mock_client.create_index.call_count == 1
-
-    def test_fallback_failure_is_reported(self, mock_client):
-        mock_client.create_index.side_effect = RuntimeError("boom")
-        manager = self._manager(mock_client, index_type="GPU_IVF_FLAT", fallback_to_cpu=True)
-        with pytest.raises(DocpipeException, match="Failed to create collection"):
-            manager.create_collection(dimension_mapping={"embeddings": 384})
-        assert mock_client.create_index.call_count == 2
-        assert manager.index_type == "IVF_FLAT"
-
-    def test_fallback_to_cpu_cosine_after_downgrade_is_allowed(self, mock_client):
-        mock_client.create_index.side_effect = [RuntimeError("no gpu"), None]
-        manager = self._manager(mock_client, index_type="GPU_CAGRA", metric_type="IP", fallback_to_cpu=True)
-        manager.create_collection(dimension_mapping={"embeddings": 384})
-        assert manager.index_type == "HNSW"
         assert manager.metric_type == "IP"
-
-
-class TestQuantization:
-    @pytest.mark.parametrize(
-        ("base", "quant", "expected"),
-        [
-            ("HNSW", "SQ8", "HNSW_SQ"),
-            ("HNSW", "PQ", "HNSW_PQ"),
-            ("HNSW", "PRQ", "HNSW_PRQ"),
-            ("IVF_FLAT", "SQ8", "IVF_SQ8"),
-            ("IVF_FLAT", "PQ", "IVF_PQ"),
-            ("FLAT", "PQ", "IVF_PQ"),
-            ("GPU_IVF_FLAT", "PQ", "GPU_IVF_PQ"),
-            ("HNSW", "NONE", "HNSW"),
-            ("HNSW", None, "HNSW"),
-            ("DISKANN", "PQ", "DISKANN"),
-        ],
-    )
-    def test_resolve_quantized_index_type(self, base, quant, expected):
-        assert MilvusIndexManager.resolve_quantized_index_type(base_index_type=base, quantization=quant) == expected
-
-    def test_manager_applies_quantization_and_parameters(self, mock_client):
-        manager = MilvusIndexManager(
-            client=mock_client,
-            collection_name="c",
-            index_type="HNSW",
-            quantization="PQ",
-            quantization_parameters={"m": 32},
-        )
-        assert manager.index_type == "HNSW_PQ"
-        assert manager._get_index_parameters()["m"] == 32
-
-    def test_unsupported_combination_ignores_quantization_parameters(self, mock_client):
-        manager = MilvusIndexManager(
-            client=mock_client,
-            collection_name="c",
-            index_type="DISKANN",
-            quantization="PQ",
-            quantization_parameters={"m": 32},
-        )
-        assert manager.index_type == "DISKANN"
-        assert "m" not in manager._get_index_parameters()
-
-
-class TestFilterParametersForIndexType:
-    def test_keeps_only_valid_keys(self):
-        kept, dropped = MilvusIndexManager.filter_parameters_for_index_type(
-            target_index_type="HNSW", parameters={"M": 8, "graph_degree": 32}
-        )
-        assert kept == {"M": 8}
-        assert dropped == ["graph_degree"]
-
-    def test_cagra_accepts_adapt_for_cpu(self):
-        kept, dropped = MilvusIndexManager.filter_parameters_for_index_type(
-            target_index_type="GPU_CAGRA", parameters={"adapt_for_cpu": "true"}
-        )
-        assert kept == {"adapt_for_cpu": "true"}
-        assert dropped == []
 
 
 class TestBinaryVectorIndexSupport:
@@ -1320,7 +1181,7 @@ class TestBinaryVectorIndexSupport:
                 index_type=MilvusIndexTypes.HNSW,
                 metric_type=MilvusMetricTypes.HAMMING,
             )
-        assert "cannot use binary metric" in str(exc_info.value)
+        assert "Invalid metric type 'HAMMING'" in str(exc_info.value)
 
     def test_milvus_lite_rejects_binary_index_type(self, mock_client):
         """Milvus Lite must reject binary index types at initialization."""
@@ -1642,7 +1503,7 @@ class TestValidateVectorFeatureTypes:
         manager.validate_vector_feature_types(feature_types={"dense_vec": "vector", "bin_vec": "vector_binary"})
 
     def test_sparse_mode_skips_check(self, mock_client):
-        manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING", add_sparse_vector=True)
+        manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING", vector_mode="sparse")
         manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
 
     def test_lite_with_binary_feature_and_flat_index_raises(self, mock_client):
@@ -1654,3 +1515,99 @@ class TestValidateVectorFeatureTypes:
     def test_lite_with_dense_feature_passes(self, mock_client):
         manager = self._manager(mock_client, index_type="FLAT", metric_type="L2", is_lite=True)
         manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_gpu_mode_with_dense_feature_passes(self, mock_client):
+        manager = self._manager(mock_client, vector_mode="gpu", index_type="GPU_CAGRA")
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_gpu_mode_with_only_binary_feature_raises(self, mock_client):
+        """GPU indexes cannot index binary vectors, so a binary-only collection never uses the GPU."""
+        manager = self._manager(mock_client, vector_mode="gpu", index_type="GPU_CAGRA")
+        with pytest.raises(DocpipeException, match="only applies to dense float vectors"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector_binary"})
+
+    def test_gpu_mode_mixed_dense_and_binary_passes(self, mock_client):
+        manager = self._manager(mock_client, vector_mode="gpu", index_type="GPU_CAGRA")
+        manager.validate_vector_feature_types(feature_types={"dense_vec": "vector", "bin_vec": "vector_binary"})
+
+    def test_gpu_sparse_mode_skips_check(self, mock_client):
+        """A sparse-only flow never runs the GPU/binary feature checks."""
+        manager = self._manager(mock_client, vector_mode="sparse")
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector_binary"})
+
+
+class TestVectorKindIndexResolution:
+    """Index settings applied per vector field for each collection kind (gpu mode)."""
+
+    @staticmethod
+    def _build(mock_client, *, vector_mode: str, index_type: str, metric_type: str, features: dict, dims: dict):
+        added: list[dict] = []
+        mock_client.prepare_index_params.return_value.add_index = lambda **kw: added.append(kw)
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            vector_mode=vector_mode,
+            index_type=index_type,
+            metric_type=metric_type,
+            available_features=features,
+        )
+        manager._build_dense_index_params(dimension_mapping=dims)
+        return added
+
+    def test_dense_only_gpu_uses_gpu_index(self, mock_client):
+        added = self._build(
+            mock_client,
+            vector_mode="gpu",
+            index_type="GPU_CAGRA",
+            metric_type="L2",
+            features={"embeddings": {"type": "vector"}},
+            dims={"embeddings": 384},
+        )
+        assert [(a["index_type"], a["metric_type"]) for a in added] == [("GPU_CAGRA", "L2")]
+
+    def test_mixed_gpu_dense_and_bin_flat_binary(self, mock_client):
+        added = self._build(
+            mock_client,
+            vector_mode="gpu",
+            index_type="GPU_CAGRA",
+            metric_type="L2",
+            features={"dense_vec": {"type": "vector"}, "bin_vec": {"type": "vector_binary"}},
+            dims={"dense_vec": 384, "bin_vec": 256},
+        )
+        by_type = {a["index_type"]: a["metric_type"] for a in added}
+        assert by_type == {"GPU_CAGRA": "L2", "BIN_FLAT": "HAMMING"}
+
+    def test_binary_mode_binary_only(self, mock_client):
+        added = self._build(
+            mock_client,
+            vector_mode="binary",
+            index_type="BIN_IVF_FLAT",
+            metric_type="JACCARD",
+            features={"bin_vec": {"type": "vector_binary"}},
+            dims={"bin_vec": 256},
+        )
+        assert [(a["index_type"], a["metric_type"]) for a in added] == [("BIN_IVF_FLAT", "JACCARD")]
+
+    def test_hybrid_sparse_index_stays_inverted_index_bm25(self, mock_client):
+        """Sparse mode keeps SPARSE_INVERTED_INDEX/BM25 for the sparse field and the configured dense index."""
+        mock_client.has_collection.return_value = False
+        added: list[dict] = []
+        mock_client.prepare_index_params.return_value.add_index = lambda **kw: added.append(kw)
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="c",
+            vector_mode="sparse",
+            index_type="HNSW",
+            metric_type="COSINE",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+                {"feature_name": "content", "mapped_column_name": "text"},
+            ],
+            available_features={"embeddings": {"type": "vector"}},
+        )
+        manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert {(a["index_type"], a["metric_type"]) for a in added} == {
+            ("SPARSE_INVERTED_INDEX", "BM25"),
+            ("HNSW", "COSINE"),
+        }

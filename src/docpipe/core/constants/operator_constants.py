@@ -419,17 +419,13 @@ class OperatorConstants:
         # Vector Configuration
         ADD_SPARSE_VECTOR: Final[str] = "add_sparse_vector"
         ADD_SPARSE_VECTOR_DEFAULT: Final[bool] = False
+        VECTOR_MODE: Final[str] = "vector_mode"
+        VECTOR_MODE_DEFAULT: Final[str] = "dense"
         SPARSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "sparse_embeddings"
         DENSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "dense_embeddings"
         # Milvus field names (mapped names in collection schema)
         SPARSE_VECTOR_FIELD_NAME: Final[str] = "sparse_vector"
         DENSE_VECTOR_FIELD_NAME: Final[str] = "vector"
-
-        # GPU and Quantization Configuration
-        QUANTIZATION: Final[str] = "quantization"
-        QUANTIZATION_PARAMETERS: Final[str] = "quantization_parameters"
-        USE_GPU: Final[str] = "use_gpu"
-        FALLBACK_TO_CPU: Final[str] = "fallback_to_cpu"
 
         # VectorDB Metrics and Configuration
         METRIC_TYPE: Final[str] = "metric_type"
