@@ -35,10 +35,14 @@ class GraphExecutionEngine:
 
     def execute(self) -> dict[UUID, OperatorOutput]:
         """Run operators and return each terminal operator's output table."""
+        from docpipe.core.event_streaming.kafka_producer import KafkaProducer
+
         node = None
         try:
             for node_id in self.ordered_operator_ids:
                 node = self.flow_graph.nodes[node_id]
+                event_id = node.operator_config["input_event"]["event_id"]
+                KafkaProducer.notify(event_id=event_id, operation=node.name, status="Started")
                 if node.operator_name == OperatorConstants.Operators.BRANCHING:
                     input_edges = self.flow_graph.get_input_edges(node.id)
                     edge = input_edges[0]
@@ -56,6 +60,12 @@ class GraphExecutionEngine:
                         input_table = None
                     operator_output = self._execute_simple_node(node=node, input_table=input_table)
                 self._raise_if_node_failed(node=node, metadata=operator_output.metadata)
+                KafkaProducer.notify(
+                    event_id=event_id,
+                    operation=node.name,
+                    status="Completed",
+                    pages_processed=operator_output.metadata.get(OperatorConstants.Metadata.TOTAL_PAGES_PROCESSED),
+                )
                 self.output_buffer.put_output(node_id=node_id, output=operator_output)
                 node = None
 
