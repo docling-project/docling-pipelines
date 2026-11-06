@@ -25,29 +25,33 @@ class FlowBuilder:
 
     def build_graph(self) -> FlowGraph:
         """Parse runtime operators and connections, then validate the graph."""
-        enriched_flow = self._flow_enrich()
-        flow_dag: list[dict] = enriched_flow[DocpipeConstants.DAG]
+        flow_dag: list[dict] = self.flow[DocpipeConstants.DAG]
 
         flow_graph: FlowGraph = FlowGraph()
+        branch_ids = {operator["id"]: operator.get(OperatorConstants.Misc.LINK_ID) for operator in flow_dag}
         for operator in flow_dag:
             node: Node = Node(
                 id=UUID(operator["id"]),
                 name=operator["name"],
                 operator_name=operator["operator"],
-                operator_config=operator["config"],
+                operator_config=operator.get("config") or {},
             )
             flow_graph.add_node(node=node)
 
-        for operator in flow_dag:
             for output_edge in operator["output_edges"]:
                 edge = Edge(
-                    source_id=UUID(operator["id"]),
+                    source_id=node.id,
                     target_id=UUID(output_edge["node_id_ref"]),
-                    branch_id=output_edge.get(DocpipeConstants.LINK_NAME, None),
+                    branch_id=branch_ids.get(output_edge["node_id_ref"]),
                 )
                 flow_graph.add_edge(edge=edge)
 
         FlowValidator.validate(flow_graph=flow_graph)
+
+        # Validate endpoints before feature propagation traverses the runtime connections.
+        enriched_flow = self._flow_enrich()
+        for operator in enriched_flow[DocpipeConstants.DAG]:
+            flow_graph.nodes[UUID(operator["id"])].operator_config = operator["config"]
         return flow_graph
 
     def _flow_enrich(self) -> dict:
@@ -63,6 +67,7 @@ class FlowBuilder:
                 **self.params,
                 DocpipeConstants.NODE_ID: operator["id"],
                 DocpipeConstants.NODE_NAME: operator["name"],
+                DocpipeConstants.FORCE_INGEST: True,
             }
 
         # Resolve Vault references in the effective configuration before feature propagation.

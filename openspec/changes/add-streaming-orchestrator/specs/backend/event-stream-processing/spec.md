@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Route validated Kafka file events to synchronous in-process flow execution, with sequential processing,
-bounded retries, terminal diagnostics, explicit offset commits, and cooperative shutdown.
+Route validated Kafka file events to synchronous in-process flow execution, with single-pass processing,
+terminal diagnostics, explicit offset commits, and cooperative shutdown.
 
 ## ADDED Requirements
 
@@ -23,42 +23,30 @@ Event execution SHALL NOT require an API base URL, submit an HTTP job run, or in
 
 ### Requirement: One active event per listener
 
-Each listener SHALL finish an event's execution, allowed retries, terminal reporting, and commit attempt before
-polling for the next event. Operators and retries SHALL run synchronously on the listener's processing thread.
-The application SHALL NOT accumulate a work queue or start concurrent event workers.
+Each listener SHALL finish an event's single synchronous dispatch, terminal reporting, and commit attempt before
+polling for the next event. Operators SHALL run synchronously on the listener's processing thread. The application
+SHALL NOT accumulate a work queue or start concurrent event workers.
 
 #### Scenario: Several messages are available
-- **WHEN** event A is executing or retrying while events B and C are available in Kafka
+- **WHEN** event A is executing while events B and C are available in Kafka
 - **THEN** B and C are not polled for application processing until A reaches a terminal outcome and its commit
   is attempted
 
-### Requirement: Configurable bounded immediate retries
+### Requirement: Single dispatch and skip on processing failure
 
-Valid events whose routing, flow preparation, or operator execution fails SHALL retry immediately up to a configured
-nonnegative maximum retry count. A maximum of R retries SHALL allow at most R + 1 attempts. Each retry SHALL restart
-dispatch and the complete flow with fresh attempt state; no offset commit SHALL occur between attempts.
+The listener SHALL dispatch each valid event once. If routing, flow preparation, or operator execution fails, it SHALL
+report the failure, attempt one synchronous message-specific offset commit, and continue to the next event without
+rerunning the flow. Automatic processing retries and retry configuration SHALL remain excluded.
 
-#### Scenario: Retry succeeds
-- **WHEN** an event's first attempt fails and a permitted retry succeeds
-- **THEN** the listener stops retrying, reports success, and attempts one offset commit after completion
-
-#### Scenario: Retry budget is exhausted
-- **WHEN** all R + 1 attempts fail, including a missing mapping or deleted flow
-- **THEN** the listener reports terminal failure, attempts the event's offset commit, and continues to the next event
-
-#### Scenario: Zero retries
-- **WHEN** the maximum retry count is zero
-- **THEN** the listener makes exactly one processing attempt before reporting the terminal outcome
-
-#### Scenario: Mapping changes before retry
-- **WHEN** a failed event's routing mapping changes before its next allowed attempt
-- **THEN** that attempt resolves the current mapping and prepares the currently selected saved flow
+#### Scenario: Flow dispatch fails
+- **WHEN** a valid event fails during routing, flow preparation, or operator execution
+- **THEN** the listener reports the failure, attempts one offset commit, and polls the next event without rerunning the flow
 
 ### Requirement: Invalid events are reported and skipped
 
 Messages that fail deserialization, schema validation, or event validation SHALL be reported and skipped without
-flow execution or processing retries. The listener SHALL attempt their offset commits and continue processing
-subsequent messages. Kafka error messages without a usable event record SHALL be reported without a record commit.
+flow execution. The listener SHALL attempt their offset commits and continue processing subsequent messages. Kafka
+error messages without a usable event record SHALL be reported without a record commit.
 
 #### Scenario: Invalid event precedes a valid event
 - **WHEN** a malformed event is followed by a valid event
@@ -72,16 +60,17 @@ subsequent messages. Kafka error messages without a usable event record SHALL be
 ### Requirement: Commit only terminal records
 
 Automatic commits and automatic offset storage SHALL remain disabled. The listener SHALL attempt a synchronous
-message-specific offset commit after success, retry exhaustion, or invalid-event rejection. An unfinished attempt
-or an event with a pending retry SHALL remain uncommitted, including during shutdown.
+message-specific offset commit after success, processing failure, or invalid-event rejection. It SHALL NOT rerun a
+failed flow before that commit attempt. An unfinished event execution SHALL remain uncommitted, including during
+shutdown.
 
 #### Scenario: Slow sink is still processing
 - **WHEN** a sink has not finished persisting the event's output
 - **THEN** the event's offset is not committed
 
-#### Scenario: Attempt has failed with a retry pending
-- **WHEN** an attempt fails and another retry is still allowed
-- **THEN** the listener does not commit the event before that retry reaches its outcome
+#### Scenario: Dispatch failure is acknowledged before the next poll
+- **WHEN** a valid event's dispatch fails
+- **THEN** the listener attempts its message-specific commit before polling the next event, without rerunning dispatch
 
 ### Requirement: Commit failures remain visible and separate from processing
 
@@ -99,72 +88,72 @@ The listener SHALL continue consuming; replay after restart or reassignment SHAL
 
 ### Requirement: Terminal diagnostics and failure notification
 
-The listener SHALL log completion or exhausted failure with event ID, routing key, operation, selected flow when
-known, and attempt count. Failures SHALL identify their stage, reason, and operator when known. Kafka diagnostics
-SHALL include topic, partition, and offset. Failure notification SHALL be an in-process outcome, not a Kafka publication
-or durable job record; credentials and document content SHALL NOT be logged.
+The listener SHALL log completion or failure with the event ID when known. Flow ID correlation is not required.
+Failures SHALL identify the operator and the reason for raised errors when known. Kafka diagnostics SHALL include
+topic, partition, and offset. Failure notification SHALL be an in-process outcome. It SHALL NOT publish a Kafka
+message or create a durable job record. Credentials and document content SHALL NOT be logged.
 
-#### Scenario: Operator retries are exhausted
-- **WHEN** an operator fails on the final permitted attempt
-- **THEN** terminal diagnostics identify the event, flow, operator, attempts, and failure before the commit is attempted
+#### Scenario: Operator fails
+- **WHEN** an operator fails during the event's single dispatch
+- **THEN** terminal diagnostics identify the event, operator, and failure before the commit is attempted
+
+#### Scenario: Operator reports failed documents in metadata
+- **WHEN** an operator returns failed-document metadata
+- **THEN** terminal diagnostics report the operator failure without copying failed-document reason text
 
 #### Scenario: Mapping lookup fails
 - **WHEN** routing fails before a flow or operator is known
-- **THEN** failure diagnostics include the event and routing stage without inventing a flow or operator identifier
+- **THEN** failure diagnostics include the event and routing failure reason without inventing a flow or operator identifier
 
 #### Scenario: Source filters skip a document
 - **WHEN** ingestion intentionally excludes the referenced document and reports no failed document
-- **THEN** runtime diagnostics identify the event, selected flow, skip, and available reason before dispatch completes
-- **AND** the listener treats the no-op as completed and attempts its offset commit without processing retries
-
-### Requirement: Retry configuration
-
-Event streaming SHALL expose an environment setting for the maximum retry count. Invalid or negative retry counts
-SHALL fail listener configuration before consumption starts.
-
-#### Scenario: Retry count is configured
-- **WHEN** the listener starts with a valid explicit maximum retry count
-- **THEN** the listener applies that retry limit and reports the active setting at startup
-
-#### Scenario: Retry configuration is invalid
-- **WHEN** the configured retry count is negative or nonnumeric
-- **THEN** listener configuration fails before a consumer begins polling
+- **THEN** skip reasons and logging remain the ingest operator's responsibility
+- **AND** the listener treats the no-op as completed and attempts its offset commit without rerunning dispatch
 
 ### Requirement: Cooperative draining shutdown
 
-A stop request SHALL prevent new events from starting and drain the active event through its permitted retries,
-cleanup, terminal reporting, and offset-commit attempt before closing the consumer. Shutdown SHALL NOT cancel or
-abandon running operators, count a stop request as retry exhaustion, or commit unfinished work.
+A stop request SHALL prevent new events from starting and allow the active event's single dispatch, cleanup, terminal
+reporting, and offset-commit attempt to finish before the listener closes the consumer. Shutdown SHALL NOT cancel
+running operators or commit unfinished work.
 
 #### Scenario: Stop arrives during operator or sink processing
 - **WHEN** shutdown is requested while an operator or sink is executing
-- **THEN** `stop()` remains pending without interrupting that execution, waits for the event's terminal outcome and
-  commit attempt, and returns only after consumer closure and thread exit, without polling another event
+- **THEN** `stop()` waits without interrupting that execution for up to five seconds
+- **AND** if the event and consumer shutdown finish within that period, it returns after the listener thread exits
+- **AND** otherwise it logs a shutdown-timeout warning and returns while the listener thread continues
 
-#### Scenario: Stop arrives with retries remaining
-- **WHEN** shutdown is requested for an active event whose failed attempt has a retry remaining
-- **THEN** the listener completes the permitted retry sequence until success or exhaustion, performs cleanup and
-  terminal reporting, attempts the offset commit, and only then closes the consumer and exits
+#### Scenario: Stop arrives during a failed event
+- **WHEN** shutdown is requested while the active event's dispatch is failing
+- **THEN** the listener reports the failure, attempts its offset commit once, and closes the consumer without rerunning
+  the flow, even if `stop()` already returned after its five-second wait
 
 #### Scenario: Shutdown awaits cleanup and the commit attempt
 - **WHEN** shutdown is requested and the active event's cleanup or offset-commit attempt is still in progress
-- **THEN** `stop()` remains pending and the consumer remains open until cleanup, terminal reporting, and the commit
-  attempt finish, including when the commit attempt reports a failure
+- **THEN** `stop()` waits for up to five seconds without blocking the asyncio event loop
+- **AND** if cleanup, terminal reporting, commit attempt, and consumer closure exceed that period, `stop()` logs a
+  timeout warning and returns while the listener thread continues
 
 #### Scenario: Stop arrives after poll but before execution
 - **WHEN** the stop flag is set after a record is polled but before its event begins execution
-- **THEN** the listener leaves that record unprocessed and uncommitted, closes the consumer, and exits its processing
-  thread before `stop()` returns
+- **THEN** the listener leaves that record unprocessed and uncommitted and exits through its consumer-close path
+- **AND** `stop()` follows the five-second wait and timeout behavior even if consumer closure is still in progress
 
-### Requirement: Awaitable shutdown completion
+### Requirement: Timed awaitable shutdown
 
-`stop()` SHALL be awaitable and return only after the listener's processing thread exits, with the consumer closed.
-Waiting SHALL keep the asyncio event loop responsive to unrelated asynchronous tasks. Shutdown SHALL NOT impose a
-drain timeout; an operator that never returns can keep `stop()` pending indefinitely.
+`stop()` SHALL await the listener thread's exit for up to five seconds without blocking the asyncio event loop. If the
+thread remains alive after five seconds, `stop()` SHALL log a timeout warning and return without cancelling the thread.
+The listener thread SHALL keep the consumer open until active processing reaches a terminal outcome and its cleanup,
+reporting, and commit attempt finish. If the process terminates first, unfinished work can remain uncommitted.
 
 #### Scenario: Waiting for shutdown keeps the event loop responsive
 - **WHEN** the shutdown caller awaits `stop()` while the listener thread is processing an active event
-- **THEN** `stop()` remains pending and unrelated asynchronous tasks can run on the asyncio event loop
+- **THEN** unrelated asynchronous tasks can run while `stop()` waits, and the wait ends when the thread exits or five
+  seconds elapse
+
+#### Scenario: Listener remains active after the shutdown wait expires
+- **WHEN** the listener thread has not exited five seconds after shutdown is requested
+- **THEN** `stop()` logs a timeout warning and returns without cancelling the active event or closing its consumer
+- **AND** the listener thread continues until it reaches its normal terminal cleanup and consumer-close path
 
 ### Requirement: Existing application and batch execution compatibility
 
