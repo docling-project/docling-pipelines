@@ -255,7 +255,7 @@ def get_topologically_sorted_node_ids(
     try:
         node_order = _sort_snapshot_node_keys(flow_definition=flow_definition)
     except Exception as exc:
-        logger.warning("Failed to topologically sort flow snapshot nodes: %s", exc)
+        logger.warning("Failed to topologically sort flow snapshot nodes: %s", exc, exc_info=True)
         return []
     if node_stats is None:
         return node_order

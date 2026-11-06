@@ -1943,42 +1943,6 @@ class TestIsJobRunComplete:
         assert job_tracker_service.is_job_run_complete(job_run_id=JOB_RUN_ID) is False
 
 
-class TestCalculateNodeSequence:
-    def test_empty_returns_empty(self):
-        assert JobTrackerService._calculate_node_sequence(node_stats={}) == []
-
-    def test_sorts_by_start_time(self):
-        """Lines 1464-1472."""
-        n1 = NodeStats(id="n1", name="a", start_time=10, end_time=20)
-        n2 = NodeStats(id="n2", name="b", start_time=5, end_time=15)
-        result = JobTrackerService._calculate_node_sequence(node_stats={"n1": n1, "n2": n2})
-        assert result[0] == "n2"
-
-    def test_sorts_completed_before_running_before_pending(self):
-        """Fallback sorting places completed -> running -> pending."""
-        n_pending = NodeStats(id="n_pending", name="pending", start_time=0, end_time=0)
-        n_running = NodeStats(id="n_running", name="running", start_time=150, end_time=0)
-        n_completed = NodeStats(id="n_completed", name="completed", start_time=100, end_time=200)
-
-        result = JobTrackerService._calculate_node_sequence(
-            node_stats={"n_pending": n_pending, "n_running": n_running, "n_completed": n_completed}
-        )
-        assert result == ["n_completed", "n_running", "n_pending"]
-
-    def test_node_sequence_with_node_order_and_unmapped_nodes(self):
-        """Unmatched extra nodes are sorted chronologically and placed after matched nodes."""
-        n1 = NodeStats(id="n1", name="a", start_time=100, end_time=200)
-        n2 = NodeStats(id="n2", name="b", start_time=200, end_time=300)
-        extra_late = NodeStats(id="extra_late", name="late", start_time=500, end_time=600)
-        extra_early = NodeStats(id="extra_early", name="early", start_time=300, end_time=400)
-
-        result = JobTrackerService._calculate_node_sequence(
-            node_stats={"extra_late": extra_late, "n2": n2, "extra_early": extra_early, "n1": n1},
-            node_order=["n1", "n2"],
-        )
-        assert result == ["n1", "n2", "extra_early", "extra_late"]
-
-
 class TestBuildNodeMetadataArray:
     def test_builds_from_object_stats(self):
         """Lines 1478-1494."""
@@ -2177,99 +2141,35 @@ class TestGetFormattedJobStats:
         assert response.node_sequence == [node_1, node_2]
 
 
-LINEAR_FLOW_DEF = {
-    "dag": [
-        {"id": "a", "output_edges": [{"node_id_ref": "b"}]},
-        {"id": "b", "output_edges": [{"node_id_ref": "c"}]},
-        {"id": "c", "output_edges": []},
-    ]
-}
+class TestNodeOrderResolverWiring:
+    """JobTrackerService delegates node ordering to its NodeOrderResolver."""
 
-
-class TestSnapshotNodeOrderCache:
-    """Tests for the per-job-run snapshot node order cache behind _resolve_node_order."""
-
-    def test_snapshot_read_once_per_job_run(self, *, job_tracker_service):
-        """Repeated polls for the same job run read the snapshot only once."""
-        with patch.object(job_tracker_service, "get_flow_definition", return_value=LINEAR_FLOW_DEF) as get_def:
-            first = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}, "b": {}})
-            second = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}, "b": {}})
-
-        assert first == second == ["a", "b"]
-        get_def.assert_called_once_with(job_run_id=JOB_RUN_ID)
-
-    def test_nodes_starting_after_first_poll_keep_dag_order(self, *, job_tracker_service):
-        """The unfiltered order is cached, so nodes that gain stats later are still placed by the DAG."""
-        with patch.object(job_tracker_service, "get_flow_definition", return_value=LINEAR_FLOW_DEF):
-            early = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-            later = job_tracker_service._resolve_node_order(
-                job_run_id=JOB_RUN_ID, node_stats={"c": {}, "a": {}, "b": {}}
-            )
-
-        assert early == ["a"]
-        assert later == ["a", "b", "c"]
-
-    def test_missing_snapshot_is_not_cached(self, *, job_tracker_service):
-        """A snapshot not yet saved (None) is retried on the next poll."""
-        with patch.object(job_tracker_service, "get_flow_definition", side_effect=[None, LINEAR_FLOW_DEF]) as get_def:
-            first = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-            second = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-
-        assert first is None
-        assert second == ["a"]
-        assert get_def.call_count == 2
-
-    def test_storage_error_is_not_cached(self, *, job_tracker_service):
-        """A failing snapshot read falls back to None and is retried on the next poll."""
-        with patch.object(
-            job_tracker_service,
-            "get_flow_definition",
-            side_effect=[RuntimeError("Store connection failed"), LINEAR_FLOW_DEF],
-        ) as get_def:
-            first = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-            second = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-
-        assert first is None
-        assert second == ["a"]
-        assert get_def.call_count == 2
-
-    def test_unparseable_snapshot_is_cached_as_empty_order(self, *, job_tracker_service):
-        """A snapshot that yields no order is cached, so it is not re-read and re-warned every poll."""
-        with patch.object(job_tracker_service, "get_flow_definition", return_value={"unknown": "shape"}) as get_def:
-            first = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-            second = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats={"a": {}})
-
-        assert first == second == []
-        get_def.assert_called_once()
-
-    def test_authoring_names_mapped_to_current_node_stats(self, *, job_tracker_service):
-        """Authoring snapshots cache operator names and map them to node UUIDs on each poll."""
+    def test_repeated_status_polls_read_snapshot_once(self, *, job_tracker_service, mock_store, mock_aggregator):
+        """Two status polls for one job run read the flow snapshot once, through the patchable service method."""
+        node_first = "11111111-0000-0000-0000-000000000001"
+        node_second = "22222222-0000-0000-0000-000000000002"
+        # Same timestamps and names that sort the wrong way, so only the DAG gives the expected order
+        node_stats = {
+            node_second: NodeStats(id=node_second, name="Alpha", start_time=101, end_time=101),
+            node_first: NodeStats(id=node_first, name="Zeta", start_time=101, end_time=101),
+        }
+        job_stats = JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, node_stats=node_stats, flow_name="my-flow")
+        mock_store.get_job_stats.return_value = job_stats
+        mock_aggregator.get_aggregated_node_stats.return_value = node_stats
+        mock_aggregator.get_batch_node_stats.return_value = {}
         flow_def = {
-            "flow": [
-                {"name": "Ingest", "depends_on": []},
-                {"name": "Extract", "depends_on": ["Ingest"]},
+            "dag": [
+                {"id": node_first, "output_edges": [{"node_id_ref": node_second}]},
+                {"id": node_second, "output_edges": []},
             ]
         }
-        node_stats = {
-            "uuid-extract": NodeStats(id="uuid-extract", name="Extract", start_time=101),
-            "uuid-ingest": NodeStats(id="uuid-ingest", name="Ingest", start_time=101),
-        }
-        with patch.object(job_tracker_service, "get_flow_definition", return_value=flow_def):
-            order = job_tracker_service._resolve_node_order(job_run_id=JOB_RUN_ID, node_stats=node_stats)
 
-        assert order == ["uuid-ingest", "uuid-extract"]
+        with patch.object(job_tracker_service, "get_flow_definition", return_value=flow_def) as get_def:
+            first = job_tracker_service.get_formatted_job_stats(job_run_id=JOB_RUN_ID)
+            second = job_tracker_service.get_formatted_job_stats(job_run_id=JOB_RUN_ID)
 
-    def test_cache_evicts_least_recently_used_job_run(self, *, job_tracker_service, monkeypatch):
-        """The cache is bounded; the least recently used job run is evicted and re-read on demand."""
-        from docpipe.core.job_management.adapters.services import job_tracker_service as service_module
-
-        monkeypatch.setattr(service_module, "NODE_ORDER_CACHE_SIZE", 2)
-        with patch.object(job_tracker_service, "get_flow_definition", return_value=LINEAR_FLOW_DEF) as get_def:
-            for run_id in ("run-1", "run-2", "run-1", "run-3", "run-1", "run-2"):
-                job_tracker_service._resolve_node_order(job_run_id=run_id, node_stats={"a": {}})
-
-        # run-1 stays hot; run-2 is evicted by run-3 and read again
-        assert [c.kwargs["job_run_id"] for c in get_def.call_args_list] == ["run-1", "run-2", "run-3", "run-2"]
+        assert first.node_sequence == second.node_sequence == [node_first, node_second]
+        get_def.assert_called_once_with(job_run_id=JOB_RUN_ID)
 
 
 class TestWriteJobLogs:

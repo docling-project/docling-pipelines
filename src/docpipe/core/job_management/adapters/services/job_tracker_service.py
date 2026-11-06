@@ -15,8 +15,6 @@ Architecture:
 """
 
 import json
-import threading
-from collections import OrderedDict
 from datetime import UTC, datetime
 from logging import Logger
 from pathlib import Path
@@ -29,6 +27,7 @@ from docpipe.core.constants.constants import (
     Metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.job_management.adapters.services.node_order_resolver import NodeOrderResolver
 from docpipe.core.job_management.application.services import NodeStatsAggregator
 from docpipe.core.job_management.domain.models import (
     JobStats,
@@ -42,12 +41,9 @@ from docpipe.exceptions.docpipe_exceptions import (
 )
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
-from docpipe.utils.orchestration.node_ordering import map_node_order_to_stats, order_node_items
+from docpipe.utils.orchestration.node_ordering import order_node_items
 
 logger: Logger = get_logger()
-
-# Max job runs whose snapshot node order is kept in memory per service instance
-NODE_ORDER_CACHE_SIZE = 256
 
 
 class JobTrackerService(JobStatsService):
@@ -78,8 +74,10 @@ class JobTrackerService(JobStatsService):
         """
         self.job_stats_store = job_stats_store
         self.node_stats_aggregator = node_stats_aggregator
-        self._node_order_cache: OrderedDict[str, list[str]] = OrderedDict()
-        self._node_order_cache_lock = threading.Lock()
+        # Lambda (not a bound method) so subclass overrides and test patches of get_flow_definition apply
+        self._node_order_resolver = NodeOrderResolver(
+            load_flow_definition=lambda job_run_id: self.get_flow_definition(job_run_id=job_run_id)
+        )
 
     def start_tracking_job(
         self,
@@ -1386,7 +1384,12 @@ class JobTrackerService(JobStatsService):
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
                 node_stats = job_stats_dict["node_stats"]
                 job_run_id = job_stats_dict.get("job_run_id")
-                node_order = self._resolve_node_order(job_run_id=job_run_id, node_stats=node_stats)
+                node_order = self._node_order_resolver.resolve(
+                    job_run_id=job_run_id,
+                    node_stats=node_stats,
+                    flow_id=job_stats_dict.get("flow_id"),
+                    flow_name=job_stats_dict.get("flow_name"),
+                )
                 ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
                 job_stats_dict["node_stats"] = dict(ordered_items)
 
@@ -1454,7 +1457,12 @@ class JobTrackerService(JobStatsService):
         if not job_stats:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
-        node_order = self._resolve_node_order(job_run_id=job_run_id, node_stats=job_stats.node_stats)
+        node_order = self._node_order_resolver.resolve(
+            job_run_id=job_run_id,
+            node_stats=job_stats.node_stats,
+            flow_id=job_stats.flow_id,
+            flow_name=job_stats.flow_name,
+        )
 
         # Delegate to mapper for enterprise-compatible model construction
         return JobStatsMapper.to_status_response(
@@ -1462,62 +1470,6 @@ class JobTrackerService(JobStatsService):
             include_logs=include_logs,
             node_order=node_order,
         )
-
-    def _resolve_node_order(
-        self,
-        *,
-        job_run_id: str | None,
-        node_stats: dict[str, Any] | None = None,
-    ) -> list[str] | None:
-        """Resolve topological node order from the flow snapshot for a job run."""
-        if not job_run_id:
-            return None
-        try:
-            snapshot_order = self._get_snapshot_node_order(job_run_id=job_run_id)
-            if snapshot_order is None:
-                return None
-            if node_stats is None:
-                return snapshot_order
-            return map_node_order_to_stats(node_order=snapshot_order, node_stats=node_stats)
-        except Exception as e:
-            logger.warning(
-                "Failed to determine topological node order for job_run_id %s: %s",
-                job_run_id,
-                e,
-                exc_info=True,
-            )
-        return None
-
-    def _get_snapshot_node_order(self, *, job_run_id: str) -> list[str] | None:
-        """Return the unfiltered snapshot node order for a job run, cached per job run.
-
-        A job run's flow snapshot is written once and never changes, so its order is
-        cached for the life of the service (LRU-bounded). The order is cached before
-        mapping to node_stats because node_stats grows as nodes start. A missing
-        snapshot is not cached (it is saved after flow validation, so early polls see
-        None), and storage errors propagate uncached.
-        """
-        with self._node_order_cache_lock:
-            cached = self._node_order_cache.get(job_run_id)
-            if cached is not None:
-                self._node_order_cache.move_to_end(job_run_id)
-                return cached
-
-        flow_def = self.get_flow_definition(job_run_id=job_run_id)
-        if not flow_def:
-            return None
-
-        # Local import to prevent circular import: dag_utils -> elyra_converter -> abstract_operator
-        # -> operator_utils -> job_management. The node_stats-only helpers live in node_ordering instead.
-        from docpipe.utils.orchestration.dag_utils import get_topologically_sorted_node_ids
-
-        snapshot_order = get_topologically_sorted_node_ids(flow_definition=flow_def)
-        with self._node_order_cache_lock:
-            self._node_order_cache[job_run_id] = snapshot_order
-            self._node_order_cache.move_to_end(job_run_id)
-            if len(self._node_order_cache) > NODE_ORDER_CACHE_SIZE:
-                self._node_order_cache.popitem(last=False)
-        return snapshot_order
 
     def get_flow_definition(self, *, job_run_id: str) -> dict[str, Any] | None:
         """
@@ -1674,12 +1626,6 @@ class JobTrackerService(JobStatsService):
 
         # Partial failure: some failed but not all
         return 0 < failed_batch_count < total_batch_count
-
-    @staticmethod
-    def _calculate_node_sequence(*, node_stats: dict, node_order: list[str] | None = None) -> list[str]:
-        """Calculate node execution sequence based on topological order with chronological fallback."""
-        ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
-        return [node_id for node_id, _ in ordered_items]
 
     @staticmethod
     def _build_node_metadata_array(*, node_stats: dict) -> list[dict]:
