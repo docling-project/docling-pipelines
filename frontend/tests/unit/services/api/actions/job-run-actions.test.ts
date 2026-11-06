@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { server } from '../../../../mocks/server';
 import { http, HttpResponse } from 'msw';
 import {
@@ -52,6 +52,35 @@ describe('job-run-actions', () => {
       );
       const res = await getJobRuns();
       expect(res.data.count).toBe(0);
+    });
+
+    it('rejects without logging an error when the request is aborted', async () => {
+      server.use(
+        http.get('/api/job_runs', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return HttpResponse.json({ list: [], count: 0, total: 0 });
+        })
+      );
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const ac = new AbortController();
+
+      const pending = getJobRuns({ job_id: 'f-1' }, ac.signal);
+      ac.abort();
+
+      await expect(pending).rejects.toBeDefined();
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it('still logs an error when the request fails', async () => {
+      server.use(
+        http.get('/api/job_runs', () => HttpResponse.json({ error: 'fail' }, { status: 500 }))
+      );
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await expect(getJobRuns({ job_id: 'f-1' })).rejects.toBeDefined();
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
     });
   });
 
