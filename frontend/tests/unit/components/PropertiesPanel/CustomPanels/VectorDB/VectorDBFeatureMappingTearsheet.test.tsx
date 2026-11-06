@@ -1343,4 +1343,166 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     }
     expect(screen.getByTestId('tearsheet')).toBeInTheDocument();
   });
+
+  // ── Binary vector similarity metric filtering and labels ──────────────────
+
+  it('filters Milvus similarity options to HAMMING and JACCARD when only vector_binary features are present', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="HAMMING"
+      />
+    );
+    await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
+
+    await waitFor(() => {
+      expect(screen.getByText(/Hamming distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
+  });
+
+  it('filters Milvus similarity options to Jaccard when saved similarity is JACCARD with binary vectors', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="JACCARD"
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Jaccard distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
+  });
+
+  it('filters Milvus similarity options to L2, IP, COSINE when only dense vector features are present', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        dense_emb: {
+          name: 'dense_emb',
+          type: 'vector',
+          description: 'Dense vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="L2"
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Euclidean distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Hamming distance/i)).toBeNull();
+    expect(screen.queryByText(/Jaccard distance/i)).toBeNull();
+  });
+
+  it('includes BM25 in similarity options when sparse vectors are enabled alongside binary vectors', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="BM25"
+        addSparseVector={true}
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/BM25/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
+  });
 });
