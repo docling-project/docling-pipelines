@@ -152,7 +152,10 @@ Weaviate has no stored sparse vector. "Sparse" retrieval is BM25 keyword search 
 
 - Set `add_sparse_vector: true` at the top level of the node `config`. Setting it only inside `provider_config` records the BM25 parameters but does not enable sparse-only runs.
 - The content feature must be mapped (for example `content` to `text`). A `sparse_embeddings` mapping is accepted and ignored.
-- A sparse-only run (no dense embedding column) creates a keyword-only collection: one non-indexed named vector (named `keyword_only`) and objects written without a vector. Sparse-only runs currently require in-memory chunks from upstream operators; the standard extract, chunker, vectordb pipeline produces memory-mapped chunks and does not qualify. Hybrid runs (dense plus BM25) are unaffected.
+- A sparse-only run (no dense embedding column) creates a keyword-only collection: one non-indexed named vector (named `keyword_only`) and objects written without a vector. Hybrid runs (dense plus BM25) are unaffected.
+
+> **WARNING:** Sparse-only runs currently require in-memory chunks from upstream operators. The standard extract, chunker, vectordb pipeline produces memory-mapped chunks and does not qualify: with no embeddings column, every affected document is recorded as failed. Add an embeddings operator (hybrid mode) or keep chunks in memory upstream.
+
 - An existing collection must have a searchable, `word`-tokenized property in whichever column the content feature is mapped to (for example `text` or `body`); this cannot be changed after the collection is created.
 - Querying is outside this operator. Use the Weaviate client:
 

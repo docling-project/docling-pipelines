@@ -764,6 +764,12 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 vector_column_generators=vector_column_generators,
             )
 
+        if chunks_filepath and not vector_column_filepaths:
+            raise ValueError(
+                f"Document {doc_id} has memory-mapped chunks but no memory-mapped embeddings column; "
+                "memory-mapped chunks require an embeddings column (sparse-only runs need in-memory chunks)"
+            )
+
         # Process chunks
         if chunks_filepath and vector_column_filepaths:
             # File-based streaming for memory efficiency

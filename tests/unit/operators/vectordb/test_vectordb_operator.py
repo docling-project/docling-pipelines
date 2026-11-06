@@ -1774,6 +1774,25 @@ class TestPrepareDocumentsExceptionPath:
         _, metadata = op.transform(table)
         assert metadata["failed_docs_count"] >= 1
 
+    def test_memmap_chunks_without_embeddings_column_fail_with_actionable_reason(self):
+        op, _ = _make_operator_with_mock_adapter()
+        metadata = op.create_base_metadata(total_docs_count=1)
+        table = pa.table(
+            {
+                "doc_id_hash": ["doc1"],
+                OperatorConstants.Columns.CHUNKED_CONTENT: [{DocpipeConstants.CHUNKS_MEMMAP_FILE: "/tmp/chunks.bin"}],
+            }
+        )
+
+        documents, _ = op._prepare_documents(
+            table=table, vector_columns=["embeddings"], doc_hash_to_id={}, metadata=metadata
+        )
+
+        assert documents == []
+        assert metadata["failed_docs_count"] == 1
+        reasons = " ".join(str(v) for v in metadata.values())
+        assert "memory-mapped chunks require an embeddings column" in reasons
+
 
 # ---------------------------------------------------------------------------
 # _index_and_record_results — failed chunk tracking
