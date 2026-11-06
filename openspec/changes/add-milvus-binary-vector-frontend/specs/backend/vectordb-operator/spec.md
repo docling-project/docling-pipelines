@@ -2,8 +2,29 @@
 
 ## MODIFIED Requirements
 
+### Requirement: Binary quantization of embeddings
+`EmbeddingsOperator` SHALL support a node-level `quantization` setting (`none`, `binary`, `ubinary`) that converts float embeddings into packed 1-bit vectors and SHALL expose the resulting `embeddings` feature as `vector_binary` with dynamically updated feature descriptions. The setting is read from the embeddings node configuration, not from `global_config`.
+
+#### Scenario: Binary quantization types the embeddings feature
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary` on its node
+- **THEN** feature propagation exposes the embeddings feature as `vector_binary` so downstream VectorDB nodes create a `BINARY_VECTOR` field
+
+#### Scenario: Dynamic feature description based on quantization
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary`
+- **THEN** the `embeddings` feature description is dynamically set to `"Binary vector embeddings for similarity search"`
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `"none"` or unquantized
+- **THEN** the `embeddings` feature description is set to `"Dense vector embeddings for similarity search"`
+
+#### Scenario: Quantized output format
+- **WHEN** an embedding of dimension `d` is quantized
+- **THEN** the output is a `bytes` value of `ceil(d / 8)` bytes using sign thresholding (`value > 0`) and `numpy.packbits`, and file-backed embeddings record the dimension in bits with dtype `packed_bits`
+
+#### Scenario: Unsupported quantization value
+- **WHEN** `quantization` is not one of `none`, `binary` or `ubinary`
+- **THEN** the operator raises an invalid-configuration error listing the supported values
+
 ### Requirement: Vector store resource metadata and flow enrichment
-The vector database adapters SHALL provide live resource introspection for flow enrichment endpoints, retrieving available indices/collections, existing schema definitions (including dense, sparse, and binary vector dimensions and index information), supporting collections with `FLOAT_VECTOR` or `BINARY_VECTOR` fields, and resolving default feature mappings.
+The vector database adapters SHALL provide live resource introspection for flow enrichment endpoints, retrieving available indices/collections, existing schema definitions (including dense, sparse, and binary vector dimensions and index information), supporting collections with `FLOAT_VECTOR` or `BINARY_VECTOR` fields, and resolving default feature mappings while preserving upstream dynamic feature descriptions.
 
 #### Scenario: Live resources discovered during enrichment
 - **WHEN** flow feature enrichment is requested for a vectordb node with valid connection configuration

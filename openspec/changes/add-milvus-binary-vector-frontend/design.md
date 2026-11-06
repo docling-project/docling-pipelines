@@ -10,7 +10,7 @@ See `proposal.md` for background and motivation. PR #452 added backend binary ve
 - Provide a clean `Quantization` selection in the `Embeddings` operator panel to generate binary vectors, defaulting to `None` when undefined.
 - Support `HAMMING` and `JACCARD` binary vector metrics in the `VectorDB` feature mapping tearsheet when Milvus is selected.
 - Provide contextual metric filtering in the tearsheet based on whether incoming/mapped features are binary, dense float, or a hybrid/multi-vector combination.
-- Show actionable warnings when Milvus Lite (`auth_type: "lite"`) is configured with upstream binary vectors.
+- Show actionable warnings when Milvus Lite (`auth_type: "lite"`) or OpenSearch (`provider: "opensearch"`) is configured with upstream binary vectors.
 - Ensure `MilvusResourceMetadata` in `enrich_flow_features` correctly handles binary vector collections (dimension bit-count detection, support check, index info extraction, and graceful fallback on connection failures).
 
 **Non-Goals:**
@@ -35,7 +35,7 @@ PropertiesPanel/CustomPanels/
 │
 └── VectorDB/
     ├── VectorDBPanelBody (VectorDB.tsx)
-    │   ├── InlineNotification (Carbon <InlineNotification>) [Milvus Lite + vector_binary warning]
+    │   ├── InlineNotification (Carbon <InlineNotification>) [Milvus Lite / OpenSearch + vector_binary warning]
     │   ├── Connection & Settings Accordions
     │   └── Summary Table & "Configure Feature Mappings" Button
     │
@@ -65,9 +65,11 @@ PropertiesPanel/CustomPanels/
 - **Rationale**: Prevents users from selecting invalid metric combinations (such as `COSINE` on a binary vector or `HAMMING` on a dense float vector) at creation time before backend validation fails.
 - **Alternatives Considered**: Showing all metrics unfiltered in the dropdown and relying solely on backend save validation. Filtered lists provide immediate visual feedback.
 
-### 3. Milvus Lite Restriction Warning
-- **Decision**: In `VectorDBPanelBody`, detect when `provider === 'milvus'` and `milvusAuthType === 'lite'`, and check if any upstream input feature has `type === 'vector_binary'`. When true, display an `InlineNotification` (warning kind, lowContrast) alerting the user.
-- **Rationale**: Immediate canvas-level feedback prevents runtime pipeline execution failures on Milvus Lite.
+### 3. Milvus Lite & OpenSearch Restriction Warnings
+- **Decision**: In `VectorDBPanelBody`, detect when upstream input features include `type === 'vector_binary'` and:
+  - For Milvus (`provider === 'milvus'` and `milvusAuthType === 'lite'`): display an `InlineNotification` (warning kind, lowContrast) explaining that Milvus Lite does not support binary vectors and advising standalone/grpc/uri or setting Quantization to "None".
+  - For OpenSearch (`provider === 'opensearch'`): display an `InlineNotification` (warning kind, lowContrast) explaining that OpenSearch does not support binary vectors and advising using a supported provider (e.g. Milvus) or setting Quantization to "None".
+- **Rationale**: Immediate canvas-level feedback prevents runtime pipeline execution failures and backend validation errors before attempting to save or run.
 
 ### 4. Backend `MilvusResourceMetadata` Flow Enrichment & Error Fallback
 - **Decision**: Update `_collection_columns`, `_is_supported`, `_stored_metadata`, and `_apply_index_info` in `MilvusResourceMetadata` to handle `DataType.BINARY_VECTOR` alongside `FLOAT_VECTOR`. If the Milvus connection fails or the vector store is unreachable, return the standard five-key empty fallback dictionary (`empty_result()`) without throwing an unhandled exception.

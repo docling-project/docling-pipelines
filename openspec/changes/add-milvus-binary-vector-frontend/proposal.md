@@ -9,7 +9,7 @@ Following the backend addition of Milvus binary vector support (PR #452), the fr
 - **Embeddings Operator Quantization UI**: Add a `Quantization` dropdown field inside the Advanced accordion of the Embeddings operator custom panel (`Embeddings.tsx`), exposing `None` (default, float32) and `Binary (1-bit packed)` (`"binary"`).
 - **Milvus Binary Vector Metrics Support**: Add `HAMMING` and `JACCARD` to the default vector similarity metrics list, message catalogs, and label mappings for Milvus collections in the VectorDB feature mapping tearsheet.
 - **Contextual Similarity Metric Selection**: Dynamically adapt the similarity metric dropdown choices in the VectorDB feature mapping tearsheet based on mapped vector feature types (displaying `HAMMING` / `JACCARD` for `vector_binary` features, `L2` / `IP` / `COSINE` for dense float vectors).
-- **Milvus Lite Restriction Safeguard**: Display an inline warning in the VectorDB properties panel when `auth_type: "lite"` is selected alongside upstream `vector_binary` features, alerting users that Milvus Lite does not support binary vectors.
+- **Milvus Lite & OpenSearch Restriction Safeguards**: Display an inline warning in the VectorDB properties panel when `auth_type: "lite"` (for Milvus) or `provider: "opensearch"` is selected alongside upstream `vector_binary` features, alerting users that these configurations do not support binary vectors and directing them to switch deployments/providers or set Quantization to "None" in the upstream Embeddings operator.
 - **Live Resource Enrichment for Binary Milvus Collections**: Update `MilvusResourceMetadata` backend helpers (`_collection_columns`, `_is_supported`, `_stored_metadata`, `_apply_index_info`) to extract dimensions and index metadata for `BINARY_VECTOR` fields and recognize existing binary collections as docpipe-supported.
 
 ## Non-goals
@@ -24,7 +24,7 @@ Following the backend addition of Milvus binary vector support (PR #452), the fr
 None.
 
 ### Modified Capabilities
-- `frontend/properties-panel`: Add quantization dropdown to Embeddings panel, binary similarity metrics (`HAMMING`, `JACCARD`) and contextual metric filtering to VectorDB tearsheet, and Milvus Lite binary vector warning banner.
+- `frontend/properties-panel`: Add quantization dropdown to Embeddings panel, binary similarity metrics (`HAMMING`, `JACCARD`) and contextual metric filtering to VectorDB tearsheet, and Milvus Lite & OpenSearch binary vector warning banners.
 - `backend/vectordb-operator`: Update `MilvusResourceMetadata` in `enrich_flow_features` to inspect, parse, and validate collections containing `BINARY_VECTOR` fields.
 
 ## Impact

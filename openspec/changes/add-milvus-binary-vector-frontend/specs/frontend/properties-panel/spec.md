@@ -21,6 +21,10 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 - **WHEN** the user selects `auth_type: "lite"` in Milvus provider configuration and an upstream node provides `vector_binary` features
 - **THEN** an inline warning notification is displayed in the properties panel explaining that Milvus Lite does not support binary vectors
 
+#### Scenario: OpenSearch binary vector restriction warning
+- **WHEN** the user selects OpenSearch provider configuration and an upstream node provides `vector_binary` features
+- **THEN** an inline warning notification is displayed in the properties panel explaining that OpenSearch does not support binary vectors
+
 ## ADDED Requirements
 
 ### Requirement: Embeddings quantization configuration
