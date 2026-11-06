@@ -91,7 +91,7 @@ dependencies = [
     "sqlglot==27.13.2",
     "sqlmodel==0.0.48",
     "tabulate==0.10.0",
-    "tenacity==8.3.0",
+    "tenacity==9.2.1",
     "toml==0.10.2",
     "torch==2.14.1",
     "transformers>=5.17,<5.18",
