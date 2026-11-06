@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Extract Operator
 
@@ -643,9 +646,9 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
 
         if self.text_extraction_mode == TextExtractionMode.DOCLING_LIBRARY:
             extensions = set(OperatorConstants.FileExtensions.DOCLING_LIBRARY_BASE_EXTENSIONS)
-            # Add audio/video if ASR is available
+            extensions.update(OperatorConstants.FileExtensions.VIDEO_EXTENSIONS)
             if is_asr_available():
-                extensions.update(OperatorConstants.FileExtensions.DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS)
+                extensions.update(OperatorConstants.FileExtensions.AUDIO_EXTENSIONS)
             return extensions
 
         if self.text_extraction_mode == TextExtractionMode.DOCLING_SERVE:
@@ -677,16 +680,8 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         for idx in range(table.num_rows):
             doc_name = table[OperatorConstants.Columns.NAME][idx].as_py()
 
-            # Try to get extension from document_format column first (set by ingest operators for cloud files)
-            # Fall back to extracting from filename if not available
-            file_ext = ""
-            if "document_format" in table.column_names:
-                doc_fmt = table["document_format"][idx].as_py() or ""
-                if doc_fmt:
-                    file_ext = f".{doc_fmt.lstrip('.')}"
-
-            if not file_ext:
-                file_ext = Path(doc_name).suffix.lower()
+            doc_fmt = table["document_format"][idx].as_py() if "document_format" in table.column_names else None
+            file_ext = OperatorUtils.resolve_file_extension(doc_name=doc_name, document_format=doc_fmt)
 
             if file_ext not in supported_extensions:
                 doc_id = (
@@ -990,6 +985,7 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                     self.text_adapter.extract_single_document,
                     file_path=task["doc_name"],
                     binary_content=task["binary_content"],
+                    file_extension=task.get("file_extension"),
                 )
                 text_future_to_task[future] = task
 

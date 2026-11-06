@@ -1,0 +1,3 @@
+# Synthetic fixture
+
+Synthetic fixture text.

@@ -1,0 +1,7 @@
+From: sender@example.invalid
+To: recipient@example.invalid
+Subject: Synthetic fixture
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Synthetic fixture text.
