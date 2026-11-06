@@ -520,6 +520,41 @@ def test_one_unreadable_open_pr_does_not_fail_the_duplicate_scan(
     assert [c["number"] for c in stored["candidates"]] == [7]
 
 
+def test_unresolvable_issue_references_do_not_fail_candidate_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_api(*, path: str, paginate: bool = False, jq: str | None = None) -> Any:
+        if "/issues/99999" in path:
+            raise triage.subprocess.CalledProcessError(1, ["gh"], stderr="HTTP 404")
+        if "/pulls?state=open" in path:
+            return []
+        raise AssertionError(f"unexpected API path: {path}")
+
+    monkeypatch.setattr(triage, "gh_api", fake_api)
+    candidates = triage.find_candidates(
+        repo=REPO,
+        pr_number=10,
+        refs=[99999],
+        files=[{"filename": "src/docpipe/a.py", "status": "modified", "patch": "@@ -1 +1 @@\n+x"}],
+    )
+    assert candidates == []
+
+
+def test_find_sticky_comment_ignores_null_or_empty_comment_bodies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comments = [
+        {"id": 1, "user": {"login": "alice"}, "body": None},
+        {"id": 2, "user": {"login": common.BOT_LOGIN}, "body": None},
+        {"id": 3, "user": {"login": common.BOT_LOGIN}, "body": ""},
+        {"id": 4, "user": {"login": common.BOT_LOGIN}, "body": f"Note\n{common.COMMENT_MARKER}"},
+    ]
+    monkeypatch.setattr(triage, "gh_api", lambda *, path, paginate=False: comments)
+    found = triage._find_sticky_comment(repo=REPO, pr_number=10)
+    assert found is not None
+    assert found["id"] == 4
+
+
 def test_publish_without_a_context_posts_a_notice_and_removes_old_labels(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

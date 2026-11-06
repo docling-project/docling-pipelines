@@ -103,6 +103,16 @@ def test_a_bad_finding_is_dropped_and_the_others_are_kept() -> None:
         )
 
 
+def test_raw_findings_are_capped_at_max_findings() -> None:
+    findings = [finding(title=f"Finding {i}") for i in range(10)]
+    result = review.parse_review_result(
+        data=answer(*findings),
+        changed_paths={"src/docpipe/a.py"},
+    )
+    assert len(result.findings) == review.MAX_FINDINGS == 5
+    assert [f.title for f in result.findings] == [f"Finding {i}" for i in range(5)]
+
+
 def test_a_review_that_reached_the_turn_limit_reports_the_reason(
     tmp_path: Path,
 ) -> None:

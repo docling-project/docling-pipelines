@@ -370,11 +370,17 @@ def find_candidates(
         return candidate
 
     for ref in refs:
-        issue = gh_api(path=f"repos/{repo}/issues/{ref}")
+        try:
+            issue = gh_api(path=f"repos/{repo}/issues/{ref}")
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            continue
         if "pull_request" in issue:
             add(issue, f"referenced as #{ref}")
             continue
-        events = gh_api(path=f"repos/{repo}/issues/{ref}/timeline?per_page=100", paginate=True)
+        try:
+            events = gh_api(path=f"repos/{repo}/issues/{ref}/timeline?per_page=100", paginate=True)
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            continue
         for event in events:
             source = (event.get("source") or {}).get("issue") or {}
             source_repo = (source.get("repository") or {}).get("full_name")
@@ -610,7 +616,7 @@ def _find_sticky_comment(*, repo: str, pr_number: int) -> dict[str, Any] | None:
         (
             comment
             for comment in comments
-            if comment["user"]["login"] == BOT_LOGIN and COMMENT_MARKER in comment["body"]
+            if comment["user"]["login"] == BOT_LOGIN and COMMENT_MARKER in (comment.get("body") or "")
         ),
         None,
     )
