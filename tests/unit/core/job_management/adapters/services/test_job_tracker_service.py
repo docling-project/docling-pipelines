@@ -1707,6 +1707,24 @@ class TestGetNodeStats:
         assert "n1" in result
 
 
+class TestCountJobRuns:
+    def test_count_job_runs_delegates_to_store(self, *, job_tracker_service, mock_store):
+        mock_store.count_job_runs.return_value = 7
+
+        result = job_tracker_service.count_job_runs(
+            job_id=JOB_ID,
+            job_ids=[JOB_ID],
+            status=ExecutionStatus.COMPLETED,
+        )
+
+        assert result == 7
+        mock_store.count_job_runs.assert_called_once_with(
+            job_id=JOB_ID,
+            job_ids=[JOB_ID],
+            status=ExecutionStatus.COMPLETED,
+        )
+
+
 class TestCancelJobRunIfCancelling:
     def test_returns_false_when_no_job(self, *, job_tracker_service, mock_store):
         """Line 846 branch: job not found."""
