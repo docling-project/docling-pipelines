@@ -10,6 +10,7 @@ When configured with `provider: "milvus"`, the operator supports multiple index 
 
 ### Core Capabilities
 - **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, FLAT, AUTOINDEX, BIN_FLAT, BIN_IVF_FLAT
+- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE (`vector_mode: "gpu"`)
 - **Vector Similarity Metrics**: L2, IP (Inner Product), COSINE, HAMMING, JACCARD
 - **Binary Vector Support**: 1-bit quantized compact vector embeddings (`BIN_FLAT`, `BIN_IVF_FLAT`) for 32x memory and storage savings
 - **Hybrid Search**: Dense + sparse vector support with BM25
@@ -103,10 +104,11 @@ Connection and index-specific parameters are configured inside the `provider_con
 | `password` | string | No | `"Milvus"` | Password/API key for authentication |
 | `database` | string | No | `"default"` | Database name (not used for `lite`) |
 | `secure` | boolean | No | false | Enable TLS/SSL (not used for `lite`) |
-| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, `BIN_FLAT`, `BIN_IVF_FLAT`, etc.; only `FLAT` is supported for `lite`) |
-| `metric_type` | string | No | `"L2"` | Similarity metric: L2, IP, COSINE for dense vectors; HAMMING, JACCARD for binary vectors. A `BIN_*` `index_type` requires a binary metric, so the default `L2` is rejected |
+| `vector_mode` | string | No | inferred | `dense`, `sparse`, `binary` or `gpu`. When omitted: `sparse` if `add_sparse_vector` is true, otherwise inferred from `index_type` (`BIN_*` gives `binary`, `GPU_*` gives `gpu`, else `dense`) |
+| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, `GPU_CAGRA`, `BIN_FLAT`, `BIN_IVF_FLAT`, etc.; only `FLAT` is supported for `lite`). Must belong to the `vector_mode` |
+| `metric_type` | string | No | `"L2"` | Similarity metric: L2, IP, COSINE for dense vectors; L2, IP for GPU indexes; HAMMING, JACCARD for binary vectors. A `BIN_*` `index_type` requires a binary metric, so the default `L2` is rejected |
 | `index_parameters` | object | No | {} | Custom index-specific parameters |
-| `add_sparse_vector` | boolean | No | false | Enable hybrid search with BM25 sparse vectors (not supported for `lite`) |
+| `add_sparse_vector` | boolean | No | false | Backward-compatible alias for `vector_mode: "sparse"` (BM25 hybrid search, not supported for `lite`). An explicit `vector_mode` takes precedence |
 
 ### Index Parameters
 
@@ -580,6 +582,84 @@ OperatorConstants.Config.PROVIDER_CONFIG: {
     }
 }
 ```
+
+## GPU Indexes
+
+Large collections can use GPU-accelerated indexes to improve build and query speed. Set `vector_mode: "gpu"` (or just a `GPU_*` `index_type`, which is inferred as `gpu` mode). GPU indexes apply to dense `FLOAT_VECTOR` fields on standalone or remote Milvus; the schema and ingestion path are the same as for CPU dense vectors. Milvus Lite supports only `FLAT`, and GPU mode with `auth_type: "lite"` raises a configuration error.
+
+### Prerequisites
+
+Per the Milvus GPU requirements:
+
+1. A Linux host with an NVIDIA GPU of compute capability 6.0, 7.0, 7.5, 8.0, 8.6 or 9.0, and NVIDIA driver 545 or newer.
+2. The NVIDIA Container Toolkit, and a GPU build of Milvus, for example the `milvusdb/milvus:<version>-gpu` image (such as `v2.6.16-gpu`). The regular image has no GPU index support.
+3. The GPU device assigned to the Milvus service in Docker Compose:
+   ```yaml
+   milvus-standalone:
+     image: milvusdb/milvus:v2.6.16-gpu
+     deploy:
+       resources:
+         reservations:
+           devices:
+             - driver: nvidia
+               capabilities: ["gpu"]
+               device_ids: ["0"]
+   ```
+4. GPU memory large enough for the collection. Milvus loads the data into GPU memory, so `maxMemSize` in the Milvus config must be at least the data size.
+
+macOS and Podman on Apple Silicon cannot run GPU indexes.
+
+Docling Pipelines does not probe the pipeline host for a GPU. Index building runs on the Milvus server, so the configured GPU index type is always sent to the server as given. If the server is not a GPU build, index creation fails with the server error.
+
+### GPU index types
+
+| GPU index | Notes |
+|-----------|-------|
+| `GPU_CAGRA` | Graph-based index with the highest query throughput in Milvus benchmarks |
+| `GPU_IVF_FLAT` | Good balance of speed and recall |
+| `GPU_IVF_PQ` | Lower GPU memory through product quantization |
+| `GPU_BRUTE_FORCE` | Exact search with recall of 1 |
+
+### GPU index limits
+
+- **Metrics: `L2` and `IP` only.** `COSINE` is rejected with a configuration error. Normalize the vectors and use `IP`, or use `L2`. This check applies to the configured settings, independent of the hardware.
+- **Index type must be a GPU type.** A CPU index type such as `HNSW` with `vector_mode: "gpu"` is rejected, and a GPU index type with `vector_mode: "dense"` is rejected.
+- **Dense vectors only.** GPU indexes apply to `FLOAT_VECTOR` fields. In a mixed dense and binary collection the binary fields use `BIN_FLAT` with `HAMMING`. If the only vector features are binary (for example embeddings with `quantization: binary`), `vector_mode: "gpu"` is rejected during flow validation because the GPU would never be used. With `vector_mode: "sparse"` (alone or hybrid with dense vectors) the sparse field keeps `SPARSE_INVERTED_INDEX` with `BM25`.
+- **Validated without a Milvus connection.** The mode, index type, metric and `GPU_CAGRA` settings are checked before connecting, so flow validation reports them even when Milvus is unreachable.
+- **No leftover collection.** If index creation fails after the collection was created (for example the server has no GPU build), the collection is dropped and the original error is raised.
+- For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree`; otherwise a configuration error is raised before the collection is created.
+- GPU indexes do not support range search or grouping search.
+- The maximum search `limit` is 1,024 for `GPU_IVF_FLAT`, `GPU_IVF_PQ` and `GPU_CAGRA`.
+- A GPU index does not always lower latency compared with a CPU index. The gain is largest with heavy query load or large query batches.
+
+### Example
+
+```json
+{
+  "provider": "milvus",
+  "provider_config": {
+    "collection_name": "docs_gpu",
+    "auth_type": "standalone",
+    "host": "localhost",
+    "vector_mode": "gpu",
+    "index_type": "GPU_CAGRA",
+    "metric_type": "IP",
+    "index_parameters": {
+      "intermediate_graph_degree": 64,
+      "graph_degree": 32
+    }
+  }
+}
+```
+
+A complete flow is in [`sample_flows/vectordb/milvus_gpu_integration.json`](../../../sample_flows/vectordb/milvus_gpu_integration.json).
+
+### Tuning guidance
+
+- `GPU_CAGRA`: raise `graph_degree` for recall at the cost of GPU memory and build time. `intermediate_graph_degree` must be at least `graph_degree`.
+- `GPU_IVF_FLAT` and `GPU_IVF_PQ`: `nlist` defaults to 1024. Roughly `sqrt(n)` to `4*sqrt(n)` for `n` vectors is a common starting range.
+- For small collections, `HNSW` on CPU is often as fast as a GPU index.
+- Search-time parameters (for example `ef` for HNSW, `nprobe` for IVF, `itopk_size` for CAGRA) are query-time settings. This operator only ingests, so pass them in the `search()` call of your query client.
 
 ## Error Handling
 

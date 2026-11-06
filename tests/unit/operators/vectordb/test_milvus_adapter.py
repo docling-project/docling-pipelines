@@ -250,3 +250,45 @@ class TestMilvusAdapterMissingCollectionName:
 
         with pytest.raises(ValueError, match="collection_name is required for the Milvus adapter"):
             MilvusAdapter(host="localhost", port=19530)
+
+
+class TestMilvusAdapterVectorMode:
+    """The adapter must resolve vector_mode and forward it to MilvusIndexManager and MilvusBatchProcessor."""
+
+    @staticmethod
+    def _build(extra_config):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.adapter import MilvusAdapter
+
+        base = "docpipe.core.operators.vectordb.adapters.outbound.milvus"
+        with (
+            patch(f"{base}.client.MilvusClient.__init__", return_value=None),
+            patch(f"{base}.client.MilvusClient.get_client", return_value=MagicMock()),
+            patch(f"{base}.adapter.MilvusIndexManager") as mock_manager,
+            patch(f"{base}.batch_processor.MilvusBatchProcessor.__init__", return_value=None) as mock_batch,
+        ):
+            adapter = MilvusAdapter(collection_name="c", **extra_config)
+        return adapter, mock_manager, mock_batch
+
+    def test_vector_mode_forwarded_to_index_manager(self):
+        _, mock_manager, _ = self._build({"vector_mode": "gpu", "index_type": "GPU_CAGRA"})
+        kwargs = mock_manager.call_args.kwargs
+        assert kwargs["vector_mode"] == "gpu"
+        assert kwargs["index_type"] == "GPU_CAGRA"
+
+    def test_vector_mode_defaults_to_dense(self):
+        adapter, mock_manager, _ = self._build({})
+        assert adapter.vector_mode == "dense"
+        assert adapter.add_sparse_vector is False
+        assert mock_manager.call_args.kwargs["vector_mode"] == "dense"
+
+    def test_add_sparse_vector_maps_to_sparse_mode(self):
+        adapter, mock_manager, _ = self._build({"add_sparse_vector": True})
+        assert adapter.vector_mode == "sparse"
+        assert adapter.add_sparse_vector is True
+        assert mock_manager.call_args.kwargs["vector_mode"] == "sparse"
+
+    def test_explicit_vector_mode_wins_over_add_sparse_vector(self):
+        adapter, mock_manager, _ = self._build({"vector_mode": "gpu", "add_sparse_vector": True})
+        assert adapter.vector_mode == "gpu"
+        assert adapter.add_sparse_vector is False
+        assert mock_manager.call_args.kwargs["vector_mode"] == "gpu"

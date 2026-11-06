@@ -16,7 +16,10 @@ from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_fa
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.batch_processor import MilvusBatchProcessor
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.client import MilvusClient
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import MilvusConfig
-from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import MilvusIndexManager
+from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import (
+    MilvusIndexManager,
+    MilvusVectorModes,
+)
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
@@ -77,9 +80,11 @@ class MilvusAdapter(VectorStorePort):
                 - ssl: Use SSL/TLS connection (optional)
                 - ssl_certificate: SSL certificate path (optional)
                 - batch_size: Batch size for bulk operations (default: 100)
-                - index_type: Vector index algorithm (FLAT, IVF_FLAT, HNSW, etc.)
+                - vector_mode: Vector indexing mode ('dense', 'sparse', 'binary', 'gpu')
+                - index_type: Vector index algorithm (FLAT, IVF_FLAT, HNSW, GPU_CAGRA, etc.)
                 - metric_type: Similarity metric (L2, IP, COSINE)
                 - index_parameters: Index-specific parameters
+                - add_sparse_vector: Legacy sparse mode flag (maps to vector_mode='sparse')
         """
         # collection_name is now part of provider_config — read it from config
         self.collection_name = adapter_config.get(OperatorConstants.VectorDB.COLLECTION_NAME)
@@ -91,9 +96,9 @@ class MilvusAdapter(VectorStorePort):
         self.vector_dimension = adapter_config.get(
             OperatorConstants.VectorDB.VECTOR_DIMENSION, OperatorConstants.VectorDB.DEFAULT_VECTOR_DIMENSION
         )
-        self.add_sparse_vector = adapter_config.get(
-            OperatorConstants.VectorDB.ADD_SPARSE_VECTOR, OperatorConstants.VectorDB.ADD_SPARSE_VECTOR_DEFAULT
-        )
+        self.vector_mode = self._resolve_vector_mode(adapter_config)
+        # Batch processor still takes the legacy boolean
+        self.add_sparse_vector = self.vector_mode == MilvusVectorModes.SPARSE
         available_features = adapter_config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {})
         feature_mappings: list[dict[str, str]] = adapter_config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
 
@@ -116,6 +121,16 @@ class MilvusAdapter(VectorStorePort):
         index_type = adapter_config.get(OperatorConstants.VectorDB.INDEX_TYPE, DEFAULT_INDEX_TYPE)
         metric_type = adapter_config.get(OperatorConstants.VectorDB.METRIC_TYPE, DEFAULT_METRIC_TYPE)
         index_parameters = adapter_config.get(OperatorConstants.VectorDB.INDEX_PARAMETERS, {})
+
+        # Validate the index configuration before connecting so flow validation reports
+        # misconfiguration (e.g. GPU + COSINE) even when Milvus is unreachable.
+        MilvusIndexManager.validate_index_config(
+            vector_mode=self.vector_mode,
+            index_type=index_type,
+            metric_type=metric_type,
+            index_parameters=index_parameters,
+            is_lite=is_lite,
+        )
 
         # Note: Sparse vector mode uses hardcoded index configuration in MilvusIndexManager
         # The index_type and metric_type parameters here are only used for dense vectors
@@ -149,7 +164,7 @@ class MilvusAdapter(VectorStorePort):
             feature_mappings=feature_mappings,
             primary_key_field=self.primary_key_field,
             auto_id=False,
-            add_sparse_vector=self.add_sparse_vector,
+            vector_mode=self.vector_mode,
             is_lite=is_lite,
         )
 
@@ -166,12 +181,31 @@ class MilvusAdapter(VectorStorePort):
         )
 
         logger.info(
-            "Initialized MilvusAdapter for collection: %s (index: %s, metric: %s, lite: %s)",
+            "Initialized MilvusAdapter for collection: %s (vector_mode: %s, index: %s, metric: %s, lite: %s)",
             self.collection_name,
+            self.vector_mode,
             index_type,
             metric_type,
             is_lite,
         )
+
+    @staticmethod
+    def _resolve_vector_mode(config: dict[str, Any]) -> str:
+        """Resolve vector_mode from config with backward compatibility for add_sparse_vector.
+
+        Resolution order:
+        1. Explicit 'vector_mode'
+        2. 'add_sparse_vector': True -> 'sparse'
+        3. Inferred from 'index_type' (BIN_* -> 'binary', GPU_* -> 'gpu', otherwise 'dense')
+        """
+        vector_mode = config.get(OperatorConstants.VectorDB.VECTOR_MODE)
+        if vector_mode is not None:
+            return str(vector_mode)
+        if config.get(
+            OperatorConstants.VectorDB.ADD_SPARSE_VECTOR, OperatorConstants.VectorDB.ADD_SPARSE_VECTOR_DEFAULT
+        ):
+            return MilvusVectorModes.SPARSE
+        return MilvusVectorModes.infer_from_index_type(index_type=config.get(OperatorConstants.VectorDB.INDEX_TYPE))
 
     def close(self) -> None:
         """Close the underlying Milvus client connection and release any file locks."""

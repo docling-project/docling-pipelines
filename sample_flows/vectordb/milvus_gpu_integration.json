@@ -1,0 +1,120 @@
+{
+  "flow_name": "milvus-gpu-index-pipeline",
+  "description": "Single-embedding pipeline for Milvus with a GPU index: Ingest -> Extract -> Chunk -> Embeddings -> Milvus (GPU_CAGRA, optional fallback to HNSW if the Milvus server has no GPU support)",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "storage": "in-memory",
+    "execute_type": "local"
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_documents",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "./sample_documents"
+          ]
+        },
+        "include_filter": "pdf,txt,docx"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_content",
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        },
+        "entity_extraction": {
+          "provider": "none"
+        }
+      },
+      "depends_on": [
+        "ingest_documents"
+      ]
+    },
+    {
+      "type": "chunker",
+      "name": "chunk_documents",
+      "config": {
+        "chunk_type": "semantic",
+        "chunk_size": 512,
+        "chunk_overlap": 50,
+        "semantic_embeddings_model": "nomic-embed-text",
+        "retain_original_content": false
+      },
+      "depends_on": [
+        "extract_content"
+      ]
+    },
+    {
+      "type": "embeddings",
+      "name": "generate_embeddings",
+      "config": {
+        "provider": "litellm",
+        "embeddings_column": "embeddings",
+        "overlap_ratio": 0.1,
+        "provider_config": {
+          "model_id": "openai/nomic-embed-text",
+          "api_base": "http://localhost:11434/v1",
+          "api_key": "${OLLAMA_API_KEY:-ollama}"
+        }
+      },
+      "depends_on": [
+        "chunk_documents"
+      ]
+    },
+    {
+      "type": "vectordb",
+      "name": "store_in_milvus",
+      "config": {
+        "provider": "milvus",
+        "doc_id_column": "doc_id_hash",
+        "add_sparse_vector": false,
+        "provider_config": {
+          "collection_name": "gpu_collection",
+          "host": "localhost",
+          "port": 19530,
+          "auth_type": "standalone",
+          "username": "${MILVUS_USERNAME}",
+          "password": "${MILVUS_PASSWORD}",
+          "database": "default",
+          "batch_size": 100,
+          "vector_mode": "gpu",
+          "index_type": "GPU_CAGRA",
+          "metric_type": "L2"
+        },
+        "feature_mappings": [
+          {
+            "feature_name": "doc_id_hash",
+            "mapped_column_name": "pk"
+          },
+          {
+            "feature_name": "content",
+            "mapped_column_name": "text"
+          },
+          {
+            "feature_name": "name",
+            "mapped_column_name": "doc_name"
+          },
+          {
+            "feature_name": "path",
+            "mapped_column_name": "file_path"
+          },
+          {
+            "feature_name": "embeddings",
+            "mapped_column_name": "vector_embeddings"
+          }
+        ]
+      },
+      "depends_on": [
+        "generate_embeddings"
+      ]
+    }
+  ]
+}

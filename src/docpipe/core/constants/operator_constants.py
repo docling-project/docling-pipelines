@@ -419,6 +419,8 @@ class OperatorConstants:
         # Vector Configuration
         ADD_SPARSE_VECTOR: Final[str] = "add_sparse_vector"
         ADD_SPARSE_VECTOR_DEFAULT: Final[bool] = False
+        VECTOR_MODE: Final[str] = "vector_mode"
+        VECTOR_MODE_DEFAULT: Final[str] = "dense"
         SPARSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "sparse_embeddings"
         DENSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "dense_embeddings"
         # Milvus field names (mapped names in collection schema)
