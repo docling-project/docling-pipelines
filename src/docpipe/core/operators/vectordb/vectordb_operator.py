@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Generic Vector Database Operator
 """
@@ -22,6 +25,7 @@ from docpipe.utils.core.memmap_file_utils import (
 )
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
+from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
 
 logger = get_logger()
 
@@ -50,6 +54,7 @@ SCHEMA_TEMPLATE_PATH_KEY: str = "schema_template_path"
 DEFAULT_BATCH_SIZE: int = 100
 DEFAULT_VECTOR_DIMENSION: int = 384
 NUMBER_OF_BATCHES_KEY: str = "number_of_batches"
+LEGACY_CREATE_INDEX_KEY: str = "create_index"  # removed option; still detected to warn on legacy flows
 
 
 class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
@@ -91,7 +96,12 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         self.doc_id_column: str = config.get(
             OperatorConstants.Columns.DOC_ID_COLUMN, OperatorConstants.Columns.DOC_ID_HASH_DEFAULT
         )
-        self.create_index: bool = config.get(OperatorConstants.VectorDB.CREATE_INDEX, True)
+        if LEGACY_CREATE_INDEX_KEY in config:
+            logger.warning(
+                "The 'create_index' configuration parameter is deprecated and will be ignored. "
+                "Index lifecycle is now handled automatically.",
+                extra=self.common_log_arguments,
+            )
         self.add_sparse_vector: bool = config.get(
             OperatorConstants.VectorDB.ADD_SPARSE_VECTOR, OperatorConstants.VectorDB.ADD_SPARSE_VECTOR_DEFAULT
         )
@@ -189,6 +199,15 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 else:
                     errors.append(error["msg"])
 
+        # Reject index settings that cannot work with the vector kinds produced upstream (e.g. BIN_* without
+        # a binary vector feature). Only possible when the validator supplied the propagated feature types.
+        feature_types: dict[str, str | None] | None = self.config.get(DocpipeConstants.VALIDATION_FEATURE_TYPES)
+        if feature_types is not None and not errors:
+            try:
+                self.adapter.validate_vector_feature_types(feature_types=feature_types)
+            except DocpipeException as exc:
+                errors.append(str(exc))
+
         # Validate that feature mappings are present.
         feature_mappings: list[dict[str, str]] = self.config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
         op_available_features: dict = self.config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {})
@@ -278,17 +297,16 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         if dimension_mapping is None:
             return [table], metadata
 
-        # Create index if needed
-        if self.create_index:
-            index_ok = self._ensure_index_ready(
-                dimension_mapping=dimension_mapping,
-                unique_doc_ids=unique_doc_ids,
-                doc_hash_to_id=doc_hash_to_id,
-                doc_hash_to_name=doc_hash_to_name,
-                metadata=metadata,
-            )
-            if not index_ok:
-                return [table], metadata
+        # Create the index when absent, validate its schema when present
+        index_ok = self._ensure_index_ready(
+            dimension_mapping=dimension_mapping,
+            unique_doc_ids=unique_doc_ids,
+            doc_hash_to_id=doc_hash_to_id,
+            doc_hash_to_name=doc_hash_to_name,
+            metadata=metadata,
+        )
+        if not index_ok:
+            return [table], metadata
 
         documents, chunk_id_to_doc_id = self._prepare_documents(
             table=table,
@@ -396,11 +414,12 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         Returns (vector_columns, None) and sets NODE_STATUS=FAILED when detection
         is required but fails so the caller can short-circuit.
         """
-        # Identify all DENSE vector columns from available_features
+        # Identify all dense (float) and binary vector columns from available_features
         vector_columns = [
             col_name
             for col_name, feature_config in self.config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {}).items()
-            if feature_config.get("type") == "vector" and feature_config.get("available_for_vector_db", False)
+            if is_dense_or_binary_vector_feature(feature_config=feature_config)
+            and feature_config.get("available_for_vector_db", False)
         ]
 
         # Handle sparse vector mode
@@ -503,9 +522,11 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             chunk_data = chunk_and_embeddings[0]
             chunk_embeddings = chunk_and_embeddings[1:]
 
-            # Add embeddings from all vector columns
+            # Add embeddings from all vector columns (packed binary vectors stream as raw bytes)
             for vec_col, chunk_embedding in zip(vec_col_names, chunk_embeddings, strict=True):
-                chunk_row_data[vec_col] = chunk_embedding.tolist()
+                chunk_row_data[vec_col] = (
+                    chunk_embedding if isinstance(chunk_embedding, bytes) else chunk_embedding.tolist()
+                )
 
             chunk_dict = json.loads(chunk_data) if isinstance(chunk_data, str) else chunk_data
             if isinstance(chunk_dict, dict):
@@ -1062,13 +1083,6 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     OperatorConstants.Config.DESCRIPTION: "Column containing sparse vector embeddings for hybrid search",
                     OperatorConstants.Config.REQUIRED: False,
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
-                },
-                OperatorConstants.VectorDB.CREATE_INDEX: {
-                    OperatorConstants.Misc.NAME: "Create Index",
-                    OperatorConstants.Config.DESCRIPTION: "Create index if it doesn't exist",
-                    OperatorConstants.Config.REQUIRED: False,
-                    OperatorConstants.Config.DEFAULT: True,
-                    OperatorConstants.Misc.TYPE: AttributeDataTypes.BOOLEAN,
                 },
                 OperatorConstants.VectorDB.VECTOR_DIMENSION: {
                     OperatorConstants.Misc.NAME: "Vector Dimension",

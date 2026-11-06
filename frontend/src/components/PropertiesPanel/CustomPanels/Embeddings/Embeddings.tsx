@@ -8,6 +8,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip, VaultInput } from '@/components/common';
 import {
@@ -23,13 +24,13 @@ import {
 import {
   EMBEDDINGS_ATTRIBUTE as ATTR,
   EMBEDDINGS_DEFAULTS,
-  EMBEDDINGS_LABELS as LABEL,
-  EMBEDDINGS_PROVIDERS,
   EMBEDDINGS_PROVIDER_LABELS,
+  EMBEDDINGS_PROVIDERS,
   WATSONX_CONTAINER_KINDS,
   type EmbeddingsProvider,
   type WatsonxContainerKind,
 } from './constants';
+import { messages } from './Embeddings.messages';
 import type { ModelInfo, OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import { getProviderModels } from '@/services/api';
@@ -57,6 +58,7 @@ interface EmbeddingsPanelBodyProps {
  * - filters those models for embeddings-specific use in the model selector
  */
 export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   // ── Operator metadata ─────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
@@ -158,13 +160,13 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
         return;
       }
       setAvailableModels([]);
-      setModelsError('Failed to load provider models. Enter a model ID manually.');
+      setModelsError(intl.formatMessage(messages.loadModelsError));
     } finally {
       if (latestModelsRequestRef.current === requestId) {
         setModelsLoading(false);
       }
     }
-  }, []);
+  }, [intl]);
 
   useEffect(() => {
     void loadProviderModels(provider, apiBase);
@@ -207,14 +209,14 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
             nodeAttributes={nodeAttributes}
             definition={attrDesc(ATTR.PROVIDER)}
           >
-            {LABEL.PROVIDER}
+            {intl.formatMessage(messages.provider)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="embeddings-provider"
-          titleText={LABEL.PROVIDER}
+          titleText={intl.formatMessage(messages.provider)}
           hideLabel
-          label="Select provider"
+          label={intl.formatMessage(messages.selectProvider)}
           items={[...EMBEDDINGS_PROVIDERS]}
           selectedItem={provider}
           itemToString={(item: EmbeddingsProvider | null) => (item ? EMBEDDINGS_PROVIDER_LABELS[item] : '')}
@@ -236,12 +238,12 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
               openOnHover
               align="right"
             >
-              {LABEL.API_BASE}
+              {intl.formatMessage(messages.apiBase)}
             </DefinitionTooltip>
           </div>
           <TextInput
             id="embeddings-api-base"
-            labelText={LABEL.API_BASE}
+            labelText={intl.formatMessage(messages.apiBase)}
             hideLabel
             placeholder="http://localhost:11434/v1"
             value={apiBase}
@@ -257,14 +259,14 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
         <div className={common.formField}>
           <VaultInput
             id="embeddings-api-key"
-            labelText={LABEL.API_KEY}
+            labelText={intl.formatMessage(messages.apiKey)}
             labelComponent={
               <DefinitionTooltip
                 definition={providerFieldDesc(provider, ATTR.PROVIDER_CONFIG_API_KEY)} // pragma: allowlist secret
                 openOnHover
                 align="right"
               >
-                {LABEL.API_KEY}
+                {intl.formatMessage(messages.apiKey)}
               </DefinitionTooltip>
             }
             placeholder="sk-..."
@@ -280,18 +282,18 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
             <DefinitionTooltip
               definition={
                 provider === 'watsonx'
-                  ? "Model identifier for IBM watsonx.ai (e.g., 'ibm/slate-30m-english-rtrvr')."
+                  ? intl.formatMessage(messages.modelIdWatsonxDescription)
                   : providerFieldDesc(provider, ATTR.PROVIDER_CONFIG_MODEL_ID)
               }
               openOnHover
               align="right"
             >
-              {LABEL.MODEL_ID}
+              {intl.formatMessage(messages.modelId)}
             </DefinitionTooltip>
           </div>
 
           {modelsLoading && (
-            <InlineLoading description="Loading provider models..." />
+            <InlineLoading description={intl.formatMessage(messages.loadingModels)} />
           )}
 
           {!modelsLoading && modelsError && (
@@ -307,9 +309,9 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
           {!modelsLoading && availableModels.length > 0 ? (
             <Dropdown
               id="embeddings-model-id"
-              titleText={LABEL.MODEL_ID}
+              titleText={intl.formatMessage(messages.modelId)}
               hideLabel
-              label="Select model"
+              label={intl.formatMessage(messages.selectModel)}
               items={availableModels}
               selectedItem={availableModels.find((model) => model.model_id === modelId) ?? null}
               itemToString={(item: ModelInfo | null) => item?.model_id ?? ''}
@@ -322,7 +324,7 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
           ) : (
             <TextInput
               id="embeddings-model-id"
-              labelText={LABEL.MODEL_ID}
+              labelText={intl.formatMessage(messages.modelId)}
               hideLabel
               placeholder={provider === 'litellm' ? 'openai/nomic-embed-text' : 'ibm/slate-30m-english-rtrvr'}
               value={modelId}
@@ -344,12 +346,12 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
                   openOnHover
                   align="right"
                 >
-                  {LABEL.URL}
+                  {intl.formatMessage(messages.watsonxUrl)}
                 </DefinitionTooltip>
               </div>
               <TextInput
                 id="embeddings-watsonx-url"
-                labelText={LABEL.URL}
+                labelText={intl.formatMessage(messages.watsonxUrl)}
                 hideLabel
                 placeholder="https://us-south.ml.cloud.ibm.com"
                 value={watsonxUrl}
@@ -366,14 +368,14 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
                   openOnHover
                   align="right"
                 >
-                  {LABEL.CONTAINER_KIND}
+                  {intl.formatMessage(messages.containerKind)}
                 </DefinitionTooltip>
               </div>
               <Dropdown
                 id="embeddings-watsonx-container-kind"
-                titleText={LABEL.CONTAINER_KIND}
+                titleText={intl.formatMessage(messages.containerKind)}
                 hideLabel
-                label="Select container type"
+                label={intl.formatMessage(messages.selectContainerType)}
                 items={[...WATSONX_CONTAINER_KINDS]}
                 selectedItem={watsonxContainerKind}
                 itemToString={(item: WatsonxContainerKind | null) => item ?? ''}
@@ -392,12 +394,12 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
                   openOnHover
                   align="right"
                 >
-                  {LABEL.CONTAINER_ID}
+                  {intl.formatMessage(messages.containerId)}
                 </DefinitionTooltip>
               </div>
               <TextInput
                 id="embeddings-watsonx-container-id"
-                labelText={LABEL.CONTAINER_ID}
+                labelText={intl.formatMessage(messages.containerId)}
                 hideLabel
                 placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                 value={watsonxContainerId}
@@ -411,7 +413,7 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
       </div>
 
       <Accordion align="start">
-        <AccordionItem title="Advanced">
+        <AccordionItem title={intl.formatMessage(messages.advanced)}>
           <div className={common.formField}>
             <div className={common.labelWithTooltip}>
               <RequiredParamTooltip
@@ -419,12 +421,12 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
                 nodeAttributes={nodeAttributes}
                 definition={attrDesc(ATTR.OVERLAP_RATIO)}
               >
-                {LABEL.OVERLAP_RATIO}
+                {intl.formatMessage(messages.overlapRatio)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="embeddings-overlap-ratio"
-              label={LABEL.OVERLAP_RATIO}
+              label={intl.formatMessage(messages.overlapRatio)}
               hideLabel
               value={overlapRatio}
               min={0}
@@ -446,12 +448,12 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
                 nodeAttributes={nodeAttributes}
                 definition={attrDesc(ATTR.TOKEN_LIMIT)}
               >
-                {LABEL.TOKEN_LIMIT}
+                {intl.formatMessage(messages.tokenLimit)}
               </RequiredParamTooltip>
             </div>
             <NumberInput
               id="embeddings-token-limit"
-              label={LABEL.TOKEN_LIMIT}
+              label={intl.formatMessage(messages.tokenLimit)}
               hideLabel
               value={tokenLimit}
               min={1}

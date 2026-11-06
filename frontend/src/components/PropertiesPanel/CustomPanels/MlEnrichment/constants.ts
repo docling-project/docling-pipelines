@@ -20,12 +20,3 @@ export const ML_ENRICHMENT_ATTRIBUTE = {
  */
 export type MlEnrichmentAttributeKey =
   typeof ML_ENRICHMENT_ATTRIBUTE[keyof typeof ML_ENRICHMENT_ATTRIBUTE];
-
-/**
- * User-friendly labels for every field in the ML Enrichment panel.
- */
-export const ML_ENRICHMENT_LABELS = {
-  DOC_COLUMN: 'Document content column',
-  LANG_COLUMN: 'Language column',
-  OUTPUT_COLUMN_PREFIX: 'Output column prefix',
-} as const;

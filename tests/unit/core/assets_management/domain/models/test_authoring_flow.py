@@ -267,6 +267,69 @@ class TestAuthoringFlow:
 
         flow.validate()  # Should not raise
 
+    def test_branching_non_dict_config_raises_flow_invalid_data(self):
+        """A branching operator whose config is not a dict fails validation."""
+        flow = AuthoringFlow.from_dict(
+            data={
+                "flow_name": "x",
+                "flow": [
+                    {"type": "ingest_source", "name": "a"},
+                    {"type": "branching", "name": "b", "depends_on": ["a"], "config": []},
+                ],
+            }
+        )
+
+        with pytest.raises(FlowInvalidDataException) as exc_info:
+            flow.validate()
+
+        assert "config must be a dictionary" in str(exc_info.value)
+        assert "operator: b" in str(exc_info.value)
+
+    def test_branch_reference_to_non_dict_branching_config_collects_errors(self):
+        """A branch reference into a non-dict branching config is a validation error."""
+        flow = AuthoringFlow.from_dict(
+            data={
+                "flow_name": "x",
+                "flow": [
+                    {"type": "ingest_source", "name": "a"},
+                    {"type": "branching", "name": "b", "depends_on": ["a"], "config": "not-a-dict"},
+                    {"type": "noop", "name": "c", "depends_on": ["b.left"]},
+                ],
+            }
+        )
+
+        with pytest.raises(FlowInvalidDataException) as exc_info:
+            flow.validate()
+
+        message = str(exc_info.value)
+        assert "config must be a dictionary" in message
+        assert "operator: b" in message
+
+    def test_branch_reference_to_non_dict_branches_collects_errors(self):
+        """A branch reference when branches is not a dict fails validation without crashing."""
+        flow = AuthoringFlow.from_dict(
+            data={
+                "flow_name": "x",
+                "flow": [
+                    {"type": "ingest_source", "name": "a"},
+                    {
+                        "type": "branching",
+                        "name": "b",
+                        "depends_on": ["a"],
+                        "config": {"branches": ["left", "right"]},
+                    },
+                    {"type": "noop", "name": "c", "depends_on": ["b.left"]},
+                ],
+            }
+        )
+
+        with pytest.raises(FlowInvalidDataException) as exc_info:
+            flow.validate()
+
+        message = str(exc_info.value)
+        assert "branches" in message.lower()
+        assert "dictionary" in message.lower()
+
 
 class TestAuthoringFlowFromDict:
     """Tests for AuthoringFlow.from_dict()."""

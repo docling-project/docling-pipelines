@@ -76,10 +76,6 @@ def get_opensearch_config() -> dict:
         OperatorConstants.VectorDB.VECTOR_DIMENSION: int(
             os.getenv(OperatorConstants.VectorDB.OPENSEARCH_VECTOR_DIMENSION, "384")
         ),
-        # Index settings
-        OperatorConstants.VectorDB.CREATE_INDEX: str_to_bool(
-            os.getenv(OperatorConstants.VectorDB.OPENSEARCH_CREATE_INDEX, "true")
-        ),
         OperatorConstants.Columns.DOC_ID_COLUMN: os.getenv(
             OperatorConstants.VectorDB.OPENSEARCH_DOC_ID_COLUMN, "doc_id_hash"
         ),
@@ -157,10 +153,6 @@ def get_milvus_config() -> dict:
         # Vector dimension
         OperatorConstants.VectorDB.VECTOR_DIMENSION: int(
             os.getenv(OperatorConstants.VectorDB.MILVUS_VECTOR_DIMENSION, "384")
-        ),
-        # Collection settings
-        OperatorConstants.VectorDB.CREATE_INDEX: str_to_bool(
-            os.getenv(OperatorConstants.VectorDB.MILVUS_CREATE_INDEX, "true")
         ),
         OperatorConstants.Columns.DOC_ID_COLUMN: os.getenv(
             OperatorConstants.VectorDB.MILVUS_DOC_ID_COLUMN, "doc_id_hash"

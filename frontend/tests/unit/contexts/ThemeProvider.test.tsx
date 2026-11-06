@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, act } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { ThemeProvider } from '@/contexts/ThemeProvider';

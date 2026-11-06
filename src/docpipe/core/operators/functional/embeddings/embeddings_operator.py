@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Embeddings Operator
 
@@ -153,6 +156,15 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
             OperatorConstants.Columns.DOC_ID_HASH, OperatorConstants.Columns.DOC_ID_HASH_DEFAULT
         )
 
+        # Quantization configuration
+        self.quantization: str = str(config.get(OperatorConstants.Config.QUANTIZATION, "none")).lower()
+        if self.quantization not in ("none", "binary", "ubinary"):
+            raise DocpipeException(
+                f"Invalid quantization '{self.quantization}'. Supported: ['none', 'binary', 'ubinary']",
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+
         # Chunking configuration
         self.overlap_ratio: float = config.get(OVERLAP_RATIO_KEY, OVERLAP_RATIO_DEFAULT)
         self.token_limit: int = config.get(TOKEN_LIMIT_KEY, TOKEN_LIMIT_DEFAULT)
@@ -264,9 +276,6 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         """Validate provider type and value against supported providers."""
         if not self.should_validate_field(field_value=self.provider):
             return
-        if not isinstance(self.provider, str):
-            errors.append(f"provider must be a string, got {type(self.provider)}")
-            return
         supported_providers = LLMAdapterFactory.get_supported_providers(capability="embedding")
         if self.provider not in supported_providers:
             errors.append(f"provider must be one of {sorted(supported_providers)}, got '{self.provider}'")
@@ -288,9 +297,6 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
     def _validate_provider_config(self, *, errors: list[str]) -> None:
         """Validate provider_config dict including model_id, max_concurrent_requests, and batch_size."""
         if not self.should_validate_field(field_value=self.provider_config):
-            return
-        if not isinstance(self.provider_config, dict):
-            errors.append(f"provider_config must be a dictionary, got {type(self.provider_config)}")
             return
 
         model_id = self.provider_config.get(OperatorConstants.Config.MODEL_ID)
@@ -442,8 +448,34 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
                     OperatorConstants.Config.DEFAULT: TOKEN_LIMIT_DEFAULT,
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.INTEGER,
                 },
+                OperatorConstants.Config.QUANTIZATION: {
+                    OperatorConstants.Misc.NAME: "Quantization",
+                    OperatorConstants.Config.DESCRIPTION: "Quantization method for generated embeddings: none (default, float32 embeddings), binary/ubinary (identical: 1-bit sign thresholding packed 8 dimensions per byte; works best with zero-centred, e.g. normalized, embeddings).",
+                    OperatorConstants.Config.REQUIRED: False,
+                    OperatorConstants.Config.DEFAULT: "none",
+                    OperatorConstants.Config.VALID_VALUES: ["none", "binary", "ubinary"],
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+                },
             },
         }
+
+    @staticmethod
+    def _quantize_vectors_to_binary(*, vectors: list[list[float]]) -> list[bytes]:
+        """
+        Quantize float vectors to packed binary byte sequences using 1-bit sign thresholding (>0).
+
+        Args:
+            vectors: List of float vectors
+
+        Returns:
+            List of packed bytes objects of length ceil(dim / 8)
+        """
+        if not vectors:
+            return []
+        arr = np.asarray(vectors, dtype=np.float32)
+        bool_mask = arr > 0
+        packed = np.packbits(bool_mask, axis=-1)
+        return [row.tobytes() for row in packed]
 
     @staticmethod
     def _build_chunk_text_for_embedding(*, chunk: dict[str, Any]) -> str:
@@ -1092,41 +1124,15 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         ).value
         return [table.slice(0, 0)], metadata
 
-    def _update_doc_hash_column(self, table: pa.Table, doc_id_hashes: list[str]) -> pa.Table:
-        """
-        Update or add document hash column to table.
-
-        Args:
-            table: PyArrow table to update
-            doc_id_hashes: List of document hashes
-
-        Returns:
-            Updated PyArrow table with hash column
-        """
-        if not doc_id_hashes:
-            return table
-
-        if self.doc_id_hash_column in table.column_names:
-            table = table.drop_columns([self.doc_id_hash_column])
-
-        table = TransformUtils.add_column(table=table, name=self.doc_id_hash_column, content=doc_id_hashes)
-
-        logger.info(
-            "Added document hash column '%s' to table",
-            self.doc_id_hash_column,
-            extra=self.common_log_arguments,
-        )
-        return table
-
     def _store_embedding_for_row(
         self,
         *,
         idx: int,
-        embeddings: list[float] | list[list[float]],
+        embeddings: list[float] | list[list[float]] | bytes | list[bytes],
         chunks_column_data: list | None,
         doc_ids: list | None,
         embeddings_dir_ref: list[str | None],
-    ) -> dict[str, str] | list[float] | list[list[float]]:
+    ) -> dict[str, str] | list[float] | list[list[float]] | bytes | list[bytes]:
         """
         Decide whether to write embeddings to a memmap file (when the matching
         chunk row is already file-backed) or keep them in memory.
@@ -1141,7 +1147,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
             and DocpipeConstants.CHUNKS_MEMMAP_FILE in chunks_column_data[idx]
         )
         if not row_chunks_as_files:
-            return embeddings  # type: ignore[return-value]
+            return embeddings
 
         # Lazy-initialise the embeddings directory once per slice
         if embeddings_dir_ref[0] is None:
@@ -1184,7 +1190,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         )
         embeddings_dir_ref: list[str | None] = [None]
 
-        embeddings_column_data: list[dict[str, str] | list[float] | list[list[float]]] = [
+        embeddings_column_data: list[dict[str, str] | list[float] | list[list[float]] | bytes | list[bytes]] = [
             self._store_embedding_for_row(
                 idx=idx,
                 embeddings=emb,
@@ -1200,12 +1206,9 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         )
         logger.info("Added embeddings column '%s' to table", self.embeddings_column, extra=self.common_log_arguments)
 
-        if self.doc_id_hash_column in slice_table.column_names:
-            slice_table = slice_table.drop_columns([self.doc_id_hash_column])
-            slice_table = TransformUtils.add_column(
-                table=slice_table, name=self.doc_id_hash_column, content=slice_doc_id_hashes
-            )
-        return slice_table
+        # transform() ensured the doc_id_hash column before slicing
+        slice_table = slice_table.drop_columns([self.doc_id_hash_column])
+        return TransformUtils.add_column(table=slice_table, name=self.doc_id_hash_column, content=slice_doc_id_hashes)
 
     def _ensure_doc_id_hash_column(self, *, table: pa.Table) -> tuple[pa.Table, Exception | None]:
         """
@@ -1245,7 +1248,7 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
 
         Returns (embeddings, doc_id_hashes, indices of rows that failed).
         """
-        slice_embeddings: list[list[float] | list[list[float]]] = []
+        slice_embeddings: list[list[float] | list[list[float]] | bytes | list[bytes]] = []
         slice_doc_id_hashes: list[str] = []
         slice_remove_idx: list[int] = []
         slice_hash_values: list[str] = slice_table[self.doc_id_hash_column].to_pylist()
@@ -1288,7 +1291,11 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
 
             # For chunked content, store all embeddings; for full doc, store single embedding
             doc_embeddings = row_vectors[i]
-            slice_embeddings.append(doc_embeddings if has_chunked_content else doc_embeddings[0])
+            if self.quantization in ("binary", "ubinary"):
+                quantized_doc = self._quantize_vectors_to_binary(vectors=doc_embeddings)
+                slice_embeddings.append(quantized_doc if has_chunked_content else quantized_doc[0])
+            else:
+                slice_embeddings.append(doc_embeddings if has_chunked_content else doc_embeddings[0])
             slice_doc_id_hashes.append(slice_hash_values[i])
             metadata[Metrics.External.PROCESSED_DOCS] += 1
             logger.debug(

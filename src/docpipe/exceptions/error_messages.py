@@ -1,3 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
+"""Shared validation messages and structured alert payloads."""
+
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
@@ -44,6 +49,8 @@ class ValidationMessage(BaseModel):
 class ValidationCodeMessages(StrEnum):
     """Validationcodemessages."""
 
+    INGEST_PROVIDER_MISSING = "Provider not added. Select a provider for the ingest source operator."
+
     MISSING_FEATURES = """Not all required features for {operator_name} operator are available - required: {missing_features},
         Missing one or more operators:  {missing_operators},
         Please consider adding the missing operators to ensure full functionality
@@ -67,7 +74,7 @@ class ValidationCodeMessages(StrEnum):
 
     INGEST_OPERATOR_MISPLACED = """The first operator in the flow must be an "Ingest data" operator"""
 
-    GENERATE_OUTPUT_MISSING = """The last operator should be a "Vector DB" or "Storage" operator"""
+    GENERATE_OUTPUT_MISSING = """The last operator is not a "Generate Output" operator"""
 
     MULTIPLE_EXTRACTED_DETECTED = """Multiple extract operators detected. Ensure they are used correctly"""
 

@@ -7,6 +7,8 @@ import pytest
 from docpipe.core.custom_operators.validation import validate_operator_file
 from docpipe.exceptions.docpipe_exceptions import CustomOperatorInvalidDataException
 
+EXAMPLES_DIR = Path(__file__).resolve().parents[4] / "examples" / "custom_operators"
+
 
 class TestASTOperatorValidatorHappyPath:
     """Test suite for valid custom operator AST validation."""
@@ -212,3 +214,173 @@ class InstanceMetadata(AbstractOperator):
             CustomOperatorInvalidDataException, match="must implement 'get_metadata' as a @staticmethod"
         ):
             validate_operator_file(operator_file_path=op_file)
+
+
+def _write_operator(*, directory: Path, code: str, filename: str = "operator.py") -> Path:
+    """Write operator source code to a file in directory and return its path."""
+    op_file = directory / filename
+    op_file.write_text(code, encoding="utf-8")
+    return op_file
+
+
+def _operator_source(*, short_name: str = '"probe_op"', category: str = '"Extract"', owner: str = '"custom"') -> str:
+    """Return a minimal operator source whose class attributes are the given source expressions."""
+    return f"""
+from docpipe.core.constants.constants import DocpipeConstants
+from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
+
+class ProbeOp(AbstractOperator):
+    short_name = {short_name}
+    category = {category}
+    owner = {owner}
+    def transform(self, table): pass
+    @staticmethod
+    def get_metadata(): pass
+"""
+
+
+class TestASTOperatorValidatorShippedExamples:
+    """The example operators shipped in the repository satisfy the upload contract."""
+
+    @pytest.mark.parametrize(
+        ("example_file", "short_name", "class_name"),
+        [
+            ("hello_operator.py", "hello", "HelloOperator"),
+            ("example_custom_operator.py", "example_custom", "ExampleCustomOperator"),
+        ],
+    )
+    def test_validate_shipped_example_operator(self, *, example_file: str, short_name: str, class_name: str) -> None:
+        """Annotated attributes, OperatorCategory members and DocpipeConstants.OWNER_CUSTOM are accepted."""
+        example_path = EXAMPLES_DIR / example_file
+
+        info = validate_operator_file(operator_file_path=example_path)
+
+        assert info == {"short_name": short_name, "category": "Functional", "class_name": class_name}
+
+
+class TestASTOperatorValidatorClassDetection:
+    """Test suite for detecting the operator class and reading its body."""
+
+    def test_validate_detects_module_qualified_base_and_ignores_other_classes(self, *, tmp_path: Path) -> None:
+        """A base written as module.AbstractOperator is detected; classes with other bases are ignored."""
+        code = '''
+import abc
+from docpipe.core.operators import abstract_operator
+
+class Helper(object):
+    short_name = 1
+
+class Config(abc.ABC):
+    category = 2
+
+class QualifiedOp(abstract_operator.AbstractOperator):
+    """Docstrings and other statements in the class body are ignored."""
+
+    short_name: str = "qualified_op"
+    category: str = "Quality"
+    owner: str = "custom"
+    version = "1.0"
+    description: str
+    registry.default: int = 3
+
+    def transform(self, table):
+        return [table], {}
+
+    def get_required_features(self):
+        return []
+
+    @staticmethod
+    def get_metadata():
+        return {}
+'''
+        op_file = _write_operator(directory=tmp_path, code=code)
+
+        info = validate_operator_file(operator_file_path=op_file)
+
+        assert info == {"short_name": "qualified_op", "category": "Quality", "class_name": "QualifiedOp"}
+
+    def test_validate_accepts_module_qualified_staticmethod_decorator(self, *, tmp_path: Path) -> None:
+        """get_metadata decorated with builtins.staticmethod counts as a static method."""
+        code = _operator_source().replace("@staticmethod", "@builtins.staticmethod")
+        op_file = _write_operator(directory=tmp_path, code=code)
+
+        info = validate_operator_file(operator_file_path=op_file)
+
+        assert info["class_name"] == "ProbeOp"
+
+    def test_validate_annotation_without_value_does_not_define_short_name(self, *, tmp_path: Path) -> None:
+        """A bare annotation `short_name: str` does not count as a short_name definition."""
+        code = _operator_source().replace('short_name = "probe_op"', "short_name: str")
+        op_file = _write_operator(directory=tmp_path, code=code)
+
+        with pytest.raises(CustomOperatorInvalidDataException, match="must define 'short_name'") as exc_info:
+            validate_operator_file(operator_file_path=op_file)
+
+        assert exc_info.value.field_name == "short_name"
+
+
+class TestASTOperatorValidatorAttributeRules:
+    """Test suite for the category and owner attribute rules."""
+
+    @pytest.mark.parametrize("category", ["42", 'OperatorCategory("Quality")', "None"])
+    def test_validate_non_literal_category_raises_exception(self, *, tmp_path: Path, category: str) -> None:
+        """A category that is neither a string literal nor an attribute reference is rejected."""
+        op_file = _write_operator(directory=tmp_path, code=_operator_source(category=category))
+
+        with pytest.raises(
+            CustomOperatorInvalidDataException, match="category must be a string literal or OperatorCategory enum"
+        ) as exc_info:
+            validate_operator_file(operator_file_path=op_file)
+
+        assert exc_info.value.field_name == "category"
+
+    def test_validate_missing_category_raises_exception(self, *, tmp_path: Path) -> None:
+        """An operator class without a category attribute is rejected."""
+        code = _operator_source().replace('    category = "Extract"\n', "")
+        op_file = _write_operator(directory=tmp_path, code=code)
+
+        with pytest.raises(CustomOperatorInvalidDataException, match="must define 'category'") as exc_info:
+            validate_operator_file(operator_file_path=op_file)
+
+        assert exc_info.value.field_name == "category"
+
+    @pytest.mark.parametrize(
+        ("category", "reported"),
+        [('"Transform"', "Transform"), ('"quality"', "quality"), ("OperatorCategory.Enrichment", "Enrichment")],
+    )
+    def test_validate_unknown_category_raises_exception(self, *, tmp_path: Path, category: str, reported: str) -> None:
+        """Categories outside OperatorCategory (case-sensitive) are rejected and the valid ones are listed."""
+        op_file = _write_operator(directory=tmp_path, code=_operator_source(category=category))
+
+        with pytest.raises(CustomOperatorInvalidDataException, match=f"Invalid category '{reported}'") as exc_info:
+            validate_operator_file(operator_file_path=op_file)
+
+        assert exc_info.value.field_name == "category"
+        assert "Extract, Functional, Ingest, Quality, Storage, VectorDB" in str(exc_info.value)
+
+    @pytest.mark.parametrize("owner", ["DocpipeConstants.OWNER_DOCPIPE", "100", "None"])
+    def test_validate_non_custom_owner_expression_raises_exception(self, *, tmp_path: Path, owner: str) -> None:
+        """An owner that is neither a string literal nor OWNER_CUSTOM is rejected while parsing the class."""
+        op_file = _write_operator(directory=tmp_path, code=_operator_source(owner=owner))
+
+        with pytest.raises(CustomOperatorInvalidDataException, match="owner must be 'custom'") as exc_info:
+            validate_operator_file(operator_file_path=op_file)
+
+        assert exc_info.value.field_name == "owner"
+
+
+class TestASTOperatorValidatorUnreadableFile:
+    """Test suite for files that cannot be decoded."""
+
+    def test_validate_non_utf8_file_raises_exception(self, *, tmp_path: Path) -> None:
+        """A file that is not valid UTF-8 is reported as unreadable instead of crashing."""
+        op_file = tmp_path / "latin1_op.py"
+        op_file.write_bytes(_operator_source(short_name='"caf' + chr(0xE9) + '"').encode("latin-1"))
+
+        with pytest.raises(
+            CustomOperatorInvalidDataException, match="Failed to read or parse operator file"
+        ) as exc_info:
+            validate_operator_file(operator_file_path=op_file)
+
+        assert exc_info.value.field_name == "operator_file"
+        assert isinstance(exc_info.value.__cause__, UnicodeDecodeError)

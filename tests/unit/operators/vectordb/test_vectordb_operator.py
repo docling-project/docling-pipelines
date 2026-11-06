@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for VectorDB operator with OpenSearch adapter."""
 
 from unittest.mock import MagicMock, Mock, patch
@@ -6,10 +9,11 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from docpipe.core.constants.constants import Metrics
+from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb import VectorDBOperator
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
+from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.config import get_opensearch_config
 from docpipe.utils.operators.vectordb_utils import generate_composite_pk, generate_positional_pk
@@ -25,7 +29,6 @@ def basic_config():
     provider_cfg["index_name"] = "test_index"
     return {
         OperatorConstants.Config.PROVIDER: "opensearch",
-        OperatorConstants.VectorDB.CREATE_INDEX: True,
         OperatorConstants.Columns.DOC_ID_COLUMN: env_config.get(OperatorConstants.Columns.DOC_ID_COLUMN, "doc_id_hash"),
         OperatorConstants.Config.AVAILABLE_FEATURES: {
             "doc_id_hash": {
@@ -121,7 +124,6 @@ class TestVectorDBOperatorInitialization:
         """Milvus: missing collection_name raises at construction (adapter guard fires before validate())."""
         config = {
             OperatorConstants.Config.PROVIDER: "milvus",
-            OperatorConstants.VectorDB.CREATE_INDEX: True,
             OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
             OperatorConstants.Config.PROVIDER_CONFIG: {
                 "host": "localhost",
@@ -140,7 +142,6 @@ class TestVectorDBOperatorInitialization:
         """Milvus: validate() also surfaces collection_name via schema-driven check when adapter is mocked."""
         config = {
             OperatorConstants.Config.PROVIDER: "milvus",
-            OperatorConstants.VectorDB.CREATE_INDEX: True,
             OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
             OperatorConstants.Config.PROVIDER_CONFIG: {
                 "host": "localhost",
@@ -269,6 +270,65 @@ class TestBatchProcessing:
         mock_adapter.index_documents.assert_called_once()
         assert metadata["processed_docs"] == 3
         assert metadata["failed_docs_count"] == 0
+
+    def test_transform_creates_index_when_absent(self, basic_config, sample_table):
+        """Index is created automatically, without any create_index option, when it does not exist."""
+        mock_adapter = Mock()
+        mock_adapter.index_exists.return_value = False
+        mock_adapter.detect_all_vector_dimensions.return_value = {"embeddings": 384}
+        mock_adapter.index_documents.return_value = (3, [])
+
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+            return_value=mock_adapter,
+        ):
+            operator = VectorDBOperator(basic_config)
+            _result_tables, metadata = operator.transform(sample_table)
+
+        mock_adapter.create_index.assert_called_once_with(dimension_mapping={"embeddings": 384})
+        mock_adapter.validate_existing_schema.assert_not_called()
+        mock_adapter.index_documents.assert_called_once()
+        assert metadata["processed_docs"] == 3
+
+    @pytest.mark.parametrize("legacy_value", [True, False])
+    def test_legacy_create_index_logs_deprecation_and_is_ignored(self, basic_config, sample_table, legacy_value):
+        """A legacy create_index value logs a deprecation warning and never skips index handling."""
+        basic_config["create_index"] = legacy_value
+        mock_adapter = Mock()
+        mock_adapter.index_exists.return_value = False
+        mock_adapter.detect_all_vector_dimensions.return_value = {"embeddings": 384}
+        mock_adapter.index_documents.return_value = (3, [])
+
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            operator = VectorDBOperator(basic_config)
+            operator.transform(sample_table)
+
+        warning_messages = [call.args[0] for call in mock_logger.warning.call_args_list]
+        assert any("'create_index' configuration parameter is deprecated" in msg for msg in warning_messages)
+        mock_adapter.create_index.assert_called_once_with(dimension_mapping={"embeddings": 384})
+
+    def test_no_deprecation_warning_without_create_index(self, basic_config):
+        """No deprecation warning is logged when create_index is not supplied."""
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=Mock(),
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            VectorDBOperator(basic_config)
+
+        assert not any("create_index" in str(call.args[0]) for call in mock_logger.warning.call_args_list)
+
+    def test_metadata_excludes_create_index(self):
+        """get_metadata() no longer exposes the create_index parameter."""
+        assert "create_index" not in VectorDBOperator.get_metadata()["attributes"]
 
 
 class TestChunkedEmbeddings:
@@ -1894,3 +1954,161 @@ class TestIndexAndRecordResultsFailedChunks:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestVectorDBOperatorValidateFeatureTypes:
+    """validate() forwards the propagated feature types to the adapter and reports its rejection."""
+
+    @staticmethod
+    def _validate(
+        *,
+        feature_types: dict | None,
+        adapter_error: Exception | None = None,
+        initial_errors: list | None = None,
+    ) -> tuple[list, MagicMock]:
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "test_index", "host": "localhost"},
+        }
+        if feature_types is not None:
+            config[DocpipeConstants.VALIDATION_FEATURE_TYPES] = feature_types
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearch"):
+            operator = VectorDBOperator(config)
+        operator.adapter = MagicMock()
+        operator.adapter.get_config_schema.return_value = OpenSearchConfig
+        operator.adapter.validate_vector_feature_types.side_effect = adapter_error
+        errors: list = list(initial_errors or [])
+        operator.validate(errors=errors, warnings=[], available_features=[])
+        return errors, operator.adapter
+
+    def test_feature_types_are_forwarded_to_adapter(self):
+        types = {"embeddings": "vector_binary"}
+        errors, adapter = self._validate(feature_types=types)
+        adapter.validate_vector_feature_types.assert_called_once_with(feature_types=types)
+        assert not errors
+
+    def test_adapter_rejection_is_reported_as_error(self):
+        errors, adapter = self._validate(
+            feature_types={"embeddings": "vector"}, adapter_error=DocpipeException("bad index")
+        )
+        assert "bad index" in errors
+        adapter.validate_vector_feature_types.assert_called_once()
+
+    def test_adapter_not_called_without_feature_types(self):
+        _, adapter = self._validate(feature_types=None)
+        adapter.validate_vector_feature_types.assert_not_called()
+
+    def test_adapter_not_called_when_earlier_errors_exist(self):
+        """Feature-type validation is skipped when the config is already invalid."""
+        errors, adapter = self._validate(
+            feature_types={"embeddings": "vector"},
+            initial_errors=["earlier validation error"],
+        )
+        adapter.validate_vector_feature_types.assert_not_called()
+        assert "earlier validation error" in errors
+
+
+class TestBinaryVectorColumnHandling:
+    """Binary (vector_binary) columns are treated as vector columns and streamed as raw bytes."""
+
+    @staticmethod
+    def _make_operator(*, available_features: dict, sparse: bool = False, detected: dict | None = None):
+        mock_adapter = Mock()
+        mock_adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content: (
+            f"{file_id}_{chunk_index}"
+        )
+        mock_adapter.detect_all_vector_dimensions.return_value = detected or {}
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+            OperatorConstants.Config.AVAILABLE_FEATURES: available_features,
+            OperatorConstants.VectorDB.ADD_SPARSE_VECTOR: sparse,
+        }
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+            return_value=mock_adapter,
+        ):
+            return VectorDBOperator(config), mock_adapter
+
+    def test_prepare_file_based_chunks_keeps_packed_bytes(self):
+        import json
+
+        op, _ = self._make_operator(available_features={})
+        packed = [b"\x01\x02", b"\x03\x04"]
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.yield_chunks_from_file",
+            return_value=iter([json.dumps({"chunk": "a"}), json.dumps({"chunk": "b"})]),
+        ):
+            result = op._prepare_file_based_chunks(
+                row_data={"id": "file.pdf", "content": "full text"},
+                doc_id="hash1",
+                chunks_filepath="/tmp/chunks.bin",
+                vector_column_generators={"embeddings": iter(packed)},
+                id_column="id",
+            )
+
+        assert [row["embeddings"] for _, row in result] == packed
+        assert all(isinstance(row["embeddings"], bytes) for _, row in result)
+
+    def test_prepare_file_based_chunks_mixed_dense_and_binary_columns(self):
+        import json
+
+        op, _ = self._make_operator(available_features={})
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.yield_chunks_from_file",
+            return_value=iter([json.dumps({"chunk": "a"})]),
+        ):
+            result = op._prepare_file_based_chunks(
+                row_data={"id": "file.pdf", "content": "full text"},
+                doc_id="hash1",
+                chunks_filepath="/tmp/chunks.bin",
+                vector_column_generators={
+                    "dense_emb": iter([np.array([0.1, 0.2])]),
+                    "binary_emb": iter([b"\xff"]),
+                },
+                id_column="id",
+            )
+
+        _, row = result[0]
+        assert row["dense_emb"] == pytest.approx([0.1, 0.2])
+        assert row["binary_emb"] == b"\xff"
+
+    def test_resolve_vector_dimensions_includes_binary_columns(self):
+        features = {
+            "binary_emb": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_VECTOR_BINARY,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+            },
+            "dense_emb": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_VECTOR,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+            },
+            "content": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_STRING,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+            },
+        }
+        op, adapter = self._make_operator(available_features=features, detected={"binary_emb": 256, "dense_emb": 384})
+
+        table = pa.table({"binary_emb": [b"\x00" * 32], "dense_emb": [[0.1, 0.2]], "content": ["x"]})
+        vec_cols, dim_map = op._resolve_vector_dimensions(table=table, metadata={})
+
+        assert vec_cols == ["binary_emb", "dense_emb"]
+        assert dim_map == {"binary_emb": 256, "dense_emb": 384}
+        adapter.detect_all_vector_dimensions.assert_called_once()
+
+    def test_resolve_vector_dimensions_ignores_binary_not_available_for_vector_db(self):
+        features = {
+            "binary_emb": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_VECTOR_BINARY,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: False,
+            },
+        }
+        op, _ = self._make_operator(available_features=features)
+        metadata: dict = {}
+
+        vec_cols, dim_map = op._resolve_vector_dimensions(table=pa.table({"binary_emb": [b"\x00"]}), metadata=metadata)
+
+        assert vec_cols == []
+        assert dim_map is None
+        assert metadata[Metrics.External.NODE_STATUS] == "Failed"

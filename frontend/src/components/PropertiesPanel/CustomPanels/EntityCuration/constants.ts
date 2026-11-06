@@ -18,11 +18,3 @@ export const ENTITY_CURATION_ATTRIBUTE = {
  */
 export type EntityCurationAttributeKey =
   typeof ENTITY_CURATION_ATTRIBUTE[keyof typeof ENTITY_CURATION_ATTRIBUTE];
-
-/**
- * User-friendly labels for every field in the Entity curation panel.
- */
-export const ENTITY_CURATION_LABELS = {
-  ENTITIES_COLUMN: 'Entities column',
-  DOCUMENT_TYPE_COLUMN: 'Document type column',
-} as const;

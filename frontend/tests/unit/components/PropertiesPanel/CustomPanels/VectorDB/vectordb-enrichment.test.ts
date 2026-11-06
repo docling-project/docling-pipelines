@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { buildVectorDBEnrichmentFlow, extractVectorDBNodeResult } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-enrichment';
 
 describe('vectordb-enrichment', () => {
@@ -29,7 +29,7 @@ describe('vectordb-enrichment', () => {
     it('does not mutate the original flow', () => {
       const original = makePipelineFlow();
       buildVectorDBEnrichmentFlow(original, 'node-1', 'opensearch', { host: 'h' }, 'index_name');
-      expect(original.pipelines[0].nodes[0].parameters.provider_config).toBe('{"host":"localhost"}');
+      expect(original.pipelines[0]?.nodes[0]?.parameters.provider_config).toBe('{"host":"localhost"}');
     });
   });
 
