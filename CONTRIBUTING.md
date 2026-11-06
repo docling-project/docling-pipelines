@@ -810,6 +810,8 @@ All PRs must pass:
 4. **Approval** - at least one maintainer approval required
 5. **Merge** - maintainer will merge after approval
 
+An AI triage and first review may add `ai:*` labels, a triage comment, and inline review comments to your PR. The output is advisory, and a maintainer reviews every change. See [`.github/AI_TRIAGE.md`](.github/AI_TRIAGE.md) for what it checks and the `/ai` commands.
+
 ### Merge Requirements
 
 - All checks passing
