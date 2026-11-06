@@ -33,7 +33,7 @@ The job-runs-api capability is the REST API surface for job run lifecycle manage
 - **THEN** `count` is 5 and `total` is 20
 
 ### Requirement: Get job run status and node statistics
-`GET /api/v1/job_runs/{job_run_id}` SHALL return a `JobRunStatusResponse` containing `job_stats` (overall run metadata and per-node `node_stats`), `node_sequence` (ordered node execution list), and `node_metadata` (per-node document counts). When `include_logs=true` the response SHALL also include per-node execution log strings keyed by node ID. An unknown `job_run_id` SHALL return 404.
+`GET /api/v1/job_runs/{job_run_id}` SHALL return a `JobRunStatusResponse` containing `job_stats` (overall run metadata and per-node `node_stats`), `node_sequence` (node IDs in flow DAG order; see "Order nodes in job run status by flow DAG"), and `node_metadata` (per-node document counts). When `include_logs=true` the response SHALL also include per-node execution log strings keyed by node ID. An unknown `job_run_id` SHALL return 404.
 
 #### Scenario: Status returned with node stats
 - **WHEN** `GET /api/v1/job_runs/{job_run_id}` is called for a running or completed run
