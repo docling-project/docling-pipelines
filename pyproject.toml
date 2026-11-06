@@ -99,6 +99,8 @@ dependencies = [
     "unicodedataplus==16.0.0.post1",
     "urllib3==2.8.0",
     "uvicorn[standard]==0.54.0",
+    # weaviate-client caps grpcio<1.80.0; grpcio is held below 1.80 to resolve with the client
+    "weaviate-client==4.24.1",
     "mcp>=1.0,<2.0",
 ]
 

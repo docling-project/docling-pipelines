@@ -207,7 +207,7 @@ When `add_sparse_vector` is true, the provider SHALL configure keyword (BM25) re
 
 #### Scenario: Sparse only with memory-mapped chunks
 - **WHEN** sparse mode is on, `available_features` declares no dense vector column, and the input chunks are memory-mapped file references
-- **THEN** this is an existing operator limitation independent of the provider: the affected documents are recorded as failed, and the documentation states that sparse-only runs require in-memory chunks
+- **THEN** this is an existing operator limitation independent of the provider: the affected documents are recorded as failed with a reason stating that memory-mapped chunks require an embeddings column (not an opaque lookup error), and the documentation states that sparse-only runs require in-memory chunks
 
 #### Scenario: Content not mapped
 - **WHEN** sparse mode is on and no feature mapping targets the content feature

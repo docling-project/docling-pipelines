@@ -43,7 +43,7 @@ export const OPERATOR_LABELS: Record<string, OperatorLabel> = {
   [NodeOperator.VECTORDB]: {
     label: 'Store in Vector Database',
     description:
-      'Store document embeddings in a vector database for similarity search. Supports OpenSearch, Milvus, and other vector stores.',
+      'Store document embeddings in a vector database for similarity search. Supports OpenSearch, Milvus, Weaviate, and other vector stores.',
   },
   [NodeOperator.DOCUMENT_SET]: {
     label: 'Document Set',

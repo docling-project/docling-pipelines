@@ -44,6 +44,12 @@ VectorStoreFactory.register_lazy(
 )
 logger.debug("Milvus adapter registered (lazy)")
 
+# Weaviate adapter (lazy - requires weaviate-client)
+VectorStoreFactory.register_lazy(
+    "weaviate", "docpipe.core.operators.vectordb.adapters.outbound.weaviate.adapter", "WeaviateAdapter"
+)
+logger.debug("Weaviate adapter registered (lazy)")
+
 # Constants
 ENGINE_KEY: str = "engine"
 ALGORITHM_KEY: str = "algorithm"
@@ -62,11 +68,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
     Generic vector database operator using hexagonal architecture.
 
     This operator works with any vector database through the VectorStorePort interface.
-    It delegates to provider-specific adapters (OpenSearch, Milvus).
+    It delegates to provider-specific adapters (OpenSearch, Milvus, Weaviate).
     without being tightly coupled to any specific implementation.
 
     Supported Vector Databases:
     - opensearch: OpenSearch with multiple KNN engines (faiss, lucene, nmslib)
+    - milvus: Milvus / Milvus Lite
+    - weaviate: Weaviate with named vectors and BM25 sparse retrieval
 
     To add a new vector database:
     1. Create an adapter class implementing VectorStorePort
@@ -144,7 +152,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             # Store canonical list-of-dicts back into config so validation sees one shape
             self.config[OperatorConstants.Config.FEATURE_MAPPINGS] = user_mappings
             adapter_config[OperatorConstants.Config.FEATURE_MAPPINGS] = user_mappings
-            # Add sparse vector configuration if present (Milvus-specific)
+            # Add sparse vector configuration if present (providers with server-side BM25 sparse retrieval)
             if OperatorConstants.VectorDB.ADD_SPARSE_VECTOR in self.config:
                 adapter_config[OperatorConstants.VectorDB.ADD_SPARSE_VECTOR] = self.config[
                     OperatorConstants.VectorDB.ADD_SPARSE_VECTOR
@@ -154,6 +162,9 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             schema_template_path = self.config.get(SCHEMA_TEMPLATE_PATH_KEY)
             if schema_template_path:
                 adapter_config[SCHEMA_TEMPLATE_PATH_KEY] = schema_template_path
+
+            if self.validating_flow:
+                adapter_config[DocpipeConstants.VALIDATING_FLOW] = self.validating_flow
 
             self.adapter: VectorStorePort = VectorStoreFactory.create(self.provider, **adapter_config)
         except Exception as e:
@@ -172,11 +183,25 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
     def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
         """
         Validate operator configuration.
+
+        When the operator was built for flow validation, the adapter is released before
+        returning because transform() never runs to close it.
+
         Args:
             errors: List to append validation errors
             warnings: List to append validation warnings
             available_features: List of available features from previous operators
         """
+        try:
+            self._validate_config(errors=errors, warnings=warnings, available_features=available_features)
+        finally:
+            if self.validating_flow:
+                try:
+                    self.adapter.close()
+                except Exception as e:
+                    logger.warning("Failed to close adapter after flow validation: %s", e)
+
+    def _validate_config(self, *, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
         super().validate(errors=errors, warnings=warnings, available_features=available_features)
 
         metadata = self.get_metadata()
@@ -392,14 +417,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         doc_hash_to_name: dict[str, str],
         file_ids: set[str],
     ) -> None:
-        """Register one row's doc_id_hash, original id, and name into the mapping dicts."""
+        """Register one row's doc_id_hash, document identity, and name into the mapping dicts."""
         unique_doc_ids.add(doc_hash)
-        # Build mapping from doc_id_hash to original id and name
-        if has_id_col:
-            original_id = table[id_column][idx].as_py()
-            if original_id:
-                doc_hash_to_id[doc_hash] = str(original_id)
-                file_ids.add(str(original_id))
+        # Identity is the row's id when usable, else the document ID, matching chunk-key generation.
+        original_id = table[id_column][idx].as_py() if has_id_col else None
+        identity = str(original_id) if original_id else doc_hash
+        doc_hash_to_id[doc_hash] = identity
+        file_ids.add(identity)
         if has_name_col:
             name_val = table["name"][idx].as_py()
             if name_val:
@@ -544,7 +568,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     chunk_text = OperatorUtils.doclang_to_markdown(chunk_text)
                 chunk_row_data[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] = chunk_text
 
-            file_id: str = str(row_data.get(id_column, doc_id))
+            file_id: str = str(row_data.get(id_column) or doc_id)
             chunk_pk: str = self.adapter.generate_chunk_pk(
                 file_id=file_id, chunk_index=chunk_idx, chunk_content=chunk_text
             )
@@ -589,7 +613,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                         chunk_text = OperatorUtils.doclang_to_markdown(chunk_text)
                     chunk_row_data[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] = chunk_text
 
-            file_id: str = str(row_data.get(id_column, doc_id))
+            file_id: str = str(row_data.get(id_column) or doc_id)
             chunk_pk: str = self.adapter.generate_chunk_pk(
                 file_id=file_id, chunk_index=chunk_idx, chunk_content=chunk_text
             )
@@ -738,6 +762,12 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 vector_column_data=vector_column_data,
                 vector_column_filepaths=vector_column_filepaths,
                 vector_column_generators=vector_column_generators,
+            )
+
+        if chunks_filepath and not vector_column_filepaths:
+            raise ValueError(
+                f"Document {doc_id} has memory-mapped chunks but no memory-mapped embeddings column; "
+                "memory-mapped chunks require an embeddings column (sparse-only runs need in-memory chunks)"
             )
 
         # Process chunks
@@ -1002,10 +1032,17 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import (
             OpenSearchConfig,
         )
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import (
+            ADAPTER_NAME as WEAVIATE_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import (
+            WeaviateConfig,
+        )
 
         return {
             OPENSEARCH_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(schema=OpenSearchConfig.model_json_schema()),
             MILVUS_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(schema=MilvusConfig.model_json_schema()),
+            WEAVIATE_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(schema=WeaviateConfig.model_json_schema()),
         }
 
     @staticmethod
@@ -1020,7 +1057,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             OperatorConstants.Misc.CATEGORY: VectorDBOperator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: VectorDBOperator.is_available(),
             OperatorConstants.Misc.LABEL: "Vector Database",
-            OperatorConstants.Config.DESCRIPTION: "Store documents and embeddings in vector databases for similarity search. Supports OpenSearch and Milvus through adapters.",
+            OperatorConstants.Config.DESCRIPTION: "Store documents and embeddings in vector databases for similarity search. Supports OpenSearch, Milvus, and Weaviate through adapters.",
             OperatorConstants.Config.FEATURES: {
                 OperatorConstants.Columns.DOC_ID_HASH_DEFAULT: {
                     OperatorConstants.Misc.NAME: "Document ID",
@@ -1058,7 +1095,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             OperatorConstants.Config.ATTRIBUTES: {
                 OperatorConstants.Config.PROVIDER: {
                     OperatorConstants.Misc.NAME: "Vector Database Provider",
-                    OperatorConstants.Config.DESCRIPTION: "Type of vector database provider. Supported values: opensearch, milvus.",
+                    OperatorConstants.Config.DESCRIPTION: "Type of vector database provider. Supported values: opensearch, milvus, weaviate.",
                     OperatorConstants.Config.REQUIRED: False,
                     OperatorConstants.Config.DEFAULT: PROVIDER_DEFAULT,
                     OperatorConstants.Config.VALID_VALUES: VectorStoreFactory.list_adapters(),

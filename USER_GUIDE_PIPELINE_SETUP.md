@@ -911,7 +911,7 @@ docling-pipelines --list-operators --verbose
 - **Extract**: ExtractOperator (with multiple extraction providers)
 - **Quality**: DocumentClassifier, LanguageDetect, Redaction, Dedup
 - **Functional**: Chunker, Embeddings, Branching, Merge, NOOP
-- **VectorDB**: VectorDBOperator (OpenSearch, Milvus)
+- **VectorDB**: VectorDBOperator (OpenSearch, Milvus, Weaviate)
 - **Storage**: DocumentSetOperator
 
 See **[Operator Reference](docs/reference/OPERATORS.md)** for complete specifications.
