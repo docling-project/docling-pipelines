@@ -95,8 +95,12 @@ Enabling `use_asr_pipeline` on `docling_library` SHALL configure `InputFormat.VI
 - **THEN** video is configured with Docling's default ASR model and audio retains its existing default behavior
 
 #### Scenario: VLM and ASR are both enabled
-- **WHEN** both `use_vlm_pipeline` and `use_asr_pipeline` are enabled in either standard or GPU converter configuration
+- **WHEN** both `use_vlm_pipeline` and `use_asr_pipeline` are enabled without a standard pipeline GPU accelerator
 - **THEN** PDF and image options use VLM while audio and video options use their ASR-backed pipelines
+
+#### Scenario: VLM and standard pipeline GPU settings are combined
+- **WHEN** the extraction configuration enables VLM and specifies a standard pipeline GPU device
+- **THEN** adapter creation rejects the configuration instead of silently ignoring the GPU device or thread settings
 
 #### Scenario: Missing video format option support degrades gracefully
 - **WHEN** the installed Docling does not expose `VideoFormatOption`

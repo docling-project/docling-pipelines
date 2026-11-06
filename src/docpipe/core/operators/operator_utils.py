@@ -1828,6 +1828,8 @@ class OperatorUtils:
                        for ``converter_config`` is leased exclusively from the
                        process-wide pool and returned after the conversion.
             doc_format: Target format for the primary content column (default: "markdown").
+            file_extension: Optional effective extension, taking precedence over the file path's suffix.
+                            Used to select media routing and construct the conversion filename.
 
         Returns:
             Dictionary containing:

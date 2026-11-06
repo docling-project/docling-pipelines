@@ -14,7 +14,7 @@
 - [x] 3.1 [backend] Update `DoclingAdapter` (`_build_gpu_converter_config()` and `extract_single_document()`) in `src/docpipe/core/operators/extract/adapters/outbound/text_extraction/docling_adapter.py` so that when `use_asr_pipeline` is enabled and Docling video classes can be imported, `InputFormat.VIDEO` is configured via `VideoFormatOption(pipeline_cls=VideoPipeline, pipeline_options=VideoPipelineOptions(generate_frame_images=False, ...))`, setting `asr_options` from the resolved model spec only when `asr_model_name` is set; guard the video imports with `try / except (ImportError, AttributeError)`, log a warning, and keep audio working; replace the outdated "no separate VIDEO InputFormat" comment; add tests in `tests/unit/operators/extract/adapters/outbound/text_extraction/test_docling_adapter_gpu.py` (and a standard-path test) for model-named, no-model, and missing-`VideoFormatOption` cases; verify with `pytest tests/unit/operators/extract/`.
 - [x] 3.2 [backend] Add `OperatorConstants.MimeTypes.CSV` -> `.csv` and `OperatorConstants.MimeTypes.EML` -> `.eml` to `_CONTENT_TYPE_TO_EXTENSION` in `src/docpipe/core/operators/ingest/adapters/outbound/sources/web/adapter.py` (no `application/epub+zip` mapping; no Google Drive change); add tests under `tests/unit/operators/ingest/` for CSV, EML with a `charset` parameter, and unrecognised-type HTML fallback, plus `IngestSourceOperator` tests in `tests/unit/operators/ingest/test_extension_validation.py` for Tier 1 `include_filter` acceptance, default (no filter) ingesting `.csv`, and `exclude_filter` skipping `.csv`; verify with `pytest tests/unit/operators/ingest/`.
 
-- [x] 3.3 [backend] Carry the normalized effective extension from validation through the text extraction port and adapters; nonempty `document_format` takes precedence over the filename suffix. Append or replace the suffix on media temporary filenames. Test extensionless and conflicting names, unsupported formats, and cleanup. Test VLM and ASR enabled together in both converter paths, omitted versus explicitly empty/null model names, and absent ffmpeg reaching per-document failure metadata.
+- [x] 3.3 [backend] Carry the normalized effective extension from validation through the text extraction port and adapters; nonempty `document_format` takes precedence over the filename suffix. Append or replace the suffix on media temporary filenames. Test extensionless and conflicting names, unsupported formats, and cleanup. Test VLM and ASR together, ASR in both converter paths, omitted versus explicitly empty/null model names, and absent ffmpeg reaching per-document failure metadata.
 
 ## 4. Documentation
 
@@ -31,3 +31,7 @@
 ## 7. MKV and WebM support
 
 - [x] 7.1 [both] Add MKV and WebM to backend extension discovery, ingest filters, local extraction and frontend filters; add locally generated safe video fixtures and tests for ingest, extraction and provider boundaries; update format documentation and validate the real-model pipeline.
+
+## 8. Review fixes
+
+- [x] 8.1 Document the effective file extension argument and enforce the existing incompatibility between VLM and standard pipeline GPU settings in the adapter factory, with regression coverage.

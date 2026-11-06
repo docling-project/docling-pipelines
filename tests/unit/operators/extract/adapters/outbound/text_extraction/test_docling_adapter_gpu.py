@@ -423,6 +423,23 @@ class TestTextExtractionAdapterFactoryValidateGpu:
                 use_processes=False,
             )
 
+    @pytest.mark.parametrize("device", ["mps", "auto"])
+    def test_factory_rejects_vlm_with_explicit_or_detected_gpu(self, device):
+        accelerator: dict[str, object] = {"num_threads": 9}
+        if device != "auto":
+            accelerator["device"] = device
+        config = {"provider_config": {"vlm_pipeline": {}, "standard_pipeline": {"accelerator": accelerator}}}
+        with (
+            patch.object(TextExtractionAdapterFactory, "_auto_detect_device", return_value="mps"),
+            pytest.raises(ValueError, match="cannot be combined"),
+        ):
+            TextExtractionAdapterFactory.create_adapter(
+                mode=TextExtractionMode.DOCLING_LIBRARY,
+                text_extraction_config=config,
+                global_config={},
+                max_workers=1,
+            )
+
     def test_zero_num_threads_raises(self):
         with pytest.raises(ValueError, match="num_threads must be a positive integer"):
             TextExtractionAdapterFactory._validate_gpu_config(
@@ -1330,15 +1347,13 @@ def test_video_option_is_bound_in_converter_paths(gpu):
     assert InputFormat.VIDEO in options
 
 
-@pytest.mark.parametrize("gpu", [False, True])
-def test_vlm_and_asr_are_both_preserved(gpu):
+def test_vlm_and_asr_are_both_preserved():
     from docling.datamodel.base_models import InputFormat
     from docling.pipeline.vlm_pipeline import VlmPipeline
 
     adapter = _make_adapter({"use_vlm_pipeline": True, "use_asr_pipeline": True})
     adapter.use_vlm_pipeline = True
     adapter.use_asr_pipeline = True
-    adapter.gpu_device = "mps" if gpu else None
     with (
         patch(
             "docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter._asr_available",
@@ -1349,8 +1364,6 @@ def test_vlm_and_asr_are_both_preserved(gpu):
             "docpipe.core.operators.operator_utils.OperatorUtils.extract_content", return_value={"success": False}
         ) as extract,
     ):
-        if gpu:
-            adapter._gpu_converter_config = adapter._build_gpu_converter_config()
         adapter.extract_single_document(file_path="movie.mp4", binary_content=b"video")
     options = extract.call_args.kwargs["converter_config"]["format_options"]
     assert options[InputFormat.PDF].pipeline_cls is VlmPipeline
