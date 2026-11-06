@@ -27,7 +27,7 @@ The current spec only says `node_sequence` is an "ordered node execution list" a
 - None
 
 ### Modified Capabilities
-- `backend/job-runs-api`: the status requirement now defines the order of `node_sequence`, `node_stats` and `node_metadata`.
+- `backend/job-runs-api`: adds a requirement that defines the order of `node_sequence`, `node_stats` and `node_metadata` in the job run status response.
 
 ## Impact
 

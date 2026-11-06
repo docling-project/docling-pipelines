@@ -16,4 +16,4 @@
 
 - [x] 3.1 [backend] Run `ruff format --check`, `ruff check` and `mypy` on touched files.
 - [x] 3.2 [backend] Run `openspec validate topological-node-ordering --strict`.
-- [ ] 3.3 [backend] After review and merge, run `openspec archive topological-node-ordering`.
+- [x] 3.3 [backend] Run `openspec archive topological-node-ordering`.
