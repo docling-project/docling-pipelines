@@ -6,7 +6,7 @@ requires-python = ">=3.12,<3.13"
 maintainers = [
     { name = "Jojo Joseph", email = "jo-in@ibm.com" },
     { name = "Aditya Rohan Singh", email = "adityars@ibm.com" },
-    { name = "Nipun Bayas", email = "nsbayas@ibm.com" },
+    { name = "Nipun Bayas", email = "nipun.bayas@ibm.com" },
     { name = "Paul Baby", email = "paulbaby@ibm.com" },
     { name = "Docling Pipeline Team", email = "docling_pipeline_team-dg@ibm.com"},
 ]

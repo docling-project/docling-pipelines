@@ -1337,9 +1337,9 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 | `model_id` | string | Yes | WatsonX model identifier |
 | `api_key` | string | Yes | IBM Cloud API key |
 | `url` | string | Yes | WatsonX endpoint URL |
-| `container_kind` | string | Yes | `"project"` or `"space"` |
+| `container_kind` | string | No | `"project"` or `"space"` (default: `"project"`) |
 | `container_id` | string | Yes | Project or space UUID |
-| `timeout` | integer | No | Request timeout in seconds (default: `300`) |
+| `timeout` | integer | No | Request timeout in seconds (default: `120`) |
 
 **`provider_config` — Presidio (PII only; requires `pip install "docling-pipelines[presidio]"` and a spaCy model):**
 
