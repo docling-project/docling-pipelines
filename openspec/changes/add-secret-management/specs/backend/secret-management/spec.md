@@ -60,6 +60,10 @@ A value SHALL be treated as a Vault reference only when the entire string is exa
 - **WHEN** a field value is `vault://hashicorp/opensearch/token` and the secret has exactly one key
 - **THEN** it is parsed with no key and resolves to that single value
 
+#### Scenario: Keyless reference to a multi-key secret is rejected
+- **WHEN** a field value is `vault://hashicorp/db` and the secret has two or more keys
+- **THEN** the node fails with category `secret unavailable` and no value is returned
+
 #### Scenario: Truncated reference is rejected
 - **WHEN** a field value is `vault://` or `vault://hashicorp`
 - **THEN** the value is rejected as malformed and is never passed on as a literal credential
@@ -116,8 +120,12 @@ The secret-capable declarations SHALL cover at least the fields in the inventory
 - **WHEN** the test suite runs
 - **THEN** a test enumerates every registered operator and fails if a field named like a credential (`password`, `*_key`, `*_secret`, `*_token`, `credentials*`) is neither declared secret-capable nor explicitly marked as not accepting references
 
+#### Scenario: Inventory is enforced structurally
+- **WHEN** the pre-commit hook and CI run the AST check over operator and adapter configuration classes
+- **THEN** a credential-looking field that is neither declared nor marked `no_references` fails the check before the change is pushed
+
 ### Requirement: Deployment policy for providers and paths
-The platform SHALL support a deployment policy `secrets.vault.allowed_paths`, a list of provider-qualified glob patterns such as `hashicorp:opensearch/*`. When configured, a reference matching no pattern SHALL be rejected as not permitted by validation and by execution, without a Vault request. When not configured, the platform SHALL log one WARNING at startup.
+The platform SHALL support `secrets.vault.allowed_paths`, entries of the form `provider:glob[@operator.field]`. Matching SHALL be case-sensitive on the normalized path, with `*` within one segment and `**` across segments. When a provider is registered, a reference matching no entry (including an unset policy) SHALL be rejected as `not permitted` without a Vault request. Allowing every path SHALL require the entry `*:**`.
 
 #### Scenario: Path outside policy
 - **WHEN** the policy is `hashicorp:opensearch/*` and a flow references `vault://hashicorp/prod/payments#key`
@@ -127,9 +135,48 @@ The platform SHALL support a deployment policy `secrets.vault.allowed_paths`, a 
 - **WHEN** the policy is `hashicorp:opensearch/*` and a flow references `vault://hashicorp/opensearch/credentials#password`
 - **THEN** the reference is permitted and resolved
 
+#### Scenario: Single star does not cross a segment
+- **WHEN** the policy is `hashicorp:opensearch/*` and a flow references `vault://hashicorp/opensearch/team-a/credentials#password`
+- **THEN** the reference is rejected as `not permitted`
+
+#### Scenario: Double star crosses segments
+- **WHEN** the policy is `hashicorp:opensearch/**` and a flow references `vault://hashicorp/opensearch/team-a/credentials#password`
+- **THEN** the reference is permitted
+
+#### Scenario: Matching is case-sensitive
+- **WHEN** the policy is `hashicorp:opensearch/*` and a flow references `vault://hashicorp/OpenSearch/credentials#password`
+- **THEN** the reference is rejected as `not permitted`
+
+#### Scenario: Field-scoped entry
+- **WHEN** the policy is `hashicorp:opensearch/*@vectordb.password` and a flow references `vault://hashicorp/opensearch/credentials#password` in a `vectordb` node's `password` field and in its `token` field
+- **THEN** the `password` reference is permitted and the `token` reference is rejected as `not permitted`
+
 #### Scenario: Policy not configured
-- **WHEN** the platform starts without `secrets.vault.allowed_paths`
-- **THEN** exactly one WARNING is logged stating that any Vault path readable by the platform can be referenced, and existing flows behave as before
+- **WHEN** a secret provider is registered and `secrets.vault.allowed_paths` is unset or empty
+- **THEN** every reference is rejected as `not permitted`, no Vault request is made, and one ERROR-level startup message names `secrets.vault.allowed_paths`
+
+#### Scenario: Explicit allow-all
+- **WHEN** the policy is `*:**`
+- **THEN** every well-formed reference to a registered provider is permitted, and one WARNING is logged at startup stating that any Vault path readable by the platform can be referenced
+
+### Requirement: Credentials are bound to their destination
+When any field of a node resolves from a secret provider, each destination field of that node (`endpoint_url`, `host`, `uri`, `api_base`, `url`) SHALL be (a) itself a permitted reference, (b) a literal whose parsed host matches an entry in `secrets.vault.allowed_destinations`, which is empty by default, or (c) unset, so that the adapter uses its fixed default endpoint. Any other destination SHALL be rejected as `not permitted` by validation and by execution before any connection.
+
+#### Scenario: Attacker-chosen endpoint
+- **WHEN** an S3 ingest node sets `endpoint_url` to `https://attacker.example` and `secret_key` to a permitted reference
+- **THEN** validation and execution reject the node as `not permitted`, no Vault request is made, and nothing is signed for that host
+
+#### Scenario: Allowed destination
+- **WHEN** `secrets.vault.allowed_destinations` lists `*.s3.example.internal` and the node's `endpoint_url` is `https://store.s3.example.internal`
+- **THEN** the node is permitted
+
+#### Scenario: Destination from Vault
+- **WHEN** `endpoint_url` and `secret_key` are both permitted references
+- **THEN** the node is permitted
+
+#### Scenario: No Vault credential in the node
+- **WHEN** a node has only literal and environment credentials
+- **THEN** the destination rule does not apply and behavior is unchanged
 
 ### Requirement: Mixed credential sources
 Within one operator configuration, `vault://` references, `$ENV_VAR` or `${ENV_VAR}` references, and literal values SHALL be supported together, with each field resolved independently by its own form. Environment resolution SHALL be applied only to values that were present in the configuration, never to the output of a secret provider.
@@ -189,6 +236,14 @@ A resolved value SHALL be held in an opaque secret type whose `repr`, `str`, `fo
 #### Scenario: Derived value
 - **WHEN** the Milvus adapter builds a token from `username` and `password`
 - **THEN** the combined string is itself masked and scrubbed
+
+#### Scenario: Accidental coercion fails loudly
+- **WHEN** code compares a secret to a `str`, iterates it, takes its length, or joins it into a string
+- **THEN** the comparison is `False` and iteration and length raise, so the mask is never silently embedded
+
+#### Scenario: Reveal is confined to adapters
+- **WHEN** the pre-commit hook and CI run the AST check
+- **THEN** a call to `reveal()`, including `getattr(value, "reveal")` and a re-exported or wrapped call, outside adapter modules fails the check
 
 ### Requirement: Verbatim use of resolved values
 A resolved value MUST be used exactly as stored: not trimmed, case-changed, expanded, treated as an environment variable name, parsed as JSON, or converted to another type. The only exception is a field declared as structured (such as `credentials_json`), which MAY receive a parsed object when the stored value is valid JSON.
@@ -328,7 +383,11 @@ The platform SHALL keep a per-run registry of secret values, with their percent-
 - **THEN** the stored message contains the mask
 
 ### Requirement: Scrubber fails closed
-A secret of any length SHALL be registered, accepting over-redaction of short values. If the scrubber raises, the outbound text MUST be replaced with a fixed placeholder rather than emitted unscrubbed. Registry entries SHALL exist only for the lifetime of the run that resolved them.
+A non-empty secret of any length SHALL be registered, accepting over-redaction of short values. An empty resolved value SHALL be treated as `secret unavailable` and never registered, because replacing an empty string would corrupt every scrubbed line. If the scrubber raises, the outbound text MUST be replaced with a fixed placeholder rather than emitted unscrubbed. Registry entries SHALL exist only for the lifetime of the run that resolved them.
+
+#### Scenario: Empty secret
+- **WHEN** a reference resolves to an empty string
+- **THEN** the node fails with category `secret unavailable`, nothing is registered with the scrubber, and no log line is altered
 
 #### Scenario: Scrubber failure
 - **WHEN** the scrubber raises while processing a log record
@@ -376,11 +435,15 @@ The Vault client SHALL NOT follow redirects on any request carrying credentials 
 - **THEN** the provider is not registered
 
 ### Requirement: Bounded lifetime of secret values
-Secret values SHALL be held only for the duration of the node's execution and released when its executor is released. Caches of clients, tokens, or loaders SHALL be keyed by a non-reversible digest, never by a string containing the secret, and cleared when the run ends.
+Secret values SHALL be held only for the duration of the node's execution and released when its executor is released. Caches of clients, tokens, or loaders SHALL be keyed by an `HMAC-SHA256` digest computed with a per-run random key that is never persisted, never by a string containing the secret and never by an unsalted hash of it. Cache keys MUST NOT be logged. Caches SHALL be cleared when the run ends.
 
 #### Scenario: Cache key
 - **WHEN** an adapter caches an authenticated client
-- **THEN** its cache key contains a digest and no substring of the secret
+- **THEN** its cache key is an HMAC digest and contains no substring of the secret, and the same secret in a different run produces a different key
+
+#### Scenario: Cache key not logged
+- **WHEN** `DS_LOG_LEVEL=DEBUG` is set and an adapter caches a client
+- **THEN** no log record contains the cache key
 
 #### Scenario: Run end
 - **WHEN** a run ends, whether it succeeds or fails
@@ -398,7 +461,7 @@ Secrets MUST NOT be written to disk, set in process environment variables, or pa
 - **THEN** the process environment is unchanged
 
 ### Requirement: Distributed orchestration carries references only
-Task parameters, cache keys, and persisted results of distributed orchestration MUST contain references only, never resolved values, and result persistence and caching MUST remain disabled for tasks that handle secrets.
+Task parameters, cache keys, and persisted results of distributed orchestration MUST contain references only, never resolved values, and result persistence and caching MUST remain disabled for tasks that handle secrets. A `SecretValue` MUST NOT appear as a Prefect task argument or flow parameter.
 
 #### Scenario: Orchestrator-visible parameters
 - **WHEN** a flow runs under Prefect
@@ -420,7 +483,7 @@ Lineage events, dataset names and namespaces, job statistics, and node statistic
 - **THEN** secret-capable fields are excluded by declaration, not only by a fixed list of key names
 
 ### Requirement: Audit trail
-Every resolution attempt SHALL emit one server-side audit record containing timestamp, job and job-run identifiers, node name, config key path, provider name, outcome category, and correlation identifier. The record MUST NOT contain a secret value or reference text beyond provider and config key path. Policy denials SHALL be recorded at WARNING.
+Every resolution attempt SHALL emit one structured JSON record to the `docpipe.audit` logger, which log-level and scrub filters cannot suppress and whose retention is `audit.retention_days`. The record SHALL carry timestamp, job and job-run ids, node, config key path, provider, `outcome`, and correlation id, and MUST NOT contain a secret value or reference text beyond provider and key path. Policy denials SHALL be logged at WARNING.
 
 #### Scenario: Successful resolution
 - **WHEN** a reference resolves
@@ -434,8 +497,8 @@ Every resolution attempt SHALL emit one server-side audit record containing time
 For every secret-capable field of every operator, the suite SHALL include a conformance test that supplies a unique canary secret through a fake provider, runs the operator through a success path and each failure path (resolution, adapter validation, client, mid-run), and asserts the canary and its encoded and derived forms are absent from every sink. A test SHALL fail if a secret-capable field has no conformance test.
 
 #### Scenario: Hostile custom operator
-- **WHEN** the suite runs a custom operator that reads `os.environ`, imports the secret provider, reads the Vault token, and inspects other nodes' configuration, in each isolation mode
-- **THEN** it obtains no canary, no provider, no token, and no other node's configuration
+- **WHEN** the suite runs a custom operator that reads `os.environ`, imports the secret provider, reads the in-memory Vault token, and inspects other nodes' configuration, in each isolation mode
+- **THEN** it obtains no canary, no provider object, no in-memory token, and no other node's configuration. Same-UID file, `/proc`, and network access are covered by deployment preconditions, not by this test.
 
 #### Scenario: Sinks covered
 - **WHEN** a conformance test runs
@@ -461,7 +524,7 @@ A new operator, adapter, or vector database provider SHALL inherit this contract
 - **THEN** references in its configuration are rejected rather than passed through
 
 ### Requirement: Untrusted custom operators never share a process with secrets
-An untrusted custom operator SHALL NOT be imported, constructed, or executed in a process that holds a registered secret provider, a Vault token, AppRole identifiers, or a per-run secret registry. Deployment setting `custom_operators.isolation` SHALL be `process` (separate worker, no provider, scrubbed environment) or `disabled`. When a secret provider is registered and no setting is given, the default is `disabled`.
+An untrusted custom operator SHALL NOT be imported or executed in a process that holds a secret provider, Vault token, AppRole identifiers, or secret registry. `custom_operators.isolation` SHALL be `process` (a separate worker reused across batches) or `disabled`, and defaults to `disabled` when a provider is registered.
 
 #### Scenario: Default with Vault configured
 - **WHEN** a Vault provider is registered and `custom_operators.isolation` is not set
@@ -469,7 +532,37 @@ An untrusted custom operator SHALL NOT be imported, constructed, or executed in 
 
 #### Scenario: Process isolation
 - **WHEN** `custom_operators.isolation` is `process`
-- **THEN** the operator runs in a separate process whose environment, memory, and module state contain no provider, token, AppRole identifier, or other node's configuration
+- **THEN** the operator runs in a separate process whose environment, memory, module state, and inherited file descriptors contain no provider, token, AppRole identifier, or other node's configuration
+
+#### Scenario: Start-up cost gate
+- **WHEN** the isolation overhead is measured on the CI runner
+- **THEN** the p95 cost of starting a worker plus a 1000-row Arrow round-trip is at most 2 seconds, and a later batch on the same worker adds less than that
+
+### Requirement: Isolation guarantee is limited to in-memory and inherited state
+The `process` mode SHALL guarantee only that the worker holds no in-memory or inherited secret state, and SHALL NOT be described as blocking same-UID reads of `/proc/<ppid>/environ`, token or AppRole files, metadata endpoints, or outbound connections. Documentation SHALL state a distinct worker UID, restricted token location, and egress restriction as deployment preconditions.
+
+#### Scenario: Claim limited in tests
+- **WHEN** the hostile custom operator suite runs under `process` isolation
+- **THEN** it asserts only that the worker obtains no provider object, no registry entry, no other node's configuration, and no inherited environment variable or file descriptor beyond the allowlist
+
+#### Scenario: Preconditions documented
+- **WHEN** the secrets guide is read
+- **THEN** it lists the distinct UID, token-file permissions, and egress restriction as deployment preconditions for `process` isolation
+
+### Requirement: Resolved secrets cross the isolation boundary explicitly
+A `SecretValue` MUST NOT be pickled to a worker. For each declared field, the parent SHALL call `reveal()`, send the value as UTF-8 JSON over a private pipe to that one worker, and register it with the scrubber; the worker SHALL rebuild a `SecretValue`. The value MUST NOT travel through environment variables, arguments, or files, and the pipe SHALL close when the worker is released.
+
+#### Scenario: Worker receives the real value
+- **WHEN** an allowed reference resolves for an untrusted operator's declared field
+- **THEN** the worker's client is constructed with the real value, not the mask
+
+#### Scenario: Parent registers the value
+- **WHEN** a value is sent to a worker
+- **THEN** the parent has registered it, and its encoded forms, with the scrubber
+
+#### Scenario: Value is not exposed elsewhere
+- **WHEN** a value is sent to a worker
+- **THEN** it does not appear in the worker's environment, arguments, or any file
 
 #### Scenario: No Vault configured
 - **WHEN** no secret provider is registered

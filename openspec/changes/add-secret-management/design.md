@@ -15,8 +15,8 @@ See [proposal.md](proposal.md) for motivation and scope, and [specs/backend/secr
 - **Enrichment.** `FlowEnrichmentService._resolve_dag_secrets` resolves every node including ingest, logs failures at DEBUG, and keeps the literal `vault://` string. The vectordb metadata fetchers then connect with it.
 - **Validation.** `FlowValidator` replaces references with `"__vault_placeholder__"`, and with `{"__vault_mock__": True}` for three keys. Placeholders cause false format errors in S3 `endpoint_url`, filesystem `paths`, and web `urls`. The `ingest_source.py` guard that skips validation when vault refs exist is dead code on the validator path. `flow_validator.py:308` echoes the full malformed reference.
 - **Lineage.** `derive_dataset_info_from_ingest` builds dataset names from raw field text, for example `s3://vault://hashicorp/s3#bucket`.
-- **Custom operators.** `POST /api/v1/custom_operators` accepts a `.py` file. `ASTOperatorValidator` checks only the contract. `filesystem_adapter._load_module_from_file` calls `exec_module`, so module-level code runs inside the API or worker process on every catalog refresh (create, update, delete). `ENABLE_CUSTOM_OPERATORS_DEFAULT` is true. `custom_operators_router` declares no authentication dependency (neither in the router nor in `api_router.py`), and `api/main.py` disables auth when `JWT_SECRET_KEY` is unset. Operators run in-process with threads and no sandbox, so they can import `secret_provider`, read the Vault token and session, `os.environ`, and shared module state.
-- **Prefect.** `persist_result=False` and `NO_CACHE` are set. The content of task parameters was not verified, so this is a task.
+- **Custom operators.** `POST /api/v1/custom_operators` accepts a `.py` file. `ASTOperatorValidator` checks only the contract. `filesystem_adapter._load_module_from_file` calls `exec_module`, so module-level code runs inside the API or worker process on every catalog refresh (create, update, delete). `ENABLE_CUSTOM_OPERATORS_DEFAULT` is true. None of the six `custom_operators_router` handlers (create, update, delete, list, get, `directory_tree`) declares an authentication dependency, neither on the router nor in `api_router.py`. `api/main.py` only disables login and token issuance when `JWT_SECRET_KEY` is unset; no router checks for it. Operators run in-process with threads and no sandbox, so they can import `secret_provider`, read the Vault token and session, `os.environ`, and shared module state. `CustomOperatorService` logs only `Refreshed operator factory ...`, so there is no audit record today.
+- **Prefect.** `persist_result=False` and `NO_CACHE` are set, and `_populate_ingest_source_config` passes the unresolved ingest `provider_config` to the batch subflow. The content of task parameters was not otherwise verified, so this is a verification task.
 
 **Constraints:**
 - Project rules: no secrets in logs, `%s` logging, keyword-only arguments, `@staticmethod` for pure helpers, ports not concrete adapters, DDD layering. Operators never call a database directly.
@@ -63,13 +63,29 @@ A single parser (`parse_reference(*, value)`) implements the grammar and syntax 
 
 ### D4. Path policy
 
-`secrets.vault.allowed_paths` is a list of `provider:glob` entries in `docling-pipelines-config.yaml`. Unset means allow, with one startup WARNING, so existing deployments do not break. Custom operators use the separate, default-empty `secrets.vault.custom_operator_allowed_paths` (D12). Policy runs before any provider call, in validation as well as execution.
+`secrets.vault.allowed_paths` is a list of `provider:glob[@operator.field]` entries in `docling-pipelines-config.yaml`. The optional `@operator.field` suffix (for example `hashicorp:opensearch/*@vectordb.password`) scopes an entry to one operator field. Custom operators use the separate, default-empty `secrets.vault.custom_operator_allowed_paths` (D12). Policy runs before any provider call, in validation as well as execution.
+
+*Glob semantics.* Matching runs on the normalized parsed path (after the grammar in D3, so no traversal segments exist). The provider part is an exact, case-sensitive match. In the path part, `*` matches any characters within one segment and does not cross `/`, `**` matches across segments, and matching is case-sensitive. A pattern with no `**` therefore cannot match a deeper path than it spells out.
+
+### D4b. Deny by default, and destination binding
+
+*Default.* When a secret provider is registered and `secrets.vault.allowed_paths` is unset or empty, every reference is `not permitted`. Allowing everything is an explicit choice: `allowed_paths: ["*:**"]`. The platform logs one WARNING at startup when that explicit wildcard is configured, and one ERROR-level startup message naming the setting when a provider is registered and the policy is unset. This favors the secure state over compatibility, because the only flows affected already use `vault://`, and this change already rejects those flows in other cases (malformed references, undeclared fields, plaintext `VAULT_ADDR`, JSON in a scalar field). The release notes tell deployers to set the policy before upgrading.
+
+*Destination binding.* A path allowlist does not stop a flow author from sending a permitted credential to a host they control, for example `endpoint_url=https://attacker.example` with `secret_key=vault://...`. Fields that choose where a credential is sent (`endpoint_url`, `host`, `uri`, `api_base`, `url`) are therefore bound as follows when any other field of the same node resolves from a provider:
+
+1. The destination is itself a reference (resolved under the path policy), or
+2. its host matches an entry in `secrets.vault.allowed_destinations` (a list of host globs, empty by default), or
+3. it is unset and the adapter uses its fixed default endpoint.
+
+Otherwise the node fails with category `not permitted` before any connection. The check runs on the parsed host of the literal value, in validation and in execution. Scoped path entries (`@operator.field`) add a second control: they limit which operator field may read a given Vault path.
 
 ### D5. `SecretValue` opaque type and verbatim use
 
 `SecretValue` is a wrapper, not a `str` subclass, because a subclass is easy to format by accident and some client libraries copy it. It masks `__repr__`, `__str__`, `__format__`, `__reduce__`, `__copy__`, and JSON encoding, and exposes `reveal()` used only at client construction. Derived strings (`user:password`, `Authorization` headers) are built inside the client factory from `reveal()` and registered with the scrubber. `resolve_env_var` returns a `SecretValue` unchanged, so its `$` and upper-case heuristics never see it. For fields declared structured (`credentials_json`) the resolver parses once and wraps the parsed object.
 
-*Trade-off:* a wrapper needs a `reveal()` call in every adapter. Most adapters build one client, so the change is small and reviewable. A test fails if `reveal()` is called outside adapter modules.
+`SecretValue` also fails loudly when it is coerced by accident: `__eq__` against a `str` returns `False`, `__iter__` and `__len__` raise, and `__hash__` is based on identity. A `"".join(...)` or an f-string in a client factory then fails in tests instead of embedding the mask.
+
+*Trade-off:* a wrapper needs a `reveal()` call in every adapter. Most adapters build one client, so the change is small and reviewable. `reveal()` returns a `str` by design, and the registry (D8) holds raw values, so the guarantee is limited to the adapters' client-construction points. An AST-based check, run as a pre-commit hook and in CI, fails when `reveal()` (including `getattr(value, "reveal")` and re-exports) is called outside adapter modules. The same AST check enforces D2's rule that a credential-looking field is either declared or marked `no_references`.
 
 ### D6. Minimal resolution scope
 
@@ -92,7 +108,9 @@ The registry is defense in depth. The primary controls are D2 (where), D5 (type)
 
 ### D9. Lifetime, caches, files
 
-Adapter caches (`_adapter_cache` and similar) are keyed by `sha256(provider + key path + value)` and cleared when the run ends. A client needing a credential file gets a `0600` file in a private temporary directory removed on release. Nothing is set in `os.environ`.
+Adapter caches (`_adapter_cache` and similar) are keyed by `HMAC-SHA256` over `provider + key path + value`, using a per-run random key that is never persisted, and are cleared when the run ends. An unsalted hash of a low-entropy secret can be brute-forced offline if a key is ever logged. The existing SharePoint and OneDrive loader caches use `sha256(client_secret)[:16]` and move to the HMAC key. Cache keys are never logged. A client needing a credential file gets a `0600` file in a private temporary directory removed on release. Nothing is set in `os.environ`.
+
+An empty resolved value is treated as `secret unavailable` and is never registered with the scrubber, because replacing an empty string would corrupt every scrubbed line.
 
 ### D10. Vault client hardening
 
@@ -113,22 +131,28 @@ Adapter caches (`_adapter_cache` and similar) are keyed by `sha256(provider + ke
 | Option | Result |
 |---|---|
 | A. Keep in-process, add AST deny-lists | Rejected. Deny-lists are bypassable (`__import__`, `getattr`, `importlib`), and an in-process module can reach `sys.modules`, the provider dict, and thread-shared state. |
-| B. Separate worker process per node | Chosen as the supported mode (`isolation=process`). The worker has no provider, no token, a scrubbed environment (allowlist), receives the node's own config and the table over a pipe (Arrow IPC), and returns the table and metadata. |
+| B. Separate worker process | Chosen as the supported mode (`isolation=process`). The worker has no provider, no token, an allowlisted environment, no inherited file descriptors, receives the node's own config and the table over a pipe (Arrow IPC), and returns the table and metadata. One persistent worker per operator class per run is reused across batches, instead of one `spawn` per node. |
 | C. Disable untrusted operators when a provider is registered | Chosen as the default (`isolation=disabled`) so the safe state needs no setup. |
 | D. Container or seccomp sandbox | Out of scope; documented as deployment hardening on top of B. |
+
+*What `process` isolation guarantees, and what it does not.* A worker started with `multiprocessing` `spawn` under the API's UID removes **in-memory and inherited state**: no secret provider, no Vault session or token held by the parent, no per-run registry, no other node's configuration, no inherited environment variables beyond an allowlist, and no inherited file descriptors. It does **not** stop code running under the same UID from reading `/proc/<ppid>/environ`, `~/.vault-token`, mounted Kubernetes service-account tokens, or configuration files holding the AppRole, from reaching the cloud metadata endpoint, or from opening outbound connections. Those need deployment controls: a distinct UID for the worker, a read-restricted token and config location, and egress restriction. The docs state these as deployment preconditions, and the normative hostile-operator test asserts only the in-memory and inherited guarantees.
+
+*Secret hand-off across the process boundary.* `SecretValue` masks `__reduce__`, so it cannot be pickled to the worker, and it must not be. For each declared field of that node that resolved, the parent calls `reveal()`, sends the string as a UTF-8 JSON message (`{field path: value}`) over the private pipe with the Arrow IPC table, and registers the value with the scrubber. The worker rebuilds a `SecretValue` and calls `reveal()` only at its own client construction. The value goes to that one worker only, never in environment variables, command-line arguments, or files, and the pipe is closed when the worker is released.
 
 *Rules.*
 1. With a provider registered and no setting, untrusted operators fail validation with `not permitted`. With no provider, behavior is unchanged.
 2. The API process never imports untrusted code. Upload and update use AST analysis (`ASTOperatorValidator`, extended to read `short_name`, `category`, and declared secret fields as literals). `_refresh_operator_factories` registers a lightweight descriptor from AST data and defers import to the worker. `exec_module` stays only for platform and deployer-installed sources.
-3. The worker receives only the node's own config. References in declared fields resolve only if they match `custom_operator_allowed_paths`, in the parent process, and travel as values over the pipe to that worker alone. The table passed to the worker has had credentials stripped by D7, and `global_config` is replaced by an allowlisted subset (`doc_column`, `job_id`).
-4. `/api/v1/custom_operators` create, update, delete require `get_current_user`, return 403 if authentication is disabled while a provider is registered, and write an audit record with the script digest.
-5. Documentation states the limit: isolation reduces what a hostile author can reach, it does not make upload safe to expose to untrusted users. Treat upload as an administrator capability.
+3. The worker receives only the node's own config. References in declared fields resolve only if they match `custom_operator_allowed_paths`, in the parent process, and cross the boundary as described above. The table passed to the worker has had credentials stripped by D7, and `global_config` is replaced by an allowlisted subset (`doc_column`, `job_id`).
+4. **Authentication.** Every `/api/v1/custom_operators` route, including the read routes `GET /custom_operators`, `GET /custom_operators/{id}` and `GET /custom_operators/directory_tree`, depends on `get_current_user`. They disclose the inventory of uploaded scripts and, through `directory_tree`, the on-disk layout. `get_current_user` already fails closed: 401 without a valid token, and 503 when `JWT_SECRET_KEY` is missing or too short (`get_jwt_config`). A 403 for "authentication disabled" is therefore not needed, and the routes are unavailable on a deployment with no JWT configured. This is an intentional breaking change for development setups, and it ships in Stage A.
+5. **Who may upload.** Create, update and delete additionally require the caller to be listed in `custom_operators.allowed_uploaders` (usernames) when a secret provider is registered. An empty list means nobody and the routes return 403. With no provider registered, any authenticated user may upload, as before. The reason is that with `isolation=process` an uploaded script runs on the worker host with network access, so it must not be open to every logged-in user. A role model is out of scope for this change.
+6. **Audit.** Create, update and delete write one structured JSON record to a dedicated `docpipe.audit` logger that debug and scrub filters cannot suppress, with fields: timestamp, caller, `operator_id`, `short_name`, action, `script_sha256`, and `outcome` (`success` or `rejected`). Rejected attempts (401, 403, validation failure) are recorded too. Retention is set by `audit.retention_days` and the logger's handler is configured by the deployer. The "Audit trail" requirement for secret resolution uses the same logger and field conventions.
+7. Documentation states the limit: isolation reduces what a hostile author can reach, it does not make upload safe to expose to untrusted users. Treat upload as an administrator capability.
 
-*Risk:* process isolation costs throughput (table serialization per node). It applies only to untrusted operators and is opt-in when Vault is present.
+*Risk:* process isolation costs throughput. It applies only to untrusted operators and is opt-in when Vault is present. The cost is a gate, not an open question: p95 overhead for starting a worker plus a 1000-row Arrow round-trip must stay at or below 2 seconds, measured on the CI runner, and a persistent worker per operator class per run must keep the per-batch overhead below that. Measuring it is a blocking task in D.3, and the number can be revised in review.
 
 ### D13. Orchestrator parameters
 
-Task parameters in the Prefect engine are audited. The node config passed to tasks is the unresolved config (references); resolution happens inside the task, in the worker. A test inspects the parameters Prefect would record.
+The node config passed to Prefect tasks is the unresolved config (references); resolution happens inside the task, in the worker. A `SecretValue` MUST NOT appear as a task argument or flow parameter. On `main`, `persist_result=False` and `NO_CACHE` are already set, and `abstract_orchestrator._populate_ingest_source_config` already passes the unresolved ingest `provider_config` to the batch subflow in `global_config`, so Stage D's work is a verification: a test inspects the parameters Prefect would record. It becomes a fix only if a resolved value is found.
 
 ### D14. Conformance suite
 
@@ -140,25 +164,30 @@ A parametrized suite iterates every `(operator, secret_field)` from the declarat
 - **[Breaking: metadata no longer carries credentials]** The ACL operator and external sidecar readers may depend on it. → ACL gets its own credentials (D7); the proposal flags it; docs describe the migration.
 - **[Breaking: undeclared fields rejected]** Flows with a reference in an undeclared field fail. → The error names the key and the docs list declared fields.
 - **[`SecretValue` wrapper vs. client libraries]** Some libraries type-check for `str`. → `reveal()` at the client boundary only; a test constructs each real client with a revealed value.
-- **[Process isolation performance]** → Applies to untrusted custom operators only; documented.
+- **[Process isolation performance]** → Applies to untrusted custom operators only; a persistent worker per operator class per run; a measured p95 gate in task D.3.
+- **[Same-UID worker]** `process` isolation does not stop a same-UID worker from reading `/proc`, token files, or the network. → The claim is limited to in-memory and inherited state; distinct UID, restricted token location, and egress restriction are documented deployment preconditions (D12).
+- **[Deny-by-default path policy]** Existing `vault://` flows fail until `secrets.vault.allowed_paths` is set. → Startup ERROR names the setting; release notes call it out; `["*:**"]` is an explicit opt-out (D4b).
+- **[Auth on all custom operator routes]** Development setups with no `JWT_SECRET_KEY` lose access to the routes. → Intentional, called out under BREAKING (D12).
 - **[Scrubber false positives]** Short secrets can over-redact logs. → Accepted by the spec; the mask is a fixed token.
 - **[Dead-code removal in ingest validation]** → Baseline tests in stage A lock current behavior first.
-- **[Prefect parameters]** Not verified. → Task in stage D; if parameters hold resolved values, fix in the same task.
-- **[Auth on custom operator routes]** No dependency was found on the router. → Task D.1 confirms with a test before the change.
+- **[Prefect parameters]** `persist_result=False`, `NO_CACHE`, and unresolved `global_config` are already in place on `main`. → Task in stage D is a verification test; it becomes a fix only if a resolved value is found.
 
 ## Migration Plan
 
-- **Stage A** (leaks that exist today, no config needed): data-plane fix, error sanitization, Vault client hardening, grammar fail-closed.
+- **Stage A** (leaks that exist today): data-plane fix, error sanitization, Vault client hardening, grammar fail-closed, and authentication on every custom operator route. Authentication goes first because it closes the most serious open exposure and depends on no other design item.
 - **Stage B**: resolver, `SecretValue` and `resolve_env_var` interplay, declarations, path policy, executor scope, validation, enrichment, lineage.
 - **Stage C**: scrubber, registry, audit trail, log filter.
-- **Stage D**: custom operator isolation, authorization, Prefect audit.
+- **Stage D**: custom operator isolation, uploader allowlist, Prefect parameter verification.
 - **Stage E**: conformance suite, docs, archive.
 
-Stages A and D carry BREAKING items and need release notes (maintainers handle `CHANGELOG.md`). Rollback per stage is a revert; no stored data changes. Documents already written with credentials in metadata remain; the docs tell operators to rotate those credentials and purge old outputs.
+Stages A, B, and D carry BREAKING items and need release notes (maintainers handle `CHANGELOG.md`). Rollback per stage is a revert; no stored data changes.
+
+**Credentials already persisted.** Every deployment that has run a SharePoint or OneDrive ingest holds `client_id`, `client_secret`, and `tenant_id` in document metadata, and therefore in parquet files and storage sidecars. Stopping the write (D7) is necessary and not sufficient. Those credentials MUST be treated as disclosed to anyone with read access to the output store, and rotated. Stage A also ships a small utility, `scripts/find_persisted_credentials.py`, that scans parquet files and sidecar JSON under given paths for these keys and lists the affected files without printing values, so operators do not have to guess which outputs to purge or re-ingest. The docs describe rotation, purge, and re-ingest.
 
 ## Open Questions
 
 - **Single change or staged pull requests?** The design supports both. Recommendation: stage A as its own pull request because it removes active leaks, then B to E.
-- **Default for `secrets.vault.allowed_paths` when unset.** The spec allows with a WARNING for compatibility. A deny default is safer but breaks existing flows. Needs a maintainer decision.
-- **Isolation mechanism for `process` mode.** `multiprocessing` with `spawn` and an Arrow IPC pipe is the proposed baseline. Confirm that worker start-up cost is acceptable for flows with many custom nodes.
-- **Is upload administrator-only?** There is no role concept today. The spec requires authentication and audit; a role check is left for a follow-up unless maintainers want it in this change.
+- **Disclosure of the custom operator finding.** The Context section describes the unauthenticated upload path in detail while it is still unfixed. Maintainers decide whether to move that detail into a private security advisory and leave a short reference here.
+- **Role model for upload.** This change uses a configured uploader allowlist (D12). A role model is a follow-up.
+
+*Resolved in review:* default for `allowed_paths` is deny (D4b); the 403 "authentication disabled" case is replaced by `get_current_user`'s existing 401/503 behavior (D12); the worker start-up cost is a measured gate (D12).
