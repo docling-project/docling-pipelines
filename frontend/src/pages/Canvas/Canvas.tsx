@@ -1374,6 +1374,8 @@ export function Canvas(): React.JSX.Element {
       if (!controller) { return; }
       const nodeId = (source as any).nodeId as string | undefined;
       if (!nodeId) { return; }
+      // Clicking the port of the node whose card is already open toggles it closed.
+      if (nodeSuggestion?.sourceNodeId === nodeId) { return; }
       openNodeSuggestion(nodeId, controller);
       return;
     }
@@ -1382,7 +1384,7 @@ export function Canvas(): React.JSX.Element {
     if (source.clickType === 'DOUBLE_CLICK' && source.objectType === 'node' && source.id) {
       openNodePanel(String(source.id));
     }
-  }, [openNodePanel, handleNodeSuggestionClose]);
+  }, [openNodePanel, handleNodeSuggestionClose, openNodeSuggestion, nodeSuggestion]);
 
   const handleClosePropertiesDialog = useCallback(() => {
     setIsPanelOpen(false);

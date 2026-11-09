@@ -235,9 +235,11 @@ export function useNodeSuggestion(): UseNodeSuggestionReturn {
   useEffect(() => {
     if (!nodeSuggestion) { return; }
     const close = (): void => { handleNodeSuggestionCloseRef.current(); };
+    // Output-port presses are also ignored here: the port's click handler
+    // toggles the card (close if already open for that node, else open).
     const closeOnOutsidePointerDown = (e: PointerEvent): void => {
       const target = e.target as Element | null;
-      if (target?.closest?.('[data-node-suggestion]')) { return; }
+      if (target?.closest?.('[data-node-suggestion], .d3-node-port-output')) { return; }
       close();
     };
     // Capture phase so this runs before the canvas library can stop the event.
