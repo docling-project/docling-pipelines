@@ -15,6 +15,20 @@ Docling pipelines is an enterprise-grade document curation pipeline for Retrieva
 
 It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, Box, and more) and extracts content and entities from PDF, DOCX, HTML, images, and other formats using [Docling](https://github.com/docling-project/docling). Extracted content is curated for LLMs, converted into chunks and embeddings, and stored in a vector database such as Milvus or OpenSearch.
 
+## What's new in 2.1.0
+
+- **[Event-driven pipelines](docs/guides/EVENT_STREAMING_GUIDE.md)** — route Kafka events to saved flows, with file event support for Box, Dropbox, Google Drive, OneDrive, and SharePoint.
+- **[Entity storage](docs/operators/storage/entity_store_operator_readme.md)** — store curated entities in DuckDB or PostgreSQL with upserts and automatic schema evolution.
+- **[Local PII detection](docs/operators/quality/pii_and_hap_readme.md)** — use Microsoft Presidio as a local PII detection provider.
+- **[Distributed deduplication](docs/operators/quality/ededup_readme.md)** — deduplicate content across batches and workers using a shared registry.
+- **[Local archive ingestion](docs/operators/ingest/ingest_source_readme.md)** — process files from ZIP, TAR, TAR.GZ, TGZ, and GZ archives.
+- **[PostgreSQL asset repositories](docs/guides/ADVANCED_CONFIGURATION.md)** — store document library and document set assets in PostgreSQL.
+- **Faster processing** — improve embedding throughput with [cross-document batching](docs/operators/functional/embeddings_readme.md) and reuse [Docling converters](docs/operators/extract/extract_operator_readme.md) across extraction tasks.
+- **[CPU and GPU containers](docs/deployment/DOCKER_COMPOSE.md)** — build Docker images for the desired compute backend.
+- **[Automatic vector index management](docs/operators/vectordb/vectordb_readme.md)** — create missing indexes and validate existing schemas automatically.
+
+**Upgrade note:** The VectorDB `create_index` option is ignored with a warning. Index management is now automatic. See the [changelog](CHANGELOG.md#210) for more details.
+
 ## Features
 
 - 📥 **[Multi-source ingestion](docs/operators/ingest/ingest_source_readme.md)** — local filesystem, Amazon S3, IBM COS, SharePoint, OneDrive, Google Drive, Box, Dropbox, and web pages
