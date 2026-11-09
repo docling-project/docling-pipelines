@@ -25,6 +25,12 @@ AUTH_SOURCE_BEARER = "bearer"
 AUTH_SOURCE_COOKIE = "cookie"
 AUTH_SOURCE_DISABLED = "disabled"
 
+# Cookie-authenticated requests with these methods must carry a non-empty CSRF header.
+# A cross-origin page cannot add a custom header without a CORS preflight that the
+# allowed-origin list refuses. Bearer requests are exempt.
+CSRF_HEADER = "X-Requested-With"
+CSRF_PROTECTED_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
 security = HTTPBearer(auto_error=False)
 
 oauth2_scheme = OAuth2AuthorizationCodeBearer(
@@ -70,10 +76,31 @@ def get_session_jwt_config() -> JWTConfig | None:
 
 
 def _unauthorized(*, detail: str) -> HTTPException:
+    """Build a 401 response carrying the ``WWW-Authenticate: Bearer`` challenge."""
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
         headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _enforce_csrf_header(*, request: Request) -> None:
+    """Reject an unsafe cookie-authenticated request that lacks the CSRF header.
+
+    Args:
+        request: Current request, already known to be cookie-authenticated.
+
+    Raises:
+        HTTPException: 403 if the method is unsafe and ``X-Requested-With`` is missing or empty.
+    """
+    if request.method not in CSRF_PROTECTED_METHODS:
+        return
+    if request.headers.get(CSRF_HEADER, "").strip():
+        return
+    logger.warning("Rejected cookie-authenticated %s request without the %s header", request.method, CSRF_HEADER)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Missing required header: {CSRF_HEADER}",
     )
 
 
@@ -87,8 +114,10 @@ def get_current_user(
 
     The Bearer header is read first and wins over the session cookie. The credential
     source is recorded in ``request.state.auth_source`` as ``bearer``, ``cookie`` or
-    ``disabled``. When authentication is disabled, the reserved local principal is
-    returned without reading any credential.
+    ``disabled``. Cookie-authenticated ``POST``, ``PUT``, ``PATCH`` and ``DELETE``
+    requests must carry a non-empty ``X-Requested-With`` header; Bearer requests are
+    exempt. When authentication is disabled, the reserved local principal is returned
+    without reading any credential.
 
     Args:
         request: Current request
@@ -99,7 +128,8 @@ def get_current_user(
         User object from the token payload, or the local principal when auth is disabled
 
     Raises:
-        HTTPException: 401 if no valid credential is presented
+        HTTPException: 401 if no valid credential is presented, 403 if the CSRF header is
+            missing on a cookie-authenticated mutation
     """
     settings = get_auth_settings()
     if not settings.enabled:
@@ -140,6 +170,8 @@ def get_current_user(
         raise _unauthorized(detail="Invalid authentication credentials")
 
     request.state.auth_source = auth_source
+    if auth_source == AUTH_SOURCE_COOKIE:
+        _enforce_csrf_header(request=request)
 
     user = User(
         username=username,
