@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """ProjectService — application service for project CRUD operations.
 
 Coordinates between:
@@ -15,6 +18,8 @@ from docpipe.core.assets.flows.application.services.flow_service import FlowServ
 from docpipe.core.assets.flows.domain.models.flow import Flow
 from docpipe.core.job_management.domain.models.job_stats import JobStats
 from docpipe.core.job_management.domain.ports.job_stats_service import JobStatsService
+from docpipe.core.models.actor_context import ActorContext
+from docpipe.core.models.ownership import ensure_can_modify
 from docpipe.core.projects.domain.models.flow_job_run_summary import FlowJobRunSummary
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.core.projects.domain.ports.project_repository import ProjectRepository
@@ -70,12 +75,14 @@ class ProjectService:
 
     # ── CREATE ───────────────────────────────────────────────────────
 
-    def create_project(self, *, project: Project) -> Project:
+    def create_project(self, *, project: Project, actor: ActorContext | None = None) -> Project:
         """Create and persist a new project.
 
         Args:
             project: Project instance to create. project_id is auto-generated
                 if not provided.
+            actor: Caller identity. When present, ``created_by`` is set to the
+                caller's username. None (CLI / library) leaves it untouched.
 
         Returns:
             The created project with flow_count=0.
@@ -89,6 +96,9 @@ class ProjectService:
         if self._repository.exists_by_name(name=project.name):
             logger.warning("Attempted to create duplicate project name: %s", project.name)
             raise ProjectAlreadyExistsException(project_name=project.name)
+
+        if actor is not None:
+            project.created_by = actor.username
 
         saved = self._repository.save(project=project)
         saved.flow_count = 0  # brand-new project has no flows
@@ -167,20 +177,33 @@ class ProjectService:
 
     # ── FULL UPDATE ──────────────────────────────────────────────────
 
-    def update_project(self, *, project: Project) -> Project:
+    def update_project(self, *, project: Project, actor: ActorContext | None = None) -> Project:
         """Fully replace a project's mutable fields.
 
         Args:
             project: Project with updated data. Must carry the existing project_id.
+            actor: Caller identity. When present, the caller must own the project
+                (or be admin, or the project must be ownerless) and ``modified_by``
+                is set to the caller's username.
 
         Returns:
             The updated project enriched with flow_count.
 
         Raises:
             ProjectNotFoundException: If no project with this ID exists.
+            PermissionDeniedException: If ``actor`` may not modify the project.
         """
         if not self._repository.exists(project_id=project.project_id):
             raise ProjectNotFoundException(project_id=project.project_id)
+        if actor is not None:
+            existing = self.get_project(project_id=str(project.project_id))
+            ensure_can_modify(
+                actor=actor,
+                owner=existing.created_by,
+                action="project.update",
+                target=str(project.project_id),
+            )
+            project.modified_by = actor.username
         project.update_timestamp()
         updated = self._repository.update(project=project)
         updated.flow_count = self._count_flows_for(project_id=updated.project_id)
@@ -189,7 +212,7 @@ class ProjectService:
 
     # ── PARTIAL UPDATE ────────────────────────────────────────────────
 
-    def partial_update_project(self, *, project_id: str, updates: dict) -> Project:
+    def partial_update_project(self, *, project_id: str, updates: dict, actor: ActorContext | None = None) -> Project:
         """Apply a partial update, modifying only the provided fields.
 
         Protected fields (project_id, created_on, created_by) are silently
@@ -198,6 +221,9 @@ class ProjectService:
         Args:
             project_id: UUID of the project to update.
             updates: Dictionary of fields to update (from PATCH body).
+            actor: Caller identity. When present, the caller must own the project
+                (or be admin, or the project must be ownerless) and ``modified_by``
+                is set to the caller's username, ignoring any client-supplied value.
 
         Returns:
             The updated project enriched with flow_count.
@@ -205,8 +231,10 @@ class ProjectService:
         Raises:
             ProjectNotFoundException: If no project with this ID exists.
             ProjectInvalidDataException: If an updated name fails validation.
+            PermissionDeniedException: If ``actor`` may not modify the project.
         """
         existing = self.get_project(project_id=project_id)  # raises 404 if missing
+        ensure_can_modify(actor=actor, owner=existing.created_by, action="project.update", target=project_id)
 
         # Strip immutable fields silently
         for field in self.PROTECTED_FIELDS:
@@ -221,6 +249,9 @@ class ProjectService:
             if key in self.UPDATABLE_FIELDS:
                 setattr(existing, key, value)
 
+        if actor is not None:
+            existing.modified_by = actor.username
+
         existing.update_timestamp()
         updated = self._repository.update(project=existing)
         updated.flow_count = self._count_flows_for(project_id=updated.project_id)
@@ -229,26 +260,40 @@ class ProjectService:
 
     # ── DELETE ───────────────────────────────────────────────────────
 
-    def delete_project(self, *, project_id: str) -> None:
+    def delete_project(self, *, project_id: str, actor: ActorContext | None = None) -> None:
         """Delete a project and cascade-delete all flows linked to it.
 
         Finds all flows whose container_id matches project_id and bulk-deletes
         them before removing the project record. Individual flow deletion
         failures are logged as warnings but do not block the project deletion.
 
+        When ``actor`` is given, ownership of the project and of every child flow is
+        verified before anything is deleted, so a foreign-owned child flow blocks the
+        whole delete. The check and the cascade are not atomic.
+
         Args:
             project_id: UUID of the project to delete.
+            actor: Caller identity, or None for CLI / library callers.
 
         Raises:
             ProjectNotFoundException: If no project with this ID exists.
+            PermissionDeniedException: If ``actor`` may not delete the project or any child flow.
         """
         if not self._repository.exists(project_id=project_id):
             raise ProjectNotFoundException(project_id=project_id)
 
-        # Cascade: delete all flows linked to this project
-        flow_ids = [f.asset_id for f in self._flow_repository.find_all() if f.container_id == project_id and f.asset_id]
+        child_flows = [f for f in self._flow_repository.find_all() if f.container_id == project_id and f.asset_id]
+        if actor is not None:
+            project = self.get_project(project_id=project_id)
+            ensure_can_modify(actor=actor, owner=project.created_by, action="project.delete", target=project_id)
+            # Verify every child flow before deleting anything.
+            for child in child_flows:
+                ensure_can_modify(actor=actor, owner=child.created_by, action="project.delete", target=project_id)
+
+        # Cascade: delete all flows linked to this project (ownership already verified above)
+        flow_ids = [f.asset_id for f in child_flows if f.asset_id]
         if flow_ids:
-            result = self._flow_service.bulk_delete_flows(flow_ids=flow_ids)
+            result = self._flow_service.bulk_delete_flows(flow_ids=flow_ids, actor=None)
             if result.get("total_failed", 0):
                 logger.warning(
                     "Deleted project %s but %d linked flow(s) could not be removed: %s",
