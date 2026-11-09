@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom operator API endpoints."""
 
 import tempfile
@@ -17,6 +20,7 @@ from fastapi import (
     Path as PathParam,
 )
 
+from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.dependencies import get_custom_operator_service
 from docpipe.api.dto.custom_operator_dto import (
     CustomOperatorDeleteResponse,
@@ -44,9 +48,12 @@ logger = get_logger(__name__)
 MAX_OPERATOR_FILE_BYTES = 512 * 1024  # 512 KB limit
 
 # Configure router
+# Every route requires a valid bearer token. Uploaded scripts are executable code, and the
+# read routes disclose the script inventory and on-disk layout.
 custom_operators_router = APIRouter(
     prefix="/custom_operators",
     tags=["Custom Operators"],
+    dependencies=[Depends(get_current_user)],
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": ErrorResponse,
@@ -142,7 +149,10 @@ OptionalOperatorFileForm = Annotated[
         },
         status.HTTP_409_CONFLICT: {
             "model": ErrorResponse,
-            "description": "Custom operator with the same short_name already exists",
+            "description": (
+                "Custom operator with the same short_name already exists, or custom operators are disabled "
+                "(DOCPIPE_ENABLE_CUSTOM_OPERATORS)"
+            ),
         },
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "model": ErrorResponse,
@@ -292,6 +302,10 @@ def get_custom_operator(
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
             "description": "Custom operator not found",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "A replacement file was sent while custom operators are disabled",
         },
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "model": ErrorResponse,
