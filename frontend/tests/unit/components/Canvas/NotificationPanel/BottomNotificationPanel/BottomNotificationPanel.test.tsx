@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import React from 'react';
 import BottomNotificationPanel from '@/components/Canvas/NotificationPanel/BottomNotificationPanel/BottomNotificationPanel';
 import type { NotificationItem } from '@/components/Canvas/NotificationPanel/BottomNotificationPanel/BottomNotificationPanel';
 
@@ -155,13 +154,13 @@ describe('BottomNotificationPanel — node link click', () => {
     const onNodeClick = vi.fn();
     renderWithProviders(
       <BottomNotificationPanel
-        notifications={[makeNotification({ node_name: 'MyNode', node_id: 'node-1', message_code: 'EXTRACT_FAILED', action_type: 'OPEN_PROPERTIES' })]}
+        notifications={[makeNotification({ node_name: 'MyNode', node_id: 'node-1', message_code: 'EXTRACT_FAILED', action_type: 'open_properties' })]}
         onClose={vi.fn()}
         onNodeClick={onNodeClick}
       />
     );
     fireEvent.click(screen.getByRole('button', { name: 'MyNode' }));
-    expect(onNodeClick).toHaveBeenCalledWith('node-1', 'EXTRACT_FAILED', 'OPEN_PROPERTIES');
+    expect(onNodeClick).toHaveBeenCalledWith('node-1', 'EXTRACT_FAILED', 'open_properties');
   });
 
   it('passes null messageCode when message_code is null', () => {
@@ -221,7 +220,11 @@ describe('BottomNotificationPanel — expand/collapse rows', () => {
     ];
     renderWithProviders(<BottomNotificationPanel notifications={notifications} onClose={vi.fn()} />);
     const expandBtns = screen.getAllByRole('button', { name: /expand row/i });
-    fireEvent.click(expandBtns[0]);
+    const firstExpandBtn = expandBtns[0];
+    expect(firstExpandBtn).toBeDefined();
+    if (firstExpandBtn) {
+      fireEvent.click(firstExpandBtn);
+    }
     // First row is expanded, second is not
     expect(screen.getAllByRole('button', { name: /collapse row/i })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: /expand row/i })).toHaveLength(1);

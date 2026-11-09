@@ -3,7 +3,8 @@
  * Uses a mocked @carbon/react Dropdown that directly calls onChange when clicked.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { enrichFlowFeaturesForNode } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-enrichment';
 import { getProviderConfig } from '@/components/PropertiesPanel/CustomPanels/VectorDB/constants';
 
@@ -112,17 +113,18 @@ const mockEnrich = vi.mocked(enrichFlowFeaturesForNode);
 
 const enrichmentResult = {
   available_resources: ['my-index', 'other-index'],
+  selected_resource_schema: {} as Record<string, unknown>,
   feature_mappings: [
     { feature_name: 'content', mapped_column_name: 'text' },
     { feature_name: 'embedding', mapped_column_name: 'vector' },
   ],
   available_features: {
-    content: { description: 'Text content', mandatory_for_vector_db: true },
-    embedding: { description: 'Vector embedding', mandatory_for_vector_db: true },
+    content: { name: 'content', type: 'string', description: 'Text content', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] },
+    embedding: { name: 'embedding', type: 'array', description: 'Vector embedding', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] },
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 const baseProps = {
   open: true,
@@ -151,7 +153,7 @@ describe('VectorDBFeatureMappingTearsheet — Dropdown onChange coverage', () =>
 
   // ── Covers lines 550-554: similarity onChange with valid selectedItem ─────
   it('similarity Dropdown onChange with valid item calls setSimilarityMetric (lines 550-554)', async () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     await waitFor(() =>
       expect(screen.getByTestId('dropdown-similarity-metric-select')).toBeInTheDocument()
     );
@@ -164,7 +166,7 @@ describe('VectorDBFeatureMappingTearsheet — Dropdown onChange coverage', () =>
   });
 
   it('similarity Dropdown onChange with empty item is a no-op (selectedItem guard)', async () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     await waitFor(() =>
       expect(screen.getByTestId('dropdown-similarity-metric-select')).toBeInTheDocument()
     );
@@ -178,7 +180,7 @@ describe('VectorDBFeatureMappingTearsheet — Dropdown onChange coverage', () =>
 
   // ── Covers lines 566-570: engine onChange with valid selectedItem ─────────
   it('engine Dropdown onChange with valid item calls setEngine (lines 566-570)', async () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     await waitFor(() =>
       expect(screen.getByTestId('dropdown-engine-select')).toBeInTheDocument()
     );
@@ -191,7 +193,7 @@ describe('VectorDBFeatureMappingTearsheet — Dropdown onChange coverage', () =>
   });
 
   it('engine Dropdown onChange with empty item is a no-op (selectedItem guard)', async () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     await waitFor(() =>
       expect(screen.getByTestId('dropdown-engine-select')).toBeInTheDocument()
     );
@@ -207,7 +209,7 @@ describe('VectorDBFeatureMappingTearsheet — Dropdown onChange coverage', () =>
     mockEnrich
       .mockResolvedValueOnce(enrichmentResult)
       .mockResolvedValueOnce(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     await waitFor(() =>
       expect(screen.getByTestId('combobox-resource-select')).toBeInTheDocument()
     );
@@ -223,7 +225,7 @@ describe('VectorDBFeatureMappingTearsheet — Dropdown onChange coverage', () =>
   // ── Loading state: {loading && (...)} block (lines 450-454) ─────────────
   it('renders Loading spinner while enrichment is pending (lines 450-454)', async () => {
     mockEnrich.mockReturnValue(new Promise(() => {}));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     // Loading=true → Loading component rendered, ComboBox not rendered
     await waitFor(() => {
       expect(screen.queryByTestId('combobox-resource-select')).toBeNull();

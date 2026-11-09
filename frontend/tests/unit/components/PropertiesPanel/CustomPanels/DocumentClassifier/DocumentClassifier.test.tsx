@@ -128,8 +128,9 @@ describe('DocumentClassifierPanelBody', () => {
 
     // Find any input and change it
     const inputs = document.querySelectorAll('input:not([type="checkbox"])');
-    if (inputs.length > 0) {
-      fireEvent.change(inputs[0], { target: { value: '0.5' } });
+    const firstInput = inputs[0];
+    if (firstInput) {
+      fireEvent.change(firstInput, { target: { value: '0.5' } });
     }
     // Component rendered without crash
     expect(document.body).toBeInTheDocument();

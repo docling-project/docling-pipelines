@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
-import React, { useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
@@ -189,7 +189,7 @@ describe('FlowDetail page', () => {
     const flowWithRuns: FlowRow = {
       ...SAMPLE_FLOW,
       run_count: 3,
-      run_status: 'Completed',
+      run_status: { errors: 0, warnings: 0, running: 1 },
     };
     renderFlowDetail('flow-1', {
       flow: {

@@ -59,6 +59,14 @@ This architecture enables:
 
 Standard document extraction using the Docling library locally. Supports optional VLM (Vision-Language Model) pipeline for enhanced extraction and ASR (Automatic Speech Recognition) pipeline for audio/video processing.
 
+Local extraction supports CSV, EPUB, EML, MSG, LaTeX (`tex`, `latex`), AsciiDoc (`adoc`, `asciidoc`, `asc`), WebVTT, HTML variants (`htm`, `xhtml`, `mhtml`, `mht`), Markdown/text variants (`markdown`, `text`, `qmd`, `rmd`), and Office templates and macro-enabled variants (`pptm`, `xlsm`, `xltx`, `xltm`) in addition to PDF, DOCX, PPTX, XLSX, HTML, MD, TXT, and images. Extensionless EML and MHTML cannot be reliably identified as such from text bytes; supply a filename extension or `document_format`.
+
+Word variants `.dotx`, `.docm`, `.dotm` and PowerPoint variants `.potx`, `.ppsx`, `.potm`, `.ppsm` are not supported because Docling 2.142.1's underlying readers reject their internal content types.
+
+MKV and WebM are supported for video transcription. Available codecs depend on the ffmpeg installation. Optional speaker diarization has a dependency incompatibility with the current setuptools version.
+
+`docling_serve` keeps the original PDF, DOCX, PPTX, XLSX, MD, TXT, HTML and image extensions. The additional document formats and audio/video formats are local-library only.
+
 **Basic Configuration:**
 ```json
 {
@@ -1040,21 +1048,15 @@ When `expand_extracted_data: true`, entity fields are expanded into individual c
 
 ### ASR Dependencies (for Audio/Video Processing)
 
-**Requirement:** ASR (Automatic Speech Recognition) dependencies must be installed to process audio and video files
+Install the optional group for audio and video processing:
 
-**Installation:**
 ```bash
-# Install ASR dependencies
-uv pip install -e '.[asr]'
+uv pip install -e '.[vlm_asr]'
 ```
 
-**Supported Audio/Video Formats (when ASR is installed):**
-- Audio: MP3, WAV, M4A, FLAC, OGG
-- Video: MP4, AVI, MOV, MKV
+Audio support covers WAV, MP3, M4A, AAC, OGG, and FLAC when audio dependencies are available. MP4, AVI, MOV, MKV, and WebM files are accepted by extension; processing requires the video dependencies, an ASR model, and ffmpeg on `PATH`. Missing conversion dependencies are reported as document failures and do not disable audio processing.
 
-**Note:** If ASR dependencies are not installed, the operator will only support standard document formats (PDF, DOCX, PPTX, etc.) and will log a warning if `use_asr_pipeline=true` is configured.
-
-**Used By:** Text extraction with ASR when `use_asr_pipeline=true`
+When the ASR pipeline is enabled, the selected ASR model is applied to both Docling audio and video input formats. If the model name is explicitly empty or null, video uses Docling's default model.
 
 ### ffmpeg (for Audio/Video Processing)
 
@@ -1062,7 +1064,7 @@ uv pip install -e '.[asr]'
 
 **Required For:**
 - Audio formats: M4A, AAC, OGG, FLAC
-- All video formats: MP4, AVI, MOV, etc.
+- All video formats: MP4, AVI, MOV, MKV, WebM
 
 **Not Required For:**
 - Audio formats: WAV, MP3
@@ -1293,7 +1295,7 @@ Complete sample flows are available in [`sample_flows/`](../../../sample_flows/)
 - Install ffmpeg if missing:
   - macOS: `brew install ffmpeg`
   - Linux: `sudo apt install ffmpeg` or `sudo dnf install ffmpeg`
-- Supported formats requiring ffmpeg: M4A, AAC, OGG, FLAC (audio), MP4, AVI, MOV (video)
+- Supported formats requiring ffmpeg: M4A, AAC, OGG, FLAC (audio), MP4, AVI, MOV, MKV, WebM (video)
 - WAV and MP3 audio files do not require ffmpeg
 
 **Issue: Extraction workers stall or memory stays high after a job**
