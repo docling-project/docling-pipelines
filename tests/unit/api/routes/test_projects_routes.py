@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Project API routes and ProjectMapper."""
 
 from datetime import UTC, datetime
@@ -411,7 +414,7 @@ class TestDeleteProjectEndpoint:
 
         client.delete(f"/projects/{_PROJECT_ID}")
 
-        override_service.delete_project.assert_called_once_with(project_id=_PROJECT_ID)
+        override_service.delete_project.assert_called_once_with(project_id=_PROJECT_ID, actor=None)
 
 
 # ── ProjectMapper unit tests ───────────────────────────────────────────────
