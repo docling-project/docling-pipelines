@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Pytest configuration and fixtures for docling-pipelines tests.
 """
@@ -24,6 +27,32 @@ def setup_python_path():
     # Cleanup: Remove from path after tests complete
     if str(backend_dir) in sys.path:
         sys.path.remove(str(backend_dir))
+
+
+# ============================================================================
+# Authentication Fixtures
+# ============================================================================
+
+
+# These fixtures use their own MonkeyPatch instances instead of the ``monkeypatch``
+# fixture so they do not change the teardown order of tests that request it.
+@pytest.fixture(autouse=True)
+def _auth_disabled_by_default():
+    """Run every test with API authentication off so existing tests need no credentials."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DOCPIPE_AUTH_ENABLED", "false")
+        yield
+
+
+@pytest.fixture
+def auth_enabled(_auth_disabled_by_default):
+    """Turn API authentication on for tests that assert 401 or other auth behavior.
+
+    The setting is read per request, so this takes effect inside an already-built app.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        yield
 
 
 # ============================================================================
