@@ -4,10 +4,11 @@
 """Opaque wrapper for resolved secret material.
 
 ``SecretValue`` holds a resolved secret and refuses to render it through any
-implicit path (``repr``, ``str``, ``format``, pickling, copying, JSON
-encoding, iteration, comparison with ``str``). The only way to read the
-underlying string is the explicit :meth:`SecretValue.reveal` call, which is
-intended for client construction sites only.
+implicit path (``repr``, ``str``, ``format``, pickling, JSON encoding,
+iteration, comparison with ``str``). Copying returns the same immutable
+instance. The only way to read the underlying string is the explicit
+:meth:`SecretValue.reveal` call, which is intended for client construction
+sites only.
 
 It is deliberately NOT a ``str`` subclass: a ``str`` subclass would join,
 slice, concatenate, and serialize as plain text without any hook.
