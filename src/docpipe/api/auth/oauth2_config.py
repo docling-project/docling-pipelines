@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OAuth2 and OIDC configuration module."""
 
 from pydantic import Field
@@ -28,6 +31,14 @@ class OAuth2Config(BaseSettings):
 
     oidc_issuer: str = Field(default="", description="OIDC issuer URL")
     oidc_audience: str = Field(default="", description="OIDC audience (usually client_id)")
+
+    oauth2_group_claim: str = Field(
+        default="",
+        description=(
+            "ID token / userinfo claim that lists the user's groups. When empty, the 'groups' claim is read "
+            "first and then the 'roles' claim."
+        ),
+    )
 
     oauth2_state_secret: str = Field(default="", description="Secret for state parameter encryption")
     oauth2_session_expire_minutes: int = Field(default=60, description="OAuth2 session expiration in minutes")

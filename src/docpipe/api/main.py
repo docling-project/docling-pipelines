@@ -37,6 +37,8 @@ from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_token
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
 from docpipe.api.auth.models import LoginRequest, TokenResponse, User
+from docpipe.api.auth.oauth2_config import get_oauth2_config
+from docpipe.api.auth.oauth2_provider import group_claim_names
 from docpipe.api.auth.oauth2_routes import router as oauth2_router
 from docpipe.api.auth.ports import AuthenticatorPort
 from docpipe.api.middleware.api_logging_middleware import ApiLoggingMiddleware
@@ -303,6 +305,11 @@ except Exception as e:
 # or invalid configuration must stop startup instead of silently disabling the break-glass login.
 bootstrap_authenticator: BootstrapAdminAuthenticator | None = BootstrapAdminAuthenticator.from_settings(
     settings=get_auth_settings()
+)
+
+logger.info(
+    "OIDC role mapping reads groups from the %s claim(s)",
+    ", ".join(group_claim_names(config=get_oauth2_config())),
 )
 
 # More specific handlers first, then generic.

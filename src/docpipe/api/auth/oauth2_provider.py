@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OAuth2 provider implementation with OIDC support."""
 
 import secrets
@@ -13,10 +16,30 @@ from jwt import PyJWTError
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, DocpipeException, ExternalServiceError
 from docpipe.utils.infrastructure.logging import get_logger
 
+from .config import get_auth_settings
 from .models import User
 from .oauth2_config import OAuth2Config
+from .ports import is_reserved_username
+from .role_mapping import resolve_role
+from .roles import Role
 
 logger = get_logger(__name__)
+
+# Claims read for group membership when no claim is configured, in order.
+DEFAULT_GROUP_CLAIMS: tuple[str, ...] = ("groups", "roles")
+
+
+def group_claim_names(*, config: OAuth2Config) -> tuple[str, ...]:
+    """Return the claim names read for group membership.
+
+    Args:
+        config: OAuth2 configuration of the provider.
+
+    Returns:
+        The configured claim alone, or ``groups`` then ``roles`` when none is configured.
+    """
+    configured = config.oauth2_group_claim.strip()
+    return (configured,) if configured else DEFAULT_GROUP_CLAIMS
 
 
 class OAuth2Provider(ABC):
@@ -259,6 +282,55 @@ class OAuth2Provider(ABC):
             logger.error("Failed to fetch user info from %s: %s", self.get_provider_name(), e)
             raise ExternalServiceError(f"Userinfo fetch failed: {e!s}") from e
 
+    def resolve_roles(self, *, claims: dict[str, Any]) -> list[Role]:
+        """Map the group claim of an ID token or userinfo document to a role.
+
+        The first configured claim that is present and non-empty is used. Group identifiers
+        are compared as trimmed exact strings. A provider that sends no group claim (Google)
+        or omits groups on overage (Azure) leaves the user with the default role.
+
+        Args:
+            claims: Decoded ID token payload or userinfo document.
+
+        Returns:
+            A one-element list holding the user's role.
+        """
+        groups: list[str] = []
+        for claim_name in group_claim_names(config=self.config):
+            value = claims.get(claim_name)
+            if isinstance(value, str) and value.strip():
+                groups = [value]
+            elif isinstance(value, list | tuple) and value:
+                groups = [item for item in value if isinstance(item, str)]
+            if groups:
+                break
+        settings = get_auth_settings()
+        return [
+            resolve_role(
+                groups=groups,
+                role_mapping=settings.role_mapping,
+                default_role=settings.default_role,
+            )
+        ]
+
+    @staticmethod
+    def reject_reserved_username(*, user: User) -> User:
+        """Refuse an identity whose username is the reserved local principal name.
+
+        Args:
+            user: User extracted from the provider response.
+
+        Returns:
+            ``user`` unchanged.
+
+        Raises:
+            ExternalServiceError: If the username is reserved.
+        """
+        if is_reserved_username(user.username):
+            logger.warning("Rejected an OIDC identity with a reserved username")
+            raise ExternalServiceError("Identity provider returned a reserved username")
+        return user
+
     @abstractmethod
     async def extract_user_from_token(self, token_data: dict[str, Any]) -> User:
         """Extract user information from token data.
@@ -287,10 +359,13 @@ class GoogleOAuth2Provider(OAuth2Provider):
 
         payload = await self.validate_id_token(id_token)
 
-        return User(
-            username=payload.get("email", ""),
-            email=payload.get("email", ""),
-            full_name=payload.get("name", ""),
+        return self.reject_reserved_username(
+            user=User(
+                username=payload.get("email", ""),
+                email=payload.get("email", ""),
+                full_name=payload.get("name", ""),
+                roles=self.resolve_roles(claims=payload),
+            )
         )
 
 
@@ -309,10 +384,13 @@ class AzureADOAuth2Provider(OAuth2Provider):
 
         payload = await self.validate_id_token(id_token)
 
-        return User(
-            username=payload.get("preferred_username", payload.get("email", "")),
-            email=payload.get("email", payload.get("preferred_username", "")),
-            full_name=payload.get("name", ""),
+        return self.reject_reserved_username(
+            user=User(
+                username=payload.get("preferred_username", payload.get("email", "")),
+                email=payload.get("email", payload.get("preferred_username", "")),
+                full_name=payload.get("name", ""),
+                roles=self.resolve_roles(claims=payload),
+            )
         )
 
 
@@ -339,10 +417,13 @@ class GenericOIDCProvider(OAuth2Provider):
         email = payload.get("email", "")
         full_name = payload.get("name", "")
 
-        return User(
-            username=username,
-            email=email,
-            full_name=full_name,
+        return self.reject_reserved_username(
+            user=User(
+                username=username,
+                email=email,
+                full_name=full_name,
+                roles=self.resolve_roles(claims=payload),
+            )
         )
 
 
