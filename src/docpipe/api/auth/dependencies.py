@@ -1,18 +1,31 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """FastAPI dependencies for authentication."""
 
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2AuthorizationCodeBearer
 
 from docpipe.utils.infrastructure.logging import get_logger
 
+from .config import get_auth_settings
 from .jwt_handler import JWTClaims, JWTConfig, verify_token
 from .models import User
+from .roles import Role, parse_roles
 
 logger = get_logger(__name__)
 
-security = HTTPBearer()
+# Reserved username of the principal returned when authentication is disabled. Contains
+# characters that no LDAP, OIDC or bootstrap login produces, and authenticators reject it.
+LOCAL_PRINCIPAL_USERNAME = "<local-principal>"
+
+AUTH_SOURCE_BEARER = "bearer"
+AUTH_SOURCE_COOKIE = "cookie"
+AUTH_SOURCE_DISABLED = "disabled"
+
+security = HTTPBearer(auto_error=False)
 
 oauth2_scheme = OAuth2AuthorizationCodeBearer(
     authorizationUrl="/auth/oauth2/authorize",
@@ -39,49 +52,118 @@ def get_jwt_config() -> JWTConfig:
         ) from exc
 
 
-def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    jwt_config: Annotated[JWTConfig, Depends(get_jwt_config)],
-) -> User:
-    """FastAPI dependency to extract and validate current user from JWT.
+def get_session_jwt_config() -> JWTConfig | None:
+    """Resolve the JWT configuration for a session check.
 
-    Args:
-        credentials: HTTP authorization credentials
-        jwt_config: JWT configuration
+    Returns ``None`` when auth is disabled, so a deployment with auth off needs no
+    ``JWT_SECRET_KEY``.
 
     Returns:
-        User object from token payload
+        JWT configuration, or ``None`` when authentication is disabled.
 
     Raises:
-        HTTPException: If token is invalid or missing required claims
+        HTTPException: 503 if auth is enabled and the JWT configuration is invalid.
     """
-    token = credentials.credentials
+    if not get_auth_settings().enabled:
+        return None
+    return get_jwt_config()
+
+
+def _unauthorized(*, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def get_current_user(
+    *,
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    jwt_config: Annotated[JWTConfig | None, Depends(get_session_jwt_config)],
+) -> User:
+    """FastAPI dependency to extract and validate the current user from the session.
+
+    The Bearer header is read first and wins over the session cookie. The credential
+    source is recorded in ``request.state.auth_source`` as ``bearer``, ``cookie`` or
+    ``disabled``. When authentication is disabled, the reserved local principal is
+    returned without reading any credential.
+
+    Args:
+        request: Current request
+        credentials: HTTP authorization credentials, if a Bearer header is present
+        jwt_config: JWT configuration, ``None`` when authentication is disabled
+
+    Returns:
+        User object from the token payload, or the local principal when auth is disabled
+
+    Raises:
+        HTTPException: 401 if no valid credential is presented
+    """
+    settings = get_auth_settings()
+    if not settings.enabled:
+        request.state.auth_source = AUTH_SOURCE_DISABLED
+        return User(username=LOCAL_PRINCIPAL_USERNAME, roles=[Role.ADMIN])
+
+    if jwt_config is None:
+        # Auth was switched on between dependency resolution and this call.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service not configured",
+        )
+
+    if credentials is not None:
+        token = credentials.credentials
+        auth_source = AUTH_SOURCE_BEARER
+    else:
+        cookie_token = request.cookies.get(settings.cookie_name)
+        if not cookie_token:
+            logger.debug("No authentication credentials provided")
+            raise _unauthorized(detail="Not authenticated")
+        token = cookie_token
+        auth_source = AUTH_SOURCE_COOKIE
+
     payload: dict[Any, Any] | None = verify_token(token, jwt_config)
 
     if payload is None:
         logger.warning("Invalid authentication token provided")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unauthorized(detail="Invalid authentication credentials")
 
     username = payload.get(JWTClaims.USERNAME)
     if username is None:
         logger.warning("Token missing username claim")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unauthorized(detail="Invalid token payload")
+
+    if username == LOCAL_PRINCIPAL_USERNAME:
+        logger.warning("Token carries the reserved local principal username")
+        raise _unauthorized(detail="Invalid authentication credentials")
+
+    request.state.auth_source = auth_source
 
     user = User(
         username=username,
         email=payload.get(JWTClaims.EMAIL, ""),
         full_name=payload.get(JWTClaims.FULL_NAME, ""),
+        roles=parse_roles(payload.get(JWTClaims.ROLES)),
     )
 
     logger.debug("Authenticated user: %s", username)
+    return user
+
+
+def require_session(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Router-level dependency that requires a valid session.
+
+    Delegates to ``get_current_user`` through ``Depends`` so dependency overrides of
+    ``get_current_user`` apply to every route that carries this dependency.
+
+    Args:
+        user: The authenticated user, or the local principal when auth is disabled.
+
+    Returns:
+        The authenticated user.
+    """
     return user
 
 

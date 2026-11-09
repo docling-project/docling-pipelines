@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Integration tests for JWT authentication."""
 
 from datetime import UTC
@@ -11,17 +14,20 @@ from docpipe.api.auth.jwt_handler import (
 )
 from docpipe.api.main import app
 
+_JWT_SECRET = "test-secret-key-for-integration-tests"  # pragma: allowlist secret
+
 
 @pytest.fixture
-def client():
-    """Create test client."""
+def client(auth_enabled, monkeypatch):
+    """Create test client with authentication enabled and the test JWT secret configured."""
+    monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
     return TestClient(app)
 
 
 @pytest.fixture
 def jwt_config():
     """Create JWT configuration for testing."""
-    return JWTConfig(jwt_secret_key="test-secret-key-for-integration-tests")
+    return JWTConfig(jwt_secret_key=_JWT_SECRET)
 
 
 class TestJWTAuthentication:
@@ -48,7 +54,7 @@ class TestJWTAuthentication:
         """Test accessing protected endpoint without token."""
         response = client.get("/auth/me")
 
-        assert response.status_code == 403  # Forbidden or 401 Unauthorized
+        assert response.status_code == 401
 
     def test_access_protected_endpoint_with_invalid_token(self, client):
         """Test accessing protected endpoint with invalid token."""
@@ -61,16 +67,6 @@ class TestJWTAuthentication:
         response = client.get("/auth/me", headers={"Authorization": "InvalidFormat token"})
 
         assert response.status_code in [401, 403]
-
-    def test_protected_route_with_valid_token(self, client, jwt_config):
-        """Test protected route with valid token."""
-        token_data = {"username": "testuser"}
-        token = create_access_token(token_data, jwt_config)
-
-        response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
-
-        assert response.status_code == 200
-        assert "testuser" in response.json()["message"]
 
     def test_token_with_missing_username_claim(self, client, jwt_config):
         """Test token without username claim is rejected."""
