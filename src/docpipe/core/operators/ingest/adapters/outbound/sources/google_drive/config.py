@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for Google Drive source adapter."""
 
 from pathlib import Path
@@ -16,6 +19,15 @@ class GoogleDriveSourceConfig(BaseModel):
     - Clear documentation of required/optional fields
     - OAuth or Service Account credential management
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "service_account_json",
+        "service_account_json_path",
+        "credentials_json",
+        "credentials_path",
+        "token_path",
+    )
 
     # Service Account credentials (inline JSON or dict is primary; file path is secondary)
     service_account_json: dict | str | None = Field(

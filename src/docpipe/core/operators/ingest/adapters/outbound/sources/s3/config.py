@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for S3 source adapter."""
 
 from typing import ClassVar
@@ -15,6 +18,15 @@ class S3SourceConfig(BaseModel):
     - Clear documentation of required/optional fields
     - Support for both AWS S3 and S3-compatible storage (e.g., IBM COS, MinIO)
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "access_key",
+        "secret_key",
+        "endpoint_url",
+        "bucket",
+        "region",
+    )
 
     # AWS credentials
     access_key: str = Field(

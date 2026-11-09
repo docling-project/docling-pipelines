@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for the Dropbox source adapter."""
 
 from typing import ClassVar
@@ -14,6 +17,14 @@ class DropboxSourceConfig(BaseModel):
     - Long-lived refresh flow: provide ``refresh_token``, ``app_key`` and ``app_secret``.
       The SDK then refreshes the access token automatically.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "access_token",
+        "refresh_token",
+        "app_key",
+        "app_secret",
+    )
 
     # Credentials (never included in repr to keep secrets out of logs and tracebacks)
     access_token: str | None = Field(

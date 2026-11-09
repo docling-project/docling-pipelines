@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import os
 from pathlib import Path
 from typing import ClassVar
@@ -7,6 +10,14 @@ from pydantic import BaseModel, Field, field_validator
 
 class BoxSourceConfig(BaseModel):
     """Configuration for Box source."""
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "credentials_json",
+        "credentials_path",
+        "credentials_json_path",
+    )
+    SECRET_FIELD_ALIASES: ClassVar[tuple[str, ...]] = ("credentials_json_path",)
 
     # Credentials (inline JSON or dict is primary; file path is secondary)
     credentials_json: dict | str | None = Field(

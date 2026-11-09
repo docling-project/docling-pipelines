@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Operator Metadata API routes.
 
 This test suite validates the router layer for operator metadata endpoints,
@@ -211,6 +214,31 @@ class TestGetOperatorMetadataEndpoint:
         assert "chunker" in data
         assert data["extract_docling"]["category"] == "Extract"
         override_service.get_all_operator_metadata.assert_called_once_with(internal_features=False)
+
+    def test_get_operator_metadata_does_not_expose_secret_declarations(self, client, override_service):
+        """Secret-capable field declarations are internal and must not appear in the response."""
+        # Arrange
+        override_service.get_all_operator_metadata.return_value = {
+            "vectordb": {
+                "label": "VectorDB",
+                "category": "VectorDB",
+                "description": "d",
+                "features": {},
+                "required_features": [],
+                "attributes": {},
+                "secret_fields": ["provider_config.password"],
+                "secret_fields_by_provider": {"provider": {"milvus": ["provider_config.token"]}},
+            }
+        }
+
+        # Act
+        response = client.get("/operators/metadata")
+
+        # Assert
+        assert response.status_code == 200
+        item = response.json()["vectordb"]
+        assert "secret_fields" not in item
+        assert "secret_fields_by_provider" not in item
 
     def test_get_operator_metadata_returns_dict_structure(self, client, override_service, sample_operator_metadata):
         """Test that response has correct dictionary structure including all DTO fields."""

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for the SharePoint destination adapter."""
 
 from typing import ClassVar
@@ -18,6 +21,13 @@ class SharePointDestinationConfig(BaseModel):
 
         PUT /drives/{document_library_id}/root:/{folder_path}/{relative_path}:/content
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "client_id",
+        "client_secret",
+        "tenant_id",
+    )
 
     # Azure AD App Registration credentials (client credentials flow)
     client_id: str = Field(..., description="Azure AD application (client) ID")

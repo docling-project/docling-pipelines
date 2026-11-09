@@ -434,9 +434,35 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each detection adapter config class's secret-capable declarations.
+
+        Covers the shared ``provider``/``provider_config`` pair and the per-capability
+        ``pii_provider``/``hap_provider`` pairs.
+        """
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        classes: dict[str, type] = {}
+        for name in PIIAndHAPDetectionFactory.list_adapters():
+            adapter_class = PIIAndHAPDetectionFactory.get_adapter_class(name)
+            if adapter_class is not None:
+                classes[name] = adapter_class.get_config_schema()
+
+        result: dict[str, dict[str, list[str]]] = {}
+        pairs = [(PROVIDER, OperatorConstants.Config.PROVIDER_CONFIG)]
+        pairs.extend(CAPABILITY_PROVIDER_KEYS.values())
+        for provider_key, provider_config_key in pairs:
+            result.update(
+                build_provider_secret_fields(selector=provider_key, prefix=provider_config_key, classes=classes)
+            )
+        return result
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Return operator metadata for SDK."""
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": PIIAndHAPAnnotator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: PIIAndHAPAnnotator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: PIIAndHAPAnnotator.is_available(),
