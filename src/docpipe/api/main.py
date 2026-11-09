@@ -52,8 +52,10 @@ from docpipe.api.middleware.error_handler import (
 )
 from docpipe.api.middleware.payload_validation import PayloadValidationMiddleware
 from docpipe.api.middleware.rate_limit import (
-    RATE_LIMIT_WINDOW_SECONDS,
-    check_login_rate_limit,
+    get_client_ip,
+    login_retry_after,
+    record_failed_login,
+    reset_login_failures,
 )
 from docpipe.api.middleware.security_headers import SecurityHeadersMiddleware
 from docpipe.api.middleware.transaction_middleware import TransactionMiddleware
@@ -363,12 +365,15 @@ async def login(credentials: LoginRequest, request: Request, response: Response)
     Raises:
         HTTPException: 401 if authentication fails, 429 if throttled, 503 if no login method is configured
     """
-    client_ip = request.client.host if request.client else "unknown"
-    if not check_login_rate_limit(client_ip=client_ip):
-        logger.warning("Rate limit exceeded for login from IP: %s", client_ip)
+    client_ip = get_client_ip(request=request, trust_proxy_headers=get_auth_settings().trust_proxy_headers)
+    retry_after = login_retry_after(client_ip=client_ip, username=credentials.username)
+    if retry_after:
+        logger.warning("Login throttled for client address: %s", sanitize_for_log(client_ip))
+        # The body is identical whether or not the username exists.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many login attempts. Please wait {RATE_LIMIT_WINDOW_SECONDS} seconds before retrying.",
+            detail="Too many failed login attempts. Please wait before retrying.",
+            headers={"Retry-After": str(retry_after)},
         )
 
     authenticators: list[AuthenticatorPort] = [
@@ -389,12 +394,14 @@ async def login(credentials: LoginRequest, request: Request, response: Response)
                 break
 
         if not user:
+            record_failed_login(client_ip=client_ip, username=credentials.username)
             logger.warning("Failed login attempt for user: %s", sanitize_for_log(credentials.username))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
             )
 
+        reset_login_failures(client_ip=client_ip, username=credentials.username)
         token_data = {
             JWTClaims.USERNAME: user.username,
             JWTClaims.EMAIL: user.email,

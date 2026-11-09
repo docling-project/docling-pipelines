@@ -5,10 +5,12 @@
 
 from unittest.mock import MagicMock, patch
 
+import bcrypt
 import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from docpipe.api.auth.bootstrap_auth import BootstrapAdminAuthenticator
 from docpipe.api.auth.jwt_handler import JWTConfig, create_access_token
 from docpipe.api.auth.models import User
 from docpipe.api.auth.roles import Role
@@ -276,3 +278,100 @@ class TestCors:
         response = _login(client, headers={"Origin": "http://localhost:3000"})
 
         assert response.headers.get("access-control-allow-credentials") != "true"
+
+
+_BOOTSTRAP_USERNAME = "break-glass"
+_WRONG_PASSWORD = "wrong"  # pragma: allowlist secret
+_BOOTSTRAP_PASSWORD = "bootstrap-route-password"  # pragma: allowlist secret
+_BOOTSTRAP_HASH = bcrypt.hashpw(_BOOTSTRAP_PASSWORD.encode(), bcrypt.gensalt(rounds=4)).decode()
+
+
+def _post(client: TestClient, *, username: str, password: str, **kwargs):
+    return client.post("/auth/login", json={"username": username, "password": password}, **kwargs)
+
+
+class TestLoginThrottle:
+    def test_sixth_failed_attempt_is_blocked_with_retry_after_and_generic_body(self, client):
+        for _ in range(rate_limit.RATE_LIMIT_MAX_ATTEMPTS):
+            assert _login(client, password="wrong").status_code == 401  # pragma: allowlist secret
+
+        blocked = _login(client, password="wrong")  # pragma: allowlist secret
+
+        assert blocked.status_code == 429
+        assert int(blocked.headers["retry-after"]) >= 1
+        assert "alice" not in blocked.text
+
+    def test_429_body_is_the_same_for_known_and_unknown_usernames(self, client):
+        for index in range(rate_limit.RATE_LIMIT_MAX_ATTEMPTS):
+            _post(client, username=f"nobody-{index}", password="x")  # pragma: allowlist secret
+
+        known = _login(client, password="x")  # pragma: allowlist secret
+        unknown = _post(client, username="nobody-xyz", password="x")  # pragma: allowlist secret
+
+        assert known.status_code == unknown.status_code == 429
+        assert known.json()["errors"] == unknown.json()["errors"]
+
+    def test_unknown_user_failures_are_counted(self, client):
+        for index in range(rate_limit.RATE_LIMIT_MAX_ATTEMPTS):
+            assert (
+                _post(client, username=f"nobody-{index}", password="x").status_code == 401
+            )  # pragma: allowlist secret
+
+        assert _login(client).status_code == 429
+
+    def test_ldap_failures_are_counted(self, client):
+        for _ in range(rate_limit.PAIR_LOCKOUT_THRESHOLD):
+            assert _login(client, password="wrong").status_code == 401  # pragma: allowlist secret
+
+        assert rate_limit.check_login_rate_limit(client_ip="testclient", username="alice") is False
+
+    def test_bootstrap_failures_are_counted(self, jwt_config):
+        bootstrap = BootstrapAdminAuthenticator(username=_BOOTSTRAP_USERNAME, password_hash=_BOOTSTRAP_HASH)
+        with (
+            patch("docpipe.api.main.ldap_authenticator", None),
+            patch("docpipe.api.main.bootstrap_authenticator", bootstrap),
+            patch("docpipe.api.main.jwt_config", jwt_config),
+        ):
+            test_client = TestClient(app)
+            for _ in range(rate_limit.PAIR_LOCKOUT_THRESHOLD):
+                response = _post(test_client, username=_BOOTSTRAP_USERNAME, password=_WRONG_PASSWORD)
+                assert response.status_code == 401
+
+            assert rate_limit.check_login_rate_limit(client_ip="testclient", username=_BOOTSTRAP_USERNAME) is False
+            assert _post(test_client, username=_BOOTSTRAP_USERNAME, password=_BOOTSTRAP_PASSWORD).status_code == 429
+
+    def test_successful_logins_are_not_counted(self, client):
+        for _ in range(rate_limit.RATE_LIMIT_MAX_ATTEMPTS * 3):
+            assert _login(client).status_code == 200
+
+        assert not rate_limit._login_attempts
+        assert _login(client).status_code == 200
+
+    def test_success_clears_the_pair_failure_streak(self, client):
+        for _ in range(rate_limit.PAIR_LOCKOUT_THRESHOLD - 1):
+            _login(client, password="wrong")  # pragma: allowlist secret
+        assert _login(client).status_code == 200
+
+        _login(client, password="wrong")  # pragma: allowlist secret
+
+        assert rate_limit._pair_state[("testclient", "alice")].failures == 1
+
+    def test_forwarded_for_is_ignored_when_proxy_headers_are_not_trusted(self, client):
+        for index in range(rate_limit.RATE_LIMIT_MAX_ATTEMPTS):
+            _login(client, password="wrong", headers={"X-Forwarded-For": f"9.9.9.{index}"})  # pragma: allowlist secret
+
+        response = _login(client, headers={"X-Forwarded-For": "8.8.8.8"})
+
+        assert response.status_code == 429
+
+    def test_spoofed_leading_forwarded_for_entry_does_not_evade_the_limit(self, client, monkeypatch):
+        monkeypatch.setenv("DOCPIPE_TRUST_PROXY_HEADERS", "true")
+        for index in range(rate_limit.RATE_LIMIT_MAX_ATTEMPTS):
+            forwarded = f"1.1.1.{index}, 203.0.113.9"
+            _login(client, password="wrong", headers={"X-Forwarded-For": forwarded})  # pragma: allowlist secret
+
+        blocked = _login(client, headers={"X-Forwarded-For": "7.7.7.7, 203.0.113.9"})
+        other_client = _login(client, headers={"X-Forwarded-For": "7.7.7.7, 203.0.113.10"})
+
+        assert blocked.status_code == 429
+        assert other_client.status_code == 200

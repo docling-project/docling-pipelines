@@ -9,6 +9,7 @@ to REST API standard error format as defined in error_dto.py.
 
 import logging
 import uuid
+from collections.abc import Mapping
 
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
@@ -47,6 +48,7 @@ def create_error_response(
     trace_id: str,
     more_info: str | None = None,
     target: ErrorTarget | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """Create REST API standard error response.
 
@@ -57,6 +59,7 @@ def create_error_response(
         trace_id: Trace ID for debugging (required)
         more_info: Optional URL to error documentation
         target: Optional target information
+        headers: Optional response headers (for example ``Retry-After``)
 
     Returns:
         JSONResponse: REST API standard error response
@@ -87,6 +90,7 @@ def create_error_response(
     return JSONResponse(
         status_code=status_code,
         content=error_response.model_dump(exclude_none=True),
+        headers=dict(headers) if headers else None,
     )
 
 
@@ -130,6 +134,7 @@ def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSO
         message=str(exc.detail),
         trace_id=trace_id,
         target=target,
+        headers=exc.headers,
     )
 
 
