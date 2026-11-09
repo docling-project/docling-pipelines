@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Secret provider abstraction and reference resolver.
 
 This module provides:
@@ -5,10 +8,15 @@ This module provides:
 - SecretReference: Parsed representation of a vault:// URI.
 - resolve_value(): Recursively resolves vault references in config dicts/lists.
 - register_provider(): Registers a provider instance by name.
-- parse_reference(): Parses a vault:// URI string.
+- parse_reference(): Parses a vault:// URI string (fails closed on malformed input).
 
 Vault reference format:
     vault://<provider>/<path>#<key>
+
+A value is a reference only when the entire string is exactly one valid
+reference. A string that contains ``vault://`` but is not exactly one valid
+reference is rejected with ``MalformedSecretReferenceError`` and is never used
+as a literal value.
 
 Examples:
     vault://hashicorp/database/postgres#password
@@ -16,7 +24,7 @@ Examples:
 """
 
 import json
-import re
+import unicodedata
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -27,11 +35,28 @@ from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
 
-# Pattern: vault://provider/path/to/secret#key
-_VAULT_REF_PATTERN = re.compile(r"^vault://([^/]+)/(.+?)(?:#(.+))?$")
+_REFERENCE_SCHEME = "vault://"
+
+# Syntax limit: a reference must not exceed this many characters.
+_MAX_REFERENCE_LENGTH = 1024
 
 # Global registry of providers
 _providers: dict[str, "SecretProvider"] = {}
+
+
+class MalformedSecretReferenceError(ConfigurationError):
+    """A value containing ``vault://`` is not exactly one valid reference.
+
+    The message is fixed and never includes the offending value, so a
+    mistyped or partially pasted credential is not echoed into logs, API
+    responses, or job messages.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "malformed reference: a value containing 'vault://' must be exactly one "
+            "valid vault://<provider>/<path>[#<key>] reference"
+        )
 
 
 @dataclass(frozen=True)
@@ -115,23 +140,51 @@ def get_provider(*, name: str) -> SecretProvider | None:
     return _providers.get(name)
 
 
-def parse_reference(value: str) -> SecretReference | None:
-    """Parse a vault:// reference string.
+def _is_unsafe_reference_char(char: str) -> bool:
+    """Return True for whitespace and control characters, which a reference may not contain."""
+    return char.isspace() or unicodedata.category(char) == "Cc"
+
+
+def parse_reference(*, value: str) -> SecretReference | None:
+    """Parse a vault:// reference string, failing closed on malformed input.
+
+    The whole string must be exactly one ``vault://<provider>/<path>[#<key>]``
+    with a non-empty provider, a non-empty path, and a non-empty key when ``#``
+    is present. The reference must not contain whitespace or control
+    characters, ``.`` / ``..`` / empty path segments, or exceed 1024 characters,
+    and must not be embedded in a larger string.
 
     Args:
         value: A string that may be a vault reference.
 
     Returns:
-        SecretReference if the string matches vault:// format, None otherwise.
+        SecretReference if the string is exactly one valid reference, or None
+        if the string does not contain ``vault://`` at all (an ordinary literal).
+
+    Raises:
+        MalformedSecretReferenceError: If the string contains ``vault://`` but is
+            not exactly one valid reference. The error never echoes the value.
     """
-    match = _VAULT_REF_PATTERN.match(value)
-    if not match:
+    if _REFERENCE_SCHEME not in value:
         return None
-    return SecretReference(
-        provider=match.group(1),
-        path=match.group(2),
-        key=match.group(3),
-    )
+
+    if (
+        not value.startswith(_REFERENCE_SCHEME)
+        or len(value) > _MAX_REFERENCE_LENGTH
+        or value.count(_REFERENCE_SCHEME) != 1
+        or any(_is_unsafe_reference_char(char) for char in value)
+    ):
+        raise MalformedSecretReferenceError
+
+    body, has_key, key = value[len(_REFERENCE_SCHEME) :].partition("#")
+    if has_key and (not key or "#" in key):
+        raise MalformedSecretReferenceError
+
+    provider, has_path, path = body.partition("/")
+    if not provider or not has_path or any(segment in ("", ".", "..") for segment in path.split("/")):
+        raise MalformedSecretReferenceError
+
+    return SecretReference(provider=provider, path=path, key=key if has_key else None)
 
 
 def parse_vault_reference(ref: str) -> tuple[str, str, str | None]:
@@ -144,24 +197,31 @@ def parse_vault_reference(ref: str) -> tuple[str, str, str | None]:
         Tuple of (provider_name, path, optional_key).
 
     Raises:
-        ValueError: If the string is not a valid vault reference.
+        ValueError: If the string is not a valid vault reference. The message
+            never includes the input.
     """
-    parsed = parse_reference(ref)
+    try:
+        parsed = parse_reference(value=ref)
+    except MalformedSecretReferenceError:
+        raise ValueError("Invalid vault reference") from None
     if parsed is None:
-        raise ValueError(f"Invalid vault reference: '{ref}'")
+        raise ValueError("Invalid vault reference")
     return parsed.provider, parsed.path, parsed.key
 
 
 def is_vault_reference(value: Any) -> bool:
-    """Check if a value is a vault:// reference string.
+    """Check if a value is, or attempts to be, a vault:// reference string.
+
+    Detection is by substring so that embedded and malformed references reach
+    the parser (and are rejected) instead of being treated as literals.
 
     Args:
         value: Any value to check.
 
     Returns:
-        True if the value is a string starting with 'vault://'.
+        True if the value is a string containing 'vault://'.
     """
-    return isinstance(value, str) and value.startswith("vault://")
+    return isinstance(value, str) and _REFERENCE_SCHEME in value
 
 
 def has_vault_references(value: Any) -> bool:
@@ -175,10 +235,10 @@ def has_vault_references(value: Any) -> bool:
         value: A string, dict, list, or any other value.
 
     Returns:
-        True if any string in the structure starts with ``vault://``.
+        True if any string in the structure contains ``vault://``.
     """
     if isinstance(value, str):
-        return value.startswith("vault://")
+        return _REFERENCE_SCHEME in value
     if isinstance(value, dict):
         return any(has_vault_references(v) for v in value.values())
     if isinstance(value, list):
@@ -199,8 +259,13 @@ def _parse_secret_json_if_applicable(secret: Any) -> Any:
 
 
 def _resolve_string_vault_ref(*, ref_string: str) -> Any:
-    """Resolve a single vault reference string if applicable, or return it unchanged."""
-    ref = parse_reference(ref_string)
+    """Resolve a single vault reference string, or return a non-reference string unchanged.
+
+    Raises:
+        MalformedSecretReferenceError: If the string contains ``vault://`` but is
+            not exactly one valid reference. It is never returned as a literal.
+    """
+    ref = parse_reference(value=ref_string)
     if ref is None:
         return ref_string
 
@@ -233,6 +298,8 @@ def resolve_value(value: Any) -> Any:
         The resolved value (secret fetched from vault, or original value).
 
     Raises:
+        MalformedSecretReferenceError: If a string contains ``vault://`` but is not exactly
+            one valid reference (truncated, embedded, traversal, over-length, ...).
         ConfigurationError: If the provider referenced in the URI is not registered, or the
             secret path has multiple keys and none is specified.
         ExternalServiceError: If the key does not exist at the vault path or the secret

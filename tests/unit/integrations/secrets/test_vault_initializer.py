@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for initialize_secret_providers()."""
 
 import logging
 import os
 from contextlib import contextmanager
+from typing import ClassVar
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -292,3 +296,61 @@ class TestInitializeSecretProviders:
         assert get_provider(name="hashicorp") is None
         assert _UNEXPECTED_WARNING in caplog.text
         assert "vault client unavailable" in caplog.text
+
+
+class TestTransportGate:
+    """The provider is not registered over an unsafe transport (A.4)."""
+
+    _ENV: ClassVar[dict[str, str]] = {
+        "DOCPIPE_VAULT_ENABLED": "true",
+        "VAULT_ROLE_ID": "role",
+        "VAULT_SECRET_ID": "secret",
+    }
+
+    def _provider(self, *, addr, skip_verify=False):
+        from docpipe.integrations.secrets.hashicorp_vault import HashiCorpVaultConfig, HashiCorpVaultProvider
+
+        config = HashiCorpVaultConfig()
+        config.addr = addr
+        config.role_id = "role"
+        config.secret_id = "secret"  # pragma: allowlist secret
+        config.tls_skip_verify = skip_verify
+        provider = HashiCorpVaultProvider(config=config)
+        provider.is_available = MagicMock(return_value=True)  # type: ignore[method-assign]
+        return provider
+
+    def test_plaintext_remote_address_not_registered(self, caplog):
+        caplog.set_level(logging.WARNING, logger="docpipe")
+        provider = self._provider(addr="http://vault-canary-host.internal:8200")
+
+        _run(env=self._ENV, provider=provider)
+
+        assert get_provider(name="hashicorp") is None
+        provider.is_available.assert_not_called()
+        assert "TLS is required" in caplog.text
+        assert "vault-canary-host" not in caplog.text
+
+    def test_skip_verify_on_remote_address_not_registered(self, caplog):
+        caplog.set_level(logging.WARNING, logger="docpipe")
+        provider = self._provider(addr="https://vault-canary-host.internal:8200", skip_verify=True)
+
+        _run(env=self._ENV, provider=provider)
+
+        assert get_provider(name="hashicorp") is None
+        provider.is_available.assert_not_called()
+        assert "loopback" in caplog.text
+        assert "vault-canary-host" not in caplog.text
+
+    def test_loopback_plaintext_with_skip_verify_registered(self):
+        provider = self._provider(addr="http://127.0.0.1:8200", skip_verify=True)
+
+        _run(env=self._ENV, provider=provider)
+
+        assert get_provider(name="hashicorp") is provider
+
+    def test_https_remote_registered(self):
+        provider = self._provider(addr="https://vault.internal:8200")
+
+        _run(env=self._ENV, provider=provider)
+
+        assert get_provider(name="hashicorp") is provider
