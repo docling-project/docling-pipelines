@@ -403,19 +403,6 @@ async def get_current_user_info(current_user: Annotated[User, Depends(get_curren
     return current_user
 
 
-@app.get("/protected")
-async def protected_route(current_user: Annotated[User, Depends(get_current_user)]):
-    """Example protected endpoint requiring authentication.
-
-    Args:
-        current_user: Current authenticated user from JWT token
-
-    Returns:
-        Welcome message with username
-    """
-    return {"message": f"Hello {current_user.username}", "user": current_user}
-
-
 app.include_router(oauth2_router)
 app.add_middleware(PayloadValidationMiddleware)
 app.include_router(api_router)
