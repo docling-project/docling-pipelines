@@ -27,7 +27,7 @@ It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, B
 - **[CPU and GPU containers](docs/deployment/DOCKER_COMPOSE.md)** — build Docker images for the desired compute backend.
 - **[Automatic vector index management](docs/operators/vectordb/vectordb_readme.md)** — create missing indexes and validate existing schemas automatically.
 
-**Upgrade note:** The VectorDB `create_index` option is ignored with a warning. Index management is now automatic. See the [changelog](CHANGELOG.md#210) for more details.
+**Upgrade note:** The VectorDB `create_index` option is ignored with a warning. Index management is now automatic. See the [changelog](CHANGELOG.md#210---2026-11-04) for more details.
 
 ## Features
 
