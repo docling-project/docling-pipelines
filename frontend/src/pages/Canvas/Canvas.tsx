@@ -1245,6 +1245,11 @@ export function Canvas(): React.JSX.Element {
         return;
       }
 
+      // Close the suggestion panel if its source node no longer exists (e.g. deleted).
+      if (nodeSuggestion && !canvasControllerRef.current?.getNode(nodeSuggestion.sourceNodeId)) {
+        handleNodeSuggestionClose();
+      }
+
       // ── Branching link condition actions ────────────────────────────────────
       if (data.type === 'link' && data.editType === CANVAS_ACTIONS.ADD_CONDITION) {
         openLinkConditionTearsheet((data as any).id as string);
@@ -1349,7 +1354,7 @@ export function Canvas(): React.JSX.Element {
     // removeConditionFromLink, syncDeletedLinks, persistLinkCondition are plain functions
     // re-created every render; listing them here would cause unnecessary callback churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [handleRun, handleSave, openNodePanel, applyNodeDefaults, openLinkConditionTearsheet]
+    [handleRun, handleSave, openNodePanel, applyNodeDefaults, openLinkConditionTearsheet, nodeSuggestion, handleNodeSuggestionClose]
   );
 
   // Double-click on a node opens the properties panel.

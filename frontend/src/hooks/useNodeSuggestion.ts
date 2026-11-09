@@ -114,6 +114,22 @@ function getAlreadyConnectedOps(sourceNodeId: string, canvasController: any): Se
 }
 
 /**
+ * Returns true if any node in the current pipeline has an input link that
+ * references the given source node (i.e. the source already has an outgoing link).
+ */
+function hasOutgoingLink(sourceNodeId: string, canvasController: any): boolean {
+  const flow = canvasController.getPipelineFlow?.();
+  const nodes: any[] = flow?.pipelines?.[0]?.nodes ?? [];
+  return nodes.some((node: any) =>
+    ((node.inputs as any[] | undefined) ?? []).some((input: any) =>
+      ((input.links as any[] | undefined) ?? []).some(
+        (link: any) => link.node_id_ref === sourceNodeId
+      )
+    )
+  );
+}
+
+/**
  * Builds the NodeSuggestionState for a given node, filtering the palette to
  * valid successors minus operators already present in the flow.
  * Returns null if the layout cannot be computed (e.g. canvas not yet mounted).
@@ -124,6 +140,8 @@ function buildNodeSuggestion(
 ): NodeSuggestionState | null {
   const node = canvasController.getNode(nodeId);
   if (!node) { return null; }
+  if (hasOutgoingLink(nodeId, canvasController)) { return null; }
+
   const layout = getNodeSuggestionLayout(node, canvasController);
   if (!layout) { return null; }
   const fullPalette = canvasController.getPaletteData();
@@ -216,14 +234,19 @@ export function useNodeSuggestion(): UseNodeSuggestionReturn {
 
   useEffect(() => {
     if (!nodeSuggestion) { return; }
-    const canvasEl = document.querySelector('.d3-svg-background');
-    if (!canvasEl) { return; }
     const close = (): void => { handleNodeSuggestionCloseRef.current(); };
-    canvasEl.addEventListener('wheel',     close, { passive: true });
-    canvasEl.addEventListener('mousedown', close, { passive: true });
+    const closeOnOutsidePointerDown = (e: PointerEvent): void => {
+      const target = e.target as Element | null;
+      if (target?.closest?.('[data-node-suggestion]')) { return; }
+      close();
+    };
+    // Capture phase so this runs before the canvas library can stop the event.
+    document.addEventListener('pointerdown', closeOnOutsidePointerDown, true);
+    const canvasEl = document.querySelector('.d3-svg-background');
+    canvasEl?.addEventListener('wheel', close, { passive: true });
     return () => {
-      canvasEl.removeEventListener('wheel',     close);
-      canvasEl.removeEventListener('mousedown', close);
+      document.removeEventListener('pointerdown', closeOnOutsidePointerDown, true);
+      canvasEl?.removeEventListener('wheel', close);
     };
   }, [nodeSuggestion]);
 
