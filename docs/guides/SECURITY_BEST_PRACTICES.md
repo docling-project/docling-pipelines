@@ -237,7 +237,11 @@ Never bypass hooks with `--no-verify`.
 
 ### Validate custom operators before use
 
-Custom operators loaded from `examples/custom_operators/` or external packages execute arbitrary Python during pipeline runs. Only load operators from trusted, reviewed sources.
+Custom operators loaded from `examples/custom_operators/`, uploaded through the API, or installed from external packages execute arbitrary Python inside the service process. Only load operators from trusted, reviewed sources.
+
+- Custom operator loading is **disabled by default**. Set `DOCPIPE_ENABLE_CUSTOM_OPERATORS=true` only on deployments that need it.
+- Every `/api/v1/custom_operators` route (list, get, `directory_tree`, create, update, delete) requires a bearer token. When `JWT_SECRET_KEY` is not configured these routes return 503.
+- Any authenticated user can upload an operator once loading is enabled. Restrict who can obtain a token accordingly.
 
 ---
 

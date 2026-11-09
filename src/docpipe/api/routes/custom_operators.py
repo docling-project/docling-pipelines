@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom operator API endpoints."""
 
 import tempfile
@@ -17,6 +20,7 @@ from fastapi import (
     Path as PathParam,
 )
 
+from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.dependencies import get_custom_operator_service
 from docpipe.api.dto.custom_operator_dto import (
     CustomOperatorDeleteResponse,
@@ -44,9 +48,12 @@ logger = get_logger(__name__)
 MAX_OPERATOR_FILE_BYTES = 512 * 1024  # 512 KB limit
 
 # Configure router
+# Every route requires a valid bearer token. Uploaded scripts are executable code, and the
+# read routes disclose the script inventory and on-disk layout.
 custom_operators_router = APIRouter(
     prefix="/custom_operators",
     tags=["Custom Operators"],
+    dependencies=[Depends(get_current_user)],
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": ErrorResponse,

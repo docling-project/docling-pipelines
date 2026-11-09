@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from docpipe.core.constants import OrchestratorType
 from docpipe.core.job_management.domain.ports import JobRunManager, JobStatsService
 from docpipe.core.lineage.domain.ports.execution_lifecycle_observer import ExecutionLifecycleObserverPort
@@ -17,7 +20,7 @@ class PythonOrchestrator(AbstractOrchestrator):
         *,
         job_stats_service: JobStatsService | None = None,
         job_run_manager: JobRunManager | None = None,
-        enable_custom_operators: bool = True,
+        enable_custom_operators: bool | None = None,
         custom_operator_packages: list[str] | None = None,
         execution_reporter=None,
         observer: ExecutionLifecycleObserverPort | None = None,

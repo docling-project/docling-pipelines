@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Public-API tests for DocpipeFlowManager validation and custom operator registration.
 
@@ -123,6 +126,7 @@ def test_registered_custom_operator_directory_makes_operator_available_to_valida
         flow_def=_ingest_then(operator_type="lib_api_echo", docs_dir=fixtures_customer_support_dir),
         configure_logging=False,
         enable_execution_reporter=False,
+        enable_custom_operators=True,
     )
 
     before = manager.validate()

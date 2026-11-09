@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for PythonOrchestrator."""
 
 from docpipe.core.constants.constants import OrchestratorType
@@ -27,3 +30,23 @@ class TestPythonOrchestrator:
         assert isinstance(executor, PythonOperatorExecutor)
         assert executor.operator_factory.enable_custom_operators is False
         assert isinstance(executor.get_operator(), NOOPOperator)
+
+    def test_default_orchestrator_has_custom_operators_disabled(self, monkeypatch) -> None:
+        """With nothing configured the orchestrator reports a resolved boolean False, and so does its executor."""
+        monkeypatch.delenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", raising=False)
+        orchestrator = PythonOrchestrator()
+
+        executor = orchestrator.create_executor_impl(
+            name="noop_node",
+            operator=OperatorConstants.Operators.NOOP,
+            params={OperatorConstants.Columns.ID: "noop_node"},
+        )
+
+        assert orchestrator.enable_custom_operators is False
+        assert executor.operator_factory.enable_custom_operators is False
+
+    def test_env_var_enables_custom_operators_when_not_passed(self, monkeypatch) -> None:
+        """DOCPIPE_ENABLE_CUSTOM_OPERATORS=true is honoured when the caller passes nothing."""
+        monkeypatch.setenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", "true")
+
+        assert PythonOrchestrator().enable_custom_operators is True
