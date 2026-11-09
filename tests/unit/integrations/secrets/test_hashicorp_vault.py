@@ -23,6 +23,7 @@ from docpipe.integrations.secrets.hashicorp_vault import (
     HashiCorpVaultProvider,
     _read_env_or_file,
 )
+from docpipe.integrations.secrets.secret_provider import ProviderUnreachableError
 
 
 class TestReadEnvOrFile:
@@ -747,3 +748,41 @@ class TestVaultTransportValidation:
             mock_session_cls.return_value.get.assert_not_called()
         assert "availability check failed" in caplog.text
         assert _ADDR_CANARY not in caplog.text
+
+
+class TestVaultUnreachableClassification:
+    """Failures that mean Vault cannot be reached are ProviderUnreachableError; the rest are not."""
+
+    @pytest.mark.parametrize("exc", [requests.exceptions.ConnectionError("x"), requests.exceptions.ReadTimeout("x")])
+    def test_transport_failure_on_login_is_unreachable(self, exc: Exception) -> None:
+        provider = HashiCorpVaultProvider(config=TestHashiCorpVaultProvider._make_config(TestHashiCorpVaultProvider()))  # type: ignore[arg-type]
+        with patch("docpipe.integrations.secrets.hashicorp_vault.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session.post.side_effect = exc
+            mock_session.headers = {}
+            mock_session_cls.return_value = mock_session
+            with pytest.raises(ProviderUnreachableError):
+                provider.authenticate()
+
+    def test_transport_failure_on_read_is_unreachable(self) -> None:
+        provider, mock_session = _authenticated_provider(
+            TestHashiCorpVaultProvider._make_config(TestHashiCorpVaultProvider())  # type: ignore[arg-type]
+        )
+        mock_session.get.side_effect = [requests.exceptions.ConnectionError("x")]
+        with pytest.raises(ProviderUnreachableError):
+            provider.get_secret(path="db/creds", key="password")
+
+    @pytest.mark.parametrize(
+        ("status_code", "unreachable"), [(429, True), (500, True), (503, True), (400, False), (403, False)]
+    )
+    def test_read_status_classification(self, status_code: int, unreachable: bool) -> None:
+        provider, mock_session = _authenticated_provider(
+            TestHashiCorpVaultProvider._make_config(TestHashiCorpVaultProvider())  # type: ignore[arg-type]
+        )
+        response = MagicMock()
+        response.status_code = status_code
+        response.text = "error"
+        mock_session.get.return_value = response
+        with pytest.raises(ExternalServiceError) as exc_info:
+            provider.get_secret(path="db/creds", key="password")
+        assert isinstance(exc_info.value, ProviderUnreachableError) is unreachable
