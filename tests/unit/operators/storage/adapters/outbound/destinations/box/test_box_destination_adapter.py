@@ -297,7 +297,8 @@ class TestBoxDestinationAdapterErrorPaths:
                 config=_make_config(),
             )
         assert result.success is False
-        assert "network down" in result.error_message
+        assert "connection failed" in result.error_message
+        assert "network down" not in result.error_message
 
     def test_returns_failed_when_create_dirs_false_and_folder_missing(self):
         adapter = BoxDestinationAdapter()
