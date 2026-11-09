@@ -945,6 +945,27 @@ class CustomOperatorsDisabledException(DocpipeException):
         )
 
 
+class PermissionDeniedException(DocpipeException):
+    """
+    Exception raised when the caller is not allowed to perform an operation.
+
+    Raised by services when an ownership or role rule refuses a write. The API
+    error handler maps it to 403 ``forbidden``. The message must stay generic and
+    never name another user.
+    """
+
+    def __init__(
+        self,
+        message: str = "Permission denied",
+        *,
+        action: str | None = None,
+        target: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=403)
+        self.action = action
+        self.target = target
+
+
 __all__ = [
     "ConfigurationError",
     "CustomOperatorAlreadyExistsException",
@@ -971,6 +992,7 @@ __all__ = [
     "JobStatsStoreInitializationException",
     "JobStatsStoreReadException",
     "JobStatsStoreWriteException",
+    "PermissionDeniedException",
     "PostgresConnectionException",
     "PostgresOperationException",
     "PostgresQueryException",

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom exception handler for REST API standard error responses.
 
 This module provides FastAPI exception handlers that convert all exceptions
@@ -73,7 +76,10 @@ def create_error_response(
 
     # Log error with stack trace
     logger.error(
-        f"Error response: status={status_code}, code={error_code}, trace={trace_id}",
+        "Error response: status=%s, code=%s, trace=%s",
+        status_code,
+        error_code,
+        trace_id,
         exc_info=True,
         stack_info=True,
     )
@@ -169,7 +175,9 @@ def validation_exception_handler(request: Request, exc: RequestValidationError) 
 
     # Log error with stack trace
     logger.error(
-        f"Validation error: trace={trace_id}, error_count={len(errors)}",
+        "Validation error: trace=%s, error_count=%d",
+        trace_id,
+        len(errors),
         exc_info=True,
         stack_info=True,
     )
@@ -211,6 +219,7 @@ def docpipe_exception_handler(request: Request, exc: DocpipeException) -> JSONRe
     # This takes precedence over the domain error code so the response body
     # matches the REST API contract (e.g. 425 → "too_early").
     status_code_error_map: dict[int, str] = {
+        403: "forbidden",
         425: "too_early",
     }
     domain_error_code = str(exc.error_code.value) if exc.error_code else None
@@ -313,7 +322,9 @@ def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # Default to internal server error for unknown exceptions
     # Log full exception details but return sanitized message
     logger.error(
-        f"Unhandled exception: {type(exc).__name__}: {exc!s}",
+        "Unhandled exception: %s: %s",
+        type(exc).__name__,
+        exc,
         exc_info=True,
         extra={"trace_id": trace_id},
     )
