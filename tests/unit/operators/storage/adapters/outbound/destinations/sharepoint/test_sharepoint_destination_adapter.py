@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for SharePointDestinationAdapter."""
 
 from unittest.mock import MagicMock, patch
@@ -486,4 +489,5 @@ class TestSharePointDestinationAdapterErrorPaths:
             )
 
         assert result.success is False
-        assert "network down" in result.error_message
+        assert "connection failed" in result.error_message
+        assert "network down" not in result.error_message
