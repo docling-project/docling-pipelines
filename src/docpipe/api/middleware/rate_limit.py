@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """In-process sliding-window rate limiter for authentication endpoints.
 
 Tracks per-IP attempt counts within a sliding time window.
@@ -39,3 +42,8 @@ def check_login_rate_limit(*, client_ip: str) -> bool:
         return False
     _login_attempts[client_ip].append(now)
     return True
+
+
+def reset_all_state() -> None:
+    """Forget all recorded login attempts (used by tests)."""
+    _login_attempts.clear()

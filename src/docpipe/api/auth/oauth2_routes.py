@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OAuth2 authentication routes."""
 
 import secrets
@@ -13,7 +16,7 @@ from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.logging import get_logger
 
 from .jwt_handler import JWTClaims, JWTConfig, create_access_token
-from .models import TokenResponse
+from .models import AuthProvider, TokenResponse
 from .oauth2_config import OAuth2Config, get_oauth2_config
 from .oauth2_provider import OAuth2Provider, get_oauth2_provider
 
@@ -214,6 +217,31 @@ async def oauth2_callback(
         ) from e
 
 
+def list_enabled_providers() -> list[AuthProvider]:
+    """Return the configured OIDC providers with public fields only.
+
+    Returns:
+        One entry per enabled provider holding ``name``, ``display_name`` and ``authorize_url``.
+    """
+    providers: list[AuthProvider] = []
+
+    for provider_name in ["google", "azure", "generic"]:
+        try:
+            config = get_oauth2_config(provider_name)
+            if config.oauth2_enabled and config.oauth2_client_id:
+                providers.append(
+                    AuthProvider(
+                        name=provider_name,
+                        display_name=provider_name.title(),
+                        authorize_url=f"/auth/oauth2/authorize?provider={provider_name}",
+                    )
+                )
+        except Exception:  # nosec B112
+            continue
+
+    return providers
+
+
 @router.get("/providers")
 async def list_oauth2_providers():
     """List available OAuth2 providers.
@@ -221,23 +249,7 @@ async def list_oauth2_providers():
     Returns:
         List of configured OAuth2 providers
     """
-    providers = []
-
-    for provider_name in ["google", "azure", "generic"]:
-        try:
-            config = get_oauth2_config(provider_name)
-            if config.oauth2_enabled and config.oauth2_client_id:
-                providers.append(
-                    {
-                        "name": provider_name,
-                        "display_name": provider_name.title(),
-                        "authorize_url": f"/auth/oauth2/authorize?provider={provider_name}",
-                    }
-                )
-        except Exception:  # nosec B112
-            continue
-
-    return {"providers": providers}
+    return {"providers": [provider.model_dump() for provider in list_enabled_providers()]}
 
 
 @router.get("/discovery/{provider}")

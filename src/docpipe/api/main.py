@@ -36,11 +36,13 @@ from docpipe.api.auth.config import get_auth_settings
 from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_token
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
-from docpipe.api.auth.models import LoginRequest, TokenResponse, User
+from docpipe.api.auth.models import AuthConfigResponse, LoginRequest, LoginResponse, User
 from docpipe.api.auth.oauth2_config import get_oauth2_config
 from docpipe.api.auth.oauth2_provider import group_claim_names
+from docpipe.api.auth.oauth2_routes import list_enabled_providers
 from docpipe.api.auth.oauth2_routes import router as oauth2_router
 from docpipe.api.auth.ports import AuthenticatorPort
+from docpipe.api.auth.session_cookie import clear_session_cookie, set_session_cookie
 from docpipe.api.middleware.api_logging_middleware import ApiLoggingMiddleware
 from docpipe.api.middleware.error_handler import (
     docpipe_exception_handler,
@@ -60,6 +62,7 @@ from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.core.event_streaming.factory import EventStreamingFactory
 from docpipe.core.job_management.adapters.config.job_management_factory import get_default_factory
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.audit import sanitize_for_log
 from docpipe.utils.infrastructure.logging import (
     configure_third_party_loggers,
     set_dpk_log_level_from_ds_log_level,
@@ -345,19 +348,20 @@ async def health_check():
     return HealthCheckResponse(status="healthy")
 
 
-@app.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: LoginRequest, request: Request):
-    """Authenticate user via LDAP and return JWT token.
+@app.post("/auth/login", response_model=LoginResponse)
+async def login(credentials: LoginRequest, request: Request, response: Response):
+    """Authenticate with the configured authenticators, set the session cookie and return the token.
 
     Args:
         credentials: Login credentials (username and password)
-        request: FastAPI request object (used for rate limiting)
+        request: FastAPI request object (used for rate limiting and the cookie ``Secure`` flag)
+        response: Response that carries the session cookie
 
     Returns:
-        TokenResponse with access token
+        LoginResponse with the access token (for script clients) and the authenticated user
 
     Raises:
-        HTTPException: If authentication fails or LDAP is not configured
+        HTTPException: 401 if authentication fails, 429 if throttled, 503 if no login method is configured
     """
     client_ip = request.client.host if request.client else "unknown"
     if not check_login_rate_limit(client_ip=client_ip):
@@ -385,10 +389,10 @@ async def login(credentials: LoginRequest, request: Request):
                 break
 
         if not user:
-            logger.warning("Failed login attempt for user: %s", credentials.username)
+            logger.warning("Failed login attempt for user: %s", sanitize_for_log(credentials.username))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password",
+                detail="Invalid credentials",
             )
 
         token_data = {
@@ -398,18 +402,59 @@ async def login(credentials: LoginRequest, request: Request):
             JWTClaims.ROLES: [role.value for role in user.roles],
         }
         access_token: str = create_access_token(token_data, jwt_config)
+        set_session_cookie(
+            response=response,
+            request=request,
+            settings=get_auth_settings(),
+            token=access_token,
+            max_age_seconds=jwt_config.jwt_access_token_expire_minutes * 60,
+        )
 
-        logger.info("User logged in successfully: %s", credentials.username)
-        return TokenResponse(access_token=access_token)
+        logger.info("User logged in successfully: %s", sanitize_for_log(user.username))
+        return LoginResponse(access_token=access_token, user=user)
 
     except (HTTPException, DocpipeException):
         raise
     except Exception as e:
-        logger.error("Login error for user %s: %s", credentials.username, e)
+        logger.error("Login error for user %s: %s", sanitize_for_log(credentials.username), e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service error",
         ) from e
+
+
+@app.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    """Clear the session cookie.
+
+    Succeeds with or without a valid session, so an expired cookie can still be cleared. A
+    token that was already issued stays valid until it expires (up to 30 minutes).
+
+    Args:
+        request: FastAPI request object
+        response: Response that carries the expiring cookie
+
+    Returns:
+        Confirmation message
+    """
+    clear_session_cookie(response=response, request=request, settings=get_auth_settings())
+    return {"message": "Logged out"}
+
+
+@app.get("/auth/config", response_model=AuthConfigResponse)
+async def get_auth_config():
+    """Describe the authentication setup to unauthenticated callers.
+
+    Returns:
+        Whether auth is enabled, whether credential login is available, and the OIDC providers
+        (name, display name and authorize URL only; never ids, secrets or endpoint addresses)
+    """
+    return AuthConfigResponse(
+        auth_enabled=get_auth_settings().enabled,
+        credential_login=(bootstrap_authenticator is not None or ldap_authenticator is not None)
+        and jwt_config is not None,
+        providers=list_enabled_providers(),
+    )
 
 
 @app.get("/auth/me", response_model=User)
@@ -417,10 +462,10 @@ async def get_current_user_info(current_user: Annotated[User, Depends(get_curren
     """Get current authenticated user information.
 
     Args:
-        current_user: Current authenticated user from JWT token
+        current_user: Current authenticated user from the session
 
     Returns:
-        User information
+        User information, including roles
     """
     return current_user
 
