@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 
 from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_job_management_service, get_job_stats_service
 from docpipe.api.dto.error_dto import ErrorResponse
 from docpipe.api.dto.field_definitions import (
@@ -115,6 +117,7 @@ ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
 
 @job_runs_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=JobRunCreateResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_job_run",
@@ -380,6 +383,7 @@ async def get_job_run_status(
 
 @job_runs_router.post(
     "/{job_run_id}/cancel",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=JobRunCancelResponse,
     status_code=202,
     operation_id="cancel_job_run",
@@ -460,6 +464,7 @@ async def cancel_job_run(
 
 @job_runs_router.delete(
     "/{job_run_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_job_run",
     summary="Delete a job run",
