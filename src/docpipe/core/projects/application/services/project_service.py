@@ -28,6 +28,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     ProjectInvalidDataException,
     ProjectNotFoundException,
 )
+from docpipe.utils.infrastructure.audit import audited
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -75,6 +76,7 @@ class ProjectService:
 
     # ── CREATE ───────────────────────────────────────────────────────
 
+    @audited(action="project.create", target=lambda a: a["project"].name, result_target=lambda r: str(r.project_id))
     def create_project(self, *, project: Project, actor: ActorContext | None = None) -> Project:
         """Create and persist a new project.
 
@@ -177,6 +179,7 @@ class ProjectService:
 
     # ── FULL UPDATE ──────────────────────────────────────────────────
 
+    @audited(action="project.update", target=lambda a: str(a["project"].project_id))
     def update_project(self, *, project: Project, actor: ActorContext | None = None) -> Project:
         """Fully replace a project's mutable fields.
 
@@ -212,6 +215,7 @@ class ProjectService:
 
     # ── PARTIAL UPDATE ────────────────────────────────────────────────
 
+    @audited(action="project.update", target=lambda a: str(a["project_id"]))
     def partial_update_project(self, *, project_id: str, updates: dict, actor: ActorContext | None = None) -> Project:
         """Apply a partial update, modifying only the provided fields.
 
@@ -260,6 +264,7 @@ class ProjectService:
 
     # ── DELETE ───────────────────────────────────────────────────────
 
+    @audited(action="project.delete", target=lambda a: str(a["project_id"]))
     def delete_project(self, *, project_id: str, actor: ActorContext | None = None) -> None:
         """Delete a project and cascade-delete all flows linked to it.
 

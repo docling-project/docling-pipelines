@@ -27,6 +27,13 @@ from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
 )
+from docpipe.utils.infrastructure.audit import (
+    OUTCOME_DENIED,
+    OUTCOME_FAILED,
+    OUTCOME_SUCCESS,
+    audit_event,
+    audited,
+)
 
 if TYPE_CHECKING:
     from docpipe.core.job_management.domain.ports.job_stats_service import JobStatsService
@@ -206,6 +213,7 @@ class FlowService(AssetService[Flow]):
             return [f for f in flows if DocpipeConstants.FLOW_NAME not in f.definition]
         return [f for f in flows if DocpipeConstants.FLOW_NAME in f.definition]
 
+    @audited(action="flow.create", target=lambda a: a["flow"].name, result_target=lambda r: str(r.flow_id))
     def create_flow(self, *, flow: Flow, is_elyra: bool = False, actor: ActorContext | None = None) -> Flow:
         """Create and store a new flow.
 
@@ -349,6 +357,7 @@ class FlowService(AssetService[Flow]):
 
         return definition
 
+    @audited(action="flow.update", target=lambda a: str(a["flow"].flow_id))
     def update_flow(self, flow: Flow, *, actor: ActorContext | None = None) -> Flow:
         """Update an existing flow with full replacement.
 
@@ -429,6 +438,7 @@ class FlowService(AssetService[Flow]):
         logger.info("Successfully updated flow %s", updated_flow.flow_id)
         return updated_flow
 
+    @audited(action="flow.delete", target=lambda a: str(a["flow_id"]))
     def delete_flow(self, flow_id: str, *, actor: ActorContext | None = None) -> bool:
         """Delete a flow by ID.
 
@@ -536,6 +546,13 @@ class FlowService(AssetService[Flow]):
                 existing = self._repository.find_by_id(asset_id=flow_id)
                 if existing is not None and not can_modify(actor=actor, owner=existing.created_by):
                     refused.append({"flow_id": flow_id, "error": PERMISSION_DENIED_MESSAGE})
+                    audit_event(
+                        username=actor.username,
+                        action="flow.bulk_delete",
+                        target=flow_id,
+                        outcome=OUTCOME_DENIED,
+                        status_code=403,
+                    )
                 else:
                     deletable_ids.append(flow_id)
 
@@ -548,6 +565,19 @@ class FlowService(AssetService[Flow]):
             result["failed"] = [*result.get("failed", []), *refused]
             result["total_failed"] = len(result["failed"])
         result["total_requested"] = len(flow_ids)
+
+        username = actor.username if actor is not None else None
+        for flow_id in result.get("deleted", []):
+            audit_event(username=username, action="flow.bulk_delete", target=flow_id, outcome=OUTCOME_SUCCESS)
+        for failure in result.get("failed", []):
+            if failure in refused:
+                continue
+            audit_event(
+                username=username,
+                action="flow.bulk_delete",
+                target=str(failure.get("flow_id", failure.get("asset_id", "-"))),
+                outcome=OUTCOME_FAILED,
+            )
 
         # Cascade-delete job runs for every successfully deleted flow
         for flow_id in result.get("deleted", []):
@@ -744,6 +774,7 @@ class FlowService(AssetService[Flow]):
         logger.info("Counted %d flows (filtered from %d)", len(filtered_flows), len(all_flows))
         return len(filtered_flows)
 
+    @audited(action="flow.update", target=lambda a: str(a["flow_id"]))
     def partial_update_flow(self, flow_id: str, updates: dict[str, Any], *, actor: ActorContext | None = None) -> Flow:
         """Partially update a flow (only provided fields).
 
