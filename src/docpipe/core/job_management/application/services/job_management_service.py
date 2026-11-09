@@ -32,6 +32,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     FlowValidationException,
     JobRunNotFoundException,
 )
+from docpipe.utils.infrastructure.audit import audited
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -125,6 +126,11 @@ class JobManagementService:
         self.flow_service = flow_service
         self.executor = executor or ThreadPoolExecutor(max_workers=10)
 
+    @audited(
+        action="job_run.create",
+        target=lambda a: str(a["request_body"].entity.job.asset_ref),
+        result_target=lambda r: str(r.get("job_run_id")),
+    )
     def create_job_run_from_request(self, *, request_body: Any, actor: ActorContext | None = None) -> dict[str, Any]:
         """
         Create and start a new job run from API request body.
@@ -289,6 +295,7 @@ class JobManagementService:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
         ensure_can_modify(actor=actor, owner=job_stats.user_id, action=action, target=job_run_id)
 
+    @audited(action="job_run.cancel", target=lambda a: str(a["job_run_id"]))
     def cancel_job_run(self, *, job_run_id: str, actor: ActorContext | None = None) -> None:
         """
         Request cancellation of a job run.
@@ -311,6 +318,7 @@ class JobManagementService:
 
         logger.info("Requested cancellation: job_run_id=%s", job_run_id)
 
+    @audited(action="job_run.delete", target=lambda a: str(a["job_run_id"]))
     def delete_job_run(self, *, job_run_id: str, actor: ActorContext | None = None) -> None:
         """
         Delete a job run and its statistics.
