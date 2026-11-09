@@ -235,9 +235,25 @@ class StorageOutputOperator(AbstractOperator):
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each destination config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        return build_provider_secret_fields(
+            selector="destination_config.provider",
+            prefix="destination_config.provider_config",
+            classes={
+                name: DestinationAdapterFactory.create(name).get_config_schema()
+                for name in DestinationAdapterFactory.get_registered_names()
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Return operator metadata for flow validation and discovery."""
         return {
+            "secret_fields": ["destination_config.credentials.*"],
+            "secret_fields_by_provider": StorageOutputOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: StorageOutputOperator.is_available(),
             OperatorConstants.Misc.CATEGORY: StorageOutputOperator.category.value,
             OperatorConstants.Misc.LABEL: "Storage Output",

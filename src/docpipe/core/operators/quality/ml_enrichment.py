@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 ML Enrichment Operator
 
@@ -179,6 +182,8 @@ class MLEnrichmentOperator(EnrichmentTransform, AbstractOperator):
         }
 
         return {
+            # The enrichment metrics need no credentials; this operator accepts no references.
+            "secret_fields": [],
             OperatorConstants.Misc.CATEGORY: MLEnrichmentOperator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: MLEnrichmentOperator.is_available(),
             OperatorConstants.Misc.LABEL: "ML Text Enrichment",

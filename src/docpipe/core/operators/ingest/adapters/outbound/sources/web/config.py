@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for Web Page source adapter."""
 
 from typing import ClassVar
@@ -15,6 +18,9 @@ class WebPageSourceConfig(BaseModel):
     - Clear documentation of required/optional fields
     - URL validation and normalization
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = ()
 
     # URL configuration
     urls: list[str] = Field(

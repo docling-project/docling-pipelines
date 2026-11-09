@@ -949,6 +949,35 @@ class IngestSourceOperator(AbstractOperator):
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each source adapter config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import BoxSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.config import DropboxSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.config import FilesystemSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.google_drive.config import GoogleDriveSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.onedrive.config import OneDriveSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.sharepoint.config import SharePointSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.web.config import WebPageSourceConfig
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        return build_provider_secret_fields(
+            selector=PROVIDER_KEY,
+            prefix=PROVIDER_CONFIG_KEY,
+            classes={
+                "filesystem": FilesystemSourceConfig,
+                "s3": S3SourceConfig,
+                "ibm_cos": S3SourceConfig,
+                "google_drive": GoogleDriveSourceConfig,
+                "onedrive": OneDriveSourceConfig,
+                "sharepoint": SharePointSourceConfig,
+                "box_driver": BoxSourceConfig,
+                "dropbox": DropboxSourceConfig,
+                "web": WebPageSourceConfig,
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """
         Get metadata about the operator including features and attributes.
@@ -1019,6 +1048,8 @@ class IngestSourceOperator(AbstractOperator):
         }
 
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": IngestSourceOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: IngestSourceOperator.category.value,
             OperatorConstants.Misc.LABEL: "Remote Source Ingest",

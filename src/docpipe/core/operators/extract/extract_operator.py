@@ -1568,6 +1568,42 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each extraction adapter config class's secret-capable declarations per provider."""
+        import docpipe.core.operators.extract.adapters.outbound.entity_extraction  # noqa: F401
+        from docpipe.core.operators.extract.adapters.outbound.factories.entity_extraction_adapter_factory import (
+            EntityExtractionAdapterFactory,
+        )
+        from docpipe.core.operators.extract.adapters.outbound.factories.text_extraction_adapter_factory import (
+            TextExtractionAdapterFactory,
+        )
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        text_key = OperatorConstants.Config.TEXT_EXTRACTION
+        entity_key = OperatorConstants.Config.ENTITY_EXTRACTION
+        provider_key = OperatorConstants.Config.PROVIDER
+        config_key = OperatorConstants.Config.PROVIDER_CONFIG
+        result = build_provider_secret_fields(
+            selector=f"{text_key}.{provider_key}",
+            prefix=f"{text_key}.{config_key}",
+            classes={
+                name: adapter_cls.get_config_schema()
+                for name, adapter_cls in TextExtractionAdapterFactory._registry.items()
+            },
+        )
+        result.update(
+            build_provider_secret_fields(
+                selector=f"{entity_key}.{provider_key}",
+                prefix=f"{entity_key}.{config_key}",
+                classes={
+                    name: adapter_cls.get_config_schema()
+                    for name, adapter_cls in EntityExtractionAdapterFactory.get_registry_items()
+                },
+            )
+        )
+        return result
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Get metadata about the operator including features and attributes.
 
@@ -1659,6 +1695,8 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         }
 
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": ExtractOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: ExtractOperator.category.value,
             OperatorConstants.Misc.LABEL: "Document Extractor",
