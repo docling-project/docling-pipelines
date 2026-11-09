@@ -260,6 +260,10 @@ def app(jwt_config) -> FastAPI:
     def session_only(request: Request):
         return {"auth_source": getattr(request.state, "auth_source", None)}
 
+    @app.api_route("/mutate", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    def mutate(user: Annotated[User, Depends(get_current_user)]):
+        return {"username": user.username}
+
     @app.get("/source")
     def source(request: Request, user: Annotated[User, Depends(get_current_user)]):
         return {"auth_source": request.state.auth_source, "username": user.username}
@@ -529,3 +533,74 @@ class TestLocalPrincipal:
         user = _current_user(credentials=_bearer(token), jwt_config=jwt_config)
 
         assert user.roles == [Role.EDITOR]
+
+
+# ---------------------------------------------------------------------------
+# CSRF defence for cookie sessions
+# ---------------------------------------------------------------------------
+
+_UNSAFE_METHODS = ["POST", "PUT", "PATCH", "DELETE"]
+
+
+class TestCsrfHeader:
+    @pytest.mark.parametrize("method", _UNSAFE_METHODS)
+    def test_cookie_mutation_without_header_is_rejected(self, *, client, alice_token, method):
+        client.cookies.set(DEFAULT_COOKIE_NAME, alice_token)
+
+        response = client.request(method, "/mutate")
+
+        assert response.status_code == 403
+        assert "X-Requested-With" in response.json()["detail"]
+
+    @pytest.mark.parametrize("method", _UNSAFE_METHODS)
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_cookie_mutation_with_empty_header_is_rejected(self, *, client, alice_token, method, value):
+        client.cookies.set(DEFAULT_COOKIE_NAME, alice_token)
+
+        response = client.request(method, "/mutate", headers={"X-Requested-With": value})
+
+        assert response.status_code == 403
+
+    @pytest.mark.parametrize("method", _UNSAFE_METHODS)
+    def test_cookie_mutation_with_header_is_accepted(self, *, client, alice_token, method):
+        client.cookies.set(DEFAULT_COOKIE_NAME, alice_token)
+
+        response = client.request(method, "/mutate", headers={"X-Requested-With": "XMLHttpRequest"})
+
+        assert response.status_code == 200
+        assert response.json() == {"username": "alice"}
+
+    def test_cookie_read_needs_no_header(self, *, client, alice_token):
+        client.cookies.set(DEFAULT_COOKIE_NAME, alice_token)
+
+        response = client.get("/mutate")
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("method", _UNSAFE_METHODS)
+    def test_bearer_mutation_is_exempt(self, *, client, alice_token, method):
+        response = client.request(method, "/mutate", headers={"Authorization": f"Bearer {alice_token}"})
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("method", _UNSAFE_METHODS)
+    def test_bearer_wins_over_cookie_for_another_user_and_is_exempt(self, *, client, jwt_config, alice_token, method):
+        client.cookies.set(DEFAULT_COOKIE_NAME, create_access_token({"username": "bob"}, jwt_config))
+
+        response = client.request(method, "/mutate", headers={"Authorization": f"Bearer {alice_token}"})
+
+        assert response.status_code == 200
+        assert response.json() == {"username": "alice"}
+
+    def test_invalid_cookie_is_401_not_403(self, *, client):
+        client.cookies.set(DEFAULT_COOKIE_NAME, "garbage")
+
+        assert client.post("/mutate").status_code == 401
+
+    @pytest.mark.parametrize("method", _UNSAFE_METHODS)
+    def test_auth_disabled_needs_no_header(self, *, app, method):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("DOCPIPE_AUTH_ENABLED", "false")
+            response = TestClient(app).request(method, "/mutate")
+
+        assert response.status_code == 200
