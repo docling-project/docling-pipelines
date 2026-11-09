@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +11,7 @@ from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.orchestration.abstract_flow_execution_event_handler import AbstractFlowExecutionEventHandler
 from docpipe.core.orchestration.batch_manager import BatchInfo
 from docpipe.core.orchestration.executor_pool import thread_pool_executor
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.flow_execution_reporter import FlowExecutionReporter
 from docpipe.utils.infrastructure.logging import get_logger
@@ -352,16 +356,21 @@ class FlowExecutionEventHandler(AbstractFlowExecutionEventHandler):
 
         self._update_framework_status(
             status=ExecutionStatus.FAILED.value,
-            job_run_stats=self._get_complete_job_stats(message=str(e)),
+            job_run_stats=self._get_complete_job_stats(message=sanitize_exception(exc=e, config_key=node_name)),
         )
 
-        logger.error(e, stack_info=True, exc_info=True, extra=self.common_log_arguments)
+        logger.error(
+            "Node %s failed: %s",
+            node_name,
+            sanitize_exception(exc=e, config_key=node_name),
+            extra=self.common_log_arguments,
+        )
 
         log_extra = {**(self.common_log_arguments or {}), "node_id": node_id, "node_name": node_name}
         logger.error(
             ">>> Node %s failed and caused aborting the branch execution: %s transaction_ID: %s",
             node_name,
-            e,
+            sanitize_exception(exc=e, config_key=node_name),
             get_session_info().transaction_id,
             extra=log_extra,
         )
