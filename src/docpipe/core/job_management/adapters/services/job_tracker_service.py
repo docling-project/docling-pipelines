@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobTrackerService - Production job stats service using new architecture
 
@@ -24,6 +27,7 @@ from docpipe.core.constants.constants import (
     Metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.job_management.adapters.services.node_order_resolver import NodeOrderResolver
 from docpipe.core.job_management.application.services import NodeStatsAggregator
 from docpipe.core.job_management.domain.models import (
     JobStats,
@@ -37,6 +41,7 @@ from docpipe.exceptions.docpipe_exceptions import (
 )
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.orchestration.node_ordering import order_node_items
 
 logger: Logger = get_logger()
 
@@ -69,6 +74,10 @@ class JobTrackerService(JobStatsService):
         """
         self.job_stats_store = job_stats_store
         self.node_stats_aggregator = node_stats_aggregator
+        # Lambda (not a bound method) so subclass overrides and test patches of get_flow_definition apply
+        self._node_order_resolver = NodeOrderResolver(
+            load_flow_definition=lambda job_run_id: self.get_flow_definition(job_run_id=job_run_id)
+        )
 
     def start_tracking_job(
         self,
@@ -1371,21 +1380,18 @@ class JobTrackerService(JobStatsService):
             else:
                 job_stats_dict = job_stats
 
-            # Sort node_stats by start_time to match execution order
+            # Sort node_stats by topological order if snapshot is available, falling back to chronological order
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
                 node_stats = job_stats_dict["node_stats"]
-                # Sort by start_time, then end_time, then name
-                sorted_node_stats = dict(
-                    sorted(
-                        node_stats.items(),
-                        key=lambda item: (
-                            item[1].get("start_time", 0),
-                            item[1].get("end_time", 0),
-                            item[1].get("name", ""),
-                        ),
-                    )
+                job_run_id = job_stats_dict.get("job_run_id")
+                node_order = self._node_order_resolver.resolve(
+                    job_run_id=job_run_id,
+                    node_stats=node_stats,
+                    flow_id=job_stats_dict.get("flow_id"),
+                    flow_name=job_stats_dict.get("flow_name"),
                 )
-                job_stats_dict["node_stats"] = sorted_node_stats
+                ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
+                job_stats_dict["node_stats"] = dict(ordered_items)
 
             # Write to file
             with Path(job_log_path).open("w") as f:
@@ -1451,8 +1457,19 @@ class JobTrackerService(JobStatsService):
         if not job_stats:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
+        node_order = self._node_order_resolver.resolve(
+            job_run_id=job_run_id,
+            node_stats=job_stats.node_stats,
+            flow_id=job_stats.flow_id,
+            flow_name=job_stats.flow_name,
+        )
+
         # Delegate to mapper for enterprise-compatible model construction
-        return JobStatsMapper.to_status_response(job_stats=job_stats, include_logs=include_logs)
+        return JobStatsMapper.to_status_response(
+            job_stats=job_stats,
+            include_logs=include_logs,
+            node_order=node_order,
+        )
 
     def get_flow_definition(self, *, job_run_id: str) -> dict[str, Any] | None:
         """
@@ -1609,23 +1626,6 @@ class JobTrackerService(JobStatsService):
 
         # Partial failure: some failed but not all
         return 0 < failed_batch_count < total_batch_count
-
-    @staticmethod
-    def _calculate_node_sequence(*, node_stats: dict) -> list[str]:
-        """Calculate node execution sequence based on start_time."""
-        if not node_stats:
-            return []
-
-        # Sort nodes by start_time, then end_time, then name
-        sorted_nodes: list[tuple[Any, Any]] = sorted(
-            node_stats.items(),
-            key=lambda item: (
-                (item[1].get("start_time", 0) if isinstance(item[1], dict) else getattr(item[1], "start_time", 0)),
-                (item[1].get("end_time", 0) if isinstance(item[1], dict) else getattr(item[1], "end_time", 0)),
-                (item[1].get("name", "") if isinstance(item[1], dict) else getattr(item[1], "name", "")),
-            ),
-        )
-        return [node_id for node_id, _ in sorted_nodes]
 
     @staticmethod
     def _build_node_metadata_array(*, node_stats: dict) -> list[dict]:
