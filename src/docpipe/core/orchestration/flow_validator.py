@@ -210,7 +210,11 @@ class FlowValidator:
             )
             # Continue with whatever metadata was successfully loaded
         # Use injected propagator when available to avoid a redundant metadata load.
-        self.feature_propagator = feature_propagator if feature_propagator is not None else FeaturePropagator()
+        # Otherwise build one from the same orchestrator, so custom operators enabled only
+        # through the orchestrator (not the environment) contribute their output features.
+        self.feature_propagator = (
+            feature_propagator if feature_propagator is not None else FeaturePropagator(orchestrator=orchestrator)
+        )
 
     def validate(self, *, flow_def: FlowConfig, params: FlowConfig) -> None:
         """Main validation entry point for a flow definition.

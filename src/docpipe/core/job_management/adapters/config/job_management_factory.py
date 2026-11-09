@@ -175,6 +175,11 @@ class JobManagementFactory:
             EnvironmentVariables.DOCPIPE_FRAMEWORK_TYPE: self.framework_type.value,
         }
 
+        # Workers must resolve the same custom-operator switch as the API that validated the flow.
+        enable_custom_operators = os.getenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS)
+        if enable_custom_operators is not None:
+            env[EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS] = enable_custom_operators
+
         if self.storage_backend == StorageBackend.FILESYSTEM:
             resolved_base_dir = self._resolve_filesystem_base_dir()
             if resolved_base_dir:

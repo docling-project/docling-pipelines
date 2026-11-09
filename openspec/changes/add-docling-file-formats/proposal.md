@@ -2,7 +2,7 @@
 
 ## Why
 
-Docling `2.142.1` natively supports a much broader set of pure-Python document formats (CSV, EPUB, Email `.eml`/`.msg`, LaTeX `.tex`/`.latex`, AsciiDoc `.adoc`/`.asciidoc`/`.asc`, WebVTT `.vtt`, HTML/MHTML variants `.htm`/`.xhtml`/`.mhtml`/`.mht`, Markdown variants `.markdown`/`.text`/`.qmd`/`.rmd`, and OpenXML macro/template variants `.dotx`/`.docm`/`.dotm`/`.potx`/`.ppsx`/`.pptm`/`.potm`/`.ppsm`/`.xlsm`/`.xltx`/`.xltm`) as well as additional video containers (`.mkv`, `.webm`), but `docpipe` currently restricts `OperatorConstants.FileExtensions` to 16 base extensions and 9 audio/video extensions. In addition, `OperatorUtils.extract_content()` only checks `FormatToExtensions[InputFormat.AUDIO]` when routing media streams to temporary files (and writes them into the process working directory), and `DoclingAdapter` only binds `InputFormat.AUDIO` when `use_asr_pipeline` is enabled, leaving `InputFormat.VIDEO` unconfigured for custom ASR models.
+Docling `2.142.1` natively supports a much broader set of pure-Python document formats (CSV, EPUB, Email `.eml`/`.msg`, LaTeX `.tex`/`.latex`, AsciiDoc `.adoc`/`.asciidoc`/`.asc`, WebVTT `.vtt`, HTML/MHTML variants `.htm`/`.xhtml`/`.mhtml`/`.mht`, Markdown variants `.markdown`/`.text`/`.qmd`/`.rmd`, and OpenXML macro/template variants `.pptm`/`.xlsm`/`.xltx`/`.xltm`), but `docpipe` currently restricts `OperatorConstants.FileExtensions` to 16 base extensions and 9 audio/video extensions. In addition, `OperatorUtils.extract_content()` only checks `FormatToExtensions[InputFormat.AUDIO]` when routing media streams to temporary files (and writes them into the process working directory), and `DoclingAdapter` only binds `InputFormat.AUDIO` when `use_asr_pipeline` is enabled, leaving `InputFormat.VIDEO` unconfigured for custom ASR models.
 
 ## What Changes
 
@@ -21,25 +21,27 @@ Docling `2.142.1` natively supports a much broader set of pure-Python document f
     - Email: `.eml`, `.msg`
     - Subtitles/Captions: `.vtt`
     - Web/Markup variants: `.htm`, `.xhtml`, `.mhtml`, `.mht`, `.markdown`, `.text`, `.qmd`, `.rmd`
-    - OpenXML Word/PowerPoint/Excel macro & template variants: `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.pptm`, `.potm`, `.ppsm`, `.xlsm`, `.xltx`, `.xltm`
+    - OpenXML PowerPoint/Excel macro & template variants: `.pptm`, `.xlsm`, `.xltx`, `.xltm`
   - Extensionless EML/MHTML cannot be reliably inferred by the UTF-8 fallback; provide a filename extension or `document_format` for reliable routing.
   - **`docling_serve` mode is unchanged**: `DOCLING_SERVE_EXTENSIONS` becomes an explicit list of the original 16 base extensions instead of a copy of `BASE_EXTENSIONS`, because the remote server's format support is not verified. Tier 1 and Tier 4 formats are accepted in `docling_library` mode only.
-  - **Default `include_filter` widens (intentional)**: `IngestSourceOperator` defaults `included_extensions` to `get_supported_file_extensions()`, so flows with no `include_filter` will ingest all Tier 1 formats (audio when ASR is available and video when video dependencies are available) in addition to the previous 16.
+  - **Default `include_filter` widens (intentional)**: `IngestSourceOperator` defaults `included_extensions` to `get_supported_file_extensions()`, so flows with no `include_filter` will ingest all Tier 1 formats (audio when ASR is available and supported video extensions regardless of optional dependency imports) in addition to the previous 16.
   - Expand `CLASSIFICATION_FILE_EXTENSIONS` with the Tier 1 formats except the plain-markdown variants (`.markdown`, `.text`, `.qmd`, `.rmd`), consistent with `.md` and `.txt` already being excluded.
   - Fix `get_supported_file_extensions()` in `src/docpipe/core/operators/operator_utils.py` so it copies `BASE_EXTENSIONS` (`[*OperatorConstants.FileExtensions.BASE_EXTENSIONS]`) instead of mutating the class-level constant list in-place when ASR is available.
 - **Tier 4 video format completion & `InputFormat.VIDEO` pipeline fix**:
-  - Add `docling-slim[format-video]==2.142.1` to the `vlm_asr` extra, regenerate `uv.lock`, and sync the development environment. Gate video separately from audio using a video dependency availability check; missing video dependencies must not disable audio.
-  - Add `.mkv` (`EXT_MKV`) and `.webm` (`EXT_WEBM`) to `OperatorConstants.FileExtensions.AUDIO_VIDEO_EXTENSIONS` (and `DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS`).
+  - Add `.mkv` and `.webm` to the existing supported video formats for local extraction and ingest filters.
+  - Add `docling-slim[format-video]==2.142.1` to the `vlm_asr` extra, regenerate `uv.lock`, and sync the development environment. Recognize supported video extensions without a separate dependency probe; report missing conversion dependencies per document and keep audio independent.
   - Fix `OperatorUtils.extract_content()` so `audio_video_suffixes` unions both `FormatToExtensions[InputFormat.AUDIO]` and `FormatToExtensions[InputFormat.VIDEO]`, and write the payload to a uniquely named file inside a `tempfile.TemporaryDirectory` (not the process working directory) before invoking `converter.convert()`.
-  - Update `DoclingAdapter` (`extract_single_document()` and `_build_gpu_converter_config()`) so that when `use_asr_pipeline` is enabled and video dependencies are available, `InputFormat.VIDEO` is also configured via `VideoFormatOption` / `VideoPipeline` / `VideoPipelineOptions` with `generate_frame_images=False` and, when `asr_model_name` is set, the selected ASR model spec.
+  - Update `DoclingAdapter` (`extract_single_document()` and `_build_gpu_converter_config()`) so that when `use_asr_pipeline` is enabled and Docling video classes can be imported, `InputFormat.VIDEO` is also configured via `VideoFormatOption` / `VideoPipeline` / `VideoPipelineOptions` with `generate_frame_images=False` and, when `asr_model_name` is set, the selected ASR model spec.
 - **Magic-byte & MIME-type detection**:
   - Extend `OperatorUtils.detect_extension_from_bytes()` to identify `.webp` (`RIFF....WEBP`) and `OperatorUtils.detect_extension_zip_based_office_formats()` to identify `.epub` (`application/epub+zip` mimetype entry, checked before the Office markers).
   - Add `CSV = "text/csv"` and `EML = "message/rfc822"` to `OperatorConstants.MimeTypes` and map them to `.csv` / `.eml` in `WebPageSourceAdapter`.
-- **Docs**: update the extract and ingest operator READMEs, `docs/reference/OPERATORS.md`, and `USER_GUIDE_PIPELINE_SETUP.md` (ffmpeg format lists now include MKV and WebM).
+- **Docs**: update the extract and ingest operator READMEs, `docs/reference/OPERATORS.md`, and `USER_GUIDE_PIPELINE_SETUP.md` (document the supported format lists).
 - **Frontend `IngestSource` constants (`frontend/src/components/PropertiesPanel/CustomPanels/IngestSource/constants.ts`)**:
   - Update `SUPPORTED_FILE_EXTENSIONS` feeding the `include_filter` / `exclude_filter` `FilterableMultiSelect` controls to match the expanded backend `AUDIO_VIDEO_EXTENSIONS` and `BASE_EXTENSIONS`. No frontend spec delta.
 
 ## Non-goals
+
+- Supporting `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, and `.ppsm`: Docling 2.142.1 advertises these extensions, but its Word and PowerPoint readers reject their internal content types. Do not normalize or rewrite the Office packages as a workaround.
 
 - Adding Tier 2 formats that require new third-party Python dependencies in `pyproject.toml` (OpenDocument `.odt`/`.ods`/`.odp` via `odfdo`, or `.xbrl` via `arelle`).
 - Adding Tier 3 legacy Office formats (`.doc`, `.dot`, `.rtf`, `.ppt`, `.pot`, `.pps`, `.xls`, `.xlt`) or iWork chart rendering that require a system-level LibreOffice (`soffice`) binary on `PATH`.

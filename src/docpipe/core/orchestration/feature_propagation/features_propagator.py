@@ -145,15 +145,21 @@ class FeaturePropagator:
         - FlowValidator: Uses propagator for validation
     """
 
-    def __init__(self):
+    def __init__(self, *, orchestrator: Any = None):
         """Initialize the feature propagator.
 
         Loads operator metadata once during initialization for efficient
         feature lookups during propagation. Metadata loading failures for
         operators requiring external services are logged but don't prevent
         propagator initialization.
+
+        Args:
+            orchestrator: Optional orchestrator whose custom operator packages and
+                enable_custom_operators setting decide which operators (and so which
+                output features) are known. Without it, only the environment-resolved
+                setting applies, so an opt-in passed as a Python argument is lost.
         """
-        self.operator_metadata = OperatorMetadata()
+        self.operator_metadata = OperatorMetadata(orchestrator=orchestrator)
         # Load operator metadata once during initialization
         self.operator_metadata.get_operator_metadata(internal_features=True)
 
