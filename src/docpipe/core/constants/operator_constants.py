@@ -560,6 +560,30 @@ class OperatorConstants:
         EXT_TXT: Final[str] = ".txt"
         EXT_HTML: Final[str] = ".html"
 
+        # Additional document formats
+        EXT_CSV: Final[str] = ".csv"
+        EXT_EPUB: Final[str] = ".epub"
+        EXT_EML: Final[str] = ".eml"
+        EXT_MSG: Final[str] = ".msg"
+        EXT_TEX: Final[str] = ".tex"
+        EXT_LATEX: Final[str] = ".latex"
+        EXT_ADOC: Final[str] = ".adoc"
+        EXT_ASCIIDOC: Final[str] = ".asciidoc"
+        EXT_ASC: Final[str] = ".asc"
+        EXT_VTT: Final[str] = ".vtt"
+        EXT_HTM: Final[str] = ".htm"
+        EXT_XHTML: Final[str] = ".xhtml"
+        EXT_MHTML: Final[str] = ".mhtml"
+        EXT_MHT: Final[str] = ".mht"
+        EXT_MARKDOWN: Final[str] = ".markdown"
+        EXT_TEXT: Final[str] = ".text"
+        EXT_QMD: Final[str] = ".qmd"
+        EXT_RMD: Final[str] = ".rmd"
+        EXT_PPTM: Final[str] = ".pptm"
+        EXT_XLSM: Final[str] = ".xlsm"
+        EXT_XLTX: Final[str] = ".xltx"
+        EXT_XLTM: Final[str] = ".xltm"
+
         # Image formats
         EXT_PNG: Final[str] = ".png"
         EXT_JPEG: Final[str] = ".jpeg"
@@ -583,6 +607,8 @@ class OperatorConstants:
         EXT_MP4: Final[str] = ".mp4"
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
+        EXT_MKV: Final[str] = ".mkv"
+        EXT_WEBM: Final[str] = ".webm"
 
         # Archive formats (filesystem ingest only)
         ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
@@ -604,25 +630,71 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_MARKDOWN,
+            EXT_TEXT,
+            EXT_QMD,
+            EXT_RMD,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
-        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [
+        AUDIO_EXTENSIONS: Final[list[str]] = [
             EXT_WAV,
             EXT_MP3,
             EXT_M4A,
             EXT_AAC,
             EXT_OGG,
             EXT_FLAC,
+        ]
+
+        VIDEO_EXTENSIONS: Final[list[str]] = [
             EXT_MP4,
             EXT_AVI,
             EXT_MOV,
+            EXT_MKV,
+            EXT_WEBM,
         ]
+
+        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_EXTENSIONS, *VIDEO_EXTENSIONS]
 
         DOCLING_LIBRARY_BASE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
 
         DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_VIDEO_EXTENSIONS]
 
-        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
+        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [
+            EXT_PDF,
+            EXT_DOCX,
+            EXT_PPTX,
+            EXT_XLSX,
+            EXT_MD,
+            EXT_TXT,
+            EXT_HTML,
+            EXT_PNG,
+            EXT_JPEG,
+            EXT_JPG,
+            EXT_TIFF,
+            EXT_TIF,
+            EXT_BMP,
+            EXT_WEBP,
+            EXT_GIF,
+            EXT_JFIF,
+        ]
 
         DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY: Final[list[str]] = [
             EXT_PDF,  # .pdf  → InputFormat.PDF
@@ -651,6 +723,24 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
     class Extraction:
@@ -1134,6 +1224,8 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         PDF: Final[str] = "application/pdf"
         HTML: Final[str] = "text/html"
         PLAIN: Final[str] = "text/plain"
+        CSV: Final[str] = "text/csv"
+        EML: Final[str] = "message/rfc822"
 
         # Google Workspace Document Types
         GOOGLE_APPS_PREFIX: Final[str] = "application/vnd.google-apps."
