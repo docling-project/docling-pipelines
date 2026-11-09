@@ -14,7 +14,7 @@ function makeState(overrides: Partial<RootState['notifications']> = {}): RootSta
       active: [],
       history: [],
       unreadCount: 0,
-      preferences: { sound: false, desktop: false },
+      preferences: { autoDismiss: true, dismissDelay: 5000 },
       ...overrides,
     },
   }) as RootState;

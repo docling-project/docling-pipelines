@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
-import React from 'react';
 
 // SharedDataTable uses ResizeObserver + Carbon internals that are slow in jsdom
 // under full-suite parallel load — raise timeout for this file.
@@ -11,8 +10,8 @@ import { OutputFeaturesTab } from '@/components/PropertiesPanel/FeatureTabs/Outp
 import type { FeatureAttributes } from '@/types';
 
 const SAMPLE_OUTPUT: Record<string, FeatureAttributes> = {
-  content:    { name: 'content',    type: 'string',  description: 'Document text', node_id: 'node-1', tags: ['mandatory'] },
-  chunk_text: { name: 'chunk_text', type: 'string',  description: 'Chunk',         node_id: 'node-1', tags: [] },
+  content:    { name: 'content',    type: 'string',  description: 'Document text', node_id: 'node-1', tags: ['mandatory'], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
+  chunk_text: { name: 'chunk_text', type: 'string',  description: 'Chunk',         node_id: 'node-1', tags: [],            available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
 };
 
 const SAMPLE_NODES = [{ id: 'node-1', app_data: { ui_data: { label: 'Chunker' } } }];
@@ -148,7 +147,10 @@ describe('OutputFeaturesTab', () => {
     // Find the checkbox that corresponds to chunk_text (it should be checked initially)
     const checkedBoxes = checkboxes.filter((cb) => cb.checked && !cb.disabled);
     expect(checkedBoxes.length).toBeGreaterThan(0);
-    fireEvent.click(checkedBoxes[0]);
+    const firstChecked = checkedBoxes[0];
+    if (firstChecked) {
+      fireEvent.click(firstChecked);
+    }
     expect(ctrl.updatePropertyValue).toHaveBeenCalled();
   });
 
@@ -228,8 +230,8 @@ describe('OutputFeaturesTab', () => {
   // ── 13. Multiple source nodes — group headers for both nodes ─────────────────
   it('renders group headers for multiple source nodes', () => {
     const multiNodeFeatures: Record<string, FeatureAttributes> = {
-      feat_a: { name: 'feat_a', type: 'string', description: '', node_id: 'node-1', tags: [] },
-      feat_b: { name: 'feat_b', type: 'integer', description: '', node_id: 'node-2', tags: [] },
+      feat_a: { name: 'feat_a', type: 'string', description: '', node_id: 'node-1', tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
+      feat_b: { name: 'feat_b', type: 'integer', description: '', node_id: 'node-2', tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
     };
     const nodes = [
       { id: 'node-1', app_data: { ui_data: { label: 'Chunker' } } },
@@ -251,8 +253,8 @@ describe('OutputFeaturesTab', () => {
   // ── 14. Current node group renders first (sort logic line 124-126) ───────────
   it('renders current nodeId group before other groups', () => {
     const multiNodeFeatures: Record<string, FeatureAttributes> = {
-      feat_a: { name: 'feat_a', type: 'string', description: '', node_id: 'node-1', tags: [] },
-      feat_b: { name: 'feat_b', type: 'integer', description: '', node_id: 'node-2', tags: [] },
+      feat_a: { name: 'feat_a', type: 'string', description: '', node_id: 'node-1', tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
+      feat_b: { name: 'feat_b', type: 'integer', description: '', node_id: 'node-2', tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
     };
     const nodes = [
       { id: 'node-1', app_data: { ui_data: { label: 'Chunker' } } },
@@ -306,7 +308,7 @@ describe('OutputFeaturesTab', () => {
   // ── 17. Feature with no node_id falls back to 'unknown' group (line 118) ──────
   it('groups features with unknown node_id under unknown key', () => {
     const featureNoNode: Record<string, FeatureAttributes> = {
-      orphan: { name: 'orphan', type: 'string', description: '', node_id: undefined, tags: [] },
+      orphan: { name: 'orphan', type: 'string', description: '', node_id: undefined as unknown as string, tags: [], available_for_filter: false, available_for_vector_db: false, mandatory_for_vector_db: false },
     };
     renderWithProviders(
       <OutputFeaturesTab

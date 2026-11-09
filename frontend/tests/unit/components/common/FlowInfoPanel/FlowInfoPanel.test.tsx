@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { FlowInfoPanel } from '@/components/common/FlowInfoPanel/FlowInfoPanel';
 import type { FlowPanelData } from '@/components/common/FlowInfoPanel/FlowInfoPanel';

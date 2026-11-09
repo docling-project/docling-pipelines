@@ -15,14 +15,6 @@ export const VECTORDB_ATTRIBUTES = {
 } as const;
 
 export const VECTORDB_LABELS = {
-  PROVIDER: 'Provider',
-  PROVIDER_CONFIG: 'Provider configuration',
-  FEATURE_MAPPING_TITLE: 'Map features to resource columns',
-  FEATURE_MAPPING_DESC:
-    'Select features from connected nodes and add them to your target resource columns',
-  FEATURE_MAPPINGS_CONFIG: 'Feature mappings configuration',
-  ADD_FEATURE_MAPPINGS: 'Add feature mappings',
-  EDIT_FEATURE_MAPPINGS: 'Edit feature mappings',
   /** Sentinel value for the resource ComboBox "create a new resource" option. */
   CREATE_NEW: 'Create new',
 } as const;
@@ -34,21 +26,6 @@ export const VECTORDB_PROVIDERS = {
 
 // ── OpenSearch constants ──────────────────────────────────────────────────────
 
-/** Display labels for OpenSearch space_type values. */
-const SPACE_TYPE_LABELS: Record<string, string> = {
-  l2: 'Euclidean distance',
-  cosine: 'Cosine similarity',
-  inner_product: 'Inner product',
-};
-
-/** Display labels for OpenSearch engine values. */
-const ENGINE_LABELS: Record<string, string> = {
-  faiss: 'Faiss',
-  lucene: 'Lucene',
-  nmslib: 'NMSLIB',
-  jvector: 'jVector',
-};
-
 /** Fallback space_type options when metadata valid_values are unavailable. */
 export const DEFAULT_SPACE_TYPE_VALUES = ['l2', 'cosine', 'inner_product'];
 
@@ -56,17 +33,6 @@ export const DEFAULT_SPACE_TYPE_VALUES = ['l2', 'cosine', 'inner_product'];
 export const DEFAULT_ENGINE_VALUES = ['faiss', 'lucene', 'nmslib', 'jvector'];
 
 // ── Milvus constants ──────────────────────────────────────────────────────────
-
-/**
- * Display labels for Milvus metric_type values.
- * Valid values returned by the backend: L2, IP, COSINE, BM25.
- */
-const METRIC_TYPE_LABELS: Record<string, string> = {
-  L2: 'Euclidean distance (L2)',
-  IP: 'Inner product (IP)',
-  COSINE: 'Cosine similarity',
-  BM25: 'BM25 (sparse)',
-};
 
 /** Fallback metric_type options when metadata valid_values are unavailable. */
 export const DEFAULT_METRIC_TYPE_VALUES = ['L2', 'IP', 'COSINE', 'BM25'];
@@ -88,8 +54,6 @@ interface ProviderConfigBase {
   similarityKey: string;
   /** User-facing label for the similarity field (e.g. "Space type" / "Metric type"). */
   similarityLabel: string;
-  /** Display labels for similarity raw values { raw: 'Human label' }. */
-  similarityLabels: Record<string, string>;
   /** Fallback similarity options when operator metadata returns none. */
   defaultSimilarityValues: string[];
   /**
@@ -110,15 +74,12 @@ interface ProviderConfigWithEngine extends ProviderConfigBase {
   hasEngine: true;
   /** Key in provider_config for the engine. */
   engineKey: string;
-  /** Display labels for engine raw values { raw: 'Human label' }. */
-  engineLabels: Record<string, string>;
 }
 
 /** Provider without an engine field (e.g. Milvus). */
 interface ProviderConfigNoEngine extends ProviderConfigBase {
   hasEngine: false;
   engineKey?: never;
-  engineLabels?: never;
 }
 
 /** Discriminated union — narrow with `cfg.hasEngine` to access engine fields without `!`. */
@@ -130,11 +91,9 @@ const PROVIDER_CONFIG_MAP: Record<string, ProviderConfig> = {
     resourceLabel:           'index',
     similarityKey:           'space_type',
     similarityLabel:         'Space type',
-    similarityLabels:        SPACE_TYPE_LABELS,
     defaultSimilarityValues: DEFAULT_SPACE_TYPE_VALUES,
     hasEngine:               true,
     engineKey:               'engine',
-    engineLabels:            ENGINE_LABELS,
     // algorithm: index-creation-time KNN parameter (default: "hnsw"). No dedicated UI
     // control — set via the Advanced JSON textarea if a non-default value is needed.
     resourceSpecificKeys:    ['index_name', 'space_type', 'engine', 'algorithm'],
@@ -145,7 +104,6 @@ const PROVIDER_CONFIG_MAP: Record<string, ProviderConfig> = {
     resourceLabel:           'collection',
     similarityKey:           'metric_type',
     similarityLabel:         'Metric type',
-    similarityLabels:        METRIC_TYPE_LABELS,
     defaultSimilarityValues: DEFAULT_METRIC_TYPE_VALUES,
     hasEngine:               false,
     // index_type: index-creation-time ANN parameter (default: "HNSW"). No dedicated UI

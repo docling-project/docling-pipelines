@@ -1,23 +1,35 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { ConditionBuilder } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
 import type { ConditionBuilderProps } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
 import type { Condition } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
+import type { FeatureAttributes } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const FEATURES = {
-  lang_score: { type: 'float', description: 'Language score' },
-  pii_score: { type: 'float', description: 'PII score' },
-  is_valid: { type: 'boolean', description: 'Boolean feature' },
-  doc_name: { type: 'string', description: 'Document name' },
-  timestamp: { type: 'datetime', description: 'Created at' },
-  metadata: { type: 'json', description: 'JSON metadata' },
-  count: { type: 'int32', description: 'Count' },
+const makeFeature = (name: string, type: string, description: string, overrides: Partial<FeatureAttributes> = {}): FeatureAttributes => ({
+  name,
+  type,
+  description,
+  available_for_filter: true,
+  available_for_vector_db: true,
+  mandatory_for_vector_db: false,
+  node_id: 'node-1',
+  tags: [],
+  ...overrides,
+});
+
+const FEATURES: Record<string, FeatureAttributes> = {
+  lang_score: makeFeature('lang_score', 'float', 'Language score'),
+  pii_score: makeFeature('pii_score', 'float', 'PII score'),
+  is_valid: makeFeature('is_valid', 'boolean', 'Boolean feature'),
+  doc_name: makeFeature('doc_name', 'string', 'Document name'),
+  timestamp: makeFeature('timestamp', 'datetime', 'Created at'),
+  metadata: makeFeature('metadata', 'json', 'JSON metadata'),
+  count: makeFeature('count', 'int32', 'Count'),
 };
 
 const makeCondition = (overrides: Partial<Condition> = {}): Condition => ({
@@ -99,7 +111,6 @@ describe('ConditionBuilder', () => {
 
   it('renders the delete button for each condition', () => {
     renderBuilder();
-    const deleteBtn = document.querySelector('button[aria-label="Delete condition"]') as HTMLElement | null;
     // Delete should exist unless aria-label differs — check via icon description
     expect(document.body).toBeInTheDocument();
   });
@@ -275,7 +286,6 @@ describe('ConditionBuilder', () => {
         onChange={vi.fn()}
       />
     );
-    const dtInputs = document.querySelectorAll('input[id^="dt-"]');
     // May render as dt-start / dt-end
     expect(document.body).toBeInTheDocument();
   });
@@ -300,11 +310,10 @@ describe('ConditionBuilder', () => {
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'count', operator: 'between', value: '1,10' })]}
         logicalOperator="AND"
-        features={{ count: { type: 'int32', description: 'Count' } }}
+        features={FEATURES}
         onChange={vi.fn()}
       />
     );
-    const numInputs = document.querySelectorAll('input[id^="num-"]');
     expect(document.body).toBeInTheDocument();
   });
 

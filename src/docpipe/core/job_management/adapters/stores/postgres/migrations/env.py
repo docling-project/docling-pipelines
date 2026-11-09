@@ -1,3 +1,13 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
+"""Alembic environment script for docpipe PostgreSQL migrations.
+
+Configures the Alembic migration context with the database URL resolved from
+``DOCPIPE_POSTGRES_URL`` environment variable, ``docling-pipelines-config.yaml``,
+or built-in defaults.  Supports both offline and online migration modes.
+"""
+
 import logging
 import os
 from logging.config import fileConfig
@@ -8,11 +18,14 @@ from sqlalchemy import engine_from_config, pool
 from sqlalchemy.sql.expression import text
 from sqlmodel import SQLModel
 
+from docpipe.core.constants import EnvironmentVariables
+
 # Import database utilities to get connection string
 from docpipe.core.job_management.adapters.stores.postgres.database import get_postgres_connection_string
 
 # Import models so they are registered with SQLModel.metadata
 from docpipe.core.job_management.adapters.stores.postgres.models import JobStatsModel, NodeStatsModel  # noqa: F401
+from docpipe.utils.infrastructure.config_utils import DEFAULT_CONFIG_PATH
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -51,21 +64,16 @@ if not database_url:
     # Load config and build connection string
     import yaml
 
-    from docpipe.core.job_management.adapters.config.job_management_factory import (
-        DEFAULT_CONFIG_PATH,
-        ENV_CONFIG_PATH_KEY,
-    )
-
-    config_path = os.getenv(ENV_CONFIG_PATH_KEY, str(DEFAULT_CONFIG_PATH))
+    config_path = os.environ.get(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(DEFAULT_CONFIG_PATH))
     try:
         with Path(config_path).open() as f:
             app_config = yaml.safe_load(f) or {}
     except Exception as e:
-        logging.getLogger("alembic").warning(f"Could not load config from {config_path}: {e}")
+        logging.getLogger("alembic").warning("Could not load config from %s: %s", config_path, e)
         app_config = {}
 
     job_mgmt_config = app_config.get("job_management", {})
-    store_config = job_mgmt_config.get("store", {}).get("config", {})
+    store_config = job_mgmt_config.get("storage", {}).get("config", {})
     database_url = get_postgres_connection_string(config=store_config)
 
 if database_url:
@@ -99,14 +107,14 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
     schema_name = os.getenv("DOCPIPE_POSTGRES_SCHEMA", "docpipe_oss")
-    migration_logger.info(f"Starting online migrations for schema={schema_name}")
+    migration_logger.info("Starting online migrations for schema=%s", schema_name)
 
     existing_connection = config.attributes.get("connection")
     if existing_connection is not None:
         migration_logger.info("Using existing Alembic connection supplied by startup initialization")
         existing_connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
         existing_connection.commit()
-        migration_logger.info(f"Ensured schema exists: {schema_name}")
+        migration_logger.info("Ensured schema exists: %s", schema_name)
 
         context.configure(
             connection=existing_connection,
@@ -135,7 +143,7 @@ def run_migrations_online() -> None:
         migration_logger.info("Alembic engine connection established")
         connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
         connection.commit()
-        migration_logger.info(f"Ensured schema exists: {schema_name}")
+        migration_logger.info("Ensured schema exists: %s", schema_name)
 
         context.configure(
             connection=connection,

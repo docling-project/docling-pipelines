@@ -30,7 +30,7 @@ describe('validation-actions', () => {
       );
       const res = await validateFlow({ pipelines: [] });
       expect(res.data.errors).toHaveLength(1);
-      expect(res.data.errors[0].code).toBe('E001');
+      expect(res.data.errors[0]?.code).toBe('E001');
     });
 
     it('throws when server returns 500', async () => {

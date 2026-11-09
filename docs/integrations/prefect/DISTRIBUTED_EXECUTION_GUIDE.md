@@ -159,7 +159,7 @@ export PREFECT_API_URL=http://localhost:4200/api
 **Critical**: Without `PREFECT_MODE=server`, Docling Pipelines uses ephemeral mode and ignores work pool configuration.
 
 **Job stats store guidance for this setup:**
-- `DOCPIPE_STORAGE_BACKEND`, `DOCPIPE_FRAMEWORK_TYPE`, and `DOCPIPE_JOB_STATS_BASE_DIR` can be set explicitly in work-pool env, but if they are omitted the worker inherits the submitter's effective job-management configuration resolved from env
+- The worker selects its job stats backend from `docling-pipelines-config.yaml` (the submitter forwards `DOCPIPE_CONFIG_PATH` when the file exists). `DOCPIPE_STORAGE_BACKEND` and `DOCPIPE_FRAMEWORK_TYPE` are still forwarded to workers, but `JobManagementFactory` no longer reads them, so the worker must be able to read the same config file. `DOCPIPE_JOB_STATS_BASE_DIR` and the `DOCPIPE_POSTGRES_*` variables are still honoured
 - [`JsonJobStatsStore`](../../../src/docpipe/core/job_management/adapters/stores/json/json_job_stats_store.py) can work for `work-pool-process` only when the submitter and worker share the same filesystem semantics
 - Requirement: the submitter and worker must share the same filesystem and the same absolute path namespace for the job stats directory
 - Relative filesystem `base_dir` paths depend on where the submitter and worker processes are started
@@ -324,7 +324,7 @@ This matches:
 
 
 **Job stats store guidance:**
-- The worker job environment can explicitly define `DOCPIPE_STORAGE_BACKEND`, `DOCPIPE_FRAMEWORK_TYPE`, and backend-specific settings, but if omitted the worker inherits the submitter's effective job-management configuration
+- The worker selects its backend from the config file at `DOCPIPE_CONFIG_PATH`; mount or bake that file into the worker image. `DOCPIPE_STORAGE_BACKEND` and `DOCPIPE_FRAMEWORK_TYPE` are forwarded but not read by `JobManagementFactory`. Backend-specific settings (`DOCPIPE_JOB_STATS_BASE_DIR`, `DOCPIPE_POSTGRES_*`) are still honoured
 - Filesystem job stats storage is acceptable only when submitter and worker processes read/write the same filesystem path namespace
 - Requirement: submitter and workers must share the same filesystem and must see the same absolute job stats path
 - If using [`JsonJobStatsStore`](../../../src/docpipe/core/job_management/adapters/stores/json/json_job_stats_store.py), `DOCPIPE_JOB_STATS_BASE_DIR` should resolve to the same absolute shared path for submitter and workers instead of relying on cwd-relative resolution
@@ -1197,8 +1197,8 @@ export PREFECT_API_URL=http://localhost:4200/api
 |----------|----------|-------------|---------|
 | `PREFECT_MODE` | Yes (for distributed) | Execution mode | `server` or `ephemeral` |
 | `PREFECT_API_URL` | Yes (for distributed) | Prefect server URL | `http://localhost:4200/api` |
-| `DOCPIPE_STORAGE_BACKEND` | Optional | Effective job stats storage backend for worker runtime; inherited from submitter if omitted | `filesystem`, `postgresql`, `inmemory` |
-| `DOCPIPE_FRAMEWORK_TYPE` | Optional | Effective job framework type for worker runtime; inherited from submitter if omitted | `default` |
+| `DOCPIPE_STORAGE_BACKEND` | Optional | Forwarded from the submitter. Not read by `JobManagementFactory`; the backend comes from the config file at `DOCPIPE_CONFIG_PATH` | `filesystem`, `postgresql`, `inmemory` |
+| `DOCPIPE_FRAMEWORK_TYPE` | Optional | Forwarded from the submitter. Not read by `JobManagementFactory`; the framework comes from the config file | `default` |
 | `DOCPIPE_JOB_STATS_BASE_DIR` | Optional for filesystem store | Absolute shared job stats path for filesystem-backed job stats; inherited from submitter if omitted | `/app/data/job_stats` |
 | `DOCPIPE_POSTGRES_HOST` | Optional for PostgreSQL store | PostgreSQL host for job stats store; inherited from submitter if omitted | `postgres` |
 | `DOCPIPE_POSTGRES_PORT` | Optional for PostgreSQL store | PostgreSQL port for job stats store; inherited from submitter if omitted | `5432` |

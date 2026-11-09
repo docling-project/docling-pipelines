@@ -21,9 +21,8 @@
  *  - After waitFor the canvas is visible.
  */
 
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { Canvas } from '@/pages/Canvas/Canvas';
 import { buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
@@ -937,7 +936,7 @@ describe('Canvas — G8: Fetch & MSW integration', () => {
 // the handlers directly to drive coverage of the handler code paths.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { CommonCanvas, CanvasController } from '@elyra/canvas';
+import { CommonCanvas } from '@elyra/canvas';
 import { CANVAS_ACTIONS } from '@/constants/canvasActions';
 
 describe('Canvas — G9: Handler invocation via CommonCanvas mock', () => {
