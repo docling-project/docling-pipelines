@@ -32,6 +32,7 @@ from docpipe.core.custom_operators.service import CustomOperatorService
 from docpipe.exceptions.docpipe_exceptions import (
     CustomOperatorAlreadyExistsException,
     CustomOperatorNotFoundException,
+    CustomOperatorsDisabledException,
     DocpipeException,
 )
 
@@ -125,6 +126,25 @@ class TestCreateCustomOperatorEndpoint:
             files={"operator_file": ("dup_op.py", io.BytesIO(b"# code"), "text/x-python")},
         )
         assert response.status_code == 409
+
+    def test_create_custom_operator_disabled_returns_409_custom_operators_disabled(
+        self, *, client: TestClient, mock_service: MagicMock
+    ) -> None:
+        """Test the disabled rejection renders as the documented 409 with its own error code."""
+        mock_service.create_operator.side_effect = CustomOperatorsDisabledException(
+            message="Custom operators are disabled"
+        )
+
+        response = client.post(
+            "/custom_operators",
+            data={"name": "Disabled Op"},
+            files={"operator_file": ("disabled_op.py", io.BytesIO(b"# code"), "text/x-python")},
+        )
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["status_code"] == 409
+        assert body["errors"][0]["code"] == "custom_operators_disabled"
 
 
 class TestGetAndListCustomOperatorEndpoints:

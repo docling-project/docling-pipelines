@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """REST API standard error response DTOs.
 
 These models implement an industry-standard error response format following
@@ -64,6 +67,7 @@ ErrorCode = Literal[
     "custom_operator_not_found",
     "custom_operator_already_exists",
     "custom_operator_invalid_data",
+    "custom_operators_disabled",
     # Project error codes
     "project_not_found",
     "project_already_exists",
