@@ -190,6 +190,8 @@ Environment variables override file configuration:
 | `VAULT_TOKEN` | Token for token-based auth | `""` |
 | `VAULT_TIMEOUT` | Request timeout in seconds | `30` |
 
+**Transport rules.** `VAULT_ADDR` must use `https` unless the host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`). `VAULT_TLS_SKIP_VERIFY` is honored only for a loopback address; with any other host the provider is not registered and a server-side log line says why. Redirects are never followed, requests use bounded connect and read timeouts, and error messages and logs never include the Vault address or a response body.
+
 ---
 
 ## Step-by-Step Setup and Usage Walkthrough
@@ -297,8 +299,9 @@ The web UI canvas provides interactive support for `vault://` URIs through the `
 
 | Symptom | Cause | Solution |
 |---|---|---|
-| `Cannot connect to Vault at http://127.0.0.1:8200` | Vault server unreachable | Verify Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
+| `Vault AppRole login failed: connection failed` (or `Vault secret read failed (kv2): connection failed`) | Vault server unreachable. Messages name a category only and omit the address | Verify Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
+| `Vault provider will not be registered - unsafe transport configuration` | Plaintext `http` to a non-loopback host, or `VAULT_TLS_SKIP_VERIFY` with a non-loopback host | Use an `https` `VAULT_ADDR`; reserve `VAULT_TLS_SKIP_VERIFY` for loopback development |
 | `Key 'api_key' not found at vault path 'docpipe/embeddings'` | Secret key name or path mismatch | Check secret contents with `vault kv get secret/docpipe/embeddings` |
-| `VAULT_URI_MALFORMED` | URI missing provider or key | Follow `vault://<provider>/<path>#<key>` format |
+| `VAULT_URI_MALFORMED` / `malformed reference` | The value contains `vault://` but is not exactly one valid reference (truncated, embedded in a longer string, `.` or `..` or empty path segment, whitespace, over 1024 characters). It is rejected, never used as a literal, and never echoed | Use the whole value `vault://<provider>/<path>[#<key>]` |
 | `Unregistered vault provider 'hashicorp'` | Vault provider not enabled | Set `VAULT_ENABLED=true` or update `docling-pipelines-config.yaml` |
 | `'str' object is not a mapping` | Complex field expected JSON object | Ensure the Vault secret field contains a valid JSON string or dictionary |

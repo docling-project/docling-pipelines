@@ -301,18 +301,25 @@ class FlowValidator:
         op_def: dict[str, Any],
         validate_results: ValidateStepResults,
     ) -> None:
-        """Validate a single vault reference URI and record any error or warning."""
+        """Validate a single vault reference URI and record any error or warning.
+
+        The error for a malformed reference names the config key only; the value
+        is never echoed.
+        """
         from docpipe.integrations.secrets.secret_provider import (
+            MalformedSecretReferenceError,
             get_provider,
-            parse_vault_reference,
+            parse_reference,
         )
 
         try:
-            provider_name, _, _ = parse_vault_reference(ref)
-        except Exception:
+            parsed = parse_reference(value=ref)
+        except MalformedSecretReferenceError:
+            parsed = None
+        if parsed is None:
             add_validation_alert(
                 message=ValidationMessage(
-                    message=f"Config key '{path}' contains a malformed vault URI: '{ref}'.",
+                    message=f"Config key '{path}' contains a malformed vault URI.",
                     message_code="VAULT_URI_MALFORMED",
                 ),
                 op_def=op_def,
@@ -320,7 +327,8 @@ class FlowValidator:
             )
             return
 
-        if not provider_name or get_provider(name=provider_name) is None:
+        provider_name = parsed.provider
+        if get_provider(name=provider_name) is None:
             add_validation_alert(
                 message=ValidationMessage(
                     message=(

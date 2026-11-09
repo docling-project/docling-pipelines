@@ -93,6 +93,19 @@ def _initialize_secret_providers() -> None:
         )
         return
 
+    # 5b. Refuse to register over an unsafe transport (plaintext non-loopback address,
+    #     or TLS verification disabled for a non-loopback address). The message is fixed
+    #     and does not echo the address.
+    try:
+        provider._config.validate_transport()
+    except ConfigurationError as exc:
+        logger.error(
+            "Vault provider will not be registered - unsafe transport configuration. %s "
+            "Use an https VAULT_ADDR and set VAULT_TLS_SKIP_VERIFY only for loopback development.",
+            exc,
+        )
+        return
+
     # 6. Check reachability — fail gracefully, don't crash startup
     #    is_available() logs the full stacktrace internally on failure
     if not provider.is_available():

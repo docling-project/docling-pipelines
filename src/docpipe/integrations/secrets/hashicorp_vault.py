@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """HashiCorp Vault secret provider using AppRole authentication via REST API.
 
 Uses the Vault HTTP API directly with the `requests` library (already a project
@@ -12,6 +15,14 @@ Vault API reference:
     - KV v2 read:    GET  /v1/{mount}/data/{path}
     - KV v1 read:    GET  /v1/{mount}/{path}
 
+Transport safety:
+    - ``https`` is required for any non-loopback ``VAULT_ADDR``.
+    - ``VAULT_TLS_SKIP_VERIFY`` is honored only for a loopback address.
+    - Redirects are never followed on requests that carry credentials or a token.
+    - Every request uses bounded (connect, read) timeouts.
+    - Response bodies, the Vault address, and transport exception text are never
+      placed in exception messages or log records.
+
 Connection credentials are read from environment variables:
     VAULT_ADDR              - Vault server URL (default: http://127.0.0.1:8200)
     VAULT_ROLE_ID           - AppRole role ID
@@ -22,7 +33,7 @@ Connection credentials are read from environment variables:
     VAULT_CA_CERT           - Path to CA certificate for TLS (optional)
     VAULT_CLIENT_CERT       - Path to client certificate for mTLS (optional)
     VAULT_CLIENT_KEY        - Path to client private key for mTLS (optional)
-    VAULT_TLS_SKIP_VERIFY   - Skip TLS verification, dev only (default: false)
+    VAULT_TLS_SKIP_VERIFY   - Skip TLS verification, loopback dev only (default: false)
 
 For Docker/Kubernetes, credentials can also be provided as file-backed
 secrets using the _FILE suffix convention:
@@ -30,11 +41,13 @@ secrets using the _FILE suffix convention:
     VAULT_SECRET_ID_FILE    - Path to file containing secret_id
 """
 
+import ipaddress
 import os
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -71,6 +84,16 @@ def _read_env_or_file(env_var: str, *, default: str = "") -> str:
             return f.read().strip()
 
     return os.environ.get(env_var, default)
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return True if *host* is ``localhost`` or a loopback IP address literal."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -122,33 +145,83 @@ class HashiCorpVaultConfig:
             msg = "VAULT_ADDR must be set."
             raise ConfigurationError(msg)
 
+    def validate_transport(self) -> None:
+        """Validate that the address and TLS settings are safe to use.
+
+        ``https`` is required unless the address is loopback, and
+        ``tls_skip_verify`` is honored only for a loopback address. Messages are
+        fixed strings that never include the address.
+
+        Raises:
+            ConfigurationError: If the address or TLS settings are not permitted.
+        """
+        try:
+            parsed = urlparse(self.addr)
+            host = parsed.hostname
+        except ValueError:
+            host = None
+            parsed = urlparse("")
+        if parsed.scheme not in ("http", "https") or not host:
+            msg = "VAULT_ADDR must be an http(s) URL with a host."
+            raise ConfigurationError(msg)
+
+        loopback = _is_loopback_host(host)
+        if parsed.scheme != "https" and not loopback:
+            msg = "VAULT_ADDR must use https unless the host is a loopback address; TLS is required."
+            raise ConfigurationError(msg)
+        if self.tls_skip_verify and not loopback:
+            msg = "VAULT_TLS_SKIP_VERIFY is only honored for a loopback VAULT_ADDR."
+            raise ConfigurationError(msg)
+
 
 # Buffer before token expiry to trigger re-authentication (seconds)
 _TOKEN_REFRESH_BUFFER = 60
 
-# HTTP timeout for Vault API calls (seconds)
-_REQUEST_TIMEOUT = 30
+# (connect, read) timeouts for Vault API calls (seconds)
+_REQUEST_TIMEOUT = (5, 30)
+
+# (connect, read) timeouts for the health check (seconds)
+_HEALTH_TIMEOUT = (5, 5)
+
+# Response headers that may be logged; everything else (including the body) is withheld.
+_LOGGABLE_RESPONSE_HEADERS = frozenset({"content-type", "x-request-id", "x-vault-request-id"})
 
 
-def _log_vault_response(*, method: str, url: str, response: "requests.Response") -> None:
-    """Log the full Vault HTTP response at DEBUG level for error diagnosis.
+def _log_vault_response(*, method: str, category: str, response: "requests.Response") -> None:
+    """Log a failed Vault HTTP response at DEBUG level without its body.
 
-    Only emitted when DS_LOG_LEVEL=DEBUG. Logs method, URL, status code,
-    response headers, and body so that Vault-side error messages are fully visible.
+    Only emitted when DS_LOG_LEVEL=DEBUG. Records the method, a request-path
+    category, the status code, and allowlisted headers (request identifier and
+    content type). The response body, the Vault address, and request headers
+    (token, namespace) are never logged.
 
     Args:
         method: HTTP method used (GET, POST, etc.).
-        url: Full request URL.
+        category: Request-path category (for example ``login`` or ``kv2 read``).
         response: The requests.Response object from the failed call.
     """
+    headers = {k: v for k, v in response.headers.items() if k.lower() in _LOGGABLE_RESPONSE_HEADERS}
     logger.debug(
-        "Vault %s %s -> HTTP %d\nResponse headers: %s\nResponse body: %s",
+        "Vault %s (%s) -> HTTP %d, headers: %s",
         method,
-        url,
+        category,
         response.status_code,
-        dict(response.headers),
-        response.text,
+        headers,
     )
+
+
+def _request_error_category(exc: requests.exceptions.RequestException) -> str:
+    """Map a ``requests`` exception to a fixed category string.
+
+    The returned text never contains the address, the path, or the exception message.
+    """
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "TLS verification failed"
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "request timed out"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "connection failed"
+    return "request failed"
 
 
 class HashiCorpVaultProvider(SecretProvider):
@@ -182,7 +255,11 @@ class HashiCorpVaultProvider(SecretProvider):
 
         Returns:
             Configured requests.Session instance.
+
+        Raises:
+            ConfigurationError: If the address or TLS settings are not permitted.
         """
+        self._config.validate_transport()
         session = requests.Session()
 
         # TLS verification
@@ -243,17 +320,14 @@ class HashiCorpVaultProvider(SecretProvider):
         }
 
         try:
-            response = self._session.post(url, json=payload, timeout=_REQUEST_TIMEOUT)
-        except requests.exceptions.ConnectionError as e:
-            msg = f"Cannot connect to Vault at {self._config.addr}: {e}"
-            raise ExternalServiceError(msg) from e
+            response = self._session.post(url, json=payload, timeout=_REQUEST_TIMEOUT, allow_redirects=False)
         except requests.exceptions.RequestException as e:
-            msg = f"Vault authentication request failed: {e}"
-            raise ExternalServiceError(msg) from e
+            msg = f"Vault AppRole login failed: {_request_error_category(e)}"
+            raise ExternalServiceError(msg) from None
 
         if response.status_code != 200:
-            _log_vault_response(method="POST", url=url, response=response)
-            msg = f"Vault AppRole login failed (HTTP {response.status_code}): {response.text}"
+            _log_vault_response(method="POST", category="login", response=response)
+            msg = f"Vault AppRole login failed (HTTP {response.status_code})"
             raise ExternalServiceError(msg)
 
         data = response.json()
@@ -338,34 +412,34 @@ class HashiCorpVaultProvider(SecretProvider):
         # Try KV v2 first (most common)
         kv2_url = f"{base_url}/v1/{mount}/data/{path}"
         try:
-            response = self._session.get(kv2_url, timeout=_REQUEST_TIMEOUT)
+            response = self._session.get(kv2_url, timeout=_REQUEST_TIMEOUT, allow_redirects=False)
             if response.status_code == 200:
                 resp_data = response.json()
                 return resp_data["data"]["data"]
             if response.status_code != 404:
                 # 403 permission denied, 400 bad request, 429 rate limited, 503 sealed, etc.
                 # None of these mean "try KV v1" — fail immediately with the real status.
-                _log_vault_response(method="GET", url=kv2_url, response=response)
-                msg = f"Vault returned HTTP {response.status_code} for path '{mount}/{path}': {response.text}"
+                _log_vault_response(method="GET", category="kv2 read", response=response)
+                msg = f"Vault returned HTTP {response.status_code} for secret read (kv2)"
                 raise ExternalServiceError(msg)
             # 404 only: path not found under KV v2 /data/ prefix — fall through to KV v1
         except requests.exceptions.RequestException as kv2_error:
-            msg = f"Network error reading secret at path '{mount}/{path}': {kv2_error}"
-            raise ExternalServiceError(msg) from kv2_error
+            msg = f"Vault secret read failed (kv2): {_request_error_category(kv2_error)}"
+            raise ExternalServiceError(msg) from None
 
         # Fallback to KV v1 (only reached on 404 from KV v2)
         kv1_url = f"{base_url}/v1/{mount}/{path}"
         try:
-            response = self._session.get(kv1_url, timeout=_REQUEST_TIMEOUT)
+            response = self._session.get(kv1_url, timeout=_REQUEST_TIMEOUT, allow_redirects=False)
             if response.status_code == 200:
                 resp_data = response.json()
                 return resp_data["data"]
-            _log_vault_response(method="GET", url=kv1_url, response=response)
-            msg = f"Vault returned HTTP {response.status_code} for path '{mount}/{path}': {response.text}"
+            _log_vault_response(method="GET", category="kv1 read", response=response)
+            msg = f"Vault returned HTTP {response.status_code} for secret read (kv1)"
             raise ExternalServiceError(msg)
         except requests.exceptions.RequestException as kv1_error:
-            msg = f"Network error reading secret at path '{mount}/{path}': {kv1_error}"
-            raise ExternalServiceError(msg) from kv1_error
+            msg = f"Vault secret read failed (kv1): {_request_error_category(kv1_error)}"
+            raise ExternalServiceError(msg) from None
 
     def is_available(self) -> bool:
         """Check if Vault is reachable and initialized.
@@ -380,9 +454,15 @@ class HashiCorpVaultProvider(SecretProvider):
                 self._session = self._build_session()
 
             url = "{}/v1/sys/health".format(self._config.addr.rstrip("/"))
-            response = self._session.get(url, timeout=5)
+            response = self._session.get(url, timeout=_HEALTH_TIMEOUT, allow_redirects=False)
             # Vault returns 200 if initialized+unsealed, 429/472/473 for other states
             return response.status_code in (200, 429, 472, 473)
+        except requests.exceptions.RequestException as e:
+            logger.warning("Vault availability check failed: %s", _request_error_category(e))
+            return False
+        except ConfigurationError:
+            logger.warning("Vault availability check failed: configuration not permitted")
+            return False
         except Exception as e:
-            logger.warning("Vault availability check failed for %s: %s", self._config.addr, e, exc_info=True)
+            logger.warning("Vault availability check failed: %s", type(e).__name__)
             return False
