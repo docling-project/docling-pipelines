@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Secret provider integration for external vault/secret managers.
 
 Supports resolving secret references in flow configurations using the
@@ -22,11 +25,14 @@ from docpipe.integrations.secrets.secret_provider import (
     register_provider,
     resolve_value,
 )
+from docpipe.integrations.secrets.secret_value import SecretValue, secret_json_default
 
 __all__ = [
     "SecretProvider",
     "SecretReference",
+    "SecretValue",
     "parse_reference",
     "register_provider",
     "resolve_value",
+    "secret_json_default",
 ]

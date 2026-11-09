@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Chunker operator that splits documents into smaller text segments."""
 
 import io
@@ -326,9 +329,30 @@ class ChunkerOperator(AbstractOperator):
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate the summarization provider config classes' secret-capable declarations."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+        from docpipe.core.operators.shared.llm_provider_config import LLMProviderConfig, WatsonxProviderConfig
+
+        return build_provider_secret_fields(
+            selector=f"{OperatorConstants.Config.SUMMARIZATION}.{OperatorConstants.Config.PROVIDER}",
+            prefix=f"{OperatorConstants.Config.SUMMARIZATION}.{OperatorConstants.Config.PROVIDER_CONFIG}",
+            classes={
+                OperatorConstants.Config.PROVIDER_LITELLM: LLMProviderConfig,
+                OperatorConstants.Config.PROVIDER_WATSONX: WatsonxProviderConfig,
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Get metadata."""
         return {
+            "secret_fields": [
+                # Remote chunking (docling_serve) provider_config
+                f"{OperatorConstants.Config.PROVIDER_CONFIG}.{OperatorConstants.Config.API_BASE}",
+                f"{OperatorConstants.Config.PROVIDER_CONFIG}.{OperatorConstants.Config.API_KEY}",
+            ],
+            "secret_fields_by_provider": ChunkerOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: ChunkerOperator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: ChunkerOperator.is_available(),

@@ -1022,6 +1022,25 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each vector store config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import (
+            ADAPTER_NAME as MILVUS_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import MilvusConfig
+        from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import (
+            ADAPTER_NAME as OPENSEARCH_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
+
+        return build_provider_secret_fields(
+            selector=OperatorConstants.Config.PROVIDER,
+            prefix=OperatorConstants.Config.PROVIDER_CONFIG,
+            classes={OPENSEARCH_ADAPTER_NAME: OpenSearchConfig, MILVUS_ADAPTER_NAME: MilvusConfig},
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Get metadata about the operator including features and attributes.
 
@@ -1029,6 +1048,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         Provider-specific parameters should be passed via the 'provider_config' configuration.
         """
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": VectorDBOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: VectorDBOperator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: VectorDBOperator.is_available(),

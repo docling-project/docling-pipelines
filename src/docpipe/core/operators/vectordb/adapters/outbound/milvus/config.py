@@ -3,7 +3,7 @@
 
 """Pydantic config model for the Milvus vector store adapter."""
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,6 +16,16 @@ class MilvusConfig(BaseModel):
     Describes the fields the user writes inside ``provider_config`` when
     selecting the ``milvus`` provider in a VectorDB operator node.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "host",
+        "uri",
+        "token",
+        "username",
+        "password",
+        "database",
+    )
 
     model_config = ConfigDict(extra="ignore")
 

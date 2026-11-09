@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class and supporting types for all docpipe operators."""
 
 from enum import StrEnum
@@ -221,8 +224,11 @@ class AbstractOperator(AbstractTableTransform):  # type: ignore[misc]
         """Return operator metadata for registry and UI rendering.
 
         Returns:
-            Dict containing at minimum 'short_name', 'description', and 'owner'."""
-        return {}
+            Dict containing at minimum 'short_name', 'description', and 'owner'.
+            ``secret_fields`` lists the dotted config keys that may hold a
+            ``vault://`` reference; an operator that declares none accepts no
+            references (see ``docpipe.core.operators.secret_fields``)."""
+        return {"secret_fields": []}
 
     def should_validate_field(self, *, field_value: Any) -> bool:
         # Always validate during execution phase

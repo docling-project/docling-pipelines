@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for filesystem source adapter."""
 
 from pathlib import Path
@@ -16,6 +19,9 @@ class FilesystemSourceConfig(BaseModel):
     - Clear documentation of required/optional fields
     - Default values where appropriate
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = ()
 
     # Required fields
     paths: list[str] = Field(

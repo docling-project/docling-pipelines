@@ -1,6 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config model for the Docling Serve text extraction adapter."""
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +18,12 @@ class DoclingServeConfig(BaseModel):
     Describes the fields the user writes inside ``text_extraction.provider_config``
     when selecting the ``docling_serve`` provider in an Extract operator node.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "base_url",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
