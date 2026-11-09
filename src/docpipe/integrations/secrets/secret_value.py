@@ -3,7 +3,8 @@
 
 """Opaque wrapper for resolved secret material.
 
-``SecretValue`` holds a resolved secret and refuses to render it through any
+``SecretValue`` holds a resolved secret (a string, or the parsed JSON object of
+a field declared structured) and refuses to render it through any
 implicit path (``repr``, ``str``, ``format``, pickling, JSON encoding,
 iteration, comparison with ``str``). Copying returns the same immutable
 instance. The only way to read the underlying string is the explicit
@@ -27,12 +28,16 @@ class SecretValue:
 
     __slots__ = ("_value",)
 
-    def __init__(self, *, value: str) -> None:
+    def __init__(self, *, value: str | dict[str, Any] | list[Any]) -> None:
         object.__setattr__(self, "_value", value)
 
-    def reveal(self) -> str:
-        """Return the underlying secret. Call only when building a client."""
-        return str(object.__getattribute__(self, "_value"))
+    def reveal(self) -> Any:
+        """Return the underlying secret. Call only when building a client.
+
+        This is the stored string, or the parsed object for a structured field
+        (for example ``credentials_json``).
+        """
+        return object.__getattribute__(self, "_value")
 
     def __setattr__(self, name: str, value: Any) -> None:
         msg = "SecretValue is immutable"
