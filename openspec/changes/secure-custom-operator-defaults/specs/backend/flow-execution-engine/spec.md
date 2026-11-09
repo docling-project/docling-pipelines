@@ -24,3 +24,11 @@ The engine SHALL NOT load custom operators (uploaded scripts, `DOCPIPE_CUSTOM_OP
 #### Scenario: Orchestrator reports a resolved boolean
 - **WHEN** an orchestrator is created without an explicit setting
 - **THEN** `orchestrator.enable_custom_operators` is a `bool` equal to the resolved value
+
+#### Scenario: Workers receive the setting
+- **WHEN** worker environment variables are resolved for a job run and `DOCPIPE_ENABLE_CUSTOM_OPERATORS` is set in the submitting process
+- **THEN** the same value is forwarded to the worker, so API validation and worker execution agree
+
+#### Scenario: Setting not forwarded when unset
+- **WHEN** `DOCPIPE_ENABLE_CUSTOM_OPERATORS` is unset in the submitting process
+- **THEN** it is not set for the worker, and the worker uses the disabled default

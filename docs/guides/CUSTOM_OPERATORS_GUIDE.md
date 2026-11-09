@@ -106,7 +106,7 @@ export DOCPIPE_CUSTOM_OPERATORS="./examples/custom_operators/hello_operator.py"
 export DOCPIPE_CUSTOM_OPERATORS="$HOME/my_custom_operators"
 ```
 
-Custom operators run arbitrary Python inside the pipeline process, so enable them only where the operator sources are trusted. The `/api/v1/custom_operators` upload routes additionally require a bearer token (see [Security Best Practices](SECURITY_BEST_PRACTICES.md#validate-custom-operators-before-use)).
+Custom operators run arbitrary Python inside the pipeline process, so enable them only where the operator sources are trusted. The `/api/v1/custom_operators` routes additionally require a bearer token, and every token holder can run code on the server once loading is enabled (see [Security Best Practices](SECURITY_BEST_PRACTICES.md#validate-custom-operators-before-use)). While loading is disabled, an upload or a script replacement returns 409 and nothing is stored.
 
 ### Step 3: Use in a Flow
 

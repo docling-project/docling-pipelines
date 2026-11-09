@@ -149,7 +149,10 @@ OptionalOperatorFileForm = Annotated[
         },
         status.HTTP_409_CONFLICT: {
             "model": ErrorResponse,
-            "description": "Custom operator with the same short_name already exists",
+            "description": (
+                "Custom operator with the same short_name already exists, or custom operators are disabled "
+                "(DOCPIPE_ENABLE_CUSTOM_OPERATORS)"
+            ),
         },
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "model": ErrorResponse,
@@ -299,6 +302,10 @@ def get_custom_operator(
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
             "description": "Custom operator not found",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "A replacement file was sent while custom operators are disabled",
         },
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "model": ErrorResponse,

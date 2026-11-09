@@ -241,7 +241,9 @@ Custom operators loaded from `examples/custom_operators/`, uploaded through the 
 
 - Custom operator loading is **disabled by default**. Set `DOCPIPE_ENABLE_CUSTOM_OPERATORS=true` only on deployments that need it.
 - Every `/api/v1/custom_operators` route (list, get, `directory_tree`, create, update, delete) requires a bearer token. When `JWT_SECRET_KEY` is not configured these routes return 503.
-- Any authenticated user can upload an operator once loading is enabled. Restrict who can obtain a token accordingly.
+- While loading is disabled, uploading or replacing an operator script returns 409 and nothing is stored.
+- The loader runs an uploaded script inside the API process (`exec_module`). Once loading is enabled, **every token holder can execute arbitrary code on the server (remote code execution)**. There is no role check, uploader allowlist or sandbox. Issue tokens only to people you trust with shell access to the API host. Isolation and an uploader allowlist are tracked in #463 and #464.
+- Set `DOCPIPE_ENABLE_CUSTOM_OPERATORS` on the API and on every worker. Job-run workers started by the API receive the value automatically; workers that you start yourself do not.
 
 ---
 

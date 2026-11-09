@@ -57,6 +57,7 @@ class ErrorCode(StrEnum):
     CUSTOM_OPERATOR_NOT_FOUND = "custom_operator_not_found"
     CUSTOM_OPERATOR_ALREADY_EXISTS = "custom_operator_already_exists"
     CUSTOM_OPERATOR_INVALID_DATA = "custom_operator_invalid_data"
+    CUSTOM_OPERATORS_DISABLED = "custom_operators_disabled"
 
     # ACL extraction errors
     ACL_EXTRACTION_FAILED = "acl_extraction_failed"

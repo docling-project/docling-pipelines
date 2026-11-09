@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from docpipe.core.constants.constants import DocpipeConstants, OrchestratorType
+from docpipe.core.constants.constants import DocpipeConstants, EnvironmentVariables, OrchestratorType
 from docpipe.core.custom_operators.file_store import LocalFileStore
 from docpipe.core.custom_operators.models import CustomOperator, CustomOperatorStatus
 from docpipe.core.custom_operators.service import CUSTOM_OPERATORS_COLLECTION, CustomOperatorService
@@ -14,6 +14,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     CustomOperatorAlreadyExistsException,
     CustomOperatorInvalidDataException,
     CustomOperatorNotFoundException,
+    CustomOperatorsDisabledException,
 )
 from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
 
@@ -33,6 +34,12 @@ class SampleCustomOperator(AbstractOperator):
     def get_metadata():
         return {"short_name": "sample_custom_op"}
 """
+
+
+@pytest.fixture(autouse=True)
+def _enable_custom_operators(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Custom operators are disabled by default; the service tests exercise the enabled path."""
+    monkeypatch.setenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS, "true")
 
 
 @pytest.fixture
@@ -373,6 +380,62 @@ class TestCustomOperatorServiceFactoryRefresh:
         stored = custom_operator_service.get_operator(operator_id=created.id)
         assert stored.status == CustomOperatorStatus.VALIDATED
         assert stored.short_name == "sample_custom_op"
+
+
+class TestCustomOperatorServiceDisabled:
+    """Test suite for the fail-closed behaviour when custom operators are disabled."""
+
+    @pytest.fixture(autouse=True)
+    def _disable_custom_operators(self, *, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Override the module-level enable fixture."""
+        monkeypatch.delenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS, raising=False)
+
+    def test_create_is_refused_and_nothing_is_stored(
+        self, *, custom_operator_service: CustomOperatorService, tmp_path: Path
+    ) -> None:
+        """Upload is refused with a clear error, and neither script nor metadata is written."""
+        op_file = tmp_path / "sample_op.py"
+        op_file.write_text(SAMPLE_OP_CODE, encoding="utf-8")
+
+        with pytest.raises(CustomOperatorsDisabledException, match="disabled") as exc_info:
+            custom_operator_service.create_operator(name="Sample", description="d", operator_file_path=op_file)
+
+        assert exc_info.value.status_code == 409
+        assert custom_operator_service.list_operators() == []
+        assert not (tmp_path / "custom_operators").exists() or not any((tmp_path / "custom_operators").iterdir())
+
+    def test_file_replacement_is_refused_but_metadata_update_allowed(
+        self, *, custom_operator_service: CustomOperatorService, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A script replacement is refused while a metadata-only update still works."""
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS, "true")
+        created = _create_sample_operator(service=custom_operator_service, directory=tmp_path)
+        assert created.id is not None
+        monkeypatch.delenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS)
+        replacement = tmp_path / "sample_op_v2.py"
+        replacement.write_text(SAMPLE_OP_CODE, encoding="utf-8")
+
+        with pytest.raises(CustomOperatorsDisabledException):
+            custom_operator_service.update_operator(operator_id=created.id, operator_file_path=replacement)
+
+        renamed = custom_operator_service.update_operator(operator_id=created.id, name="Renamed")
+        assert renamed.name == "Renamed"
+
+    def test_delete_does_not_touch_the_operator_factory(
+        self, *, custom_operator_service: CustomOperatorService, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Deleting a stored operator while disabled skips the factory refresh instead of logging a false success."""
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS, "true")
+        created = _create_sample_operator(service=custom_operator_service, directory=tmp_path)
+        assert created.id is not None
+        monkeypatch.delenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS)
+        factory = _RecordingOperatorFactory()
+        lookups = _install_operator_factory(monkeypatch=monkeypatch, factory=factory)
+
+        custom_operator_service.delete_operator(operator_id=created.id)
+
+        assert factory.refresh_calls == 0
+        assert lookups == []
 
 
 class TestCustomOperatorServiceConsistency:

@@ -373,12 +373,12 @@ class TestCustomOperatorRoutesRequireAuthentication:
         method: str,
         path: str,
     ) -> None:
-        """No Authorization header: rejected before the handler runs."""
+        """No Authorization header: rejected with 401 before the handler runs."""
         monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
 
         response = _call(client=unauth_client, method=method, path=path)
 
-        assert response.status_code in (401, 403)
+        assert response.status_code == 401
         assert mock_service.mock_calls == []
 
     @pytest.mark.parametrize(("method", "path"), _ALL_ROUTES)

@@ -36,8 +36,13 @@ Changing the constant alone does nothing. It is read only inside `OperatorFactor
 - **Decision**: reuse the existing rule, `true`, `1` or `yes` (case-insensitive) enables, anything else disables.
 - **Rationale**: Existing deployments that already set the variable keep working.
 
+### 4. Refuse upload while disabled, forward the flag to workers
+- **Decision**: `CustomOperatorService` raises `CustomOperatorsDisabledException` (409, `custom_operators_disabled`) in `create_operator` and in `update_operator` when a script file is replaced. Metadata-only updates, reads and deletes stay allowed. `_refresh_operator_factories` returns early when disabled. `JobManagementFactory.resolve_worker_env()` forwards `DOCPIPE_ENABLE_CUSTOM_OPERATORS` when it is set.
+- **Rationale**: Storing a script that can never load reports success for a dead operator. Docker work pools receive only explicit job variables, so without forwarding the API could validate a flow that the worker then rejects.
+- **Alternatives considered**: Store the script and mark it inactive in the response. Rejected because it keeps untrusted code on disk without a use.
+
 ## Risks / Trade-offs
 
 - Deployments that rely on uploaded or package operators stop loading them after upgrade until `DOCPIPE_ENABLE_CUSTOM_OPERATORS=true` is set. Flows that reference such an operator fail validation with an unknown operator error, which names the problem. Documented under Breaking Changes.
-- API clients and scripts that call the custom operator routes without a token start receiving 401/403/503. Documented.
+- API clients and scripts that call the custom operator routes without a token start receiving 401 (503 when `JWT_SECRET_KEY` is unset). Documented.
 - Any authenticated user can still upload code once the flag is on. This change narrows exposure and does not provide isolation.
