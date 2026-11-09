@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for flow_utils — focusing on sort_dag_topologically."""
 
 import pytest
@@ -94,3 +97,28 @@ class TestSortDagTopologically:
         for branch in ("b", "c", "d"):
             assert ids.index("a") < ids.index(branch)
             assert ids.index(branch) < ids.index("e")
+
+    def test_dangling_edge_raises_flow_validation_exception(self):
+        """Edges referencing unknown nodes fail loudly with FlowValidationException."""
+        dag = [
+            {"id": "a", "output_edges": [{"node_id_ref": "nonexistent_node"}]},
+        ]
+        with pytest.raises(FlowValidationException) as exc_info:
+            sort_dag_topologically(dag=dag)
+        assert exc_info.value.errors
+        assert any("unknown node" in str(e).lower() for e in exc_info.value.errors)
+
+    def test_deterministic_sibling_order_matches_input_positions(self):
+        """Sibling nodes with equal dependency rank preserve their relative order in the input list."""
+        dag = [
+            {
+                "id": "root",
+                "output_edges": [{"node_id_ref": "sib_1"}, {"node_id_ref": "sib_2"}, {"node_id_ref": "sib_3"}],
+            },
+            {"id": "sib_1", "output_edges": []},
+            {"id": "sib_2", "output_edges": []},
+            {"id": "sib_3", "output_edges": []},
+        ]
+        result = sort_dag_topologically(dag=dag)
+        ids = [n["id"] for n in result]
+        assert ids == ["root", "sib_1", "sib_2", "sib_3"]
