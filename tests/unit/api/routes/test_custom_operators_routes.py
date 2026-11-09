@@ -1,9 +1,13 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Custom Operator API routes."""
 
 import io
 import uuid
 from datetime import UTC, datetime
-from typing import Generator
+from pathlib import Path
+from typing import Any, Generator
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.jwt_handler import JWTConfig, create_access_token
+from docpipe.api.auth.models import User
 from docpipe.api.dependencies import get_custom_operator_service
 from docpipe.api.middleware.error_handler import (
     docpipe_exception_handler,
@@ -28,6 +35,8 @@ from docpipe.exceptions.docpipe_exceptions import (
     DocpipeException,
 )
 
+_JWT_SECRET = "unit-test-secret-key-with-at-least-32-chars"  # pragma: allowlist secret
+
 
 @pytest.fixture
 def mock_service() -> MagicMock:
@@ -35,8 +44,7 @@ def mock_service() -> MagicMock:
     return MagicMock(spec=CustomOperatorService)
 
 
-@pytest.fixture
-def app(mock_service: MagicMock) -> FastAPI:
+def _build_app(*, mock_service: MagicMock) -> FastAPI:
     """Create a FastAPI application with custom operators router and exception handlers."""
     test_app = FastAPI()
     test_app.include_router(custom_operators_router)
@@ -47,6 +55,14 @@ def app(mock_service: MagicMock) -> FastAPI:
     test_app.add_exception_handler(RequestValidationError, validation_exception_handler)
     test_app.add_exception_handler(Exception, generic_exception_handler)
 
+    return test_app
+
+
+@pytest.fixture
+def app(mock_service: MagicMock) -> FastAPI:
+    """Create an app with authentication satisfied, for tests of route behavior."""
+    test_app = _build_app(mock_service=mock_service)
+    test_app.dependency_overrides[get_current_user] = lambda: User(username="alice", email="alice@example.com")
     return test_app
 
 
@@ -219,3 +235,198 @@ class TestUpdateAndDeleteCustomOperatorEndpoints:
         data = response.json()
         assert data["success"] is True
         assert data["operator_id"] == op_id
+
+
+class TestOperatorFileValidation:
+    """Filename, extension and size limits on create and update, and temp-file handling on update."""
+
+    @pytest.mark.parametrize(
+        ("filename", "content", "status_code", "detail"),
+        [
+            ("a" * 253 + ".py", b"# code", 400, "Invalid operator filename"),
+            ("big_op.py", b"#" * (512 * 1024 + 1), 413, "maximum allowed size of 512 KB"),
+        ],
+        ids=["name-too-long", "too-large"],
+    )
+    def test_create_rejects_invalid_files(
+        self,
+        *,
+        client: TestClient,
+        mock_service: MagicMock,
+        filename: str,
+        content: bytes,
+        status_code: int,
+        detail: str,
+    ) -> None:
+        response = client.post(
+            "/custom_operators",
+            data={"name": "Op"},
+            files={"operator_file": (filename, io.BytesIO(content), "text/x-python")},
+        )
+
+        assert response.status_code == status_code
+        assert detail in response.text
+        mock_service.create_operator.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("filename", "content", "status_code", "detail"),
+        [
+            ("a" * 253 + ".py", b"# code", 400, "Invalid operator filename"),
+            ("op.txt", b"# code", 400, "must have a .py extension"),
+            ("big_op.py", b"#" * (512 * 1024 + 1), 413, "maximum allowed size of 512 KB"),
+        ],
+        ids=["name-too-long", "not-python", "too-large"],
+    )
+    def test_update_rejects_invalid_files(
+        self,
+        *,
+        client: TestClient,
+        mock_service: MagicMock,
+        filename: str,
+        content: bytes,
+        status_code: int,
+        detail: str,
+    ) -> None:
+        response = client.patch(
+            f"/custom_operators/{uuid.uuid4()}",
+            files={"operator_file": (filename, io.BytesIO(content), "text/x-python")},
+        )
+
+        assert response.status_code == status_code
+        assert detail in response.text
+        mock_service.update_operator.assert_not_called()
+
+    def test_update_with_file_passes_temp_copy_and_removes_it(
+        self, *, client: TestClient, mock_service: MagicMock
+    ) -> None:
+        op_id = str(uuid.uuid4())
+        seen: dict[str, Any] = {}
+
+        def _update(**kwargs: Any) -> CustomOperator:
+            path: Path = kwargs["operator_file_path"]
+            seen.update(kwargs, exists=path.exists(), content=path.read_bytes())
+            return CustomOperator(
+                id=op_id,
+                name="Op",
+                description="",
+                short_name="op",
+                status=CustomOperatorStatus.VALIDATED,
+                message="Updated",
+                operator_file="new_op.py",
+            )
+
+        mock_service.update_operator.side_effect = _update
+
+        response = client.patch(
+            f"/custom_operators/{op_id}",
+            files={"operator_file": ("new_op.py", io.BytesIO(b"class NewOp: ...\n"), "text/x-python")},
+        )
+
+        assert response.status_code == 200
+        assert (seen["exists"], seen["content"], seen["original_filename"]) == (
+            True,
+            b"class NewOp: ...\n",
+            "new_op.py",
+        )
+        assert not seen["operator_file_path"].exists()
+
+
+_OPERATOR_ID = str(uuid.uuid4())
+
+# (method, path) for every route on the router, with a body where the route needs one.
+_ALL_ROUTES = [
+    ("get", "/custom_operators"),
+    ("get", "/custom_operators/directory_tree"),
+    ("get", f"/custom_operators/{_OPERATOR_ID}"),
+    ("patch", f"/custom_operators/{_OPERATOR_ID}"),
+    ("delete", f"/custom_operators/{_OPERATOR_ID}"),
+    ("post", "/custom_operators"),
+]
+
+
+def _call(*, client: TestClient, method: str, path: str, headers: dict[str, str] | None = None):
+    """Issue a request, supplying form data for the routes that need it."""
+    kwargs: dict[str, Any] = {"headers": headers or {}}
+    if method == "post":
+        kwargs["data"] = {"name": "My Custom Op", "description": "desc"}
+        kwargs["files"] = {"operator_file": ("op.py", io.BytesIO(b"x = 1\n"), "text/x-python")}
+    elif method == "patch":
+        kwargs["data"] = {"name": "New name"}
+    return getattr(client, method)(path, **kwargs)
+
+
+class TestCustomOperatorRoutesRequireAuthentication:
+    """Every custom operator route requires a valid bearer token (real JWT verification, no override)."""
+
+    @pytest.fixture
+    def unauth_client(self, *, mock_service: MagicMock) -> TestClient:
+        """Client against an app that does not override get_current_user."""
+        return TestClient(_build_app(mock_service=mock_service), raise_server_exceptions=False)
+
+    @pytest.mark.parametrize(("method", "path"), _ALL_ROUTES)
+    def test_no_token_is_rejected_and_service_not_called(
+        self,
+        *,
+        unauth_client: TestClient,
+        mock_service: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        method: str,
+        path: str,
+    ) -> None:
+        """No Authorization header: rejected with 401 before the handler runs."""
+        monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
+
+        response = _call(client=unauth_client, method=method, path=path)
+
+        assert response.status_code == 401
+        assert mock_service.mock_calls == []
+
+    @pytest.mark.parametrize(("method", "path"), _ALL_ROUTES)
+    def test_invalid_token_returns_401_and_service_not_called(
+        self,
+        *,
+        unauth_client: TestClient,
+        mock_service: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        method: str,
+        path: str,
+    ) -> None:
+        """A token that fails verification returns 401."""
+        monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
+
+        response = _call(client=unauth_client, method=method, path=path, headers={"Authorization": "Bearer not-a-jwt"})
+
+        assert response.status_code == 401
+        assert mock_service.mock_calls == []
+
+    @pytest.mark.parametrize(("method", "path"), _ALL_ROUTES)
+    def test_jwt_secret_unset_returns_503_and_service_not_called(
+        self,
+        *,
+        unauth_client: TestClient,
+        mock_service: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        method: str,
+        path: str,
+    ) -> None:
+        """With JWT_SECRET_KEY unset the routes refuse to serve."""
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        monkeypatch.chdir(Path(__file__).parent)  # keep a stray .env from supplying the secret
+
+        response = _call(client=unauth_client, method=method, path=path, headers={"Authorization": "Bearer some-token"})
+
+        assert response.status_code == 503
+        assert mock_service.mock_calls == []
+
+    def test_valid_token_reaches_handler(
+        self, *, unauth_client: TestClient, mock_service: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A correctly signed token is accepted and the handler runs."""
+        monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
+        mock_service.list_operators.return_value = []
+        token = create_access_token({"username": "alice"}, JWTConfig(jwt_secret_key=_JWT_SECRET))
+
+        response = unauth_client.get("/custom_operators", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        assert mock_service.list_operators.called

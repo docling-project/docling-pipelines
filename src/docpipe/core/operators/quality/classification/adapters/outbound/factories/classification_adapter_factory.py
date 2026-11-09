@@ -12,8 +12,8 @@ Provider aliases
 ----------------
 Some provider strings used in flow JSON (``"litellm"``, ``"watsonx"``) map to
 the ``"standard"`` adapter.  The alias table lives here as ``_PROVIDER_ALIASES``
-and is the single source of truth for those mappings.  Registered
-``ADAPTER_NAME`` values are also accepted directly as provider strings.
+and is the single source of truth for those mappings.  Custom adapters are
+selected directly by their ``ADAPTER_NAME``.
 """
 
 from typing import Any, ClassVar
@@ -35,15 +35,17 @@ class ClassificationAdapterFactory:
 
     Aliases
     -------
-    ``_PROVIDER_ALIASES`` maps extra flow-JSON provider strings to the
+    ``_PROVIDER_ALIASES`` maps flow-JSON provider strings to the internal
     ``ADAPTER_NAME`` they resolve to.  For example ``"litellm"`` and
-    ``"watsonx"`` both resolve to ``"standard"``.  Every registered
-    ``ADAPTER_NAME`` is also a valid provider string, so a custom adapter is
-    selected with ``provider: "<ADAPTER_NAME>"`` without registering an alias.
+    ``"watsonx"`` both resolve to ``"standard"``.  Custom registered
+    adapters are selected directly with ``provider: "<ADAPTER_NAME>"``.
     """
 
-    # Registry: ADAPTER_NAME → adapter class
+    # Registry of custom adapters: ADAPTER_NAME → adapter class
     _REGISTRY: ClassVar[dict[str, type[ClassificationPort]]] = {}
+
+    # Internal registry of built-in adapters: ADAPTER_NAME → adapter class
+    _BUILTIN_REGISTRY: ClassVar[dict[str, type[ClassificationPort]]] = {}
 
     # Alias table: flow-JSON provider string → ADAPTER_NAME
     # Add an entry here for every provider string a new adapter accepts.
@@ -70,9 +72,24 @@ class ClassificationAdapterFactory:
         Args:
             adapter_class: A concrete subclass of :class:`ClassificationPort`
                 with ``ADAPTER_NAME`` set.
+
+        Raises:
+            ValueError: If a custom adapter attempts to register using a reserved
+                built-in provider name (e.g. 'litellm', 'watsonx').
         """
-        cls._REGISTRY[adapter_class.ADAPTER_NAME] = adapter_class
-        logger.debug("ClassificationAdapterFactory: registered adapter=%s", adapter_class.ADAPTER_NAME)
+        name = adapter_class.ADAPTER_NAME.lower()
+        if getattr(adapter_class, "is_builtin", False):
+            cls._BUILTIN_REGISTRY[name] = adapter_class
+            logger.debug("ClassificationAdapterFactory: registered built-in adapter=%s", name)
+        else:
+            if name in cls._PROVIDER_ALIASES:
+                reserved = sorted(cls._PROVIDER_ALIASES)
+                raise ValueError(
+                    f"Cannot register custom adapter with reserved provider name '{adapter_class.ADAPTER_NAME}'. "
+                    f"Reserved names: {reserved}"
+                )
+            cls._REGISTRY[name] = adapter_class
+            logger.debug("ClassificationAdapterFactory: registered custom adapter=%s", name)
 
     @classmethod
     def create_adapter(cls, *, provider: str, config: dict[str, Any]) -> ClassificationPort:
@@ -82,9 +99,8 @@ class ClassificationAdapterFactory:
 
         1. Normalise to lower-case.
         2. Reject deprecated providers with migration guidance.
-        3. Apply alias table (``"litellm"`` → ``"standard"``, etc.); a name
-           with no alias is used as-is.
-        4. Look up the resolved name in the registry.
+        3. Check supported providers.
+        4. Look up in custom registry first; fall back to built-in alias table.
         5. Delegate to ``adapter_class.from_config(config)`` — all validation
            and dependency construction happen there.
 
@@ -107,13 +123,20 @@ class ClassificationAdapterFactory:
         if normalised in cls._DEPRECATED:
             raise ValueError(cls._DEPRECATED[normalised])
 
-        # Resolve alias → canonical ADAPTER_NAME; fall back to the name itself
-        # so a registered ADAPTER_NAME is directly selectable.
-        resolved = cls._PROVIDER_ALIASES.get(normalised, normalised)
+        supported_providers = cls.get_supported_providers()
+        if normalised not in supported_providers:
+            supported = sorted(supported_providers)
+            raise ValueError(f"Unknown classification provider: {provider!r}. Supported values: {supported}")
 
-        adapter_class = cls._REGISTRY.get(resolved)
+        # Check custom registry first (direct match by ADAPTER_NAME)
+        adapter_class = cls._REGISTRY.get(normalised)
         if adapter_class is None:
-            supported = sorted(cls.get_supported_providers())
+            # Fall back to built-in alias table
+            resolved = cls._PROVIDER_ALIASES.get(normalised, normalised)
+            adapter_class = cls._BUILTIN_REGISTRY.get(resolved)
+
+        if adapter_class is None:
+            supported = sorted(supported_providers)
             raise ValueError(f"Unknown classification provider: {provider!r}. Supported values: {supported}")
 
         logger.debug(
@@ -130,9 +153,7 @@ class ClassificationAdapterFactory:
 
     @classmethod
     def get_supported_providers(cls) -> set[str]:
-        """Return all valid provider strings (alias keys plus registered ``ADAPTER_NAME`` values).
-
-        Deprecated providers are excluded.
+        """Return all valid provider strings (alias keys plus custom adapter names).
 
         Returns:
             Set of valid provider name strings accepted by :meth:`create_adapter`.

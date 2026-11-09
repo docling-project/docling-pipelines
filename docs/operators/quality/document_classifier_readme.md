@@ -77,7 +77,7 @@ graph TD
 - `ClassificationResponse` may carry optional `extracted_content` and `extraction_metadata` for adapters that extract text as a by-product
 
 #### 3. Factory ([`classification_adapter_factory.py`](../../../src/docpipe/core/operators/quality/classification/adapters/outbound/factories/classification_adapter_factory.py))
-- Registry of adapters keyed by `ADAPTER_NAME`; every registered name is a valid `provider`
+- Registry of adapters keyed by `ADAPTER_NAME`; custom registered names are valid providers
 - Alias table (`litellm`, `watsonx` resolve to the `standard` adapter)
 - Rejects deprecated providers (`ollama`) with migration guidance
 
@@ -702,8 +702,7 @@ class ClassificationPort(ABC):
 
 ### StandardLLMClassificationAdapter
 
-Built-in adapter registered as `"standard"`. It serves the `litellm` and `watsonx` providers (and
-`"standard"` itself, like any registered `ADAPTER_NAME`) and
+Built-in adapter serving the `litellm` and `watsonx` providers. It
 builds its `LLMInferencePort` through `LLMAdapterFactory` in `from_config()`. When it extracts text itself
 it honors the flow's `doc_format` (`markdown` by default, or `doclang`). See the
 [Architecture](#architecture) section for how the operator, factory, and adapter interact.

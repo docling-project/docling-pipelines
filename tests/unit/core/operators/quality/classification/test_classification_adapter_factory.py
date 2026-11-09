@@ -41,7 +41,7 @@ _WATSONX_CONFIG: dict[str, Any] = {
 
 @contextmanager
 def _registered_custom_adapter(*, name: str = "_custom_test_adapter") -> Iterator[type[ClassificationPort]]:
-    """Register a throwaway adapter under *name* and remove it on exit."""
+    """Register a throwaway adapter under *name* and restore previous on exit."""
 
     class _CustomAdapter(ClassificationPort):
         ADAPTER_NAME = name
@@ -54,11 +54,16 @@ def _registered_custom_adapter(*, name: str = "_custom_test_adapter") -> Iterato
         def classify_document(self, *, doc_name, binary_content, existing_text, document_types):  # type: ignore[override]
             ...
 
+    normalised = name.lower()
+    previous = ClassificationAdapterFactory._REGISTRY.get(normalised)
     ClassificationAdapterFactory.register(_CustomAdapter)
     try:
         yield _CustomAdapter
     finally:
-        ClassificationAdapterFactory._REGISTRY.pop(name, None)
+        if previous is not None:
+            ClassificationAdapterFactory._REGISTRY[normalised] = previous
+        else:
+            ClassificationAdapterFactory._REGISTRY.pop(normalised, None)
 
 
 # ---------------------------------------------------------------------------
@@ -68,9 +73,10 @@ def _registered_custom_adapter(*, name: str = "_custom_test_adapter") -> Iterato
 
 class TestRegistry:
     def test_standard_adapter_is_registered(self) -> None:
-        """StandardLLMClassificationAdapter is registered under 'standard' at import time."""
-        assert "standard" in ClassificationAdapterFactory._REGISTRY
-        assert ClassificationAdapterFactory._REGISTRY["standard"] is StandardLLMClassificationAdapter
+        """StandardLLMClassificationAdapter is registered in _BUILTIN_REGISTRY at import time."""
+        assert "standard" in ClassificationAdapterFactory._BUILTIN_REGISTRY
+        assert ClassificationAdapterFactory._BUILTIN_REGISTRY["standard"] is StandardLLMClassificationAdapter
+        assert "standard" not in ClassificationAdapterFactory._REGISTRY
 
     def test_register_adds_to_registry(self) -> None:
         """register() stores the adapter class under its ADAPTER_NAME."""
@@ -91,9 +97,28 @@ class TestRegistry:
         # clean up so other tests aren't affected
         del ClassificationAdapterFactory._REGISTRY["_fake_test_adapter"]
 
+    @pytest.mark.parametrize("reserved_name", ["litellm", "watsonx", "LiteLLM", "WatsonX"])
+    def test_custom_adapter_cannot_use_reserved_provider_name(self, reserved_name: str) -> None:
+        """Custom adapters cannot register using reserved built-in provider names."""
+
+        class _ReservedAdapter(ClassificationPort):
+            ADAPTER_NAME = reserved_name
+            ADAPTER_DISPLAY_NAME = "Reserved"
+
+            @classmethod
+            def from_config(cls, config: dict[str, Any]) -> "_ReservedAdapter":
+                return cls()
+
+            def classify_document(self, *, doc_name, binary_content, existing_text, document_types):  # type: ignore[override]
+                ...
+
+        with pytest.raises(ValueError, match="Cannot register custom adapter with reserved provider name"):
+            ClassificationAdapterFactory.register(_ReservedAdapter)
+
     def test_get_supported_providers_are_alias_keys_plus_registered_names(self) -> None:
         supported = ClassificationAdapterFactory.get_supported_providers()
-        assert supported == {"litellm", "watsonx", "standard"}
+        assert supported == {"litellm", "watsonx"}
+        assert "standard" not in supported
 
     def test_get_supported_providers_includes_custom_registered_adapter(self) -> None:
         with _registered_custom_adapter():
@@ -126,12 +151,12 @@ class TestAliasResolution:
             ClassificationAdapterFactory.create_adapter(provider="watsonx", config=_WATSONX_CONFIG)
         mock_fc.assert_called_once_with(_WATSONX_CONFIG)
 
-    def test_standard_is_a_valid_provider(self) -> None:
-        """'standard' is a registered ADAPTER_NAME, so it resolves directly as a provider."""
+    def test_standard_is_not_a_valid_provider(self) -> None:
+        """'standard' is the internal ADAPTER_NAME, not a provider string."""
         with patch.object(StandardLLMClassificationAdapter, "from_config") as mock_fc:
-            mock_fc.return_value = MagicMock(spec=StandardLLMClassificationAdapter)
-            ClassificationAdapterFactory.create_adapter(provider="standard", config=_LITELLM_CONFIG)
-        mock_fc.assert_called_once_with(_LITELLM_CONFIG)
+            with pytest.raises(ValueError, match="Unknown classification provider: 'standard'"):
+                ClassificationAdapterFactory.create_adapter(provider="standard", config=_LITELLM_CONFIG)
+        mock_fc.assert_not_called()
 
     def test_registered_adapter_name_is_selectable_as_provider(self) -> None:
         """A custom adapter is selected by its ADAPTER_NAME without registering an alias."""
@@ -139,6 +164,16 @@ class TestAliasResolution:
         with _registered_custom_adapter() as adapter_class:
             result = ClassificationAdapterFactory.create_adapter(provider="_Custom_Test_Adapter", config=config)
         assert isinstance(result, adapter_class)
+
+    def test_custom_adapter_with_standard_name_is_supported(self) -> None:
+        """When a custom adapter registers with ADAPTER_NAME='standard', it overrides the built-in and is supported."""
+        with _registered_custom_adapter(name="standard") as adapter_class:
+            assert "standard" in ClassificationAdapterFactory.get_supported_providers()
+            result = ClassificationAdapterFactory.create_adapter(provider="standard", config={"provider": "standard"})
+            assert isinstance(result, adapter_class)
+
+        # After cleanup, built-in standard adapter is restored and excluded from supported providers
+        assert "standard" not in ClassificationAdapterFactory.get_supported_providers()
 
     def test_provider_string_is_case_insensitive(self) -> None:
         """Provider strings are normalised to lower-case before resolution."""

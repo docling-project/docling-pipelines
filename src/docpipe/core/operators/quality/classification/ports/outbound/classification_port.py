@@ -1,7 +1,7 @@
 """Outbound port interface for document classification adapters."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 from docpipe.core.operators.quality.classification.domain.models import ClassificationResponse
 
@@ -17,6 +17,7 @@ class ClassificationPort(ABC):
             (e.g. ``"standard"``).  The factory's ``register()`` call uses this
             value as the registry key.
         ADAPTER_DISPLAY_NAME: Human-readable label for logs and UI.
+        is_builtin: True for built-in docpipe adapters, False for custom adapters.
 
     The port defines the contract only.  Each adapter parses the config values
     it needs (e.g. ``confidence_threshold``) in its own ``from_config`` /
@@ -27,6 +28,7 @@ class ClassificationPort(ABC):
 
     ADAPTER_NAME: str
     ADAPTER_DISPLAY_NAME: str
+    is_builtin: ClassVar[bool] = False
 
     @classmethod
     @abstractmethod

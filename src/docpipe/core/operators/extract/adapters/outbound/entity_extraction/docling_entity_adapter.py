@@ -29,6 +29,38 @@ logger = get_logger(__name__)
 
 _EXTRACTOR_POOL_KEY_PREFIX = "DocumentExtractor:"
 
+# Explicit allowlist of InlineVlmOptions fields that users may override from
+# the flow JSON's inline_model block. Using an explicit set (rather than an
+# open hasattr() check against the Pydantic model) prevents flow-injection
+# of arbitrary internal pipeline fields.
+# ``revision`` and ``trust_remote_code`` are allowed so that models other than
+# the NuExtract preset can be pinned and loaded; ``trust_remote_code`` executes
+# code from the model repository and is logged as a warning when enabled.
+_ALLOWED_VLM_FIELDS = frozenset(
+    {
+        "extra_generation_config",
+        "extra_processor_kwargs",
+        "inference_framework",
+        "llm_int8_threshold",
+        "load_in_8bit",
+        "max_new_tokens",
+        "max_size",
+        "prompt",
+        "quantized",
+        "repo_id",
+        "response_format",
+        "revision",
+        "scale",
+        "stop_strings",
+        "temperature",
+        "torch_dtype",
+        "transformers_model_type",
+        "transformers_prompt_style",
+        "trust_remote_code",
+        "use_kv_cache",
+    }
+)
+
 
 @register_entity_extraction_adapter
 class DoclingEntityAdapter(EntityExtractionPort):
@@ -48,6 +80,14 @@ class DoclingEntityAdapter(EntityExtractionPort):
 
     ADAPTER_NAME = OperatorConstants.ExtractionModes.ENTITY_MODE_DOCLING
     ADAPTER_DISPLAY_NAME = "Docling"
+    requires_binary_content: bool = True
+    # docling's DocumentExtractor only registers extraction backends for
+    # InputFormat.PDF and InputFormat.IMAGE (docling.document_extractor
+    # _get_default_extraction_option); other formats raise at extraction time.
+    supported_extensions: frozenset[str] | None = frozenset(
+        OperatorConstants.FileExtensions.DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY
+    )
+    _ALLOWED_VLM_FIELDS = _ALLOWED_VLM_FIELDS
 
     def __init__(self, *, config: dict[str, Any]) -> None:
         """Initialize the adapter with configuration.
@@ -83,9 +123,14 @@ class DoclingEntityAdapter(EntityExtractionPort):
                 raise ValueError(msg)
 
             model_type = vlm_pipeline.get(DoclingClientConfigConstants.MODEL_TYPE)
+
+            # Only validate model_type when it is explicitly provided
             if model_type is not None:
                 if not isinstance(model_type, str):
-                    msg = f"'{DoclingClientConfigConstants.VLM_PIPELINE}.{DoclingClientConfigConstants.MODEL_TYPE}' must be a string"
+                    msg = (
+                        f"'{DoclingClientConfigConstants.VLM_PIPELINE}.{DoclingClientConfigConstants.MODEL_TYPE}'"
+                        " must be a string"
+                    )
                     raise ValueError(msg)
                 if model_type != DoclingClientConfigConstants.MODEL_TYPE_INLINE:
                     msg = (
@@ -95,25 +140,30 @@ class DoclingEntityAdapter(EntityExtractionPort):
                     )
                     raise ValueError(msg)
 
-                # Validate inline model config
+                # inline_model is required when model_type == "inline"
                 inline_config = vlm_pipeline.get(DoclingClientConfigConstants.INLINE_MODEL)
                 if inline_config is None:
                     msg = (
                         f"'{DoclingClientConfigConstants.VLM_PIPELINE}.{DoclingClientConfigConstants.INLINE_MODEL}'"
-                        f" is required when model_type is '{DoclingClientConfigConstants.MODEL_TYPE_INLINE}'"
+                        " is required"
                     )
                     raise ValueError(msg)
                 if not isinstance(inline_config, dict):
-                    msg = f"'{DoclingClientConfigConstants.VLM_PIPELINE}.{DoclingClientConfigConstants.INLINE_MODEL}' must be a dictionary"
+                    msg = (
+                        f"'{DoclingClientConfigConstants.VLM_PIPELINE}.{DoclingClientConfigConstants.INLINE_MODEL}'"
+                        " must be a dictionary"
+                    )
                     raise ValueError(msg)
-                if DoclingClientConfigConstants.REPO_ID not in inline_config:
+
+                repo_id = inline_config.get(DoclingClientConfigConstants.REPO_ID)
+                if repo_id is None:
                     msg = (
                         f"'{DoclingClientConfigConstants.VLM_PIPELINE}"
                         f".{DoclingClientConfigConstants.INLINE_MODEL}"
                         f".{DoclingClientConfigConstants.REPO_ID}' is required"
                     )
                     raise ValueError(msg)
-                if not isinstance(inline_config[DoclingClientConfigConstants.REPO_ID], str):
+                if not isinstance(repo_id, str):
                     msg = (
                         f"'{DoclingClientConfigConstants.VLM_PIPELINE}"
                         f".{DoclingClientConfigConstants.INLINE_MODEL}"
@@ -194,54 +244,44 @@ class DoclingEntityAdapter(EntityExtractionPort):
             return None
 
         try:
-            from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
+            from docling.backend.image_backend import ImageDocumentBackend
             from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
             from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import VlmPipelineOptions
-            from docling.datamodel.pipeline_options_vlm_model import InlineVlmOptions
+            from docling.datamodel.pipeline_options import VlmExtractionPipelineOptions
             from docling.document_extractor import ExtractionFormatOption
             from docling.pipeline.extraction_vlm_pipeline import ExtractionVlmPipeline
 
             model_type = vlm_pipeline.get(DoclingClientConfigConstants.MODEL_TYPE)
 
-            if model_type == DoclingClientConfigConstants.MODEL_TYPE_INLINE:
-                inline_config = vlm_pipeline.get(DoclingClientConfigConstants.INLINE_MODEL, {})
-                vlm_options = InlineVlmOptions(
-                    repo_id=inline_config[DoclingClientConfigConstants.REPO_ID],
-                    inference_framework=inline_config.get(
-                        DoclingClientConfigConstants.INFERENCE_FRAMEWORK,
-                        DoclingClientConfigConstants.DEFAULT_INFERENCE_FRAMEWORK,
-                    ),
-                    scale=inline_config.get(
-                        DoclingClientConfigConstants.SCALE, DoclingClientConfigConstants.DEFAULT_SCALE
-                    ),
-                    temperature=inline_config.get(
-                        DoclingClientConfigConstants.TEMPERATURE, DoclingClientConfigConstants.DEFAULT_TEMPERATURE
-                    ),
-                    max_new_tokens=inline_config.get(
-                        DoclingClientConfigConstants.MAX_NEW_TOKENS, DoclingClientConfigConstants.DEFAULT_MAX_NEW_TOKENS
-                    ),
-                    load_in_8bit=inline_config.get(
-                        DoclingClientConfigConstants.LOAD_IN_8BIT, DoclingClientConfigConstants.DEFAULT_LOAD_IN_8BIT
-                    ),
-                    torch_dtype=inline_config.get(
-                        DoclingClientConfigConstants.TORCH_DTYPE, DoclingClientConfigConstants.DEFAULT_TORCH_DTYPE
-                    ),
-                    prompt=inline_config.get(
-                        DoclingClientConfigConstants.PROMPT, DoclingClientConfigConstants.DEFAULT_PROMPT
-                    ),
-                    response_format=inline_config.get(
-                        DoclingClientConfigConstants.RESPONSE_FORMAT,
-                        DoclingClientConfigConstants.DEFAULT_RESPONSE_FORMAT,
-                    ),
-                )
-            else:
+            if model_type != DoclingClientConfigConstants.MODEL_TYPE_INLINE:
                 return None
 
-            # Build pipeline options
-            pipeline_options = VlmPipelineOptions(vlm_options=vlm_options)
+            inline_config = vlm_pipeline.get(DoclingClientConfigConstants.INLINE_MODEL, {})
+            # Start from the default InlineVlmOptions preset bundled inside
+            # VlmExtractionPipelineOptions (NuExtract-2.0-2B) and apply only
+            # the explicitly allowed user-facing fields from inline_config.
+            allowed = _ALLOWED_VLM_FIELDS
+            user_fields = {k: v for k, v in inline_config.items() if k in allowed}
+            ignored = set(inline_config) - set(user_fields)
+            if ignored:
+                logger.warning("Ignoring unrecognised inline_model keys: %s", ", ".join(sorted(ignored)))
+            base_vlm_options = VlmExtractionPipelineOptions().vlm_options
+            # The preset pins ``revision`` to a commit of its own repo. Reusing that hash
+            # with a different repo_id would fail to resolve, so fall back to the default
+            # branch unless the user supplies a revision explicitly.
+            if "repo_id" in user_fields and user_fields["repo_id"] != base_vlm_options.repo_id:
+                user_fields.setdefault("revision", "main")
+            if user_fields.get("trust_remote_code"):
+                logger.warning(
+                    "inline_model.trust_remote_code is enabled for '%s'; code from the model repository will be executed",
+                    user_fields.get("repo_id", base_vlm_options.repo_id),
+                )
+            vlm_options = base_vlm_options.model_copy(update=user_fields)
+            pipeline_options = VlmExtractionPipelineOptions(vlm_options=vlm_options)
 
-            # Build extraction format options for both PDF and IMAGE formats
+            # Build extraction format options for both PDF and IMAGE formats.
+            # IMAGE must use ImageDocumentBackend: the PDF backends (pypdfium2,
+            # docling-parse) reject InputFormat.IMAGE and the document fails to open.
             return {
                 InputFormat.PDF: ExtractionFormatOption(
                     pipeline_cls=ExtractionVlmPipeline,
@@ -251,7 +291,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
                 InputFormat.IMAGE: ExtractionFormatOption(
                     pipeline_cls=ExtractionVlmPipeline,
                     pipeline_options=pipeline_options,
-                    backend=DoclingParseDocumentBackend,
+                    backend=ImageDocumentBackend,
                 ),
             }
 
@@ -304,6 +344,21 @@ class DoclingEntityAdapter(EntityExtractionPort):
         # Delegate to service for orchestration
         return service.transform(table=table, metadata=metadata)
 
+    INVALID_JSON_ERROR = "Extracted text is not valid JSON"
+
+    @staticmethod
+    def _parse_raw_text(*, raw_text: str) -> Any | None:
+        """Parse the first JSON value in raw_text, ignoring trailing characters.
+
+        Returns:
+            The parsed value, or None if raw_text does not start with valid JSON.
+        """
+        try:
+            value, _ = json.JSONDecoder().raw_decode(raw_text.strip())
+        except json.JSONDecodeError:
+            return None
+        return value if isinstance(value, (dict, list)) else None
+
     def extract_entities_single(
         self, *, doc_id: str, doc_name: str, content: str | bytes, schema: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -315,7 +370,9 @@ class DoclingEntityAdapter(EntityExtractionPort):
         Args:
             doc_id: Document identifier
             doc_name: Document name for logging
-            content: Document text content (str) or binary content (bytes)
+            content: Raw file bytes (preferred) or extracted text. The streaming
+                pipeline passes raw bytes when available so DocumentExtractor
+                receives the original PDF/image rather than extracted markdown.
             schema: Optional schema dictionary for structured extraction
 
         Returns:
@@ -333,8 +390,7 @@ class DoclingEntityAdapter(EntityExtractionPort):
             from docling.datamodel.base_models import InputFormat
             from docling_core.types.io import DocumentStream
 
-            # Handle both str and bytes content
-            content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+            content_bytes = content if isinstance(content, bytes) else content.encode("utf-8")
 
             # Create DocumentStream from binary content (no temporary file needed)
             doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(content_bytes))
@@ -368,19 +424,24 @@ class DoclingEntityAdapter(EntityExtractionPort):
             pages_data = []
             for page in result.pages:
                 extracted_data = page.extracted_data
+                page_errors = list(page.errors or [])
 
-                # If extracted_data is None but raw_text contains JSON, parse it
+                # Docling leaves extracted_data=None without an error when its strict
+                # json.loads fails (e.g. trailing characters). Retry leniently on raw_text.
                 if extracted_data is None and page.raw_text:
-                    try:
-                        extracted_data = json.loads(page.raw_text)
-                    except json.JSONDecodeError:
-                        # If not valid JSON, keep as None
-                        pass
+                    extracted_data = self._parse_raw_text(raw_text=page.raw_text)
+                    if extracted_data is None:
+                        logger.warning(
+                            "Extracted text for %s page %s is not valid JSON; no entities extracted",
+                            doc_name,
+                            page.page_no,
+                        )
+                        page_errors.append(self.INVALID_JSON_ERROR)
 
                 page_dict = {
                     OperatorConstants.Extraction.PAGE_NO: page.page_no,
                     OperatorConstants.Columns.EXTRACTED_DATA: extracted_data,
-                    OperatorConstants.Extraction.ERRORS: page.errors,
+                    OperatorConstants.Extraction.ERRORS: page_errors,
                 }
                 pages_data.append(page_dict)
             logger.info("Saved structured results for %s", doc_name)
@@ -422,36 +483,6 @@ class DoclingEntityAdapter(EntityExtractionPort):
                 allowed_formats=allowed_formats, extraction_format_options=extraction_format_options
             )
         return DocumentExtractor(allowed_formats=allowed_formats)
-
-    def _prepare_document_tasks(
-        self, table: Any, document_types: list[str], metadata: dict[str, Any]
-    ) -> list[dict[str, Any]]:
-        """Prepare document tasks with binary content for Docling processing.
-
-        This override fetches binary content from the table instead of text content,
-        using on-demand fetching to support both local files and cloud sources.
-        It looks for columns in this order of preference:
-        1. "binary_content" (pre-loaded)
-        2. "path" or "source_id" (fetched on-demand from local or cloud)
-
-        Args:
-            table: PyArrow table containing document data
-            document_types: List of document types corresponding to table rows
-            metadata: Metadata dictionary for recording skipped documents
-
-        Returns:
-            List of task dictionaries with binary content
-        """
-        doc_tasks: list[dict[str, Any]] = OperatorUtils.prepare_document_content_fetch(
-            table=table,
-            global_config=self.global_config,
-            supported_extensions=set(OperatorConstants.FileExtensions.DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY),
-        )
-
-        for doc_task in doc_tasks:
-            row_idx = doc_task["idx"]
-            doc_task.update({"document_type": document_types[row_idx] if document_types else None})
-        return doc_tasks
 
     def _load_schema_templates(self, *, document_types: list[str], schema_templates: dict[str, dict]) -> None:
         """Load schema templates for given document types.

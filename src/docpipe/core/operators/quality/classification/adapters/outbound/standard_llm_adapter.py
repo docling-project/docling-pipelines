@@ -11,7 +11,7 @@ The factory is a pure dispatcher and never contains adapter-specific logic.
 """
 
 from dataclasses import replace
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 from docpipe.core.adapters.llm_adapter_factory import LLMAdapterFactory
 from docpipe.core.constants.constants import LLMConstants
@@ -218,15 +218,14 @@ class StandardLLMClassificationAdapter(ClassificationPort):
     live in :meth:`from_config`, making the factory a pure dispatcher.
 
     Class attributes:
-        ADAPTER_NAME: ``"standard"`` — the key under which this adapter is
-            registered in :class:`ClassificationAdapterFactory`.  Like every
-            registered ``ADAPTER_NAME`` it is also accepted as a ``provider``
-            value in a flow.
+        ADAPTER_NAME: ``"standard"`` — internal registry key, selected via
+            ``"litellm"`` or ``"watsonx"``.
         ADAPTER_DISPLAY_NAME: Human-readable label.
     """
 
     ADAPTER_NAME = "standard"
     ADAPTER_DISPLAY_NAME = "Standard LLM Classifier"
+    is_builtin: ClassVar[bool] = True
 
     def __init__(self, *, llm_adapter: LLMInferencePort, config: dict[str, Any]) -> None:
         """Build the adapter with a pre-built LLM port.

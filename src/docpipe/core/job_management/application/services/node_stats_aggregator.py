@@ -13,9 +13,6 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.job_management.application.aggregation import MetadataAggregator, aggregate_batch_node_stats
 from docpipe.core.job_management.domain.models import NodeStats
 from docpipe.core.job_management.domain.ports import JobStatsStore
-from docpipe.utils.infrastructure.logging import get_logger
-
-logger = get_logger()
 
 
 class NodeStatsAggregator:
@@ -65,12 +62,8 @@ class NodeStatsAggregator:
         if not all_records:
             return {}
 
-        records_list = self._normalise_records(all_records)
-        if records_list is None:
-            return {}
-
-        batch_records = [r for r in records_list if getattr(r, DocpipeConstants.BATCH_ID, None) is not None]
-        non_batch_records = [r for r in records_list if getattr(r, DocpipeConstants.BATCH_ID, None) is None]
+        batch_records = [r for r in all_records if getattr(r, DocpipeConstants.BATCH_ID, None) is not None]
+        non_batch_records = [r for r in all_records if getattr(r, DocpipeConstants.BATCH_ID, None) is None]
 
         result = self._aggregate_batch_records(batch_records)
 
@@ -81,18 +74,6 @@ class NodeStatsAggregator:
                 result[node_id] = record
 
         return result
-
-    def _normalise_records(self, all_records: dict | list) -> list[NodeStats] | None:
-        """Coerce the raw store return value to a flat list of NodeStats records.
-
-        Returns None when the type is unrecognised (and logs an error).
-        """
-        if isinstance(all_records, dict):
-            return list(all_records.values())
-        if isinstance(all_records, list):
-            return all_records
-        logger.error("Unexpected return type from get_node_stats: %s", type(all_records))
-        return None
 
     def _aggregate_batch_records(self, batch_records: list[NodeStats]) -> dict[str, NodeStats]:
         """Group batch records by node and return one aggregated NodeStats per node.
@@ -118,11 +99,9 @@ class NodeStatsAggregator:
             if all_pending:
                 continue
 
-            aggregated_stats = aggregate_batch_node_stats(
+            result[node_id] = aggregate_batch_node_stats(
                 node_id=node_id, batch_records=node_batch_records, aggregator=self.metadata_aggregator
             )
-            if aggregated_stats:
-                result[node_id] = aggregated_stats
 
         return result
 

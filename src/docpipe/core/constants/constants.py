@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project-wide string constants, enums, and configuration keys for docpipe."""
 
 import os
@@ -115,6 +118,7 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
     TMP = "tmp"
@@ -125,7 +129,7 @@ class DocpipeConstants:
 
     # Custom Operator Control
     ENABLE_CUSTOM_OPERATORS = "enable_custom_operators"
-    ENABLE_CUSTOM_OPERATORS_DEFAULT = True
+    ENABLE_CUSTOM_OPERATORS_DEFAULT = False
 
     # Operator Ownership Tiers
     OWNER_DOCPIPE = "docpipe"

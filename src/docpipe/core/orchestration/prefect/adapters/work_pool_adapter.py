@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 WorkPoolAdapter - Distributed batch execution via Prefect work pools.
 
@@ -191,9 +194,11 @@ class WorkPoolAdapter(BatchExecutionPort):
         5. Release slot and repeat for remaining batches
         """
         self.prefect_engine.logger.info(
-            f"Executing {len(batches)} batches using WorkPool strategy "
-            f"(pool={self.work_pool_name}, type={self.work_pool_type}, "
-            f"storage={self.batch_storage_type.value})",
+            "Executing %s batches using WorkPool strategy (pool=%s, type=%s, storage=%s)",
+            len(batches),
+            self.work_pool_name,
+            self.work_pool_type,
+            self.batch_storage_type.value,
             extra={"job_run_id": job_run_id},
         )
 
@@ -266,7 +271,7 @@ class WorkPoolAdapter(BatchExecutionPort):
         submission_semaphore = asyncio.Semaphore(5)
 
         self.prefect_engine.logger.info(
-            f"Using submission semaphore with {max_concurrent} slots", extra={"job_run_id": job_run_id}
+            "Using submission semaphore with %s slots", max_concurrent, extra={"job_run_id": job_run_id}
         )
 
         # One shared box for all batches — each task increments the same counter.
@@ -313,7 +318,7 @@ class WorkPoolAdapter(BatchExecutionPort):
             still_running = [t for t in running_tasks if not t.done()]
             if still_running:
                 self.prefect_engine.logger.warning(
-                    f"Cancelling {len(still_running)} background submission tasks", extra={"job_run_id": job_run_id}
+                    "Cancelling %s background submission tasks", len(still_running), extra={"job_run_id": job_run_id}
                 )
                 for t in still_running:
                     t.cancel()
@@ -351,7 +356,7 @@ class WorkPoolAdapter(BatchExecutionPort):
                     self._resolve_finished_runs(flow_runs=flow_runs, pending_runs=pending_runs)
                 except Exception as e:
                     self.prefect_engine.logger.warning(
-                        f"Bulk poller encountered an error: {e}", extra={"job_run_id": job_run_id}
+                        "Bulk poller encountered an error: %s", e, extra={"job_run_id": job_run_id}
                     )
 
     async def _run_single_batch(
@@ -402,10 +407,11 @@ class WorkPoolAdapter(BatchExecutionPort):
                 )
             except Exception as e:
                 failed_info.append({"batch_num": batch_info.batch_num, "run_id": "N/A", "message": str(e)})
-                self.prefect_engine.logger.error(
-                    f"Exception in batch {batch_info.batch_num}: {e}",
+                self.prefect_engine.logger.exception(
+                    "Exception in batch %s: %s",
+                    batch_info.batch_num,
+                    e,
                     extra={"job_run_id": job_run_id},
-                    exc_info=True,
                 )
 
     async def _submit_batch_flow_run(
@@ -448,7 +454,9 @@ class WorkPoolAdapter(BatchExecutionPort):
             submitted_runs.append(flow_run_result)
             flow_run_id = str(flow_run_result.id)
             self.prefect_engine.logger.info(
-                f"Batch {batch_info.batch_num} submitted: flow_run_id={flow_run_id}",
+                "Batch %s submitted: flow_run_id=%s",
+                batch_info.batch_num,
+                flow_run_id,
                 extra={"job_run_id": job_run_id},
             )
             return flow_run_id
@@ -490,7 +498,8 @@ class WorkPoolAdapter(BatchExecutionPort):
             # A run that finished without a state is a failure, not a no-op.
             # Dropping it here would let the job report success with a batch missing.
             self.prefect_engine.logger.error(
-                f"Batch {batch_info.batch_num} NOT completed — no state on flow run",
+                "Batch %s NOT completed — no state on flow run",
+                batch_info.batch_num,
                 extra={"job_run_id": job_run_id},
             )
             failed_info.append(
@@ -504,15 +513,18 @@ class WorkPoolAdapter(BatchExecutionPort):
         if state.is_completed() or str(state.name).lower() == "completed":
             completed_count_ref[0] += 1
             self.prefect_engine.logger.info(
-                f"Batch {batch_info.batch_num} completed successfully", extra={"job_run_id": job_run_id}
+                "Batch %s completed successfully", batch_info.batch_num, extra={"job_run_id": job_run_id}
             )
         else:
             state_type_str = getattr(getattr(state, "type", None), "value", "N/A")
             state_name_str = getattr(state, "name", "N/A")
             state_msg = state.message
             self.prefect_engine.logger.error(
-                f"Batch {batch_info.batch_num} NOT completed — "
-                f"state_type={state_type_str}, state_name={state_name_str}, message={state_msg}",
+                "Batch %s NOT completed — state_type=%s, state_name=%s, message=%s",
+                batch_info.batch_num,
+                state_type_str,
+                state_name_str,
+                state_msg,
                 extra={"job_run_id": job_run_id},
             )
             failed_info.append(
@@ -590,7 +602,10 @@ class WorkPoolAdapter(BatchExecutionPort):
             pq.write_table(batch_table, f"{self.batch_storage_bucket}/{s3_key}", filesystem=s3_fs)
 
             self.prefect_engine.logger.info(
-                f"Batch {batch_num}: written to S3 ({len(batch_table)} rows) → {s3_uri}",
+                "Batch %s: written to S3 (%s rows) -> %s",
+                batch_num,
+                len(batch_table),
+                s3_uri,
                 extra={"job_run_id": job_run_id},
             )
 
@@ -622,7 +637,10 @@ class WorkPoolAdapter(BatchExecutionPort):
             pq.write_table(batch_table, local_path)
 
             self.prefect_engine.logger.info(
-                f"Batch {batch_num}: written to local ({len(batch_table)} rows) → {local_path}",
+                "Batch %s: written to local (%s rows) -> %s",
+                batch_num,
+                len(batch_table),
+                local_path,
                 extra={"job_run_id": job_run_id},
             )
 
@@ -668,7 +686,10 @@ class WorkPoolAdapter(BatchExecutionPort):
         warning_threshold = int(size_limit * BatchStrategyConstants.INLINE_SIZE_WARNING_THRESHOLD)
 
         self.prefect_engine.logger.info(
-            f"Batch {batch_num}: serialized inline ({len(batch_table)} rows, {size_bytes:,} bytes)",
+            "Batch %s: serialized inline (%s rows, %s bytes)",
+            batch_num,
+            len(batch_table),
+            size_bytes,
             extra={"job_run_id": job_run_id, "size_bytes": size_bytes},
         )
 
@@ -686,10 +707,12 @@ class WorkPoolAdapter(BatchExecutionPort):
             )
         if size_bytes > warning_threshold:
             self.prefect_engine.logger.warning(
-                f"Batch {batch_num}: size {size_bytes:,} bytes approaching "
-                f"Prefect parameter limit ({size_limit:,} bytes, controlled by PREFECT_SERVER_API_MAX_PARAMETER_SIZE). "
-                f"Consider configuring batch_storage.type='s3' or 'local' for better performance, "
-                f"or increase PREFECT_SERVER_API_MAX_PARAMETER_SIZE on Prefect Server.",
+                "Batch %s: size %s bytes approaching Prefect parameter limit (%s bytes, controlled by "
+                "PREFECT_SERVER_API_MAX_PARAMETER_SIZE). Consider configuring batch_storage.type='s3' or "
+                "'local' for better performance, or increase PREFECT_SERVER_API_MAX_PARAMETER_SIZE on Prefect Server.",
+                batch_num,
+                size_bytes,
+                size_limit,
                 extra={"job_run_id": job_run_id},
             )
 
@@ -710,11 +733,13 @@ class WorkPoolAdapter(BatchExecutionPort):
                 flow_run_id=flow_run.id,
                 state=Cancelling(message="Cancelled due to batch failure (fail-fast)"),
             )
-            self.prefect_engine.logger.info(f"Cancelled flow_run={flow_run.id}", extra={"job_run_id": job_run_id})
+            self.prefect_engine.logger.info("Cancelled flow_run=%s", flow_run.id, extra={"job_run_id": job_run_id})
             return flow_run.id
         except Exception as e:
             self.prefect_engine.logger.warning(
-                f"Failed to cancel flow_run={flow_run.id}: {e}",
+                "Failed to cancel flow_run=%s: %s",
+                flow_run.id,
+                e,
                 extra={"job_run_id": job_run_id},
             )
             return None
@@ -724,14 +749,16 @@ class WorkPoolAdapter(BatchExecutionPort):
         from prefect.client.schemas.filters import FlowRunFilter, FlowRunFilterId
 
         self.prefect_engine.logger.info(
-            f"Waiting for {len(pending_runs)} flow runs to reach terminal state...",
+            "Waiting for %s flow runs to reach terminal state...",
+            len(pending_runs),
             extra={"job_run_id": job_run_id},
         )
         start_wait = asyncio.get_event_loop().time()
         while pending_runs:
             if asyncio.get_event_loop().time() - start_wait > 60:
                 self.prefect_engine.logger.warning(
-                    f"Timeout waiting for {len(pending_runs)} flow runs to terminate",
+                    "Timeout waiting for %s flow runs to terminate",
+                    len(pending_runs),
                     extra={"job_run_id": job_run_id},
                 )
                 break
@@ -741,7 +768,7 @@ class WorkPoolAdapter(BatchExecutionPort):
                 pending_runs[:] = [run.id for run in runs if run.state and not run.state.is_final()]
             except Exception as e:
                 self.prefect_engine.logger.warning(
-                    f"Error while polling cancelled runs: {e}", extra={"job_run_id": job_run_id}
+                    "Error while polling cancelled runs: %s", e, extra={"job_run_id": job_run_id}
                 )
 
     async def _cancel_remaining_runs_async(self, *, flow_runs: list[FlowRun], job_run_id: str) -> None:
@@ -778,7 +805,8 @@ class WorkPoolAdapter(BatchExecutionPort):
             job_run_id: Parent job run ID for logging context
         """
         self.prefect_engine.logger.warning(
-            f"Triggering fail-fast cancellation for {len(flow_runs)} remaining flow runs",
+            "Triggering fail-fast cancellation for %s remaining flow runs",
+            len(flow_runs),
             extra={"job_run_id": job_run_id},
         )
 
@@ -791,10 +819,10 @@ class WorkPoolAdapter(BatchExecutionPort):
                         state=Cancelling(message=f"Cancelled due to failure in flow run {failed_run_id}"),
                         force=True,
                     )
-                    self.prefect_engine.logger.info(f"Cancelled flow run {fr.id}", extra={"job_run_id": job_run_id})
+                    self.prefect_engine.logger.info("Cancelled flow run %s", fr.id, extra={"job_run_id": job_run_id})
                 except Exception as cancel_error:
                     self.prefect_engine.logger.warning(
-                        f"Could not cancel flow run {fr.id}: {cancel_error}", extra={"job_run_id": job_run_id}
+                        "Could not cancel flow run %s: %s", fr.id, cancel_error, extra={"job_run_id": job_run_id}
                     )
 
     @staticmethod
@@ -833,7 +861,9 @@ class WorkPoolAdapter(BatchExecutionPort):
                     )
 
             self.prefect_engine.logger.info(
-                f"Prefect Server connection verified (pool={self.work_pool_name}, deployment={self.deployment_name})"
+                "Prefect Server connection verified (pool=%s, deployment=%s)",
+                self.work_pool_name,
+                self.deployment_name,
             )
         except ValueError:
             raise
@@ -861,11 +891,11 @@ class WorkPoolAdapter(BatchExecutionPort):
 
         # Delegate to JobManagementFactory for resolving job management environment
         try:
-            factory = JobManagementFactory.from_default_sources()
+            factory = JobManagementFactory.create_default_factory()
             job_management_env = factory.resolve_worker_env()
             resolved_env.update(job_management_env)
         except Exception as exc:
-            logger.warning(f"Failed to resolve job management environment for work pool propagation: {exc}")
+            logger.warning("Failed to resolve job management environment for work pool propagation: %s", exc)
 
         return resolved_env
 
@@ -946,8 +976,10 @@ class WorkPoolAdapter(BatchExecutionPort):
         from docpipe.core.orchestration.prefect.batch_subflow import batch_subflow
 
         self.prefect_engine.logger.info(
-            f"Ensuring deployment exists: {self.deployment_name} "
-            f"(work_pool={self.work_pool_name}, type={self.work_pool_type})"
+            "Ensuring deployment exists: %s (work_pool=%s, type=%s)",
+            self.deployment_name,
+            self.work_pool_name,
+            self.work_pool_type,
         )
 
         try:
@@ -959,7 +991,7 @@ class WorkPoolAdapter(BatchExecutionPort):
             deployment_params = self._build_deployment_params(flow_id=flow_obj.id)
 
             deployment_id = client.create_deployment(**deployment_params)
-            self.prefect_engine.logger.info(f"Deployment created: {self.deployment_name} (id={deployment_id})")
+            self.prefect_engine.logger.info("Deployment created: %s (id=%s)", self.deployment_name, deployment_id)
         except Exception as e:
             raise RuntimeError(self._deployment_failure_message(error=e)) from e
 
@@ -968,21 +1000,21 @@ class WorkPoolAdapter(BatchExecutionPort):
         try:
             existing = client.read_deployment_by_name(f"{flow_name}/{self.deployment_name}")
         except Exception:
-            self.prefect_engine.logger.info(f"Deployment not found, will create: {self.deployment_name}")
+            self.prefect_engine.logger.info("Deployment not found, will create: %s", self.deployment_name)
             return False
-        self.prefect_engine.logger.info(f"Deployment exists: {self.deployment_name} (id={existing.id})")
+        self.prefect_engine.logger.info("Deployment exists: %s (id=%s)", self.deployment_name, existing.id)
         return True
 
     def _register_flow_if_needed(self, *, client: Any, batch_subflow: Any) -> Any:
         """Return the registered flow object, registering the flow first if needed."""
         try:
             flow_obj = client.read_flow_by_name(batch_subflow.name)
-            self.prefect_engine.logger.info(f"Flow already registered: {batch_subflow.name} (id={flow_obj.id})")
+            self.prefect_engine.logger.info("Flow already registered: %s (id=%s)", batch_subflow.name, flow_obj.id)
             return flow_obj
         except Exception:
-            self.prefect_engine.logger.info(f"Registering flow: {batch_subflow.name}")
+            self.prefect_engine.logger.info("Registering flow: %s", batch_subflow.name)
             flow_id = client.create_flow(batch_subflow)
-            self.prefect_engine.logger.info(f"Flow registered: {batch_subflow.name} (id={flow_id})")
+            self.prefect_engine.logger.info("Flow registered: %s (id=%s)", batch_subflow.name, flow_id)
             # Read the flow object back for deployment creation
             return client.read_flow_by_name(batch_subflow.name)
 
@@ -1028,8 +1060,9 @@ class WorkPoolAdapter(BatchExecutionPort):
         if is_process:
             worker_code_dir = configured_path or str(Path.cwd())
             self.prefect_engine.logger.info(
-                f"Process work pool: worker code directory = {worker_code_dir}"
-                f" (source={'config' if configured_path else 'Path.cwd()'})"
+                "Process work pool: worker code directory = %s (source=%s)",
+                worker_code_dir,
+                "config" if configured_path else "Path.cwd()",
             )
             return {
                 "path": worker_code_dir,
@@ -1038,8 +1071,9 @@ class WorkPoolAdapter(BatchExecutionPort):
 
         deployment_path = configured_path or BatchStrategyConstants.DEFAULT_DEPLOYMENT_PATH
         self.prefect_engine.logger.info(
-            f"Container work pool: deployment path = {deployment_path}"
-            f" (source={'config' if configured_path else 'default'})"
+            "Container work pool: deployment path = %s (source=%s)",
+            deployment_path,
+            "config" if configured_path else "default",
         )
         return {"path": deployment_path, "pull_steps": []}
 
@@ -1049,8 +1083,10 @@ class WorkPoolAdapter(BatchExecutionPort):
             return
         docker_job_vars = self._build_job_variables() or {}
         self.prefect_engine.logger.info(
-            f"Configured Docker work pool with image: {self.work_pool_runtime_config.image}, "
-            f"networks: {self.work_pool_runtime_config.networks}, env vars: {len(docker_job_vars.get('env', {}))}"
+            "Configured Docker work pool with image: %s, networks: %s, env vars: %s",
+            self.work_pool_runtime_config.image,
+            self.work_pool_runtime_config.networks,
+            len(docker_job_vars.get("env", {})),
         )
 
     def _deployment_failure_message(self, *, error: Exception) -> str:
@@ -1086,20 +1122,21 @@ class WorkPoolAdapter(BatchExecutionPort):
                 if batch_dir.exists():
                     shutil.rmtree(batch_dir)
                     self.prefect_engine.logger.info(
-                        f"Cleaned up batch storage: {batch_dir}", extra={"job_run_id": job_run_id}
+                        "Cleaned up batch storage: %s", batch_dir, extra={"job_run_id": job_run_id}
                     )
             except Exception as e:
                 self.prefect_engine.logger.warning(
-                    f"Could not clean up batch storage: {e}", extra={"job_run_id": job_run_id}
+                    "Could not clean up batch storage: %s", e, extra={"job_run_id": job_run_id}
                 )
 
         elif self.batch_storage_type == BatchStorageType.S3:
             # S3 cleanup is more complex and should be done via lifecycle policies
             # or a separate cleanup process. Log a note for now.
             self.prefect_engine.logger.info(
-                f"S3 batch data at s3://{self.batch_storage_bucket}/"
-                f"{self.batch_storage_prefix}{job_run_id}/ can be cleaned up "
-                f"via S3 lifecycle policies.",
+                "S3 batch data at s3://%s/%s%s/ can be cleaned up via S3 lifecycle policies.",
+                self.batch_storage_bucket,
+                self.batch_storage_prefix,
+                job_run_id,
                 extra={"job_run_id": job_run_id},
             )
 

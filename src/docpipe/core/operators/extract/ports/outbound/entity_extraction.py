@@ -50,6 +50,9 @@ class EntityExtractionPort(ABC):
 
     ADAPTER_NAME: str = "base"
     ADAPTER_DISPLAY_NAME: str = "Base Adapter"
+    requires_binary_content: bool = False
+    # Lower-case extensions (with leading dot) the adapter can process; None = no restriction.
+    supported_extensions: frozenset[str] | None = None
 
     def __init__(self, *, config: dict[str, Any]) -> None:
         """Initialize the entity extraction port with configuration.

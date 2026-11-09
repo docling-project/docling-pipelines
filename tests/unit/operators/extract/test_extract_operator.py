@@ -1103,7 +1103,7 @@ def test_extract_operator_docling_library_with_entity_extraction_litellm_schema(
     mocked_entities = {
         "person_name": "John Doe",
         "invoice_date": "2024-01-15",
-        "total_amount": 1500.0,
+        "total_amount": "1500.0",
     }
 
     with patch("docpipe.core.adapters.litellm.litellm_adapter.LiteLLMLLMClient") as mock_litellm_class:
@@ -1253,7 +1253,7 @@ def test_extract_operator_docling_library_with_entity_extraction_litellm_expande
     mocked_entities = {
         "person_name": "Alex Johnson",
         "invoice_date": "2024-03-01",
-        "total_amount": 2750.5,
+        "total_amount": "2750.5",
     }
 
     with patch("docpipe.core.adapters.litellm.litellm_adapter.LiteLLMLLMClient") as mock_litellm_class:
@@ -3115,3 +3115,97 @@ def test_extract_operator_valid_max_workers_passed_through() -> None:
             }
         )
         assert mock_create.call_args.kwargs["max_workers"] == 8
+
+
+# ── requires_binary_content branch of the streaming pipeline ─────────────────
+
+
+def _run_streaming_with_binary_adapter(*, names: list[str], binary: list[bytes | None], supported):
+    """Run the streaming pipeline with an entity adapter that requires raw bytes."""
+    import pyarrow as pa
+
+    operator = _make_operator_with_mocks()
+    operator.entity_adapter.requires_binary_content = True
+    operator.entity_adapter.supported_extensions = supported
+    operator.entity_adapter.extract_entities_single = MagicMock(return_value=_fake_entity_result())
+    operator.text_adapter.extract_single_document = MagicMock(
+        side_effect=lambda *, file_path, binary_content, **kw: _fake_text_result(content=f"text for {file_path}")
+    )
+    table = pa.table(
+        {
+            "id": [f"doc_{i}" for i in range(len(names))],
+            "name": names,
+            "path": [f"/tmp/{n}" for n in names],
+            "binary_content": binary,
+        },
+        schema=pa.schema(
+            [("id", pa.string()), ("name", pa.string()), ("path", pa.string()), ("binary_content", pa.binary())]
+        ),
+    )
+    metadata = operator.create_base_metadata(total_docs_count=table.num_rows)
+    result_tables, result_meta = operator._run_streaming_pipeline(table=table, metadata=metadata)
+    return operator, result_tables, result_meta
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_binary_adapter_receives_bytes():
+    """Adapters with requires_binary_content=True get the original file bytes, not extracted text."""
+    operator, _, _ = _run_streaming_with_binary_adapter(
+        names=["a.pdf"], binary=[b"%PDF-raw-bytes"], supported=frozenset({".pdf"})
+    )
+
+    call = operator.entity_adapter.extract_entities_single.call_args
+    assert call.kwargs["content"] == b"%PDF-raw-bytes"
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_text_adapter_receives_extracted_text():
+    """Adapters with requires_binary_content=False still get the extracted text."""
+    operator = _make_operator_with_mocks()
+    operator.entity_adapter.requires_binary_content = False
+    operator.entity_adapter.extract_entities_single = MagicMock(return_value=_fake_entity_result())
+    operator.text_adapter.extract_single_document = MagicMock(
+        side_effect=lambda *, file_path, binary_content, **kw: _fake_text_result(content="extracted text")
+    )
+    table = _make_table(n=1)
+    metadata = operator.create_base_metadata(total_docs_count=1)
+
+    operator._run_streaming_pipeline(table=table, metadata=metadata)
+
+    assert operator.entity_adapter.extract_entities_single.call_args.kwargs["content"] == "extracted text"
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_binary_adapter_skips_unsupported_extension():
+    """Unsupported extensions are skipped (no entity call) while supported docs still run."""
+    from docpipe.core.constants.constants import Metrics
+
+    operator, result_tables, result_meta = _run_streaming_with_binary_adapter(
+        names=["a.pdf", "b.docx"], binary=[b"pdf", b"docx"], supported=frozenset({".pdf"})
+    )
+
+    assert operator.entity_adapter.extract_entities_single.call_count == 1
+    assert operator.entity_adapter.extract_entities_single.call_args.kwargs["doc_name"] == "a.pdf"
+    assert result_meta[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+    assert result_tables[0].num_rows == 2
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_binary_adapter_skips_missing_binary_content():
+    """Missing/empty bytes produce a skip and no entity call."""
+    from docpipe.core.constants.constants import Metrics
+
+    operator, _, result_meta = _run_streaming_with_binary_adapter(
+        names=["a.pdf"], binary=[b""], supported=frozenset({".pdf"})
+    )
+
+    operator.entity_adapter.extract_entities_single.assert_not_called()
+    assert result_meta[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+
+
+@pytest.mark.unit
+def test_streaming_pipeline_binary_adapter_no_extension_restriction():
+    """supported_extensions=None disables the extension check."""
+    operator, _, _ = _run_streaming_with_binary_adapter(names=["a.docx"], binary=[b"docx"], supported=None)
+
+    assert operator.entity_adapter.extract_entities_single.call_count == 1
