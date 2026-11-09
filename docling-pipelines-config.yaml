@@ -100,6 +100,12 @@ secrets:
     enabled: false          # Set to true to enable HashiCorp Vault integration
     provider: hashicorp     # Provider name used in vault:// URIs
 
+# Audit records (docpipe.audit logger) are always written to stdout as JSON lines.
+# Set retention_days to also write a daily-rotating file that keeps that many days.
+# audit:
+#   retention_days: 90
+#   file: ./data/audit/docpipe-audit.log   # default: <DOCPIPE_DATA_PATH>/audit/docpipe-audit.log
+
 #
 #    # To use DuckDB (embedded database, no server required), uncomment below:
 #    type: duckdb
