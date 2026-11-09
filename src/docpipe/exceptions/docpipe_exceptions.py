@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom exception types for docpipe flow validation and execution."""
 
 from json import JSONEncoder
