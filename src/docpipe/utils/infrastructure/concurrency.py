@@ -5,6 +5,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, TypeVar
 
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.utils.infrastructure.logging import get_logger
+
+logger = get_logger()
 
 # Define type variables for generic function typing
 T = TypeVar("T")  # input batch type
@@ -61,7 +64,7 @@ def process_batches_in_parallel[T, R](
                 _append_result(batch_result, result_extractor, results)
 
             except Exception as e:
-                print(f"Batch {future_to_batch[future]} failed with {e}")
+                logger.error("Batch %s failed with %s", future_to_batch[future], e)
 
     return results
 
