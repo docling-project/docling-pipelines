@@ -31,6 +31,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from docpipe.api.api_router import api_router
+from docpipe.api.auth.bootstrap_auth import BootstrapAdminAuthenticator
+from docpipe.api.auth.config import get_auth_settings
 from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_token
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
@@ -275,7 +277,9 @@ app.add_middleware(
 try:
     ldap_authenticator: LDAPAuthenticator | None = None
     ldap_config: LDAPConfig | None = LDAPConfig()
-    if ldap_config:
+    # LDAP counts as configured only when a server is set, so a deployment with neither LDAP
+    # nor the bootstrap administrator answers login with 503.
+    if ldap_config and ldap_config.ldap_server:
         ldap_authenticator = LDAPAuthenticator(ldap_config)
 
     try:
@@ -294,6 +298,12 @@ except Exception as e:
     ldap_config = None
     jwt_config = None
     ldap_authenticator = None
+
+# The bootstrap administrator is configured outside the try block above on purpose: a partial
+# or invalid configuration must stop startup instead of silently disabling the break-glass login.
+bootstrap_authenticator: BootstrapAdminAuthenticator | None = BootstrapAdminAuthenticator.from_settings(
+    settings=get_auth_settings()
+)
 
 # More specific handlers first, then generic.
 app.add_exception_handler(DocpipeException, cast(Any, docpipe_exception_handler))
@@ -350,16 +360,22 @@ async def login(credentials: LoginRequest, request: Request):
             detail=f"Too many login attempts. Please wait {RATE_LIMIT_WINDOW_SECONDS} seconds before retrying.",
         )
 
-    if ldap_authenticator is None or jwt_config is None:
+    authenticators: list[AuthenticatorPort] = [
+        candidate for candidate in (bootstrap_authenticator, ldap_authenticator) if candidate is not None
+    ]
+    if not authenticators or jwt_config is None:
         logger.error("Authentication not configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication service not configured",
         )
 
-    authenticator: AuthenticatorPort = ldap_authenticator
     try:
-        user: User | None = authenticator.authenticate(username=credentials.username, password=credentials.password)
+        user: User | None = None
+        for authenticator in authenticators:
+            user = authenticator.authenticate(username=credentials.username, password=credentials.password)
+            if user is not None:
+                break
 
         if not user:
             logger.warning("Failed login attempt for user: %s", credentials.username)
