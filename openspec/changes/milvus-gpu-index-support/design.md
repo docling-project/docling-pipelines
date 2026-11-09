@@ -36,7 +36,7 @@ Index building happens on the Milvus server, not on the host running the pipelin
 | `dense` | `ALL_DENSE_TYPES` (Lite: `FLAT`) | `L2`, `IP`, `COSINE` |
 | `gpu` | `ALL_GPU_TYPES` (not on Lite) | `L2`, `IP` |
 | `binary` | `ALL_BINARY_TYPES` (not on Lite) | `HAMMING`, `JACCARD` |
-| `sparse` | `SPARSE_INVERTED_INDEX` is used for the sparse field; checks skipped | not applicable |
+| `sparse` | sparse field: fixed `SPARSE_INVERTED_INDEX`; dense field of a hybrid collection: CPU dense or GPU types | sparse field: `BM25`; dense field: metrics of its index family |
 
 `GPU_CAGRA` additionally requires `graph_degree <= intermediate_graph_degree` after merging defaults with `index_parameters`.
 
@@ -47,12 +47,16 @@ GPU indexes apply only to dense `FLOAT_VECTOR` fields. Fields are indexed by the
 - **Dense only**: every vector field uses the configured GPU (or CPU) index.
 - **Binary only**: binary fields use `BIN_*`. `vector_mode=gpu` with only binary features is rejected by `validate_vector_feature_types`, because a GPU index would never be used.
 - **Mixed dense + binary**: dense fields use the configured index, binary fields use `BIN_FLAT`/`HAMMING` (a warning is logged when the configured dense settings are overridden for a binary field).
-- **Sparse only**: `vector_mode=sparse` skips the GPU and binary feature checks. The sparse field uses `SPARSE_INVERTED_INDEX`/`BM25`.
-- **Hybrid (dense + sparse)**: the sparse field keeps `SPARSE_INVERTED_INDEX`/`BM25`; the dense field uses the configured dense index.
+- **Sparse only**: `vector_mode=sparse` without a dense vector feature skips the GPU, binary and dense index checks. The sparse field uses `SPARSE_INVERTED_INDEX`/`BM25`.
+- **Hybrid (dense + sparse)**: the sparse field keeps `SPARSE_INVERTED_INDEX`/`BM25`. When a dense vector feature exists, `validate_vector_feature_types` checks the configured `index_type` against the CPU dense and GPU index types, the metric against that family, and the `GPU_CAGRA` parameters.
 
 ### 5. Cleanup after index failure
 
-`create_collection` records whether `client.create_collection` succeeded. If a later step (sparse or dense `create_index`) fails, the collection is dropped best-effort (`_drop_partial_collection`). A failed drop is logged and never masks the original error.
+`create_collection` records whether `client.create_collection` succeeded. If a later step (sparse or dense `create_index`) fails, the collection is dropped best-effort (`_drop_partial_collection`). A failed drop is logged and never masks the original error. Both the sparse and the dense `create_index` calls are covered.
+
+### 7. Existing collections
+
+When the collection already exists, `create_collection` is not called: the operator only validates vector dimensions against the existing schema. `vector_mode`, `index_type`, `metric_type` and `index_parameters` are still validated as configuration, but they are not applied to or compared with the existing indexes.
 
 ### 6. CAGRA default parameter type
 
@@ -70,4 +74,4 @@ None. Schema and wire format are unchanged and `vector_mode` is optional.
 
 ## Open Questions
 
-None.
+- Real GPU verification: index creation for each GPU index type, a mixed dense + binary collection and search quality still need to be checked on a Linux host with an NVIDIA GPU and a `-gpu` Milvus image.

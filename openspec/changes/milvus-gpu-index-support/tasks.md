@@ -12,11 +12,12 @@
 - [x] 2.3 [backend] Add static, connection-free `validate_index_config` with mode-aware `_validate_vector_mode`, `_validate_index_type`, `_validate_metric_type` and `_validate_gpu_config`.
 - [x] 2.4 [backend] Reject GPU index types on Milvus Lite and `COSINE` on GPU indexes.
 - [x] 2.5 [backend] Reject `vector_mode=gpu` when the only vector features are binary (`validate_vector_feature_types`).
-- [x] 2.6 [backend] Drop the collection when index creation fails after the collection was created.
+- [x] 2.6 [backend] Drop the collection when index creation (sparse or dense) fails after the collection was created.
+- [x] 2.7 [backend] Validate the dense field's index type, metric and `GPU_CAGRA` parameters in hybrid (sparse + dense) collections; coerce numeric-string `GPU_CAGRA` degrees.
 
 ## 3. `adapter.py`
 
-- [x] 3.1 [backend] Add `_resolve_vector_mode`, pass `vector_mode` to `MilvusIndexManager`, and call `validate_index_config` before connecting.
+- [x] 3.1 [backend] Add `_resolve_vector_mode` (rejects `add_sparse_vector=true` with a non-sparse `vector_mode`), pass `vector_mode` to `MilvusIndexManager`, and call `validate_index_config` before connecting.
 
 ## 4. Tests
 
@@ -31,9 +32,9 @@
 
 ## 6. Validation
 
-- [ ] 6.1 [backend] Run `pytest tests/unit/operators/vectordb/ tests/unit/core/orchestrator/ -v`.
-- [ ] 6.2 [backend] Run `pre-commit run --from-ref origin/main --to-ref HEAD` after committing.
-- [ ] 6.3 [backend] Verify on a Linux host with an NVIDIA GPU and a `-gpu` Milvus image.
+- [x] 6.1 [backend] Run `pytest tests/unit/operators/vectordb/ tests/unit/core/orchestrator/ -v`.
+- [x] 6.2 [backend] Run `pre-commit run --from-ref origin/main --to-ref HEAD` after committing.
+- [ ] 6.3 [backend] Verify on a Linux host with an NVIDIA GPU and a `-gpu` Milvus image (see Open Questions in `design.md`).
 
 ## Workflow follow-up
 

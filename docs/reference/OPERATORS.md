@@ -2248,7 +2248,7 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 - `index_type`: Index algorithm (HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX for dense; GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for `gpu` mode; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). GPU types are sent to the Milvus server as configured. Milvus Lite supports only FLAT
 - `metric_type`: Distance metric (L2, IP, COSINE for dense; L2 and IP only for `gpu` mode; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode)
 - `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW). For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree`
-- `add_sparse_vector`: Kept for backward compatibility. `true` is equivalent to `vector_mode: "sparse"`; an explicit `vector_mode` takes precedence
+- `add_sparse_vector`: Kept for backward compatibility. `true` is equivalent to `vector_mode: "sparse"`; combining it with another `vector_mode` is rejected
 - `batch_size`: Batch size for bulk operations (default: 100)
 - `primary_key_field`: Name of the primary key field in Milvus collection (default: "pk")
 

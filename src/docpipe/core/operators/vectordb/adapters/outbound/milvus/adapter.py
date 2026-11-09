@@ -21,6 +21,8 @@ from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager impo
     MilvusVectorModes,
 )
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -194,16 +196,29 @@ class MilvusAdapter(VectorStorePort):
         """Resolve vector_mode from config with backward compatibility for add_sparse_vector.
 
         Resolution order:
-        1. Explicit 'vector_mode'
+        1. Explicit 'vector_mode' (rejected when 'add_sparse_vector' is true and the mode is not 'sparse')
         2. 'add_sparse_vector': True -> 'sparse'
         3. Inferred from 'index_type' (BIN_* -> 'binary', GPU_* -> 'gpu', otherwise 'dense')
+
+        Raises:
+            DocpipeException: 'add_sparse_vector' is true together with a 'vector_mode' other than 'sparse'.
         """
         vector_mode = config.get(OperatorConstants.VectorDB.VECTOR_MODE)
-        if vector_mode is not None:
-            return str(vector_mode)
-        if config.get(
+        add_sparse_vector = config.get(
             OperatorConstants.VectorDB.ADD_SPARSE_VECTOR, OperatorConstants.VectorDB.ADD_SPARSE_VECTOR_DEFAULT
-        ):
+        )
+        if vector_mode is not None:
+            if add_sparse_vector and vector_mode != MilvusVectorModes.SPARSE:
+                raise DocpipeException(
+                    message=(
+                        f"MilvusDB Error: add_sparse_vector=true conflicts with vector_mode='{vector_mode}'. "
+                        "Set vector_mode to 'sparse' or remove add_sparse_vector."
+                    ),
+                    status_code=400,
+                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+                )
+            return str(vector_mode)
+        if add_sparse_vector:
             return MilvusVectorModes.SPARSE
         return MilvusVectorModes.infer_from_index_type(index_type=config.get(OperatorConstants.VectorDB.INDEX_TYPE))
 

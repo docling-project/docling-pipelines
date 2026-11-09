@@ -258,22 +258,32 @@ class MilvusIndexManager:
             )
 
     @staticmethod
+    def _as_int(*, name: str, value: Any) -> int:
+        """Coerce a GPU_CAGRA degree parameter to int (ints and numeric strings such as "64" are accepted)."""
+        if not isinstance(value, bool) and isinstance(value, (int, str)):
+            try:
+                return int(value)
+            except ValueError:
+                pass
+        raise DocpipeException(
+            message=f"MilvusDB Error: GPU_CAGRA parameter '{name}' must be an integer, got {value!r}.",
+            status_code=400,
+            error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+        )
+
+    @staticmethod
     def _validate_gpu_config(*, vector_mode: str, index_type: str, index_parameters: dict[str, Any] | None) -> None:
         """Validate GPU-specific configuration constraints before collection creation."""
         if vector_mode != MilvusVectorModes.GPU or index_type != MilvusIndexTypes.GPU_CAGRA:
             return
 
         params = {**INDEX_DEFAULT_PARAMETERS.get(index_type, {}), **(index_parameters or {})}
-        intermediate = params.get("intermediate_graph_degree")
-        graph = params.get("graph_degree")
+        intermediate = MilvusIndexManager._as_int(
+            name="intermediate_graph_degree", value=params.get("intermediate_graph_degree")
+        )
+        graph = MilvusIndexManager._as_int(name="graph_degree", value=params.get("graph_degree"))
 
-        if (
-            isinstance(intermediate, int)
-            and isinstance(graph, int)
-            and not isinstance(intermediate, bool)
-            and not isinstance(graph, bool)
-            and graph > intermediate
-        ):
+        if graph > intermediate:
             raise DocpipeException(
                 message=(
                     f"MilvusDB Error: GPU_CAGRA requires graph_degree ({graph}) "
@@ -282,6 +292,35 @@ class MilvusIndexManager:
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
+
+    @staticmethod
+    def _validate_dense_field_config(
+        *, index_type: str, metric_type: str, index_parameters: dict[str, Any] | None
+    ) -> None:
+        """Validate the index settings applied to a dense field in a hybrid (sparse + dense) collection.
+
+        The dense field may use a CPU dense index or a GPU index, with the metrics valid for that family.
+        """
+        if index_type not in MilvusIndexTypes.ALL_DENSE_TYPES + MilvusIndexTypes.ALL_GPU_TYPES:
+            raise DocpipeException(
+                message=(
+                    f"MilvusDB Error: Index type '{index_type}' cannot be used for the dense vector field of a "
+                    f"hybrid collection. Supported index types: "
+                    f"{MilvusIndexTypes.ALL_DENSE_TYPES + MilvusIndexTypes.ALL_GPU_TYPES}"
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+        MilvusIndexManager._validate_metric_type(
+            vector_mode=(
+                MilvusVectorModes.GPU if index_type in MilvusIndexTypes.ALL_GPU_TYPES else MilvusVectorModes.DENSE
+            ),
+            index_type=index_type,
+            metric_type=metric_type,
+        )
+        MilvusIndexManager._validate_gpu_config(
+            vector_mode=MilvusVectorModes.GPU, index_type=index_type, index_parameters=index_parameters
+        )
 
     @staticmethod
     def _validate_index_type(*, vector_mode: str, index_type: str, is_lite: bool) -> None:
@@ -297,7 +336,9 @@ class MilvusIndexManager:
         )
 
         if is_sparse:
-            logger.info("Sparse mode enabled, skipping index type validation (using %s)", index_type)
+            # Sparse fields use a fixed SPARSE_INVERTED_INDEX. The configured index_type only applies to a dense
+            # field, which is checked in validate_vector_feature_types once the vector features are known.
+            logger.info("Sparse mode enabled, dense index type is validated with the vector features")
             return
 
         if is_gpu:
@@ -444,6 +485,12 @@ class MilvusIndexManager:
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
         if self._is_sparse:
+            if any(ftype == OperatorConstants.Types.TYPE_VECTOR for ftype in feature_types.values()):
+                self._validate_dense_field_config(
+                    index_type=self.index_type,
+                    metric_type=self.metric_type,
+                    index_parameters=self.index_parameters,
+                )
             return
         if self._is_gpu:
             has_dense_feature = any(ftype == OperatorConstants.Types.TYPE_VECTOR for ftype in feature_types.values())

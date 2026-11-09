@@ -341,7 +341,6 @@ class TestMetricTypes:
         ):
             assert metric in MilvusMetricTypes.ALL_TYPES
         assert MilvusMetricTypes.GPU_VALID_METRICS == ["L2", "IP"]
-        assert len(MilvusMetricTypes.GPU_VALID_METRICS) == 2
 
 
 class TestIndexTypes:
@@ -370,7 +369,9 @@ class TestIndexTypes:
         assert MilvusIndexTypes.BIN_IVF_FLAT == "BIN_IVF_FLAT"
         assert MilvusIndexTypes.BIN_FLAT in MilvusIndexTypes.ALL_TYPES
         assert MilvusIndexTypes.BIN_IVF_FLAT in MilvusIndexTypes.ALL_TYPES
-        assert len(MilvusIndexTypes.ALL_TYPES) == 15
+        for gpu_type in ("GPU_CAGRA", "GPU_IVF_FLAT", "GPU_IVF_PQ", "GPU_BRUTE_FORCE"):
+            assert gpu_type in MilvusIndexTypes.ALL_TYPES
+            assert gpu_type in MilvusIndexTypes.ALL_GPU_TYPES
 
     def test_default_parameters_for_all_types(self):
         """Test that default parameters exist for all index types"""
@@ -787,6 +788,26 @@ class TestCreateCollectionEdgeCases:
 
         with pytest.raises(DocpipeException, match="index build failed"):
             manager.create_collection(dimension_mapping={"embeddings": 384})
+
+    def test_sparse_index_failure_drops_partial_collection(self, mock_client):
+        """A failing sparse create_index (the first index call) also drops the dead collection."""
+        mock_client.create_index.side_effect = RuntimeError("sparse index failed")
+        manager = MilvusIndexManager(
+            client=mock_client,
+            collection_name="test_col",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+                {"feature_name": "content", "mapped_column_name": "text"},
+            ],
+            vector_mode="sparse",
+        )
+
+        with pytest.raises(DocpipeException, match="sparse index failed"):
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+
+        assert mock_client.create_index.call_count == 1
+        mock_client.drop_collection.assert_called_once_with(collection_name="test_col")
 
 
 class TestCreateCollectionSparseMode:
@@ -1502,9 +1523,10 @@ class TestValidateVectorFeatureTypes:
         manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING")
         manager.validate_vector_feature_types(feature_types={"dense_vec": "vector", "bin_vec": "vector_binary"})
 
-    def test_sparse_mode_skips_check(self, mock_client):
+    def test_sparse_mode_skips_binary_requirement(self, mock_client):
+        """Sparse mode never requires a binary feature, even when index_type is a BIN_* type."""
         manager = self._manager(mock_client, index_type="BIN_FLAT", metric_type="HAMMING", vector_mode="sparse")
-        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+        manager.validate_vector_feature_types(feature_types={"content": "string"})
 
     def test_lite_with_binary_feature_and_flat_index_raises(self, mock_client):
         """FLAT/L2 is valid for Lite, but a binary feature (quantization) still cannot be stored."""
@@ -1611,3 +1633,78 @@ class TestVectorKindIndexResolution:
             ("SPARSE_INVERTED_INDEX", "BM25"),
             ("HNSW", "COSINE"),
         }
+
+
+class TestHybridDenseFieldValidation:
+    """In sparse (hybrid) mode the dense field's index and metric are validated once a dense feature exists."""
+
+    @staticmethod
+    def _hybrid(mock_client, **kwargs):
+        return MilvusIndexManager(client=mock_client, collection_name="c", vector_mode="sparse", **kwargs)
+
+    def test_hybrid_default_dense_config_passes(self, mock_client):
+        self._hybrid(mock_client).validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_gpu_index_with_valid_metric_passes(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="GPU_CAGRA", metric_type="IP")
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_gpu_index_with_cosine_raises(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="GPU_CAGRA", metric_type="COSINE")
+        with pytest.raises(DocpipeException, match="does not support metric 'COSINE'"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_unknown_index_type_raises(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="NOT_AN_INDEX")
+        with pytest.raises(DocpipeException, match="cannot be used for the dense vector field"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_binary_index_type_for_dense_field_raises(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="BIN_FLAT", metric_type="HAMMING")
+        with pytest.raises(DocpipeException, match="cannot be used for the dense vector field"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_invalid_dense_metric_raises(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="HNSW", metric_type="HAMMING")
+        with pytest.raises(DocpipeException, match="Invalid metric type"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_cagra_degree_violation_raises(self, mock_client):
+        manager = self._hybrid(
+            mock_client,
+            index_type="GPU_CAGRA",
+            metric_type="L2",
+            index_parameters={"graph_degree": 64, "intermediate_graph_degree": 32},
+        )
+        with pytest.raises(DocpipeException, match="graph_degree"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_sparse_only_does_not_check_dense_config(self, mock_client):
+        """Sparse-only (no dense vector feature): the dense index settings are unused and unchecked."""
+        manager = self._hybrid(mock_client, index_type="NOT_AN_INDEX", metric_type="COSINE")
+        manager.validate_vector_feature_types(feature_types={"content": "string"})
+
+
+class TestGpuCagraDegreeCoercion:
+    """GPU_CAGRA degree parameters accept ints and numeric strings, and reject anything else."""
+
+    @staticmethod
+    def _validate(params):
+        MilvusIndexManager.validate_index_config(
+            vector_mode="gpu", index_type="GPU_CAGRA", metric_type="L2", index_parameters=params
+        )
+
+    def test_numeric_strings_are_compared_as_ints(self):
+        with pytest.raises(DocpipeException, match=r"graph_degree \(64\)"):
+            self._validate({"graph_degree": "64", "intermediate_graph_degree": "32"})
+
+    def test_valid_numeric_strings_pass(self):
+        self._validate({"graph_degree": "32", "intermediate_graph_degree": "64"})
+
+    def test_non_numeric_value_raises(self):
+        with pytest.raises(DocpipeException, match="must be an integer"):
+            self._validate({"graph_degree": "abc"})
+
+    def test_bool_value_raises(self):
+        with pytest.raises(DocpipeException, match="must be an integer"):
+            self._validate({"graph_degree": True})

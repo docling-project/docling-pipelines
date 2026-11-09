@@ -1,6 +1,6 @@
 {
   "flow_name": "milvus-gpu-index-pipeline",
-  "description": "Single-embedding pipeline for Milvus with a GPU index: Ingest -> Extract -> Chunk -> Embeddings -> Milvus (GPU_CAGRA, optional fallback to HNSW if the Milvus server has no GPU support)",
+  "description": "Single-embedding pipeline for Milvus with a GPU index: Ingest -> Extract -> Chunk -> Embeddings -> Milvus (GPU_CAGRA; requires a Milvus server built with GPU support)",
   "global_config": {
     "doc_column": "content",
     "disable_validation": false,
@@ -75,7 +75,6 @@
       "config": {
         "provider": "milvus",
         "doc_id_column": "doc_id_hash",
-        "add_sparse_vector": false,
         "provider_config": {
           "collection_name": "gpu_collection",
           "host": "localhost",

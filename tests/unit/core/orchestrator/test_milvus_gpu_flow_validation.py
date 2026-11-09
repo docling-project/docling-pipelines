@@ -21,7 +21,7 @@ BINARY_SAMPLE_FLOW = (
 
 
 @pytest.fixture(autouse=True)
-def _mock_milvus_connection() -> Iterator[MagicMock]:
+def milvus_client_mock() -> Iterator[MagicMock]:
     """Validation instantiates the Milvus adapter, which connects on init; keep the tests offline."""
     with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.PyMilvusClient") as mock_client:
         yield mock_client
@@ -113,3 +113,44 @@ def test_gpu_with_binary_only_vectors_fails_validation() -> None:
 
     assert result["status"] == "FAILED"
     assert "only applies to dense float vectors" in json.dumps(result.get("errors"))
+
+
+def test_invalid_config_is_reported_when_milvus_is_unreachable(milvus_client_mock: MagicMock) -> None:
+    """Config errors are raised before connecting, so an unreachable Milvus does not mask them."""
+    milvus_client_mock.side_effect = ConnectionError("milvus down")
+    flow_definition = copy.deepcopy(_load_flow())
+    _provider_config(flow_definition=flow_definition)["metric_type"] = "COSINE"
+
+    result = _validate(flow_definition=flow_definition)
+
+    assert result["status"] == "FAILED"
+    errors = json.dumps(result.get("errors"))
+    assert "does not support metric 'COSINE'" in errors
+    assert "milvus down" not in errors
+    milvus_client_mock.assert_not_called()
+
+
+def test_hybrid_gpu_index_with_cosine_fails_validation() -> None:
+    """A hybrid (sparse + dense) collection validates its dense index settings too."""
+    flow_definition = copy.deepcopy(_load_flow())
+    node = next(node for node in flow_definition["flow"] if node["type"] == "vectordb")
+    node["config"]["add_sparse_vector"] = True
+    provider_config = node["config"]["provider_config"]
+    provider_config.pop("vector_mode")
+    provider_config["metric_type"] = "COSINE"
+
+    result = _validate(flow_definition=flow_definition)
+
+    assert result["status"] == "FAILED"
+    assert "does not support metric 'COSINE'" in json.dumps(result.get("errors"))
+
+
+def test_add_sparse_vector_conflicting_with_vector_mode_fails_validation() -> None:
+    flow_definition = copy.deepcopy(_load_flow())
+    node = next(node for node in flow_definition["flow"] if node["type"] == "vectordb")
+    node["config"]["add_sparse_vector"] = True
+
+    result = _validate(flow_definition=flow_definition)
+
+    assert result["status"] == "FAILED"
+    assert "conflicts with vector_mode" in json.dumps(result.get("errors"))

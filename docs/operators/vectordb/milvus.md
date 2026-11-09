@@ -108,7 +108,7 @@ Connection and index-specific parameters are configured inside the `provider_con
 | `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, `GPU_CAGRA`, `BIN_FLAT`, `BIN_IVF_FLAT`, etc.; only `FLAT` is supported for `lite`). Must belong to the `vector_mode` |
 | `metric_type` | string | No | `"L2"` | Similarity metric: L2, IP, COSINE for dense vectors; L2, IP for GPU indexes; HAMMING, JACCARD for binary vectors. A `BIN_*` `index_type` requires a binary metric, so the default `L2` is rejected |
 | `index_parameters` | object | No | {} | Custom index-specific parameters |
-| `add_sparse_vector` | boolean | No | false | Backward-compatible alias for `vector_mode: "sparse"` (BM25 hybrid search, not supported for `lite`). An explicit `vector_mode` takes precedence |
+| `add_sparse_vector` | boolean | No | false | Backward-compatible alias for `vector_mode: "sparse"` (BM25 hybrid search, not supported for `lite`). Combining it with another `vector_mode` is rejected |
 
 ### Index Parameters
 
@@ -624,8 +624,9 @@ Docling Pipelines does not probe the pipeline host for a GPU. Index building run
 
 - **Metrics: `L2` and `IP` only.** `COSINE` is rejected with a configuration error. Normalize the vectors and use `IP`, or use `L2`. This check applies to the configured settings, independent of the hardware.
 - **Index type must be a GPU type.** A CPU index type such as `HNSW` with `vector_mode: "gpu"` is rejected, and a GPU index type with `vector_mode: "dense"` is rejected.
-- **Dense vectors only.** GPU indexes apply to `FLOAT_VECTOR` fields. In a mixed dense and binary collection the binary fields use `BIN_FLAT` with `HAMMING`. If the only vector features are binary (for example embeddings with `quantization: binary`), `vector_mode: "gpu"` is rejected during flow validation because the GPU would never be used. With `vector_mode: "sparse"` (alone or hybrid with dense vectors) the sparse field keeps `SPARSE_INVERTED_INDEX` with `BM25`.
+- **Dense vectors only.** GPU indexes apply to `FLOAT_VECTOR` fields. In a mixed dense and binary collection the binary fields use `BIN_FLAT` with `HAMMING`. If the only vector features are binary (for example embeddings with `quantization: binary`), `vector_mode: "gpu"` is rejected during flow validation because the GPU would never be used. With `vector_mode: "sparse"` (alone or hybrid with dense vectors) the sparse field keeps `SPARSE_INVERTED_INDEX` with `BM25`; in a hybrid collection the dense field's `index_type` (CPU dense or GPU), `metric_type` and `GPU_CAGRA` parameters are validated.
 - **Validated without a Milvus connection.** The mode, index type, metric and `GPU_CAGRA` settings are checked before connecting, so flow validation reports them even when Milvus is unreachable.
+- **Existing collections.** If the collection already exists it is not recreated, and `vector_mode`/`index_type` are not compared with its existing indexes; only vector dimensions are validated.
 - **No leftover collection.** If index creation fails after the collection was created (for example the server has no GPU build), the collection is dropped and the original error is raised.
 - For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree`; otherwise a configuration error is raised before the collection is created.
 - GPU indexes do not support range search or grouping search.
