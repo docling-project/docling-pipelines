@@ -36,6 +36,7 @@ from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_tok
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
 from docpipe.api.auth.models import LoginRequest, TokenResponse, User
 from docpipe.api.auth.oauth2_routes import router as oauth2_router
+from docpipe.api.auth.ports import AuthenticatorPort
 from docpipe.api.middleware.api_logging_middleware import ApiLoggingMiddleware
 from docpipe.api.middleware.error_handler import (
     docpipe_exception_handler,
@@ -356,8 +357,9 @@ async def login(credentials: LoginRequest, request: Request):
             detail="Authentication service not configured",
         )
 
+    authenticator: AuthenticatorPort = ldap_authenticator
     try:
-        user: User | None = ldap_authenticator.authenticate(credentials.username, credentials.password)
+        user: User | None = authenticator.authenticate(username=credentials.username, password=credentials.password)
 
         if not user:
             logger.warning("Failed login attempt for user: %s", credentials.username)
@@ -370,6 +372,7 @@ async def login(credentials: LoginRequest, request: Request):
             JWTClaims.USERNAME: user.username,
             JWTClaims.EMAIL: user.email,
             JWTClaims.FULL_NAME: user.full_name,
+            JWTClaims.ROLES: [role.value for role in user.roles],
         }
         access_token: str = create_access_token(token_data, jwt_config)
 

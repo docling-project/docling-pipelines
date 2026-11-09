@@ -1,4 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """LDAP authentication module."""
+
+from typing import Any
 
 import ldap
 from ldap.filter import escape_filter_chars
@@ -7,7 +12,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.utils.infrastructure.logging import get_logger
 
+from .config import get_auth_settings
 from .models import User
+from .ports import AuthenticatorPort, is_reserved_username
+from .role_mapping import resolve_role
+from .roles import Role
 
 logger = get_logger(__name__)
 
@@ -23,6 +32,9 @@ class LDAPConfig(BaseSettings):
     ldap_use_ssl: bool = False
     ldap_use_active_directory: bool = False
     ldap_ad_domain: str = ""
+    # Attribute that lists the groups a user belongs to (Active Directory and OpenLDAP
+    # with the memberof overlay use ``memberOf``).
+    ldap_group_attribute: str = "memberOf"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,14 +42,46 @@ class LDAPConfig(BaseSettings):
     )
 
 
-class LDAPAuthenticator:
+class LDAPAuthenticator(AuthenticatorPort):
     """LDAP authenticator class."""
 
     def __init__(self, config: LDAPConfig):
         """Initialize with the given LDAP configuration."""
         self.config = config
+        logger.info("LDAP role mapping reads groups from the %s attribute", self._group_attribute())
 
-    def authenticate(self, username: str, password: str) -> User | None:
+    def _group_attribute(self) -> str:
+        """Return the configured group attribute, falling back to ``memberOf``."""
+        return self.config.ldap_group_attribute.strip() or "memberOf"
+
+    def _resolve_roles(self, *, attrs: dict[str, Any]) -> list[Role]:
+        """Map the entry's group attribute values to the user's role.
+
+        Distinguished names are compared case-insensitively. A user with no mapped group
+        receives the configured default role (``viewer`` unless overridden).
+
+        Args:
+            attrs: Attributes of the user's directory entry, with bytes values.
+
+        Returns:
+            A one-element list holding the user's role.
+        """
+        group_attribute = self._group_attribute()
+        values: list[Any] = next((v for k, v in attrs.items() if k.lower() == group_attribute.lower()), [])
+        groups = [
+            value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value) for value in values
+        ]
+        settings = get_auth_settings()
+        return [
+            resolve_role(
+                groups=groups,
+                role_mapping=settings.role_mapping,
+                default_role=settings.default_role,
+                case_insensitive=True,
+            )
+        ]
+
+    def authenticate(self, *, username: str, password: str) -> User | None:
         """Authenticate user against LDAP server.
 
         Args:
@@ -45,7 +89,8 @@ class LDAPAuthenticator:
             password: Password for authentication
 
         Returns:
-            User object if authentication successful, None otherwise
+            User object (with the role derived from the group attribute) if authentication
+            successful, None otherwise
 
         Raises:
             Exception: If LDAP connection or authentication fails
@@ -55,6 +100,10 @@ class LDAPAuthenticator:
         # it must never be treated as proof of the user's identity.
         if not username or not password:
             logger.warning("Rejected LDAP authentication with empty username or password")
+            return None
+
+        if is_reserved_username(username):
+            logger.warning("Rejected LDAP authentication for a reserved username")
             return None
 
         ldap_client = None
@@ -94,6 +143,7 @@ class LDAPAuthenticator:
                     "mail",
                     "sAMAccountName",
                     "userPrincipalName",
+                    self._group_attribute(),
                 ]
 
                 result = ldap_client.search_s(
@@ -105,13 +155,14 @@ class LDAPAuthenticator:
 
                 email = ""
                 full_name = ""
+                entry_attrs: dict[str, Any] = {}
 
                 if result:
-                    _, attrs = result[0]
+                    _, entry_attrs = result[0]
 
-                    email = attrs.get("mail", [b""])[0].decode("utf-8") if "mail" in attrs else ""
+                    email = entry_attrs.get("mail", [b""])[0].decode("utf-8") if "mail" in entry_attrs else ""
 
-                    full_name = attrs.get("cn", [b""])[0].decode("utf-8") if "cn" in attrs else ""
+                    full_name = entry_attrs.get("cn", [b""])[0].decode("utf-8") if "cn" in entry_attrs else ""
 
                 logger.info("Successfully authenticated user: %s", username)
 
@@ -119,6 +170,7 @@ class LDAPAuthenticator:
                     username=username,
                     email=email,
                     full_name=full_name,
+                    roles=self._resolve_roles(attrs=entry_attrs),
                 )
 
             # ------------------------------------------------------------------
@@ -131,7 +183,7 @@ class LDAPAuthenticator:
             )
 
             search_filter = f"(uid={escape_filter_chars(username)})"
-            attributes = ["cn", "mail", "uid"]
+            attributes = ["cn", "mail", "uid", self._group_attribute()]
 
             result = ldap_client.search_s(
                 self.config.ldap_user_dn,
@@ -175,6 +227,7 @@ class LDAPAuthenticator:
                 username=username,
                 email=email,
                 full_name=full_name,
+                roles=self._resolve_roles(attrs=attrs),
             )
 
         except ldap.SERVER_DOWN:

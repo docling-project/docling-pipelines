@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for LDAP authentication.
 
 python-ldap is never allowed to reach a real server: ``ldap.initialize`` is
@@ -15,8 +18,10 @@ import pytest
 from ldap.filter import escape_filter_chars
 
 from docpipe.api.auth import ldap_auth
+from docpipe.api.auth.dependencies import LOCAL_PRINCIPAL_USERNAME
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
 from docpipe.api.auth.models import User
+from docpipe.api.auth.roles import Role
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 
 _SERVER = "ldap://ldap.example.com:389"
@@ -166,7 +171,7 @@ class TestStandardLDAPAuthentication:
             _entry("uid=jdoe,ou=people,dc=example,dc=com", cn="John Doe", mail="jdoe@example.com", uid="jdoe")
         ]
 
-        user = LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user == User(username="jdoe", email="jdoe@example.com", full_name="John Doe")
 
@@ -174,7 +179,7 @@ class TestStandardLDAPAuthentication:
         service_conn, user_conn = ldap_clients
         service_conn.search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com", cn="John Doe")]
 
-        LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert ldap_auth.ldap.initialize.call_args_list == [call(_SERVER), call(_SERVER)]
         for conn in (service_conn, user_conn):
@@ -183,7 +188,9 @@ class TestStandardLDAPAuthentication:
             conn.start_tls_s.assert_not_called()
         # Service account bind, then search for the user's DN.
         service_conn.simple_bind_s.assert_called_once_with(_BIND_DN, _BIND_CREDENTIAL)
-        service_conn.search_s.assert_called_once_with(_USER_DN, ldap.SCOPE_SUBTREE, "(uid=jdoe)", ["cn", "mail", "uid"])
+        service_conn.search_s.assert_called_once_with(
+            _USER_DN, ldap.SCOPE_SUBTREE, "(uid=jdoe)", ["cn", "mail", "uid", "memberOf"]
+        )
         # The user's password is checked by binding as the discovered DN.
         user_conn.simple_bind_s.assert_called_once_with("uid=jdoe,ou=people,dc=example,dc=com", _USER_CREDENTIAL)
         user_conn.search_s.assert_not_called()
@@ -192,7 +199,7 @@ class TestStandardLDAPAuthentication:
         service_conn, user_conn = ldap_clients
         service_conn.search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com")]
 
-        LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         service_conn.unbind_s.assert_called_once_with()
         user_conn.unbind_s.assert_called_once_with()
@@ -201,7 +208,7 @@ class TestStandardLDAPAuthentication:
         service_conn, _ = ldap_clients
         service_conn.search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com", uid="jdoe")]
 
-        user = LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user == User(username="jdoe", email="", full_name="")
 
@@ -211,7 +218,7 @@ class TestStandardLDAPAuthentication:
             _entry("uid=jdoe,ou=people,dc=example,dc=com", cn="José Müller", mail="jose@example.com")
         ]
 
-        user = LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user is not None
         assert user.full_name == "José Müller"
@@ -223,7 +230,7 @@ class TestStandardLDAPAuthentication:
             _entry("uid=jdoe,ou=legacy,dc=example,dc=com", cn="Second"),
         ]
 
-        user = LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user is not None
         assert user.full_name == "First"
@@ -233,7 +240,7 @@ class TestStandardLDAPAuthentication:
         service_conn, user_conn = ldap_clients
         service_conn.search_s.return_value = []
 
-        result = LDAPAuthenticator(ldap_config).authenticate("ghost", _USER_CREDENTIAL)
+        result = LDAPAuthenticator(ldap_config).authenticate(username="ghost", password=_USER_CREDENTIAL)
 
         assert result is None
         assert ldap_auth.ldap.initialize.call_count == 1
@@ -245,7 +252,7 @@ class TestStandardLDAPAuthentication:
         service_conn.search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com")]
         user_conn.simple_bind_s.side_effect = ldap.INVALID_CREDENTIALS({"desc": "Invalid credentials"})
 
-        result = LDAPAuthenticator(ldap_config).authenticate("jdoe", "wrong-password")
+        result = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password="wrong-password")
 
         assert result is None
         user_conn.unbind_s.assert_called_once_with()
@@ -256,7 +263,7 @@ class TestStandardLDAPAuthentication:
         service_conn.simple_bind_s.side_effect = ldap.INVALID_CREDENTIALS({"desc": "Invalid credentials"})
 
         with pytest.raises(ExternalServiceError, match="LDAP authentication error"):
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         service_conn.search_s.assert_not_called()
 
@@ -265,7 +272,7 @@ class TestStandardLDAPAuthentication:
         service_conn.simple_bind_s.side_effect = ldap.SERVER_DOWN({"desc": "Can't contact LDAP server"})
 
         with pytest.raises(ExternalServiceError, match="LDAP server is unavailable") as exc_info:
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert exc_info.value.status_code == 502
         # ``raise ... from None`` hides the python-ldap internals from API clients.
@@ -279,7 +286,7 @@ class TestStandardLDAPAuthentication:
         user_conn.simple_bind_s.side_effect = ldap.SERVER_DOWN({"desc": "Can't contact LDAP server"})
 
         with pytest.raises(ExternalServiceError, match="LDAP server is unavailable"):
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
     def test_search_timeout_raises_external_service_error(self, *, ldap_config, ldap_clients):
         service_conn, _ = ldap_clients
@@ -287,7 +294,7 @@ class TestStandardLDAPAuthentication:
         service_conn.search_s.side_effect = timeout
 
         with pytest.raises(ExternalServiceError, match="LDAP authentication error") as exc_info:
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert exc_info.value.__cause__ is timeout
         service_conn.unbind_s.assert_called_once_with()
@@ -297,7 +304,7 @@ class TestStandardLDAPAuthentication:
         service_conn.simple_bind_s.side_effect = ldap.INVALID_DN_SYNTAX({"desc": "Invalid DN syntax"})
 
         with pytest.raises(ConfigurationError, match="invalid bind DN format") as exc_info:
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert isinstance(exc_info.value.__cause__, ldap.INVALID_DN_SYNTAX)
 
@@ -306,14 +313,14 @@ class TestStandardLDAPAuthentication:
         service_conn.search_s.side_effect = RuntimeError("socket closed")
 
         with pytest.raises(ExternalServiceError, match="socket closed"):
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
     def test_unbind_failure_does_not_mask_successful_login(self, *, ldap_config, ldap_clients, ldap_log):
         service_conn, user_conn = ldap_clients
         service_conn.search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com", cn="John Doe")]
         user_conn.unbind_s.side_effect = ldap.LDAPError({"desc": "already closed"})
 
-        user = LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user is not None
         assert user.username == "jdoe"
@@ -324,7 +331,7 @@ class TestStandardLDAPAuthentication:
         service_conn, user_conn = ldap_clients
         service_conn.search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com")]
 
-        LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         for conn in (service_conn, user_conn):
             conn.start_tls_s.assert_called_once_with()
@@ -339,7 +346,7 @@ class TestStandardLDAPAuthentication:
         service_conn.start_tls_s.side_effect = ldap.CONNECT_ERROR({"desc": "TLS handshake failed"})
 
         with pytest.raises(ExternalServiceError):
-            LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         service_conn.simple_bind_s.assert_not_called()
 
@@ -349,7 +356,7 @@ class TestStandardLDAPAuthentication:
         user_conn.simple_bind_s.side_effect = ldap.INVALID_CREDENTIALS({"desc": "Invalid credentials"})
         secret = "S3cr3t-P@ssw0rd!"  # pragma: allowlist secret
 
-        LDAPAuthenticator(ldap_config).authenticate("jdoe", secret)
+        LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=secret)
 
         assert "Invalid credentials for user: jdoe" in ldap_log.text
         assert secret not in ldap_log.text
@@ -370,7 +377,7 @@ class TestActiveDirectoryAuthentication:
             _entry("CN=John Doe,OU=Users,DC=corp,DC=example,DC=com", cn="John Doe", mail="jdoe@corp.example.com")
         ]
 
-        user = LDAPAuthenticator(ad_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user == User(username="jdoe", email="jdoe@corp.example.com", full_name="John Doe")
         conn.simple_bind_s.assert_called_once_with(f"jdoe@{_AD_DOMAIN}", _USER_CREDENTIAL)
@@ -378,7 +385,7 @@ class TestActiveDirectoryAuthentication:
             _USER_DN,
             ldap.SCOPE_SUBTREE,
             "(sAMAccountName=jdoe)",
-            ["cn", "mail", "sAMAccountName", "userPrincipalName"],
+            ["cn", "mail", "sAMAccountName", "userPrincipalName", "memberOf"],
         )
         # AD flow uses a single connection and no service account.
         assert ldap_auth.ldap.initialize.call_count == 1
@@ -388,7 +395,7 @@ class TestActiveDirectoryAuthentication:
         conn, _ = ldap_clients
         conn.simple_bind_s.side_effect = ldap.INVALID_CREDENTIALS({"desc": "Invalid credentials"})
 
-        result = LDAPAuthenticator(ad_config).authenticate("jdoe", "wrong-password")
+        result = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password="wrong-password")
 
         assert result is None
         conn.search_s.assert_not_called()
@@ -401,7 +408,7 @@ class TestActiveDirectoryAuthentication:
         conn, _ = ldap_clients
         conn.search_s.return_value = []
 
-        user = LDAPAuthenticator(ad_config).authenticate("jdoe", _USER_CREDENTIAL)
+        user = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user == User(username="jdoe", email="", full_name="")
 
@@ -410,7 +417,7 @@ class TestActiveDirectoryAuthentication:
         conn, _ = ldap_clients
 
         with pytest.raises(ConfigurationError, match="ldap_ad_domain must be configured"):
-            LDAPAuthenticator(ad_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         conn.simple_bind_s.assert_not_called()
         conn.unbind_s.assert_called_once_with()
@@ -420,21 +427,21 @@ class TestActiveDirectoryAuthentication:
         conn.simple_bind_s.side_effect = ldap.SERVER_DOWN({"desc": "Can't contact LDAP server"})
 
         with pytest.raises(ExternalServiceError, match="LDAP server is unavailable"):
-            LDAPAuthenticator(ad_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
     def test_search_timeout_raises_external_service_error(self, *, ad_config, ldap_clients):
         conn, _ = ldap_clients
         conn.search_s.side_effect = ldap.TIMEOUT({"desc": "Timed out"})
 
         with pytest.raises(ExternalServiceError, match="LDAP authentication error"):
-            LDAPAuthenticator(ad_config).authenticate("jdoe", _USER_CREDENTIAL)
+            LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
     def test_start_tls_used_when_ssl_enabled(self, *, ad_config, ldap_clients):
         ad_config.ldap_use_ssl = True
         conn, _ = ldap_clients
         conn.search_s.return_value = []
 
-        LDAPAuthenticator(ad_config).authenticate("jdoe", _USER_CREDENTIAL)
+        LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         conn.start_tls_s.assert_called_once_with()
 
@@ -452,7 +459,7 @@ class TestLDAPInputHardening:
         service_conn, _ = ldap_clients
         service_conn.search_s.return_value = []
 
-        LDAPAuthenticator(ldap_config).authenticate(username, _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username=username, password=_USER_CREDENTIAL)
 
         search_filter = service_conn.search_s.call_args.args[2]
         assert search_filter == f"(uid={escape_filter_chars(username)})"
@@ -465,7 +472,7 @@ class TestLDAPInputHardening:
         conn, _ = ldap_clients
         conn.search_s.return_value = []
 
-        LDAPAuthenticator(ad_config).authenticate(username, _USER_CREDENTIAL)
+        LDAPAuthenticator(ad_config).authenticate(username=username, password=_USER_CREDENTIAL)
 
         search_filter = conn.search_s.call_args.args[2]
         assert search_filter == f"(sAMAccountName={escape_filter_chars(username)})"
@@ -478,7 +485,7 @@ class TestLDAPInputHardening:
         service_conn, _ = ldap_clients
         service_conn.search_s.return_value = []
 
-        LDAPAuthenticator(ldap_config).authenticate("*)(uid=*", _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username="*)(uid=*", password=_USER_CREDENTIAL)
 
         assert service_conn.search_s.call_args.args[2] == r"(uid=\2a\29\28uid=\2a)"
 
@@ -491,7 +498,7 @@ class TestLDAPInputHardening:
         ldap_config.ldap_use_active_directory = use_active_directory
         ldap_config.ldap_ad_domain = _AD_DOMAIN
 
-        result = LDAPAuthenticator(ldap_config).authenticate("jdoe", "")
+        result = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password="")
 
         assert result is None
         ldap_auth.ldap.initialize.assert_not_called()
@@ -499,7 +506,7 @@ class TestLDAPInputHardening:
             conn.simple_bind_s.assert_not_called()
 
     def test_empty_username_is_rejected_without_contacting_server(self, *, ldap_config, ldap_clients, ldap_log):
-        result = LDAPAuthenticator(ldap_config).authenticate("", _USER_CREDENTIAL)
+        result = LDAPAuthenticator(ldap_config).authenticate(username="", password=_USER_CREDENTIAL)
 
         assert result is None
         ldap_auth.ldap.initialize.assert_not_called()
@@ -526,7 +533,7 @@ class TestLDAPTransportSecurity:
         service_conn, _ = ldap_clients
         service_conn.search_s.return_value = []
 
-        LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert call(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER) not in service_conn.set_option.call_args_list
 
@@ -541,7 +548,7 @@ class TestLDAPTransportSecurity:
         service_conn, _ = ldap_clients
         service_conn.search_s.return_value = []
 
-        LDAPAuthenticator(ldap_config).authenticate("jdoe", _USER_CREDENTIAL)
+        LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         configured_options = {c.args[0] for c in service_conn.set_option.call_args_list}
         assert ldap.OPT_NETWORK_TIMEOUT in configured_options
@@ -604,3 +611,133 @@ class TestVerifyConnection:
         assert LDAPAuthenticator(ldap_config).verify_connection() is True
 
         assert "Error unbinding LDAP connection" in ldap_log.text
+
+
+# ---------------------------------------------------------------------------
+# Group-to-role mapping
+# ---------------------------------------------------------------------------
+
+_EDITOR_GROUP = "cn=Pipeline Editors,ou=groups,dc=example,dc=com"
+_ADMIN_GROUP = "cn=Pipeline Admins,ou=groups,dc=example,dc=com"
+
+
+@pytest.fixture
+def mapped_roles(monkeypatch):
+    """Configure the role mapping through the environment (the YAML reader is tested separately)."""
+    monkeypatch.setenv("DOCPIPE_AUTH_ROLE_MAPPING_EDITOR", _EDITOR_GROUP)
+    monkeypatch.setenv("DOCPIPE_AUTH_ROLE_MAPPING_ADMIN", _ADMIN_GROUP)
+    monkeypatch.delenv("DOCPIPE_AUTH_ROLE_MAPPING_VIEWER", raising=False)
+    monkeypatch.delenv("DOCPIPE_AUTH_DEFAULT_ROLE", raising=False)
+    monkeypatch.setenv("DOCPIPE_CONFIG_PATH", "/nonexistent/docling-pipelines-config.yaml")
+
+
+def _member_of_entry(*groups: str, **attrs: str) -> tuple[str, dict[str, list[bytes]]]:
+    dn, entry_attrs = _entry("uid=jdoe,ou=people,dc=example,dc=com", cn="John Doe", **attrs)
+    entry_attrs["memberOf"] = [group.encode("utf-8") for group in groups]
+    return dn, entry_attrs
+
+
+@pytest.mark.usefixtures("mapped_roles")
+class TestLDAPGroupRoleMapping:
+    """``memberOf`` values are mapped to a role; the highest match wins."""
+
+    def test_mapped_group_grants_editor(self, *, ldap_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = [_member_of_entry(_EDITOR_GROUP)]
+
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.EDITOR]
+
+    def test_user_without_mapped_group_is_viewer(self, *, ldap_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = [_member_of_entry("cn=Unrelated,dc=example,dc=com")]
+
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.VIEWER]
+
+    def test_user_without_member_of_attribute_is_viewer(self, *, ldap_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = [_entry("uid=jdoe,ou=people,dc=example,dc=com", cn="John Doe")]
+
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.VIEWER]
+
+    def test_highest_role_wins(self, *, ldap_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = [_member_of_entry(_EDITOR_GROUP, _ADMIN_GROUP)]
+
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.ADMIN]
+
+    def test_distinguished_names_match_case_insensitively_and_trimmed(self, *, ldap_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = [_member_of_entry(f"  {_ADMIN_GROUP.upper()} ")]
+
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.ADMIN]
+
+    def test_configured_default_role_applies_to_unmapped_users(self, *, ldap_config, ldap_clients, monkeypatch):
+        monkeypatch.setenv("DOCPIPE_AUTH_DEFAULT_ROLE", "editor")
+        ldap_clients[0].search_s.return_value = [_member_of_entry("cn=Unrelated,dc=example,dc=com")]
+
+        user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.EDITOR]
+
+    def test_group_attribute_is_configurable_and_requested(self, *, ldap_clients):
+        config = LDAPConfig(
+            ldap_server=_SERVER,
+            ldap_user_dn=_USER_DN,
+            ldap_bind_dn=_BIND_DN,
+            ldap_bind_password=_BIND_CREDENTIAL,
+            ldap_group_attribute="isMemberOf",
+        )
+        dn, attrs = _entry("uid=jdoe,ou=people,dc=example,dc=com", cn="John Doe")
+        attrs["isMemberOf"] = [_EDITOR_GROUP.encode("utf-8")]
+        ldap_clients[0].search_s.return_value = [(dn, attrs)]
+
+        user = LDAPAuthenticator(config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.EDITOR]
+        assert ldap_clients[0].search_s.call_args.args[3] == ["cn", "mail", "uid", "isMemberOf"]
+
+    def test_active_directory_groups_are_mapped(self, *, ad_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = [_member_of_entry(_ADMIN_GROUP)]
+
+        user = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.ADMIN]
+
+    def test_active_directory_user_missing_from_search_is_viewer(self, *, ad_config, ldap_clients):
+        ldap_clients[0].search_s.return_value = []
+
+        user = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
+
+        assert user is not None
+        assert user.roles == [Role.VIEWER]
+
+
+class TestReservedUsername:
+    """The reserved local principal name must never authenticate."""
+
+    @pytest.mark.parametrize("use_active_directory", [False, True], ids=["standard", "active_directory"])
+    def test_reserved_username_is_rejected_without_contacting_server(
+        self, *, ldap_config, ldap_clients, use_active_directory
+    ):
+        ldap_config.ldap_use_active_directory = use_active_directory
+        ldap_config.ldap_ad_domain = _AD_DOMAIN
+
+        result = LDAPAuthenticator(ldap_config).authenticate(
+            username=LOCAL_PRINCIPAL_USERNAME, password=_USER_CREDENTIAL
+        )
+
+        assert result is None
+        ldap_auth.ldap.initialize.assert_not_called()

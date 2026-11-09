@@ -290,6 +290,10 @@ class DocpipeConfigKeys:
     MAX_OVERFLOW = "max_overflow"
     POOL_TIMEOUT = "pool_timeout"
 
+    # API authentication configuration keys (auth.role_mapping.<role> in the config file)
+    AUTH = "auth"
+    ROLE_MAPPING = "role_mapping"
+
     # Incremental metadata configuration keys
     INCREMENTAL_METADATA = "incremental_metadata"
     STORAGE = "storage"
