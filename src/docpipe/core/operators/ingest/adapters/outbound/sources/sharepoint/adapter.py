@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """SharePoint source adapter using Microsoft Graph API."""
 
 import hashlib
@@ -193,9 +196,6 @@ class SharePointSourceAdapter(DocumentSourcePort):
             "created_time": item.get("createdDateTime"),
             "web_url": source_url,
             OperatorConstants.Config.PROVIDER: "sharepoint",
-            "client_id": config.client_id,
-            "client_secret": config.client_secret,
-            "tenant_id": config.tenant_id,
         }
         if not is_single_file:
             metadata[OperatorConstants.Columns.SOURCE_ID] = doc_id  # Required by binary_content_fetcher
