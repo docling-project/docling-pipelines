@@ -16,6 +16,7 @@
 - [x] 3.1 [backend] Refuse script upload and script replacement with 409 (`CustomOperatorsDisabledException`) while custom operators are disabled, and skip the factory refresh. Verify with `pytest tests/unit/core/custom_operators/test_service.py`.
 - [x] 3.2 [backend] Forward `DOCPIPE_ENABLE_CUSTOM_OPERATORS` in `JobManagementFactory.resolve_worker_env()` when set. Verify with `pytest tests/unit/core/job_management/adapters/config/test_job_management_factory.py`.
 - [x] 3.3 [backend] Pin the no-token response to 401 in the spec and in `test_custom_operators_routes.py`.
+- [x] 3.4 [backend] Pass the orchestrator into `FeaturePropagator` (built by `FlowValidator`) so an `enable_custom_operators=True` Python argument is honoured during feature propagation. Verify with `pytest tests/unit/test_docpipe_flow_manager_validate.py`.
 
 ## 4. Documentation
 

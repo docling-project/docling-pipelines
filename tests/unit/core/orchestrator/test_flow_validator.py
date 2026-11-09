@@ -38,6 +38,8 @@ class TestFlowValidator:
         """Test FlowValidator initialization."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -48,6 +50,8 @@ class TestFlowValidator:
         """Test validation when disabled in config."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -63,6 +67,8 @@ class TestFlowValidator:
         """Test validation with missing DAG."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -77,6 +83,8 @@ class TestFlowValidator:
         """Test validation with empty DAG."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -149,6 +157,8 @@ class TestFlowValidator:
         """Test getting duplicate node names."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -161,6 +171,8 @@ class TestFlowValidator:
         """Test with no duplicate names."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -173,6 +185,8 @@ class TestFlowValidator:
         """Test validating first operator when it's an Ingest operator."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -188,6 +202,8 @@ class TestFlowValidator:
         """Test that ingest node listed non-first in JSON array but topological root passes validation."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -217,6 +233,8 @@ class TestFlowValidator:
         """Test building graph from DAG."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -236,6 +254,8 @@ class TestFlowValidator:
         """Test converting directed graph to undirected."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -252,6 +272,8 @@ class TestFlowValidator:
         """Test finding connected components with single component."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -270,6 +292,8 @@ class TestFlowValidator:
         """Test finding connected components with multiple components."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -288,6 +312,8 @@ class TestFlowValidator:
         """Test validation with connected operators."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -307,6 +333,8 @@ class TestFlowValidator:
         """Test validation with disconnected operators."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -326,6 +354,8 @@ class TestFlowValidator:
         """Test checking for duplicate extract operators."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -348,6 +378,8 @@ class TestFlowValidator:
         """Test validating operator category when it matches."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -370,6 +402,8 @@ class TestFlowValidator:
         """Test validating operator category when it doesn't match."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -394,6 +428,8 @@ class TestFlowValidator:
         """Test getting operator category with missing ID."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
         mock_orchestrator.create_executor = Mock()
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
@@ -412,6 +448,8 @@ class TestFlowValidator:
         """Test getting operator category with missing name."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
         mock_orchestrator.create_executor = Mock()
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
@@ -430,6 +468,8 @@ class TestFlowValidator:
         """Test successfully getting operator category."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -453,6 +493,8 @@ class TestFlowValidator:
         """Test creating validation alerts."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -469,6 +511,8 @@ class TestFlowValidator:
         """Test skipping validation for custom operator."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -489,6 +533,8 @@ class TestFlowValidator:
         """Test not skipping validation for known operator."""
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
 
         validator = FlowValidator(orchestrator=mock_orchestrator)
 
@@ -932,6 +978,8 @@ class TestValidateStorageOutputOperatorPlacement:
     def _make_validator(self):
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orchestrator)
 
     def _make_dag(self, *, ingest_op: str, storage_mode: str) -> list:
@@ -1034,6 +1082,8 @@ class TestMergeParentInputFeatures:
     def validator(self):
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orchestrator)
 
     def _make_parent(self, *, features: dict, source_node_id: str | None = None) -> FeaturePropagationResult:
@@ -1202,6 +1252,8 @@ class TestValidateAclOperatorPlacement:
     def _make_validator(self):
         mock_orch = Mock()
         mock_orch.common_log_arguments = {}
+        mock_orch.custom_operator_packages = []
+        mock_orch.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orch)
 
     def test_no_acl_node_is_noop(self):
@@ -1243,6 +1295,8 @@ class TestValidateNoCycles:
     def _make_validator(self):
         mock_orch = Mock()
         mock_orch.common_log_arguments = {}
+        mock_orch.custom_operator_packages = []
+        mock_orch.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orch)
 
     def test_acyclic_dag_no_error(self):
@@ -1273,6 +1327,8 @@ class TestGetRequiredNodeFieldsErrors:
     def _make_validator(self):
         mock_orch = Mock()
         mock_orch.common_log_arguments = {}
+        mock_orch.custom_operator_packages = []
+        mock_orch.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orch)
 
     def test_missing_node_id_raises(self):
@@ -1408,6 +1464,8 @@ class TestTraverseDag:
     def validator(self):
         mock_orch = Mock()
         mock_orch.common_log_arguments = {}
+        mock_orch.custom_operator_packages = []
+        mock_orch.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orch)
 
     def test_linear_dag(self, validator):
@@ -1554,6 +1612,8 @@ class TestFlowValidatorFeatureMetadataToDictIsPrimary:
     def validator(self):
         mock_orchestrator = Mock()
         mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
         return FlowValidator(orchestrator=mock_orchestrator)
 
     def test_is_primary_true_included(self, validator):

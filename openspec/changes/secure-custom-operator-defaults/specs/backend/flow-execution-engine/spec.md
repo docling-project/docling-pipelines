@@ -25,6 +25,10 @@ The engine SHALL NOT load custom operators (uploaded scripts, `DOCPIPE_CUSTOM_OP
 - **WHEN** an orchestrator is created without an explicit setting
 - **THEN** `orchestrator.enable_custom_operators` is a `bool` equal to the resolved value
 
+#### Scenario: Explicit opt-in reaches feature propagation
+- **WHEN** `DocpipeFlowManager(enable_custom_operators=True)` validates a flow while `DOCPIPE_ENABLE_CUSTOM_OPERATORS` is unset
+- **THEN** output features declared by custom operators propagate to downstream operators, because the validator builds its feature propagator from the same orchestrator
+
 #### Scenario: Workers receive the setting
 - **WHEN** worker environment variables are resolved for a job run and `DOCPIPE_ENABLE_CUSTOM_OPERATORS` is set in the submitting process
 - **THEN** the same value is forwarded to the worker, so API validation and worker execution agree

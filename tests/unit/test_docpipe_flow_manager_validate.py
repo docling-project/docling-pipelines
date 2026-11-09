@@ -17,6 +17,66 @@ from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.lib.docpipe_flow_manager import DocpipeFlowManager
 from docpipe.utils.infrastructure.flow_execution_reporter import FlowExecutionReporter
 
+_FEATURE_PAIR_SOURCE = textwrap.dedent(
+    '''
+    """Custom producer/consumer pair linked by an output feature."""
+
+    import pyarrow as pa
+
+    from docpipe.core.constants.constants import DocpipeConstants
+    from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
+
+
+    class FeatureProducerOperator(AbstractOperator):
+        """Declare an output feature."""
+
+        short_name: str = "lib_api_producer"
+        category: OperatorCategory = OperatorCategory.Functional
+        owner: str | None = DocpipeConstants.OWNER_CUSTOM
+
+        def transform(self, table: pa.Table, file_name: str | None = None) -> tuple[list[pa.Table], dict]:
+            """Return the input table."""
+            return [table], self.create_base_metadata(total_docs_count=table.num_rows)
+
+        @staticmethod
+        def get_metadata() -> dict:
+            """Return operator metadata with one output feature."""
+            return {
+                "label": "Producer",
+                "description": "Produces a feature",
+                "category": OperatorCategory.Functional.value,
+                "features": {"lib_api_feature": {"type": "string", "description": "Produced by the custom operator"}},
+            }
+
+        @staticmethod
+        def get_required_features() -> list[str]:
+            """Require no input features."""
+            return []
+
+
+    class FeatureConsumerOperator(AbstractOperator):
+        """Require the feature declared by the producer."""
+
+        short_name: str = "lib_api_consumer"
+        category: OperatorCategory = OperatorCategory.Functional
+        owner: str | None = DocpipeConstants.OWNER_CUSTOM
+
+        def transform(self, table: pa.Table, file_name: str | None = None) -> tuple[list[pa.Table], dict]:
+            """Return the input table."""
+            return [table], self.create_base_metadata(total_docs_count=table.num_rows)
+
+        @staticmethod
+        def get_metadata() -> dict:
+            """Return operator metadata."""
+            return {"label": "Consumer", "description": "Consumes a feature", "category": OperatorCategory.Functional.value}
+
+        @staticmethod
+        def get_required_features() -> list[str]:
+            """Require the producer's output feature."""
+            return ["lib_api_feature"]
+    '''
+)
+
 _CUSTOM_OPERATOR_SOURCE = textwrap.dedent(
     '''
     """Custom operator written by a library user."""
@@ -138,6 +198,30 @@ def test_registered_custom_operator_directory_makes_operator_available_to_valida
     assert manager.custom_operator_packages == [str(custom_operator_dir)]
     assert after["valid"] is True
     assert after["errors"] == []
+
+
+def test_custom_output_feature_propagates_when_enabled_only_by_python_argument(
+    fixtures_customer_support_dir, tmp_path, monkeypatch
+):
+    """A downstream operator may require a custom operator's output feature without the env switch."""
+    monkeypatch.delenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", raising=False)
+    ops_dir = tmp_path / "feature_operators"
+    ops_dir.mkdir()
+    (ops_dir / "feature_pair.py").write_text(_FEATURE_PAIR_SOURCE, encoding="utf-8")
+    flow = _ingest_then(operator_type="lib_api_producer", docs_dir=fixtures_customer_support_dir)
+    flow["flow"].append({"type": "lib_api_consumer", "name": "consumer", "depends_on": ["step"], "config": {}})
+    manager = DocpipeFlowManager(
+        flow_def=flow,
+        configure_logging=False,
+        enable_execution_reporter=False,
+        enable_custom_operators=True,
+    )
+    manager.register_custom_operators(package_names=[str(ops_dir)])
+
+    result = manager.validate()
+
+    assert result["errors"] == []
+    assert result["valid"] is True
 
 
 def test_validate_reports_unexpected_validator_error_as_invalid(fixtures_customer_support_dir):
