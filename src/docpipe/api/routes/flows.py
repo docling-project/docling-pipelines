@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow management API routes.
 
 This module provides REST API endpoints for flow management operations including
@@ -19,6 +22,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
+from docpipe.api.auth.actor import get_actor
 from docpipe.api.dependencies import get_flow_service
 from docpipe.api.dto.authoring_flow_dto import (
     AuthoringFlowCreateRequest,
@@ -47,6 +51,7 @@ from docpipe.api.dto.flow_dto import (
 from docpipe.api.dto.mappers.flow_mapper import FlowMapper
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
 from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
+from docpipe.core.models.actor_context import ActorContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -208,6 +213,7 @@ def get_filter_params(
 PaginationDep = Annotated[tuple[int, int], Depends(get_pagination_params)]
 FiltersDep = Annotated[dict, Depends(get_filter_params)]
 FlowServiceDep = Annotated[FlowService, Depends(get_flow_service)]
+ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
 
 
 @flows_router.post(
@@ -308,6 +314,7 @@ async def create_flow(
     request: Request,
     body: dict,
     service: FlowServiceDep,
+    actor: ActorDep,
     is_elyra: IsElyraQuery = False,
 ):
     """Create and store a new flow.
@@ -318,6 +325,7 @@ async def create_flow(
         request: FastAPI request object
         body: Raw dict containing flow definition (validated based on is_elyra)
         service: Injected flow service instance
+        actor: Authenticated caller, or None when auth is disabled
         is_elyra: Query parameter indicating if flow is in Elyra format (default: False)
 
     Returns:
@@ -358,7 +366,7 @@ async def create_flow(
     logger.debug("Converted to domain model: %s", domain_flow.name)
 
     # Create flow using service - store in original format
-    created_flow = service.create_flow(flow=domain_flow, is_elyra=is_elyra)
+    created_flow = service.create_flow(flow=domain_flow, is_elyra=is_elyra, actor=actor)
 
     logger.info("Successfully created flow %s", created_flow.flow_id)
 
@@ -748,6 +756,7 @@ async def list_flows(
 async def update_flow(
     body: dict[str, Any],
     service: FlowServiceDep,
+    actor: ActorDep,
     flow_id: str = Depends(get_flow_id),
     is_elyra: IsElyraQuery = False,
 ):
@@ -758,6 +767,7 @@ async def update_flow(
     Args:
         body: Raw request body dict (validated based on is_elyra parameter)
         service: Injected flow service instance
+        actor: Authenticated caller, or None when auth is disabled
         flow_id: UUID of the flow to update (validated via dependency)
         is_elyra: Query parameter indicating if flow is in Elyra format (default: False)
 
@@ -766,7 +776,7 @@ async def update_flow(
             (format matches input format)
 
     Raises:
-        HTTPException: If flow not found or update fails (404, 400, 500)
+        HTTPException: If flow not found or update fails (404, 400, 403, 500)
     """
     logger.debug("Updating flow: %s, is_elyra: %s", flow_id, is_elyra)
 
@@ -799,7 +809,7 @@ async def update_flow(
     domain_flow.flow_id = flow_id
 
     # Update flow using service - service raises typed exceptions
-    updated_flow = service.update_flow(domain_flow)
+    updated_flow = service.update_flow(domain_flow, actor=actor)
 
     logger.info("Successfully updated flow %s", flow_id)
 
@@ -900,6 +910,7 @@ async def partial_update_flow(
     request: Request,
     body: dict[str, Any],
     service: FlowServiceDep,
+    actor: ActorDep,
     flow_id: str = Depends(get_flow_id),
     is_elyra: IsElyraQuery = False,
 ):
@@ -911,6 +922,7 @@ async def partial_update_flow(
         request: FastAPI request object
         body: Raw request body dict (validated based on is_elyra parameter)
         service: Injected flow service instance
+        actor: Authenticated caller, or None when auth is disabled
         flow_id: UUID of the flow to update (validated via dependency)
         is_elyra: Query parameter indicating if flow is in Elyra format (default: False)
 
@@ -919,7 +931,7 @@ async def partial_update_flow(
             (format matches input format)
 
     Raises:
-        HTTPException: If flow not found or update fails (404, 400, 500)
+        HTTPException: If flow not found or update fails (404, 400, 403, 500)
     """
     logger.debug("Partially updating flow: %s, is_elyra: %s", flow_id, is_elyra)
 
@@ -930,7 +942,7 @@ async def partial_update_flow(
         updates = AuthoringFlowUpdateRequest(**body)
 
     # Pass dict directly to service - service handles transformation
-    updated_flow = service.partial_update_flow(flow_id, updates.dict(exclude_unset=True))
+    updated_flow = service.partial_update_flow(flow_id, updates.dict(exclude_unset=True), actor=actor)
 
     logger.info("Successfully partially updated flow %s", flow_id)
 
@@ -1007,6 +1019,7 @@ async def partial_update_flow(
 async def delete_flow(
     request: Request,
     service: FlowServiceDep,
+    actor: ActorDep,
     flow_id: str = Depends(get_flow_id),
 ):
     """Delete a flow by ID.
@@ -1015,6 +1028,7 @@ async def delete_flow(
         request: FastAPI request object
         flow_id: UUID of the flow to delete (validated via dependency)
         service: Injected flow service instance
+        actor: Authenticated caller, or None when auth is disabled
 
     Returns:
         No content on success
@@ -1025,7 +1039,7 @@ async def delete_flow(
     logger.debug("Deleting flow: %s", flow_id)
 
     # Delete flow using service - service raises typed exceptions
-    service.delete_flow(flow_id)
+    service.delete_flow(flow_id, actor=actor)
 
     logger.info("Successfully deleted flow %s", flow_id)
 
@@ -1101,6 +1115,7 @@ async def delete_flow(
 async def bulk_delete_flows(
     request: Request,
     service: FlowServiceDep,
+    actor: ActorDep,
     flow_ids: FlowIdsQuery,
 ):
     """Delete multiple flows by their IDs.
@@ -1109,6 +1124,7 @@ async def bulk_delete_flows(
         request: FastAPI request object
         flow_ids: Comma-separated string of flow UUIDs to delete
         service: Injected flow service instance
+        actor: Authenticated caller, or None when auth is disabled
 
     Returns:
         Dictionary with deletion results:
@@ -1128,7 +1144,7 @@ async def bulk_delete_flows(
 
     # Architectural refactoring: Validation moved to service layer
     # Service layer now validates empty flow_ids list and raises FlowInvalidDataException
-    result = service.bulk_delete_flows(flow_id_list)
+    result = service.bulk_delete_flows(flow_id_list, actor=actor)
 
     logger.info(
         "Bulk delete completed: %s deleted, %s failed out of %s requested",
