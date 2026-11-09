@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for OAuth2 route helpers and security fixes."""
 
 import time
@@ -22,12 +25,16 @@ from docpipe.api.auth.oauth2_provider import (
 from docpipe.api.auth.oauth2_routes import (
     _MAX_STATE_ENTRIES,
     _STATE_TTL_SECONDS,
+    NONCE_COOKIE_NAME,
     _consume_state,
     _is_same_origin,
     _state_store,
     _store_state,
     get_oauth2_provider_instance,
+    resolve_return_to,
+    validate_return_to,
 )
+from docpipe.api.auth.roles import Role
 from docpipe.api.middleware.error_handler import docpipe_exception_handler
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, DocpipeException, ExternalServiceError
 
@@ -83,50 +90,120 @@ class TestIsSameOrigin:
 
 class TestStateStore:
     def test_stored_state_is_consumed_once(self):
-        _store_state(state="abc123", redirect_url="/home")
-        result = _consume_state(state="abc123")
+        _store_state(state="abc123", redirect_url="/home", nonce="n1")
+        result = _consume_state(state="abc123", nonce="n1")
         assert result == "/home"
 
     def test_consumed_state_cannot_be_reused(self):
-        _store_state(state="abc123", redirect_url="/home")
-        _consume_state(state="abc123")
-        assert _consume_state(state="abc123") is None
+        _store_state(state="abc123", redirect_url="/home", nonce="n1")
+        _consume_state(state="abc123", nonce="n1")
+        assert _consume_state(state="abc123", nonce="n1") is None
 
     def test_unknown_state_returns_none(self):
-        assert _consume_state(state="no-such-state") is None
+        assert _consume_state(state="no-such-state", nonce="n1") is None
 
     def test_empty_redirect_url_is_stored_and_returned(self):
-        _store_state(state="s1", redirect_url="")
-        assert _consume_state(state="s1") == ""
+        _store_state(state="s1", redirect_url="", nonce="n1")
+        assert _consume_state(state="s1", nonce="n1") == ""
 
     def test_expired_state_is_rejected(self):
         state = "expired-state"
         expired_time = time.monotonic() - _STATE_TTL_SECONDS - 1
-        _state_store[state] = ("/home", expired_time)
-        assert _consume_state(state=state) is None
+        _state_store[state] = ("/home", expired_time, "n1")
+        assert _consume_state(state=state, nonce="n1") is None
 
     def test_expired_states_are_purged_on_store(self):
         # Plant an expired entry
-        _state_store["old"] = ("/old", time.monotonic() - _STATE_TTL_SECONDS - 1)
+        _state_store["old"] = ("/old", time.monotonic() - _STATE_TTL_SECONDS - 1, "n0")
         # Storing a new state triggers purge
-        _store_state(state="new", redirect_url="/new")
+        _store_state(state="new", redirect_url="/new", nonce="n1")
         assert "old" not in _state_store
         assert "new" in _state_store
 
     def test_multiple_states_tracked_independently(self):
-        _store_state(state="s1", redirect_url="/a")
-        _store_state(state="s2", redirect_url="/b")
-        assert _consume_state(state="s1") == "/a"
-        assert _consume_state(state="s2") == "/b"
+        _store_state(state="s1", redirect_url="/a", nonce="n1")
+        _store_state(state="s2", redirect_url="/b", nonce="n2")
+        assert _consume_state(state="s1", nonce="n1") == "/a"
+        assert _consume_state(state="s2", nonce="n2") == "/b"
 
     def test_store_full_raises_runtime_error(self):
         """_store_state raises RuntimeError when the cap is reached after purging."""
         # Fill the store to capacity with fresh (non-expired) entries
         future = time.monotonic() + _STATE_TTL_SECONDS + 100
         for i in range(_MAX_STATE_ENTRIES):
-            _state_store[f"fill-{i}"] = ("/x", future)
+            _state_store[f"fill-{i}"] = ("/x", future, "n")
         with pytest.raises(RuntimeError, match="full"):
-            _store_state(state="overflow", redirect_url="/y")
+            _store_state(state="overflow", redirect_url="/y", nonce="n")
+
+    @pytest.mark.parametrize("nonce", [None, "", "wrong"])
+    def test_missing_or_mismatched_nonce_is_rejected_and_burns_state(self, nonce):
+        _store_state(state="s1", redirect_url="/a", nonce="right")
+
+        assert _consume_state(state="s1", nonce=nonce) is None
+        assert _consume_state(state="s1", nonce="right") is None
+
+    def test_state_stored_without_nonce_is_never_valid(self):
+        _store_state(state="s1", redirect_url="/a")
+
+        assert _consume_state(state="s1", nonce="") is None
+        assert _consume_state(state="s1", nonce="anything") is None
+
+
+# ---------------------------------------------------------------------------
+# return_to validation
+# ---------------------------------------------------------------------------
+
+
+class TestReturnToValidation:
+    @pytest.mark.parametrize(
+        "value",
+        ["/flows/x", "/flows/x?a=1", "/ui/flows/x", "/", "/flows/%E2%9C%93?q=a%20b", "/p?next=/a//b"],
+    )
+    def test_safe_values_are_kept(self, value):
+        assert validate_return_to(value=value) == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None,
+            "",
+            "https://evil.example/",
+            "http://evil.example",
+            "//evil.example/path",
+            "///evil.example",
+            "/\\evil.example.com",
+            "/\\/evil.example.com",
+            "\\evil.example",
+            "javascript:alert(1)",
+            "relative/no/leading/slash",
+            "/a\nb",
+            "/a\rb",
+            "/a\x00b",
+        ],
+    )
+    def test_unsafe_values_are_refused(self, value):
+        assert validate_return_to(value=value) is None
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("/flows/abc", "/ui/flows/abc"),
+            ("/flows/x?a=1", "/ui/flows/x?a=1"),
+            ("/dashboard?tab=flows", "/ui/dashboard?tab=flows"),
+            ("/ui/flows/abc", "/ui/flows/abc"),
+            ("/ui", "/ui"),
+            ("/ui?x=1", "/ui?x=1"),
+            ("/uix/flows", "/ui/uix/flows"),
+            ("/flows/%E2%9C%93?q=a%20b", "/ui/flows/%E2%9C%93?q=a%20b"),
+            ("", "/ui/projects"),
+            (None, "/ui/projects"),
+            ("https://evil.example/", "/ui/projects"),
+            ("//evil.example/x", "/ui/projects"),
+            ("/\\evil.example", "/ui/projects"),
+        ],
+    )
+    def test_resolution_prefixes_ui_and_defaults(self, value, expected):
+        assert resolve_return_to(value=value) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +212,7 @@ class TestStateStore:
 
 
 class TestAuthorizeEndpointRedirectValidation:
-    """The /authorize endpoint must reject absolute redirect_after URLs."""
+    """The /authorize endpoint drops unsafe return_to values; the callback then uses the default."""
 
     @pytest.fixture
     def app_with_routes(self):
@@ -145,32 +222,26 @@ class TestAuthorizeEndpointRedirectValidation:
         app.include_router(router)
         return app
 
-    def test_absolute_redirect_after_returns_400(self, app_with_routes):
+    @pytest.mark.parametrize("parameter", ["redirect_after", "return_to"])
+    @pytest.mark.parametrize(
+        "value",
+        ["https://evil.example.com", "//evil.example.com/path", "/\\evil.example.com", "https://evil.example/"],
+    )
+    def test_unsafe_value_never_returns_400(self, app_with_routes, parameter, value):
         client = TestClient(app_with_routes, raise_server_exceptions=False)
-        response = client.get(
-            "/auth/oauth2/authorize",
-            params={"redirect_after": "https://evil.example.com"},
-        )
-        assert response.status_code == 400
-        assert "relative" in response.json().get("detail", "").lower()
 
-    def test_protocol_relative_redirect_after_returns_400(self, app_with_routes):
-        client = TestClient(app_with_routes, raise_server_exceptions=False)
-        response = client.get(
-            "/auth/oauth2/authorize",
-            params={"redirect_after": "//evil.example.com/path"},
-        )
-        assert response.status_code == 400
+        response = client.get("/auth/oauth2/authorize", params={parameter: value})
+
+        # OAuth2 is not configured in this app, so the provider dependency answers 503;
+        # the point is that return_to validation never answers 400.
+        assert response.status_code != 400
 
     def test_relative_redirect_after_is_not_blocked(self, app_with_routes, monkeypatch):
-        """A relative redirect_after passes the validation guard (OAuth2 not configured
-        in tests so we expect 503, not 400)."""
         client = TestClient(app_with_routes, raise_server_exceptions=False)
         response = client.get(
             "/auth/oauth2/authorize",
             params={"redirect_after": "/dashboard"},
         )
-        # 400 means the redirect validation fired — that must NOT happen for /dashboard.
         assert response.status_code != 400
 
     def test_no_redirect_after_is_not_blocked(self, app_with_routes):
@@ -252,7 +323,9 @@ def oauth_app(stub_provider) -> FastAPI:
 
 @pytest.fixture
 def client(oauth_app) -> TestClient:
-    return TestClient(oauth_app, follow_redirects=False)
+    test_client = TestClient(oauth_app, follow_redirects=False)
+    test_client.cookies.set(NONCE_COOKIE_NAME, _NONCE, path="/auth/oauth2")
+    return test_client
 
 
 @pytest.fixture
@@ -263,9 +336,12 @@ def jwt_env(monkeypatch, tmp_path) -> JWTConfig:
     return JWTConfig()
 
 
-def _issue_state(*, redirect_url: str = "") -> str:
+_NONCE = "browser-nonce-value"
+
+
+def _issue_state(*, redirect_url: str = "", nonce: str = _NONCE) -> str:
     state = f"state-{len(_state_store)}-{time.monotonic_ns()}"
-    _store_state(state=state, redirect_url=redirect_url)
+    _store_state(state=state, redirect_url=redirect_url, nonce=nonce)
     return state
 
 
@@ -360,6 +436,56 @@ class TestAuthorizeEndpoint:
         assert len(states) == 3
         assert set(_state_store) == states
 
+    def test_return_to_is_stored(self, client):
+        response = client.get("/auth/oauth2/authorize", params={"return_to": "/flows/abc?x=1"})
+
+        state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
+        assert _state_store[state][0] == "/flows/abc?x=1"
+
+    def test_return_to_wins_over_redirect_after(self, client):
+        response = client.get("/auth/oauth2/authorize", params={"return_to": "/flows/a", "redirect_after": "/flows/b"})
+
+        state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
+        assert _state_store[state][0] == "/flows/a"
+
+    @pytest.mark.parametrize("parameter", ["return_to", "redirect_after"])
+    @pytest.mark.parametrize(
+        "value", ["https://evil.example/", "//evil.example/x", "/\\evil.example", "http://evil.example"]
+    )
+    def test_unsafe_value_is_dropped_not_rejected(self, client, parameter, value):
+        response = client.get("/auth/oauth2/authorize", params={parameter: value})
+
+        assert response.status_code == 307
+        state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
+        assert _state_store[state][0] == ""
+
+    def test_sets_httponly_nonce_cookie_tied_to_state(self, client):
+        client.cookies.clear()
+
+        response = client.get("/auth/oauth2/authorize")
+
+        header = response.headers["set-cookie"].lower()
+        assert header.startswith(f"{NONCE_COOKIE_NAME}=")
+        assert "httponly" in header
+        assert "samesite=lax" in header
+        assert "path=/auth/oauth2" in header
+        assert "max-age=600" in header
+        state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
+        assert response.cookies.get(NONCE_COOKIE_NAME) == _state_store[state][2]
+        assert len(_state_store[state][2]) >= 32
+
+    def test_each_request_gets_a_fresh_nonce(self, client):
+        client.cookies.clear()
+        nonces = {client.get("/auth/oauth2/authorize").cookies.get(NONCE_COOKIE_NAME) for _ in range(3)}
+        client.cookies.clear()
+
+        assert len(nonces) == 3
+
+    def test_nonce_cookie_is_secure_over_https(self, client):
+        https_client = TestClient(client.app, base_url="https://testserver", follow_redirects=False)
+
+        assert "; secure" in https_client.get("/auth/oauth2/authorize").headers["set-cookie"].lower()
+
     def test_without_redirect_after_stores_empty_redirect(self, client):
         response = client.get("/auth/oauth2/authorize")
 
@@ -369,7 +495,7 @@ class TestAuthorizeEndpoint:
     def test_full_state_store_returns_429(self, client):
         future = time.monotonic() + _STATE_TTL_SECONDS
         for i in range(_MAX_STATE_ENTRIES):
-            _state_store[f"pending-{i}"] = ("", future)
+            _state_store[f"pending-{i}"] = ("", future, "n")
 
         response = client.get("/auth/oauth2/authorize")
 
@@ -401,35 +527,128 @@ class TestAuthorizeEndpoint:
 
 @pytest.mark.usefixtures("jwt_env")
 class TestCallbackEndpoint:
-    def test_success_returns_jwt_for_provider_user(self, *, client, stub_provider, jwt_env):
+    def test_success_sets_session_cookie_and_redirects_to_default(self, *, client, stub_provider, jwt_env):
         state = _issue_state()
 
         response = client.get("/auth/oauth2/callback", params={"code": "auth-code", "state": state})
 
-        assert response.status_code == 200
-        body = response.json()
-        assert body["token_type"] == "bearer"
-        claims = verify_token(body["access_token"], jwt_env)
+        assert response.status_code == 302
+        assert response.headers["location"] == "/ui/projects"
+        token = response.cookies.get("docpipe_access_token")
+        claims = verify_token(token, jwt_env)
         assert claims is not None
         assert (claims["username"], claims["email"], claims["full_name"]) == (
             "alice",
             "alice@example.com",
             "Alice Example",
         )
+        assert claims["roles"] == ["viewer"]
         assert stub_provider.exchanged_codes == ["auth-code"]
 
-    def test_success_with_redirect_puts_token_in_fragment_only(self, *, client, jwt_env):
-        state = _issue_state(redirect_url="/dashboard?tab=flows")
+    def test_session_cookie_flags(self, *, client):
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": _issue_state()})
 
-        response = client.get("/auth/oauth2/callback", params={"code": "auth-code", "state": state})
+        session_cookie = next(
+            value for value in response.headers.get_list("set-cookie") if value.startswith("docpipe_access_token=")
+        ).lower()
+        assert "httponly" in session_cookie
+        assert "samesite=lax" in session_cookie
+        assert "path=/;" in session_cookie or session_cookie.endswith("path=/")
 
-        assert response.status_code == 307
-        location = response.headers["location"]
-        parsed = urlparse(location)
-        assert (parsed.scheme, parsed.netloc, parsed.path, parsed.query) == ("", "", "/dashboard", "tab=flows")
-        assert "access_token" not in parsed.query
-        token = parse_qs(parsed.fragment)["access_token"][0]
-        assert verify_token(token, jwt_env)["username"] == "alice"
+    def test_nonce_cookie_is_cleared(self, *, client):
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": _issue_state()})
+
+        nonce_cookie = next(
+            value for value in response.headers.get_list("set-cookie") if value.startswith(f"{NONCE_COOKIE_NAME}=")
+        ).lower()
+        assert "max-age=0" in nonce_cookie
+
+    def test_provider_roles_are_carried_into_the_token(self, *, client, stub_provider, jwt_env):
+        stub_provider.user = User(username="root", email="r@example.com", full_name="R", roles=[Role.ADMIN])
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": _issue_state()})
+
+        claims = verify_token(response.cookies.get("docpipe_access_token"), jwt_env)
+        assert claims is not None
+        assert claims["roles"] == ["admin"]
+
+    @pytest.mark.parametrize(
+        ("stored", "expected"),
+        [
+            ("/flows/abc", "/ui/flows/abc"),
+            ("/flows/x?a=1", "/ui/flows/x?a=1"),
+            ("/dashboard?tab=flows", "/ui/dashboard?tab=flows"),
+            ("/ui/flows/abc", "/ui/flows/abc"),
+            ("/ui", "/ui"),
+            ("", "/ui/projects"),
+        ],
+    )
+    def test_redirects_to_validated_return_to_below_ui(self, *, client, stored, expected):
+        state = _issue_state(redirect_url=stored)
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.status_code == 302
+        assert response.headers["location"] == expected
+
+    @pytest.mark.parametrize(
+        "unsafe", ["https://evil.example/", "//evil.example/x", "/\\evil.example", "http://evil.example"]
+    )
+    def test_unsafe_return_to_redirects_to_default_end_to_end(self, *, client, unsafe):
+        authorize = client.get("/auth/oauth2/authorize", params={"return_to": unsafe})
+        state = parse_qs(urlparse(authorize.headers["location"]).query)["state"][0]
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/ui/projects"
+
+    def test_unsafe_value_in_the_store_is_revalidated_by_the_callback(self, *, client):
+        state = _issue_state(redirect_url="https://evil.example/")
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.headers["location"] == "/ui/projects"
+
+    def test_token_never_appears_in_the_redirect_url(self, *, client):
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": _issue_state()})
+
+        token = response.cookies.get("docpipe_access_token")
+        assert token and token not in response.headers["location"]
+        assert "#" not in response.headers["location"]
+        assert "access_token" not in response.headers["location"]
+
+    def test_matching_nonce_completes_the_login(self, *, client):
+        client.cookies.clear()
+        authorize = client.get("/auth/oauth2/authorize")  # the browser receives the nonce cookie here
+        state = parse_qs(urlparse(authorize.headers["location"]).query)["state"][0]
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.status_code == 302
+        assert response.cookies.get("docpipe_access_token")
+
+    def test_missing_nonce_cookie_is_rejected_without_session_cookie(self, *, client, stub_provider):
+        client.cookies.clear()
+        state = _issue_state()
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.status_code == 400
+        assert "docpipe_access_token" not in response.headers.get("set-cookie", "")
+        assert stub_provider.exchanged_codes == []
+
+    def test_mismatched_nonce_cookie_is_rejected_without_session_cookie(self, *, client, stub_provider):
+        client.cookies.clear()
+        client.cookies.set(NONCE_COOKIE_NAME, "another-browsers-nonce", path="/auth/oauth2")
+        state = _issue_state()
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.status_code == 400
+        assert "docpipe_access_token" not in response.headers.get("set-cookie", "")
+        assert stub_provider.exchanged_codes == []
+        assert state not in _state_store
 
     def test_state_is_single_use(self, *, client, stub_provider):
         state = _issue_state()
@@ -437,7 +656,7 @@ class TestCallbackEndpoint:
 
         replay = client.get("/auth/oauth2/callback", params={"code": "c2", "state": state})
 
-        assert first.status_code == 200
+        assert first.status_code == 302
         assert replay.status_code == 400
         assert stub_provider.exchanged_codes == ["c1"]
 
@@ -452,7 +671,7 @@ class TestCallbackEndpoint:
         assert stub_provider.exchanged_codes == []
 
     def test_expired_state_is_rejected(self, *, client, stub_provider):
-        _state_store["stale"] = ("", time.monotonic() - 1)
+        _state_store["stale"] = ("", time.monotonic() - 1, _NONCE)
 
         response = client.get("/auth/oauth2/callback", params={"code": "c", "state": "stale"})
 
@@ -486,6 +705,7 @@ class TestCallbackEndpoint:
 
         assert response.status_code == 502
         assert "access_token" not in response.text
+        assert "docpipe_access_token" not in response.headers.get("set-cookie", "")
         assert state not in _state_store
 
     def test_id_token_validation_failure_returns_502(self, *, client, stub_provider):
@@ -522,8 +742,7 @@ class TestCallbackEndpoint:
 
         location = response.headers["location"]
         normalised = location.replace("\\", "/")
-        assert normalised.startswith("/")
-        assert not normalised.startswith("//")
+        assert normalised == "/ui/projects"
 
 
 # ---------------------------------------------------------------------------
