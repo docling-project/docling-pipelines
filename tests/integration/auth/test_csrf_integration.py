@@ -14,6 +14,7 @@ from docpipe.api.auth.jwt_handler import JWTConfig, create_access_token
 from docpipe.api.dependencies import get_flow_service
 from docpipe.api.main import app
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
+from docpipe.core.models.actor_context import ActorContext
 
 _JWT_SECRET = "test-secret-key-for-integration-tests"  # pragma: allowlist secret
 _FLOW_ID = "12345678-1234-1234-1234-123456789abc"
@@ -39,8 +40,12 @@ def client(*, auth_enabled, monkeypatch, flow_service) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
+def _actor(username: str) -> ActorContext:
+    return ActorContext(username=username, roles=frozenset({"editor"}))
+
+
 def _token(*, config: JWTConfig, username: str) -> str:
-    return create_access_token({"username": username}, config)
+    return create_access_token({"username": username, "roles": ["editor"]}, config)
 
 
 class TestCsrfOnFlowsRoute:
@@ -59,7 +64,7 @@ class TestCsrfOnFlowsRoute:
         response = client.delete(_FLOW_URL, headers={"X-Requested-With": "XMLHttpRequest"})
 
         assert response.status_code == 204
-        flow_service.delete_flow.assert_called_once_with(_FLOW_ID)
+        flow_service.delete_flow.assert_called_once_with(_FLOW_ID, actor=_actor("alice"))
 
     def test_cookie_read_needs_no_header(self, *, client, flow_service, jwt_config):
         flow_service.get_flow.return_value = None
@@ -76,7 +81,7 @@ class TestCsrfOnFlowsRoute:
         response = client.delete(_FLOW_URL, headers={"Authorization": f"Bearer {token}"})
 
         assert response.status_code == 204
-        flow_service.delete_flow.assert_called_once_with(_FLOW_ID)
+        flow_service.delete_flow.assert_called_once_with(_FLOW_ID, actor=_actor("alice"))
 
     def test_bearer_for_one_user_wins_over_cookie_for_another(self, *, client, flow_service, jwt_config):
         client.cookies.set(DEFAULT_COOKIE_NAME, _token(config=jwt_config, username="bob"))
@@ -85,7 +90,7 @@ class TestCsrfOnFlowsRoute:
         response = client.delete(_FLOW_URL, headers={"Authorization": f"Bearer {token}"})
 
         assert response.status_code == 204
-        flow_service.delete_flow.assert_called_once_with(_FLOW_ID)
+        flow_service.delete_flow.assert_called_once_with(_FLOW_ID, actor=_actor("alice"))
 
     def test_unauthenticated_delete_is_401(self, *, client, flow_service):
         response = client.delete(_FLOW_URL)
