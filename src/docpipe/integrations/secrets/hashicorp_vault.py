@@ -52,7 +52,7 @@ from urllib.parse import urlparse
 import requests
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
-from docpipe.integrations.secrets.secret_provider import SecretProvider
+from docpipe.integrations.secrets.secret_provider import ProviderUnreachableError, SecretProvider
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -224,6 +224,18 @@ def _request_error_category(exc: requests.exceptions.RequestException) -> str:
     return "request failed"
 
 
+def _http_status_error(*, status_code: int, message: str) -> ExternalServiceError:
+    """Return the error for a non-success Vault read status.
+
+    Server-side failures and rate limiting (5xx, 429) mean Vault cannot serve the
+    request right now, so they are reported as unreachable. Other statuses (for
+    example 403 permission denied) mean the secret is not available to the caller.
+    """
+    if status_code >= 500 or status_code == 429:
+        return ProviderUnreachableError(message)
+    return ExternalServiceError(message)
+
+
 class HashiCorpVaultProvider(SecretProvider):
     """HashiCorp Vault provider using AppRole + optional mTLS.
 
@@ -323,12 +335,12 @@ class HashiCorpVaultProvider(SecretProvider):
             response = self._session.post(url, json=payload, timeout=_REQUEST_TIMEOUT, allow_redirects=False)
         except requests.exceptions.RequestException as e:
             msg = f"Vault AppRole login failed: {_request_error_category(e)}"
-            raise ExternalServiceError(msg) from None
+            raise ProviderUnreachableError(msg) from None
 
         if response.status_code != 200:
             _log_vault_response(method="POST", category="login", response=response)
             msg = f"Vault AppRole login failed (HTTP {response.status_code})"
-            raise ExternalServiceError(msg)
+            raise ProviderUnreachableError(msg)
 
         data = response.json()
         auth_data = data.get("auth", {})
@@ -338,7 +350,7 @@ class HashiCorpVaultProvider(SecretProvider):
 
         if not self._token:
             msg = "Vault login response missing client_token"
-            raise ExternalServiceError(msg)
+            raise ProviderUnreachableError(msg)
 
         # Set token header for subsequent requests
         self._session.headers["X-Vault-Token"] = self._token
@@ -421,11 +433,11 @@ class HashiCorpVaultProvider(SecretProvider):
                 # None of these mean "try KV v1" — fail immediately with the real status.
                 _log_vault_response(method="GET", category="kv2 read", response=response)
                 msg = f"Vault returned HTTP {response.status_code} for secret read (kv2)"
-                raise ExternalServiceError(msg)
+                raise _http_status_error(status_code=response.status_code, message=msg)
             # 404 only: path not found under KV v2 /data/ prefix — fall through to KV v1
         except requests.exceptions.RequestException as kv2_error:
             msg = f"Vault secret read failed (kv2): {_request_error_category(kv2_error)}"
-            raise ExternalServiceError(msg) from None
+            raise ProviderUnreachableError(msg) from None
 
         # Fallback to KV v1 (only reached on 404 from KV v2)
         kv1_url = f"{base_url}/v1/{mount}/{path}"
@@ -436,10 +448,10 @@ class HashiCorpVaultProvider(SecretProvider):
                 return resp_data["data"]
             _log_vault_response(method="GET", category="kv1 read", response=response)
             msg = f"Vault returned HTTP {response.status_code} for secret read (kv1)"
-            raise ExternalServiceError(msg)
+            raise _http_status_error(status_code=response.status_code, message=msg)
         except requests.exceptions.RequestException as kv1_error:
             msg = f"Vault secret read failed (kv1): {_request_error_category(kv1_error)}"
-            raise ExternalServiceError(msg) from None
+            raise ProviderUnreachableError(msg) from None
 
     def is_available(self) -> bool:
         """Check if Vault is reachable and initialized.

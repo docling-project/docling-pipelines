@@ -66,6 +66,16 @@ NAMING_FIELD_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# Field names (last path segment) that choose where a credential is sent. When
+# any field of a node resolves from a secret provider, the shared resolver binds
+# these to ``secrets.vault.allowed_destinations`` (design D4b).
+DESTINATION_FIELD_NAMES: frozenset[str] = frozenset({"endpoint_url", "host", "uri", "api_base", "url", "base_url"})
+
+# Field names (last path segment) that hold a JSON document. A resolved value
+# for one of these is parsed once by the resolver instead of being rejected as
+# "not a string".
+STRUCTURED_FIELD_NAMES: frozenset[str] = frozenset({"credentials_json", "service_account_json"})
+
 # Credential-looking names from the spec: password, *_key, *_secret, *_token,
 # credentials*, plus the bare names key, secret, and token.
 _CREDENTIAL_NAME = re.compile(r"(^|_)(password|key|secret|token)$|^credentials")

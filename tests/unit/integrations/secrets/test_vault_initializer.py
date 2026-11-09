@@ -323,7 +323,7 @@ class TestTransportGate:
         caplog.set_level(logging.WARNING, logger="docpipe")
         provider = self._provider(addr="http://vault-canary-host.internal:8200")
 
-        _run(env=self._ENV, provider=provider)
+        _run(env=_POLICY_ENV, provider=provider)
 
         assert get_provider(name="hashicorp") is None
         provider.is_available.assert_not_called()
@@ -334,7 +334,7 @@ class TestTransportGate:
         caplog.set_level(logging.WARNING, logger="docpipe")
         provider = self._provider(addr="https://vault-canary-host.internal:8200", skip_verify=True)
 
-        _run(env=self._ENV, provider=provider)
+        _run(env=_POLICY_ENV, provider=provider)
 
         assert get_provider(name="hashicorp") is None
         provider.is_available.assert_not_called()
@@ -344,13 +344,40 @@ class TestTransportGate:
     def test_loopback_plaintext_with_skip_verify_registered(self):
         provider = self._provider(addr="http://127.0.0.1:8200", skip_verify=True)
 
-        _run(env=self._ENV, provider=provider)
+        _run(env=_POLICY_ENV, provider=provider)
 
         assert get_provider(name="hashicorp") is provider
 
     def test_https_remote_registered(self):
         provider = self._provider(addr="https://vault.internal:8200")
 
-        _run(env=self._ENV, provider=provider)
+        _run(env=_POLICY_ENV, provider=provider)
 
         assert get_provider(name="hashicorp") is provider
+
+
+_POLICY_ENV = {"DOCPIPE_VAULT_ENABLED": "true", "VAULT_ROLE_ID": "role", "VAULT_SECRET_ID": "secret"}
+
+
+class TestPolicyStartupDiagnostics:
+    """Registration emits the allowed_paths diagnostics required by the deployment policy."""
+
+    def test_error_when_policy_unset(self, caplog):
+        caplog.set_level(logging.WARNING, logger="docpipe")
+        _call(env=_POLICY_ENV)
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1
+        assert "secrets.vault.allowed_paths" in errors[0].getMessage()
+
+    def test_warning_for_allow_all(self, caplog):
+        caplog.set_level(logging.WARNING, logger="docpipe")
+        yaml_content = 'secrets:\n  vault:\n    enabled: true\n    allowed_paths:\n      - "*:**"\n'
+        _call(env=_POLICY_ENV, yaml_content=yaml_content)
+        assert [r for r in caplog.records if r.levelno == logging.ERROR] == []
+        assert any("any Vault path readable by the platform" in r.getMessage() for r in caplog.records)
+
+    def test_quiet_for_scoped_policy(self, caplog):
+        caplog.set_level(logging.WARNING, logger="docpipe")
+        yaml_content = 'secrets:\n  vault:\n    enabled: true\n    allowed_paths:\n      - "hashicorp:opensearch/*"\n'
+        _call(env=_POLICY_ENV, yaml_content=yaml_content)
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
