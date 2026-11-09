@@ -22,6 +22,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request
 
 from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_project_service
 from docpipe.api.dto.error_dto import ErrorResponse
 from docpipe.api.dto.field_definitions import (
@@ -135,6 +137,7 @@ ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
 
 @projects_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=ProjectResponse,
     status_code=201,
     operation_id="create_project",
@@ -257,6 +260,7 @@ async def get_project(
 
 @projects_router.put(
     "/{project_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=ProjectResponse,
     operation_id="replace_project",
     summary="Fully replace a project",
@@ -297,6 +301,7 @@ async def replace_project(
 
 @projects_router.patch(
     "/{project_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=ProjectResponse,
     operation_id="update_project",
     summary="Partially update a project",
@@ -334,6 +339,7 @@ async def update_project(
 
 @projects_router.delete(
     "/{project_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_project",
     summary="Delete a project",

@@ -23,6 +23,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Path, Query, Request
 
 from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_flow_service
 from docpipe.api.dto.authoring_flow_dto import (
     AuthoringFlowCreateRequest,
@@ -218,6 +220,7 @@ ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
 
 @flows_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=FlowResponse | AuthoringFlowResponse,
     status_code=201,
     operation_id="create_flow",
@@ -668,6 +671,7 @@ async def list_flows(
 
 @flows_router.put(
     "/{flow_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=FlowResponse | AuthoringFlowResponse,
     operation_id="replace_flow",
     summary="Update a flow",
@@ -821,6 +825,7 @@ async def update_flow(
 
 @flows_router.patch(
     "/{flow_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=FlowResponse | AuthoringFlowResponse,
     operation_id="update_flow",
     summary="Partially update a flow",
@@ -954,6 +959,7 @@ async def partial_update_flow(
 
 @flows_router.delete(
     "/{flow_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_flow",
     summary="Delete a flow",
@@ -1049,6 +1055,7 @@ async def delete_flow(
 
 @flows_router.delete(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=BulkDeleteResponse,
     status_code=200,
     operation_id="bulk_delete_flows",

@@ -21,6 +21,8 @@ from fastapi import (
 )
 
 from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_custom_operator_service
 from docpipe.api.dto.custom_operator_dto import (
     CustomOperatorDeleteResponse,
@@ -134,6 +136,7 @@ OptionalOperatorFileForm = Annotated[
 
 @custom_operators_router.post(
     "",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=FileUploadResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create custom operator",
@@ -286,6 +289,7 @@ def get_custom_operator(
 
 @custom_operators_router.patch(
     "/{operator_id}",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=FileUploadResponse,
     status_code=status.HTTP_200_OK,
     summary="Update custom operator",
@@ -368,6 +372,7 @@ async def update_custom_operator(
 
 @custom_operators_router.delete(
     "/{operator_id}",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=CustomOperatorDeleteResponse,
     status_code=status.HTTP_200_OK,
     summary="Delete custom operator",
