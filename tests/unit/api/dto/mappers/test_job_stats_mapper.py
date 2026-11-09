@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JobStatsMapper.
 
@@ -79,7 +82,7 @@ class TestToDtoConversion:
 
     def test_to_dto_basic_fields(self, sample_job_stats):
         """Should convert all basic fields correctly."""
-        dto = JobStatsMapper.to_dto(sample_job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=sample_job_stats)
 
         assert dto.job_id == "12345678-1234-1234-1234-123456789abc"
         assert dto.job_run_id == "87654321-4321-4321-4321-cba987654321"
@@ -93,7 +96,7 @@ class TestToDtoConversion:
 
     def test_to_dto_document_counts(self, sample_job_stats):
         """Should convert document count fields correctly."""
-        dto = JobStatsMapper.to_dto(sample_job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=sample_job_stats)
 
         assert dto.total_docs == 10
         assert dto.processed_docs == 10
@@ -104,7 +107,7 @@ class TestToDtoConversion:
 
     def test_to_dto_metadata_fields(self, sample_job_stats):
         """Should convert metadata fields correctly."""
-        dto = JobStatsMapper.to_dto(sample_job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=sample_job_stats)
 
         assert dto.orchestrator == "prefect"
         assert dto.container_kind == "docker"
@@ -127,7 +130,7 @@ class TestToDtoConversion:
             batch_node_stats={},
         )
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.flow_id == "5f429668-ded4-41b5-80b9-f1d6278dc07a"
         assert dto.flow_name == "flow_06_oct_2026_11_16_PM-jyoti"
@@ -143,20 +146,20 @@ class TestToDtoConversion:
             batch_node_stats={},
         )
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
 
         assert dto.flow_name is None
 
     def test_to_dto_json_fields(self, sample_job_stats):
         """Should convert JSON fields correctly."""
-        dto = JobStatsMapper.to_dto(sample_job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=sample_job_stats)
 
         assert dto.page_type_stats == {"pdf": 5, "docx": 5}
         assert dto.user_entitlements == {"role": "admin"}
 
     def test_to_dto_node_stats_mapping(self, sample_job_stats):
         """Should map nested node_stats correctly."""
-        dto = JobStatsMapper.to_dto(sample_job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=sample_job_stats)
 
         assert "12345678-1234-1234-1234-123456789abc" in dto.node_stats
         node_dto = dto.node_stats["12345678-1234-1234-1234-123456789abc"]
@@ -175,7 +178,7 @@ class TestToDtoConversion:
             batch_node_stats={},
         )
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
         assert dto.node_stats == {}
         assert dto.batch_node_stats == {}
 
@@ -203,7 +206,7 @@ class TestToDtoConversion:
             },
         )
 
-        dto = JobStatsMapper.to_dto(job_stats)
+        dto = JobStatsMapper.to_dto(job_stats=job_stats)
         assert "22345678-1234-1234-1234-123456789abc" in dto.batch_node_stats
         assert "b2345678-1234-1234-1234-123456789abc" in dto.batch_node_stats["22345678-1234-1234-1234-123456789abc"]
         batch_dto = dto.batch_node_stats["22345678-1234-1234-1234-123456789abc"]["b2345678-1234-1234-1234-123456789abc"]
@@ -216,7 +219,7 @@ class TestToStatusResponse:
 
     def test_to_status_response_basic(self, sample_job_stats):
         """Should create status response with basic fields."""
-        response = JobStatsMapper.to_status_response(sample_job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=sample_job_stats)
 
         assert response.job_stats.job_id == "12345678-1234-1234-1234-123456789abc"
         assert response.job_stats.job_run_id == "87654321-4321-4321-4321-cba987654321"
@@ -260,7 +263,7 @@ class TestToStatusResponse:
             batch_node_stats={},
         )
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         # Should be ordered by start_time
         assert response.node_sequence == [
@@ -271,7 +274,7 @@ class TestToStatusResponse:
 
     def test_to_status_response_node_metadata(self, sample_job_stats):
         """Should include node_metadata array."""
-        response = JobStatsMapper.to_status_response(sample_job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=sample_job_stats)
 
         assert len(response.node_metadata) == 1
         metadata_item = response.node_metadata[0]
@@ -280,14 +283,14 @@ class TestToStatusResponse:
 
     def test_to_status_response_without_logs(self, sample_job_stats):
         """Should not include log strings by default."""
-        response = JobStatsMapper.to_status_response(sample_job_stats, include_logs=False)
+        response = JobStatsMapper.to_status_response(job_stats=sample_job_stats, include_logs=False)
 
         # Should not have dynamic node_id attributes
         assert not hasattr(response, "12345678-1234-1234-1234-123456789abc")
 
     def test_to_status_response_with_logs(self, sample_job_stats):
         """Should include log strings when requested."""
-        response = JobStatsMapper.to_status_response(sample_job_stats, include_logs=True)
+        response = JobStatsMapper.to_status_response(job_stats=sample_job_stats, include_logs=True)
 
         # Should have dynamic node_id attribute with log string
         assert hasattr(response, "12345678-1234-1234-1234-123456789abc")
@@ -306,7 +309,7 @@ class TestToStatusResponse:
             batch_node_stats={},
         )
 
-        response = JobStatsMapper.to_status_response(job_stats)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats)
 
         assert response.node_sequence == []
         assert response.node_metadata == []
@@ -338,7 +341,7 @@ class TestToStatusResponse:
             batch_node_stats={},
         )
 
-        response = JobStatsMapper.to_status_response(job_stats, include_logs=True)
+        response = JobStatsMapper.to_status_response(job_stats=job_stats, include_logs=True)
 
         assert hasattr(response, "11111111-1111-1111-1111-111111111111")
         assert hasattr(response, "22222222-2222-2222-2222-222222222222")
