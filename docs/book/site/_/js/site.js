@@ -11,24 +11,61 @@
     });
   }
 
-  // ── Active TOC link on scroll ──────────────────────────────────────────────
-  var headings = document.querySelectorAll('.doc h2, .doc h3');
-  var tocLinks = document.querySelectorAll('.toc-nav a');
+  // ── Build Table of Contents ───────────────────────────────────────────────
+  (function () {
+    var tocNav = document.querySelector('.toc-nav');
+    if (!tocNav) return;
 
-  if (tocLinks.length && headings.length) {
-    var observer = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting) {
-          var id = entry.target.id;
-          tocLinks.forEach(function (a) {
-            a.classList.toggle('is-active', a.getAttribute('href') === '#' + id);
-          });
-        }
-      });
-    }, { rootMargin: '-60px 0px -70% 0px' });
+    var tocMenu = tocNav.querySelector('.toc-menu') || tocNav;
+    var headings = document.querySelectorAll('.doc h2, .doc h3');
+    var validHeadings = [];
 
-    headings.forEach(function (h) { if (h.id) observer.observe(h); });
-  }
+    headings.forEach(function (h) {
+      if (h.id && h.id !== '_chapters') {
+        validHeadings.push(h);
+      }
+    });
+
+    if (validHeadings.length <= 1) {
+      tocNav.style.display = 'none';
+      return;
+    }
+
+    tocNav.style.display = '';
+    tocMenu.innerHTML = '';
+
+    validHeadings.forEach(function (h) {
+      var a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent.trim();
+      var tag = h.tagName.toLowerCase();
+      if (tag === 'h2') {
+        a.classList.add('toc-h2');
+      } else if (tag === 'h3') {
+        a.classList.add('toc-h3');
+      } else if (tag === 'h4') {
+        a.classList.add('toc-h4');
+      }
+      tocMenu.appendChild(a);
+    });
+
+    // ── Active TOC link on scroll ────────────────────────────────────────────
+    var tocLinks = tocNav.querySelectorAll('a');
+    if (tocLinks.length && validHeadings.length) {
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            var id = entry.target.id;
+            tocLinks.forEach(function (a) {
+              a.classList.toggle('is-active', a.getAttribute('href') === '#' + id);
+            });
+          }
+        });
+      }, { rootMargin: '-60px 0px -70% 0px' });
+
+      validHeadings.forEach(function (h) { observer.observe(h); });
+    }
+  }());
 
   // ── Keyboard shortcut: / focuses search (future) ──────────────────────────
   document.addEventListener('keydown', function (e) {

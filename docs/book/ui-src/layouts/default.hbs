@@ -6,7 +6,7 @@
   <meta name="generator" content="Antora {{antoraVersion}}">
   <title>{{#if page.title}}{{page.title}} :: {{/if}}{{site.title}}</title>
   <meta name="description" content="{{#if page.description}}{{page.description}}{{else}}Docling-pipelines documentation{{/if}}">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2333b1ff'/><text x='16' y='22' font-family='IBM Plex Sans,system-ui,sans-serif' font-size='14' font-weight='700' fill='%230f1117' text-anchor='middle'>DS</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2333b1ff'/><text x='16' y='22' font-family='IBM Plex Sans,system-ui,sans-serif' font-size='14' font-weight='700' fill='%230f1117' text-anchor='middle'>DP</text></svg>">
   <style>
 /* ============================================================
    Docling-pipelines Documentation — Custom Antora UI Theme
@@ -491,6 +491,23 @@ hr { border: none; border-top: 1px solid var(--color-border); margin: 2em 0; }
   transition: color .15s;
 }
 
+.toc-nav a.toc-h2 {
+  font-weight: 600;
+  color: var(--color-text);
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+
+.toc-nav a.toc-h3 {
+  padding-left: 16px;
+  font-size: 11.5px;
+}
+
+.toc-nav a.toc-h4 {
+  padding-left: 24px;
+  font-size: 11px;
+}
+
 .toc-nav a:hover, .toc-nav a.is-active {
   color: var(--color-accent);
   border-left-color: var(--color-accent);
@@ -647,23 +664,7 @@ html.light .hljs-meta                                     { color: #b45309; }
     }
 
     // ── Active TOC link on scroll ─────────────────────────────────────────────
-    var headings = document.querySelectorAll('.doc h2, .doc h3');
-    var tocLinks = document.querySelectorAll('.toc-nav a');
-
-    if (tocLinks.length && headings.length) {
-      var observer = new IntersectionObserver(function (entries) {
-        entries.forEach(function (entry) {
-          if (entry.isIntersecting) {
-            var id = entry.target.id;
-            tocLinks.forEach(function (a) {
-              a.classList.toggle('is-active', a.getAttribute('href') === '#' + id);
-            });
-          }
-        });
-      }, { rootMargin: '-60px 0px -70% 0px' });
-
-      headings.forEach(function (h) { if (h.id) observer.observe(h); });
-    }
+    // (Generated after chapter section numbering fix)
 
     // ── Keyboard shortcut: / focuses search (future) ──────────────────────────
     document.addEventListener('keydown', function (e) {
@@ -723,6 +724,62 @@ html.light .hljs-meta                                     { color: #b45309; }
           }
         }
       });
+    }());
+
+    // ── Build Table of Contents ───────────────────────────────────────────────
+    (function () {
+      var tocNav = document.querySelector('.toc-nav');
+      if (!tocNav) return;
+
+      var tocMenu = tocNav.querySelector('.toc-menu') || tocNav;
+      var headings = document.querySelectorAll('.doc h2, .doc h3');
+      var validHeadings = [];
+
+      headings.forEach(function (h) {
+        if (h.id && h.id !== '_chapters') {
+          validHeadings.push(h);
+        }
+      });
+
+      if (validHeadings.length <= 1) {
+        tocNav.style.display = 'none';
+        return;
+      }
+
+      tocNav.style.display = '';
+      tocMenu.innerHTML = '';
+
+      validHeadings.forEach(function (h) {
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.trim();
+        var tag = h.tagName.toLowerCase();
+        if (tag === 'h2') {
+          a.classList.add('toc-h2');
+        } else if (tag === 'h3') {
+          a.classList.add('toc-h3');
+        } else if (tag === 'h4') {
+          a.classList.add('toc-h4');
+        }
+        tocMenu.appendChild(a);
+      });
+
+      // ── Active TOC link on scroll ──────────────────────────────────────────
+      var tocLinks = tocNav.querySelectorAll('a');
+      if (tocLinks.length && validHeadings.length) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              var id = entry.target.id;
+              tocLinks.forEach(function (a) {
+                a.classList.toggle('is-active', a.getAttribute('href') === '#' + id);
+              });
+            }
+          });
+        }, { rootMargin: '-60px 0px -70% 0px' });
+
+        validHeadings.forEach(function (h) { observer.observe(h); });
+      }
     }());
 
   }); // end DOMContentLoaded

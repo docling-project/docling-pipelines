@@ -11,38 +11,38 @@ Docling-pipelines is a modular, operator-based data processing framework for bui
 | Chapter | Topic
 
 | xref:01_introduction_and_architecture.adoc[1]
-| Introduction & Architecture — What Docling-pipelines is, its design patterns, operator catalog, and core concepts.
+| xref:01_introduction_and_architecture.adoc[Introduction & Architecture] — What Docling-pipelines is, its design patterns, operator catalog, and core concepts.
 
 | xref:02_installation_and_quick_start.adoc[2]
-| Installation & Quick Start — Prerequisites, automated setup, Ollama, OpenSearch, and first pipeline.
+| xref:02_installation_and_quick_start.adoc[Installation & Quick Start] — Prerequisites, automated setup, Ollama, OpenSearch, and first pipeline.
 
 | xref:03_authoring_flows.adoc[3]
-| Authoring Flows — The flow JSON format, global configuration, dependency syntax, and annotated examples.
+| xref:03_authoring_flows.adoc[Authoring Flows] — The flow JSON format, global configuration, dependency syntax, and annotated examples.
 
 | xref:04_ingesting_data.adoc[4]
-| Ingesting Data — `ingest_source`, cloud provider connectors, and document libraries.
+| xref:04_ingesting_data.adoc[Ingesting Data] — `ingest_source`, cloud provider connectors, and document libraries.
 
 | xref:05_extracting_and_processing_documents.adoc[5]
-| Extracting & Processing — `extract_operator`, `chunker`, `embeddings`, and document classification.
+| xref:05_extracting_and_processing_documents.adoc[Extracting & Processing] — `extract_operator`, `chunker`, `embeddings`, and document classification.
 
 | xref:06_data_quality_and_enrichment.adoc[6]
-| Data Quality & Enrichment — Deduplication, language detection, quality scoring, PII/HAP, redaction, SQL filter.
+| xref:06_data_quality_and_enrichment.adoc[Data Quality & Enrichment] — Deduplication, language detection, quality scoring, PII/HAP, redaction, SQL filter.
 
 | xref:07_vector_storage_and_retrieval.adoc[7]
-| Vector Storage & Retrieval — OpenSearch, Milvus, `vectordb` operator, and ACL-based document retrieval.
+| xref:07_vector_storage_and_retrieval.adoc[Vector Storage & Retrieval] — OpenSearch, Milvus, `vectordb` operator, and ACL-based document retrieval.
 
 | xref:08_llm_integration.adoc[8]
-| LLM Integration — Unified adapter architecture, provider reference, ML enrichment, and entity curation.
+| xref:08_llm_integration.adoc[LLM Integration] — Unified adapter architecture, provider reference, ML enrichment, and entity curation.
 
 | xref:09_python_api_and_programmatic_usage.adoc[9]
-| Python API — `DocpipeFlowManager`, Jupyter integration, validation, and REST API.
+| xref:09_python_api_and_programmatic_usage.adoc[Python API] — `DocpipeFlowManager`, Jupyter integration, validation, and REST API.
 
 | xref:10_extending_docling_pipelines.adoc[10]
-| Extending Docling-pipelines — Custom operators, new connectors, and external operator packages.
+| xref:10_extending_docling_pipelines.adoc[Extending Docling-pipelines] — Custom operators, new connectors, and external operator packages.
 
 | xref:11_production_deployment_and_observability.adoc[11]
-| Production Deployment — Job stats backends, Prefect distributed execution, OTEL, OpenShift, OAuth2.
+| xref:11_production_deployment_and_observability.adoc[Production Deployment] — Job stats backends, Prefect distributed execution, OTEL, OpenShift, OAuth2.
 
 | xref:12_troubleshooting_and_contributing.adoc[12]
-| Troubleshooting & Contributing — Diagnostics, common fixes, code standards, PR workflow.
+| xref:12_troubleshooting_and_contributing.adoc[Troubleshooting & Contributing] — Diagnostics, common fixes, code standards, PR workflow.
 |===
