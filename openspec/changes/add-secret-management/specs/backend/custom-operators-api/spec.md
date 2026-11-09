@@ -2,21 +2,6 @@
 
 ## ADDED Requirements
 
-### Requirement: Every custom operator route requires authentication
-Every `/api/v1/custom_operators` route (create, update, delete, list, get, `directory_tree`) SHALL require an authenticated caller through `get_current_user`. A request without a valid token SHALL receive 401, and an invalid JWT configuration SHALL fail closed with the existing 503, so no "authentication disabled" state exists for these routes.
-
-#### Scenario: Unauthenticated upload
-- **WHEN** `POST /api/v1/custom_operators` is called without a valid token
-- **THEN** the response is 401 and no file is stored
-
-#### Scenario: Unauthenticated read routes
-- **WHEN** `GET /api/v1/custom_operators`, `GET /api/v1/custom_operators/{operator_id}`, or `GET /api/v1/custom_operators/directory_tree` is called without a valid token
-- **THEN** the response is 401 and no inventory or directory layout is returned
-
-#### Scenario: JWT not configured
-- **WHEN** `JWT_SECRET_KEY` is unset or too short and a request carries an `Authorization` header
-- **THEN** the response is 503 and the operation is not performed
-
 ### Requirement: Upload is restricted to configured identities when secrets are in use
 When a secret provider is registered, create, update, and delete SHALL additionally require the authenticated username to appear in `custom_operators.allowed_uploaders`. An empty or unset list SHALL permit nobody. When no secret provider is registered, any authenticated user SHALL be permitted, as before.
 
@@ -40,7 +25,7 @@ Every create, update, and delete attempt, including rejected ones, SHALL emit on
 - **THEN** one record with outcome `success`, the caller, operator, action, and script digest is written to `docpipe.audit`
 
 #### Scenario: Rejected attempt
-- **WHEN** a create, update, or delete is refused with 401, 403, or a validation error
+- **WHEN** a create, update, or delete is refused with 403 or a validation error
 - **THEN** one record with outcome `rejected` is written to `docpipe.audit`
 
 #### Scenario: Debug level does not hide the record
