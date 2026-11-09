@@ -43,6 +43,7 @@ from docpipe.api.auth.oauth2_routes import list_enabled_providers
 from docpipe.api.auth.oauth2_routes import router as oauth2_router
 from docpipe.api.auth.ports import AuthenticatorPort
 from docpipe.api.auth.session_cookie import clear_session_cookie, set_session_cookie
+from docpipe.api.auth.startup_validation import validate_auth_startup
 from docpipe.api.middleware.api_logging_middleware import ApiLoggingMiddleware
 from docpipe.api.middleware.error_handler import (
     docpipe_exception_handler,
@@ -281,30 +282,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+ldap_authenticator: LDAPAuthenticator | None = None
 try:
-    ldap_authenticator: LDAPAuthenticator | None = None
     ldap_config: LDAPConfig | None = LDAPConfig()
     # LDAP counts as configured only when a server is set, so a deployment with neither LDAP
     # nor the bootstrap administrator answers login with 503.
     if ldap_config and ldap_config.ldap_server:
         ldap_authenticator = LDAPAuthenticator(ldap_config)
-
-    try:
-        jwt_config: JWTConfig | None = JWTConfig()
-        logger.info("Authentication configurations initialized successfully")
-    except Exception as e:
-        logger.warning(
-            "JWT secret key not configured: %s. Login and token issuance "
-            "are disabled. Set JWT_SECRET_KEY to enable authentication.",
-            e,
-        )
-        jwt_config = None
-
 except Exception as e:
-    logger.error("Failed to initialize authentication configurations: %s", e)
+    logger.error("Failed to initialize LDAP configuration: %s", e)
     ldap_config = None
-    jwt_config = None
     ldap_authenticator = None
+
+# Fails startup with a ConfigurationError when auth is enabled and JWT_SECRET_KEY is missing, weak or
+# a placeholder. A bad configuration must never silently disable login.
+jwt_config: JWTConfig | None = validate_auth_startup(settings=get_auth_settings(), cors_origins=allowed_origins)
 
 # The bootstrap administrator is configured outside the try block above on purpose: a partial
 # or invalid configuration must stop startup instead of silently disabling the break-glass login.
