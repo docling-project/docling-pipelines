@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 SQLModel database models for PostgreSQL job stats storage.
 
@@ -327,6 +330,12 @@ class NodeStatsModel(SQLModel, table=True):  # type: ignore[call-arg]
         sa_column=Column(ARRAY(String)),
         title="Skipped Documents",
         description="List of skipped documents",
+    )
+    deferred_execution_docs: list[str] | None = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(String), nullable=True),
+        title="Deferred Execution Documents",
+        description="List of documents deferred for resumption at a downstream node",
     )
     docs_completed: list[str] | None = Field(
         default_factory=list,

@@ -327,6 +327,7 @@ class JobTrackerService(JobStatsService):
         node_metadata: dict[str, Any] | None = None,
         batch_id: str | None = None,
         batch_num: int | None = None,
+        deferred_execution_docs: list[str] | None = None,
     ) -> None:
         """
         Finalize node execution with completion statistics.
@@ -347,6 +348,7 @@ class JobTrackerService(JobStatsService):
             node_metadata: Optional operator-specific metadata
             batch_id: Optional batch identifier for micro-batch execution
             batch_num: Optional batch number for micro-batch execution
+            deferred_execution_docs: Documents scheduled for resumption at a downstream node
 
         Raises:
             ValueError: If node not started
@@ -390,11 +392,16 @@ class JobTrackerService(JobStatsService):
             time_taken=time_taken,
             node_status=node_status,
             col_names=col_names,
-            total_docs=(total_docs if total_docs else (docs_completed + failed_docs + skipped_docs)),
+            total_docs=(
+                total_docs
+                if total_docs
+                else (docs_completed + failed_docs + skipped_docs + list(deferred_execution_docs or []))
+            ),
             docs_completed=docs_completed,
             docs_completed_count=len(docs_completed),
             failed_docs=failed_docs,
             skipped_docs=skipped_docs,
+            deferred_execution_docs=list(deferred_execution_docs or []),
             node_metadata=final_metadata,
             batch_id=batch_id,
             batch_num=final_batch_num,

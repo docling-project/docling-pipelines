@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Aggregation strategies for metadata fields.
 
@@ -62,6 +65,7 @@ DEFAULT_STRATEGIES = {
     DocpipeConstants.COMPLETED_DOCS: AggregationStrategy.UNION,
     DocpipeConstants.FAILED_DOCS: AggregationStrategy.UNION,
     DocpipeConstants.SKIPPED_DOCS: AggregationStrategy.UNION,
+    Metrics.External.DEFERRED_EXECUTION_DOCS: AggregationStrategy.UNION,
     DocpipeConstants.STATUS: AggregationStrategy.PRIORITY_STATUS,
     Metrics.External.NODE_STATUS: AggregationStrategy.PRIORITY_STATUS,
     # Timing fields

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 DuckDB implementation of JobStatsStore.
 
@@ -146,6 +149,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                     total_docs JSON,
                     failed_docs JSON,
                     skipped_docs JSON,
+                    deferred_execution_docs JSON,
                     docs_completed JSON,
                     docs_completed_count INTEGER DEFAULT 0,
                     node_metadata JSON,
@@ -157,6 +161,11 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
             # Create sequence for node_stats id
             conn.execute("""
                 CREATE SEQUENCE IF NOT EXISTS node_stats_id_seq START 1
+            """)
+
+            # Forward-compatibility: add deferred_execution_docs to existing databases
+            conn.execute("""
+                ALTER TABLE node_stats ADD COLUMN IF NOT EXISTS deferred_execution_docs JSON
             """)
 
     def store_job_stats(self, job_stats: JobStats) -> None:
@@ -288,6 +297,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                     "total_docs",
                     "failed_docs",
                     "skipped_docs",
+                    "deferred_execution_docs",
                     "docs_completed",
                     "node_metadata",
                 ]:
@@ -312,7 +322,8 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                             name = ?, node_status = ?, error = ?,
                             start_time = ?, end_time = ?, time_taken = ?,
                             col_names = ?, total_docs = ?, failed_docs = ?,
-                            skipped_docs = ?, docs_completed = ?, docs_completed_count = ?,
+                            skipped_docs = ?, deferred_execution_docs = ?,
+                            docs_completed = ?, docs_completed_count = ?,
                             node_metadata = ?, batch_num = ?
                         WHERE id = ?
                     """,
@@ -327,6 +338,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                             data.get("total_docs"),
                             data.get("failed_docs"),
                             data.get("skipped_docs"),
+                            data.get("deferred_execution_docs"),
                             data.get("docs_completed"),
                             data.get("docs_completed_count", 0),
                             data.get("node_metadata"),
@@ -342,8 +354,8 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                             id, job_run_id, node_id, name, batch_id, batch_num,
                             node_status, error, start_time, end_time, time_taken,
                             col_names, total_docs, failed_docs, skipped_docs,
-                            docs_completed, docs_completed_count, node_metadata
-                        ) VALUES (nextval('node_stats_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            deferred_execution_docs, docs_completed, docs_completed_count, node_metadata
+                        ) VALUES (nextval('node_stats_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         [
                             job_run_id,
@@ -360,6 +372,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                             data.get("total_docs"),
                             data.get("failed_docs"),
                             data.get("skipped_docs"),
+                            data.get("deferred_execution_docs"),
                             data.get("docs_completed"),
                             data.get("docs_completed_count", 0),
                             data.get("node_metadata"),
@@ -409,6 +422,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                         "total_docs",
                         "failed_docs",
                         "skipped_docs",
+                        "deferred_execution_docs",
                         "docs_completed",
                         "node_metadata",
                     ]:
@@ -482,6 +496,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                         "total_docs",
                         "failed_docs",
                         "skipped_docs",
+                        "deferred_execution_docs",
                         "docs_completed",
                         "node_metadata",
                     ]:
@@ -537,6 +552,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                             "total_docs",
                             "failed_docs",
                             "skipped_docs",
+                            "deferred_execution_docs",
                             "docs_completed",
                             "node_metadata",
                         ]:
@@ -549,8 +565,8 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                                 id, job_run_id, node_id, name, batch_id, batch_num,
                                 node_status, error, start_time, end_time, time_taken,
                                 col_names, total_docs, failed_docs, skipped_docs,
-                                docs_completed, docs_completed_count, node_metadata
-                            ) VALUES (nextval('node_stats_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                deferred_execution_docs, docs_completed, docs_completed_count, node_metadata
+                            ) VALUES (nextval('node_stats_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                             [
                                 job_run_id,
@@ -567,6 +583,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                                 data.get("total_docs"),
                                 data.get("failed_docs"),
                                 data.get("skipped_docs"),
+                                data.get("deferred_execution_docs"),
                                 data.get("docs_completed"),
                                 data.get("docs_completed_count", 0),
                                 data.get("node_metadata"),
@@ -712,6 +729,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
                     "total_docs",
                     "failed_docs",
                     "skipped_docs",
+                    "deferred_execution_docs",
                     "docs_completed",
                     "node_metadata",
                 ]:

@@ -161,6 +161,11 @@ class DocpipeConstants:
     BATCH_COUNT = "batch_count"
     CONTINUE_ON_BATCH_FAILURE = "continue_on_batch_failure"
     CONTINUE_ON_BATCH_FAILURE_DEFAULT = False
+    # Node-level failure resumption: a document is attempted 1 + MAX_RETRY_ATTEMPTS times
+    MAX_RETRY_ATTEMPTS = "max_retry_attempts"
+    DEFAULT_MAX_RETRY_ATTEMPTS = 3
+    DEFERRED_EXECUTION_DOCS = "deferred_execution_docs"
+    RESUMPTION_PLAN = "resumption_plan"
     INGEST_NODE_ID = "ingest_node_id"
     # Batch-level concurrency control
     MAX_CONCURRENT_BATCHES = "max_concurrent_batches"
@@ -530,6 +535,8 @@ class Metrics:
         FAILED_DOCS = "failed_docs"
         SKIPPED_DOCS_COUNT = "skipped_docs_count"
         SKIPPED_DOCS = "skipped_docs"
+        DEFERRED_EXECUTION_DOCS = "deferred_execution_docs"
+        DEFERRED_EXECUTION_DOCS_COUNT = "deferred_execution_docs_count"
         DOCUMENT_URL = "document_url"
         TOTAL_PAGES_CONVERTED = "total_pages_converted"
         NODE_STATUS = "node_status"
@@ -570,6 +577,7 @@ class Metrics:
         ALL_DOC_IDS = "all_doc_ids"
         BRANCHES = "branches"
         NON_RECOVERABLE_DOCS_TABLE = "non_recoverable_docs_table"
+        DEFERRED_ENTRIES = "deferred_entries"
 
     # Metrics that require atomic aggregation to prevent race conditions
     AGGREGATION_METRICS = frozenset({External.TOTAL_PAGES_CONVERTED, External.DELETED_DOC_COUNT})

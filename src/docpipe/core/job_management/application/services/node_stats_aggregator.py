@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 NodeStatsAggregator - Centralized aggregation logic for node statistics.
 
@@ -138,6 +141,7 @@ class NodeStatsAggregator:
             set(getattr(record, "docs_completed", None) or [])
             | set(getattr(record, "failed_docs", None) or [])
             | set(getattr(record, "skipped_docs", None) or [])
+            | set(getattr(record, "deferred_execution_docs", None) or [])
         )
         # If doc-ID lists are all empty but we have a count-based total, fall back
         # to processed_docs integer from node_metadata.

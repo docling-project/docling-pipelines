@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Data Access Layer for NodeStats model.
 
@@ -26,6 +29,7 @@ _NODE_STATS_UPDATE_FIELDS = [
     NodeStatsFields.TOTAL_DOCS,
     NodeStatsFields.FAILED_DOCS,
     NodeStatsFields.SKIPPED_DOCS,
+    NodeStatsFields.DEFERRED_EXECUTION_DOCS,
     NodeStatsFields.DOCS_COMPLETED,
     NodeStatsFields.NODE_METADATA,
     NodeStatsFields.ERROR,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Global Configuration Metadata
 
@@ -110,6 +113,17 @@ class GlobalConfigMetadata:
             category=INCREMENTAL_PROCESSING,
         ),
         # Orchestration configuration (Prefect + Micro-Batching)
+        DocpipeConstants.MAX_RETRY_ATTEMPTS: GlobalConfigParam(
+            name="Maximum retry attempts",
+            type="int",
+            default=DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS,
+            required=False,
+            description=(
+                "Retries allowed for a document that failed at a node, resumed from the upstream checkpoint on "
+                "later runs (total attempts = 1 + max_retry_attempts). Requires local intermediate storage."
+            ),
+            category=ORCHESTRATION,
+        ),
         DocpipeConstants.MICRO_BATCH_SIZE: GlobalConfigParam(
             name="Micro batch size",
             type="int",

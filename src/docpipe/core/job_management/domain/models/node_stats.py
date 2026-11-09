@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 NodeStats - Node-level statistics domain model.
 
@@ -7,7 +10,7 @@ It is a simplified version of NodeStats, without API-specific metadata.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from docpipe.core.constants.constants import ExecutionStatus
 
@@ -27,6 +30,7 @@ class NodeStatsFields:
     TOTAL_DOCS = "total_docs"
     FAILED_DOCS = "failed_docs"
     SKIPPED_DOCS = "skipped_docs"
+    DEFERRED_EXECUTION_DOCS = "deferred_execution_docs"
     DOCS_COMPLETED = "docs_completed"
     DOCS_COMPLETED_COUNT = "docs_completed_count"
     BATCH_ID = "batch_id"
@@ -69,6 +73,8 @@ class NodeStats(BaseModel):
     total_docs: list[str] = Field(default_factory=list)
     failed_docs: list[str] = Field(default_factory=list)
     skipped_docs: list[str] = Field(default_factory=list)
+    # Documents scheduled for resumption at a downstream node (counted in scope, not yet processed)
+    deferred_execution_docs: list[str] = Field(default_factory=list)
     docs_completed: list[str] = Field(default_factory=list)
     docs_completed_count: int = 0
 
@@ -78,3 +84,9 @@ class NodeStats(BaseModel):
     # Batch Processing Fields (Micro-batching)
     batch_id: str | None = None
     batch_num: int | None = None
+
+    @field_validator("deferred_execution_docs", mode="before")
+    @classmethod
+    def _none_to_empty_list(cls, value: Any) -> Any:
+        """Rows written before this field existed come back as NULL; treat them as an empty list."""
+        return [] if value is None else value

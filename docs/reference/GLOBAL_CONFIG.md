@@ -234,6 +234,30 @@ Configuration for tracking and processing only changed documents.
 
 ---
 
+### `max_retry_attempts`
+
+**Type**: `integer`  
+**Default**: `3`  
+**Description**: Maximum number of retries for a document that fails at the same node on consecutive runs of the same job. A document gets one initial attempt plus `max_retry_attempts` retries, so with the default it is attempted up to 4 times. On each rerun the document resumes at the node where it failed, using the saved output of the previous node, instead of being processed from the start.
+
+Once the retries are exhausted, the document is recorded as non-recoverable in incremental metadata, its checkpoint is retained, and the job report lists it as `Failed` with a "Maximum retries exhausted" reason. Use `force_ingest: true` to discard resumption state and reprocess everything.
+
+**Requirements**:
+- Resumption is active only when `data_storage_type` is `"local"`. With `"memory"`, failed documents are re-ingested from the start.
+- A newer source `modified_time` invalidates the saved checkpoint, and the document is re-ingested fresh.
+
+**Example**:
+```json
+{
+  "global_config": {
+    "data_storage_type": "local",
+    "max_retry_attempts": 5
+  }
+}
+```
+
+---
+
 ### Centralized Incremental Metadata Configuration
 
 Docling Pipelines uses a centralized configuration system for incremental metadata storage. Instead of configuring incremental metadata in each flow JSON file, you configure it once in a repository-level `docling-pipelines-config.yaml` file.

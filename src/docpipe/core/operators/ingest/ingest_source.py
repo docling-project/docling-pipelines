@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Validate source configuration and ingest documents through provider adapters."""
 
 import asyncio
@@ -25,6 +28,11 @@ from docpipe.core.operators.ingest.ingest_utils import (
     is_doc_previously_processed,
 )
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
+from docpipe.core.orchestration.application.services.resumption_service import (
+    ResumptionDecision,
+    ResumptionService,
+)
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
 from docpipe.utils.infrastructure.logging import get_logger
@@ -401,6 +409,9 @@ class IngestSourceOperator(AbstractOperator):
             DocpipeConstants.JOB_RUN_ID: self.job_run_id,
         }
         self.previously_processed_docs_dict: dict[str, Any] | None = None
+        # Node-level failure resumption: documents deferred to a downstream node of this run
+        self._deferred_entries: list[dict[str, Any]] = []
+        self._resumption_service: ResumptionService | None = None
 
         # Validate extensions
         self._validate_extensions()
@@ -455,6 +466,12 @@ class IngestSourceOperator(AbstractOperator):
         incremental_service = get_incremental_update_service()
         job_id_for_tracking: str = self.context_id or self.job_id or ""
 
+        self._deferred_entries = []
+        self._resumption_service = create_resumption_service(config=self.config)
+        if self._resumption_service is not None and self.force_ingest:
+            # Force ingest discards all saved failure state, including exhausted records and checkpoints
+            self._resumption_service.discard_all(job_id=job_id_for_tracking)
+
         self.previously_processed_docs_dict = (
             None if self.force_ingest else incremental_service.get_all_processed_docs(job_id=job_id_for_tracking)
         )
@@ -494,11 +511,19 @@ class IngestSourceOperator(AbstractOperator):
                 ),
             )
 
-        # Update metadata
+        # Update metadata: documents_in_scope = fresh + deferred + failed + skipped
+        deferred_ids = [entry["doc_id"] for entry in self._deferred_entries]
         metadata[Metrics.External.TOTAL_DOCS] = (
-            len(doc_data) + metadata[Metrics.External.SKIPPED_DOCS_COUNT] + metadata[Metrics.External.FAILED_DOCS_COUNT]
+            len(doc_data)
+            + len(deferred_ids)
+            + metadata[Metrics.External.SKIPPED_DOCS_COUNT]
+            + metadata[Metrics.External.FAILED_DOCS_COUNT]
         )
         metadata[Metrics.External.PROCESSED_DOCS] = len(doc_data)
+        if deferred_ids:
+            metadata[Metrics.External.DEFERRED_EXECUTION_DOCS] = deferred_ids
+            metadata[Metrics.External.DEFERRED_EXECUTION_DOCS_COUNT] = len(deferred_ids)
+            metadata[Metrics.Internal.DEFERRED_ENTRIES] = list(self._deferred_entries)
 
         # Determine node status using common utility
         metadata[Metrics.External.NODE_STATUS] = OperatorUtils.determine_execution_status(
@@ -831,6 +856,11 @@ class IngestSourceOperator(AbstractOperator):
                 )
                 return None
 
+            if self._route_previously_failed_document(
+                doc_id=doc_id, doc_name=doc_name, source=source, modified_time=modified_time, metadata=metadata
+            ):
+                return None
+
             document_format: str = file_extension if file_extension else doc.metadata.get("extension", "")
             source_id = doc.metadata.get("source_id", source)
 
@@ -861,6 +891,44 @@ class IngestSourceOperator(AbstractOperator):
                 reason=f"Processing error: {e!s}",
             )
             return None
+
+    def _route_previously_failed_document(
+        self, *, doc_id: str, doc_name: str, source: str, modified_time: Any, metadata: dict[str, Any]
+    ) -> bool:
+        """Defer a previously failed document to its failure node instead of re-ingesting it.
+
+        Returns True when the document was handled here (deferred or skipped) and must not be emitted as fresh.
+        """
+        service = self._resumption_service
+        if service is None or self.force_ingest:
+            return False
+        decision, record = service.classify(
+            job_id=self.context_id or self.job_id or "",
+            doc_id=doc_id,
+            modified_time=modified_time if isinstance(modified_time, int) else None,
+        )
+        if decision == ResumptionDecision.DEFER and record is not None and record.checkpoint_path:
+            self._deferred_entries.append(
+                {
+                    "doc_id": doc_id,
+                    "doc_name": doc_name,
+                    "target_node_id": record.failed_node_id,
+                    "target_node_name": record.failed_node_name,
+                    "checkpoint_path": record.checkpoint_path,
+                    "failure_count": record.failure_count,
+                }
+            )
+            logger.info("Deferring previously failed document %s to node %s", source, record.failed_node_name)
+            return True
+        if decision == ResumptionDecision.EXHAUSTED and record is not None:
+            self.record_failed_document(
+                metadata=metadata,
+                doc_id=doc_id,
+                doc_name=source,
+                reason=service.format_exhausted_reason(record=record),
+            )
+            return True
+        return False
 
     # REMOVED: extract_content() method - binary loading now handled by downstream operators
     # REMOVED: _get_binary_content() method - no longer needed
