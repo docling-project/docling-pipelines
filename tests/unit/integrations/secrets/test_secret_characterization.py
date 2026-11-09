@@ -4,7 +4,7 @@
 """Characterization tests for secret resolution edge cases and leaks on current main.
 
 These tests document and pin existing behavior/gaps that subsequent tasks close:
-1. Malformed vault:// strings are returned unchanged as literals instead of failing closed.
+1. Malformed vault:// strings fail closed (flipped by A.5; previously returned as literals).
 2. resolve_env_var on resolved secrets starting with '$' leaks the secret minus '$' in ValueError.
 3. resolve_env_var on uppercase resolved secrets containing '_' overwrites the secret if an env var exists.
 """
@@ -14,6 +14,7 @@ import pytest
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.integrations.secrets.secret_provider import (
+    MalformedSecretReferenceError,
     SecretProvider,
     clear_providers,
     register_provider,
@@ -57,22 +58,24 @@ def _cleanup_providers():
 class TestSecretResolutionCharacterization:
     """Characterization tests documenting existing secret resolution behaviors."""
 
-    def test_malformed_vault_reference_returned_as_literal(self) -> None:
-        """On current main, malformed vault:// strings return unchanged instead of raising."""
+    def test_malformed_vault_reference_is_rejected_not_returned_as_literal(self) -> None:
+        """Flipped by A.5: malformed vault:// strings fail closed instead of being used as literals."""
         provider = FakeCharacterizationProvider(secrets={"path/to": {"key": "secret123"}})
         register_provider(name="fake", provider=provider)
 
-        # Malformed references (missing path/key or invalid format)
         malformed_refs = [
             "vault://",
             "vault://fake",
             "vault://fake/",
             "vault://invalid",
+            "Bearer vault://fake/path/to#key",
+            "vault://fake/path/../to#key",
         ]
         for ref in malformed_refs:
-            # Current behavior: returned as-is (literal) without error
-            result = resolve_value(ref)
-            assert result == ref
+            with pytest.raises(MalformedSecretReferenceError) as exc_info:
+                resolve_value(ref)
+            # Fixed message: nothing from the offending value is echoed.
+            assert str(exc_info.value) == str(MalformedSecretReferenceError())
 
     def test_resolve_env_var_leaks_dollar_prefixed_secret(self) -> None:
         """On current main, resolve_env_var on a secret starting with '$' raises ValueError leaking the secret."""
