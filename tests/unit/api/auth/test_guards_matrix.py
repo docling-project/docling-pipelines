@@ -188,3 +188,37 @@ def test_denial_is_audited(client, current_user):
 
     messages = [r.getMessage() for r in records]
     assert any("user=alice" in m and "outcome=denied" in m and "target=/flows" in m for m in messages)
+
+
+# Write-method routes that intentionally have no role guard: they are read-only and need
+# only an authenticated session (the viewer floor, enforced by the router-level session
+# dependency). Any other POST/PUT/PATCH/DELETE under /api/v1 must carry ``require_role``.
+READ_ONLY_POST_EXEMPTIONS = {
+    ("POST", "/documents/search"),
+    ("POST", "/validation/validate_flow"),
+    ("POST", "/validation/enrich_flow_features"),
+}
+
+
+def _iter_api_routes(router):
+    from fastapi.routing import APIRoute
+
+    for route in router.routes:
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            yield from _iter_api_routes(original)
+        elif isinstance(route, APIRoute):
+            yield route
+
+
+def test_every_write_route_has_a_role_guard_or_documented_exemption():
+    from docpipe.api.api_router import api_router
+
+    unguarded = set()
+    for route in _iter_api_routes(api_router):
+        guarded = any("_guard" in getattr(dep.dependency, "__qualname__", "") for dep in route.dependencies)
+        for method in route.methods:
+            if method in {"POST", "PUT", "PATCH", "DELETE"} and not guarded:
+                unguarded.add((method, route.path))
+
+    assert unguarded == READ_ONLY_POST_EXEMPTIONS
