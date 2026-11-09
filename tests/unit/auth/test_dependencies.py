@@ -297,6 +297,37 @@ class TestBearerDependencyOverHttp:
 
         assert response.status_code == 401
 
+    def test_token_in_cookie_is_accepted(self, *, client, alice_token):
+        client.cookies.set(DEFAULT_COOKIE_NAME, alice_token)
+
+        response = client.get("/me")
+
+        assert response.status_code == 200
+        assert response.json()["username"] == "alice"
+
+    def test_cookie_with_another_name_is_ignored(self, *, client, alice_token):
+        client.cookies.set("access_token", alice_token)
+
+        response = client.get("/me")
+
+        assert response.status_code == 401
+
+    def test_bearer_wins_over_cookie_for_another_user(self, *, client, jwt_config, alice_token):
+        bob_token = create_access_token({"username": "bob"}, jwt_config)
+        client.cookies.set(DEFAULT_COOKIE_NAME, bob_token)
+
+        response = client.get("/me", headers={"Authorization": f"Bearer {alice_token}"})
+
+        assert response.status_code == 200
+        assert response.json()["username"] == "alice"
+
+    def test_invalid_bearer_is_not_rescued_by_valid_cookie(self, *, client, alice_token):
+        client.cookies.set(DEFAULT_COOKIE_NAME, alice_token)
+
+        response = client.get("/me", headers={"Authorization": "Bearer garbage"})
+
+        assert response.status_code == 401
+
     @pytest.mark.parametrize(
         "token_factory",
         [
