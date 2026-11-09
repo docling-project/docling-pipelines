@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for FastAPI authentication dependencies.
 
 Covers the dependency functions both when called directly (to pin down each
@@ -247,7 +250,7 @@ class TestBearerDependencyOverHttp:
         response = client.get("/me", headers={"Authorization": f"Bearer {alice_token}"})
 
         assert response.status_code == 200
-        assert response.json() == _ALICE
+        assert response.json() == {**_ALICE, "roles": ["viewer"]}
 
     def test_scheme_is_case_insensitive(self, *, client, alice_token):
         response = client.get("/me", headers={"Authorization": f"bearer {alice_token}"})
@@ -319,7 +322,7 @@ class TestOptionalOAuth2DependencyOverHttp:
     def test_valid_token_resolves_user(self, *, client, alice_token):
         response = client.get("/maybe-me", headers={"Authorization": f"Bearer {alice_token}"})
 
-        assert response.json() == {"user": _ALICE}
+        assert response.json() == {"user": {**_ALICE, "roles": ["viewer"]}}
 
     def test_invalid_token_is_treated_as_anonymous(self, client):
         response = client.get("/maybe-me", headers={"Authorization": "Bearer garbage"})
@@ -333,7 +336,7 @@ class TestFlexibleDependencyOverHttp:
         response = client.get("/flexible-me", headers={"Authorization": f"Bearer {alice_token}"})
 
         assert response.status_code == 200
-        assert response.json() == _ALICE
+        assert response.json() == {**_ALICE, "roles": ["viewer"]}
 
     def test_invalid_token_returns_401(self, client):
         response = client.get("/flexible-me", headers={"Authorization": "Bearer garbage"})

@@ -1,6 +1,11 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic models for authentication."""
 
 from pydantic import BaseModel, Field
+
+from .roles import Role
 
 
 class LoginRequest(BaseModel):
@@ -23,3 +28,4 @@ class User(BaseModel):
     username: str = Field(..., description="Username")
     email: str = Field(default="", description="User email address")
     full_name: str = Field(default="", description="User full name")
+    roles: list[Role] = Field(default_factory=lambda: [Role.VIEWER], description="Roles held by the user")
