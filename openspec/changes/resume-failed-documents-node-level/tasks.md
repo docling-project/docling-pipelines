@@ -8,7 +8,7 @@
 
 ## 2. Resumption Service & Checkpoint Management
 
-- [x] 2.1 [backend] Create `ResumptionPlan` domain model in `src/docpipe/core/orchestration/domain/models/resumption_plan.py` to hold per-node deferred document injection descriptors.
+- [x] 2.1 [backend] Create `ResumptionPlan` domain model in `src/docpipe/core/orchestration/models/resumption_plan.py` to hold per-node deferred document injection descriptors.
 - [x] 2.2 [backend] Implement `ResumptionService` in `src/docpipe/core/orchestration/application/services/resumption_service.py` to query past failures and saved `modification_time` from `JobStatsStore`, check `max_retry_attempts` (allowing `max_retry_attempts + 1` total attempts), and locate upstream intermediate checkpoint parquet files.
 - [x] 2.3 [backend] Add unit tests for `ResumptionService` in `tests/unit/core/orchestration/test_resumption_service.py` covering retry thresholds and missing checkpoint fallbacks. Verify with `pytest tests/unit/core/orchestration/test_resumption_service.py`.
 

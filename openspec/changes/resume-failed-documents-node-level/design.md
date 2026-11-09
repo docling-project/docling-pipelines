@@ -58,7 +58,7 @@ graph TD
     JS --> PG
 ```
 
-### 1. Domain Layer (`src/docpipe/core/job_management/domain/` & `src/docpipe/core/orchestration/domain/`)
+### 1. Domain Layer (`src/docpipe/core/job_management/domain/` & `src/docpipe/core/orchestration/{models,ports}/`)
 - `NodeStats`: Updated to include `deferred_execution_docs: list[str] = Field(default_factory=list)`.
 - `ResumptionPlan`: Dataclass containing:
   - `deferred_docs_by_node: dict[str, list[DeferredDocInfo]]`

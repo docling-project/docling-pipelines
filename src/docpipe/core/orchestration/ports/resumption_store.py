@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 
 import pyarrow as pa
 
-from docpipe.core.orchestration.domain.models.resumption_plan import ResumptionRecord
+from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
 
 
 class ResumptionStore(ABC):

@@ -16,8 +16,8 @@ import pyarrow.compute as pc
 
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
-from docpipe.core.orchestration.domain.models.resumption_plan import ResumptionRecord
-from docpipe.core.orchestration.domain.ports.resumption_store import ResumptionStore
+from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
+from docpipe.core.orchestration.ports.resumption_store import ResumptionStore
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -259,6 +259,7 @@ class ResumptionService:
 
     @staticmethod
     def _modified_time(*, rows: pa.Table) -> int | None:
+        """Return the source modified_time of the first row, or None when absent."""
         column = OperatorConstants.Metadata.MODIFIED_TIME
         if column not in rows.column_names:
             return None

@@ -12,8 +12,8 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from docpipe.core.orchestration.domain.models.resumption_plan import ResumptionRecord
-from docpipe.core.orchestration.domain.ports.resumption_store import ResumptionStore
+from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
+from docpipe.core.orchestration.ports.resumption_store import ResumptionStore
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -34,6 +34,7 @@ class FilesystemResumptionStore(ResumptionStore):
         self._root = root
 
     def _job_dir(self, *, job_id: str) -> Path:
+        """Return the validated job-scoped resumption directory."""
         if not job_id or not _SAFE_JOB_ID.match(job_id) or job_id in {".", ".."}:
             msg = "Invalid job_id for resumption store"
             raise ValueError(msg)
@@ -42,12 +43,15 @@ class FilesystemResumptionStore(ResumptionStore):
 
     @staticmethod
     def _digest(*, value: str) -> str:
+        """Return a filesystem-safe digest of a document id."""
         return hashlib.sha256(value.encode()).hexdigest()
 
     def _record_path(self, *, job_id: str, doc_id: str) -> Path:
+        """Return the path of the record file of a document."""
         return self._job_dir(job_id=job_id) / "records" / f"{self._digest(value=doc_id)}.json"
 
     def _resolve_checkpoint(self, *, job_id: str, path: str) -> Path | None:
+        """Resolve a stored checkpoint path, rejecting anything outside the job directory."""
         job_dir = self._job_dir(job_id=job_id).resolve()
         resolved = (job_dir / path).resolve()
         if not resolved.is_relative_to(job_dir):
@@ -57,6 +61,7 @@ class FilesystemResumptionStore(ResumptionStore):
 
     @staticmethod
     def _atomic_write(*, target: Path, data: bytes) -> None:
+        """Write bytes through a temporary file and an atomic rename."""
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
         try:

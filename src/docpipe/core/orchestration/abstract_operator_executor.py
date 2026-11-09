@@ -25,7 +25,7 @@ from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
 from docpipe.core.orchestration.application.services.resumption_service import ResumptionService
-from docpipe.core.orchestration.domain.models.resumption_plan import ResumptionRecord
+from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.deleted_rows_tracker import update_deleted_rows
 
@@ -320,6 +320,7 @@ class AbstractOperatorExecutor:
     # ------------------------------------------------------------------ node-level failure resumption
 
     def _resumption_job_id(self) -> str:
+        """Return the job id under which resumption state is stored (context id, falling back to job id)."""
         return str(self._params.get(DocpipeConstants.CONTEXT_ID) or self._params.get(DocpipeConstants.JOB_ID))
 
     def _resumption_entries(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -390,6 +391,7 @@ class AbstractOperatorExecutor:
             logger.warning("Failed to apply resumption accounting for node '%s': %s", self._name, type(exc).__name__)
 
     def _record_failures_from_metadata(self, *, metadata: dict[str, Any]) -> None:
+        """Persist a checkpoint for every document the operator reported as failed (recoverable failures only)."""
         service = create_resumption_service(config=self._params)
         if service is None or self._resumption_input is None:
             return
