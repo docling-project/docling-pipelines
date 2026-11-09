@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JobTrackerService.write_job_logs() — chronological node_stats sorting.
 
@@ -43,7 +46,10 @@ def mock_aggregator():
 
 @pytest.fixture
 def service(mock_store, mock_aggregator):
-    return JobTrackerService(job_stats_store=mock_store, node_stats_aggregator=mock_aggregator)
+    svc = JobTrackerService(job_stats_store=mock_store, node_stats_aggregator=mock_aggregator)
+    # No snapshot: keeps write_job_logs off real snapshot storage, whose cached config leaks into later tests
+    svc.get_flow_definition = Mock(return_value=None)
+    return svc
 
 
 def _node(node_id: str, name: str, start_time: int, end_time: int = 0) -> NodeStats:
@@ -205,10 +211,10 @@ class TestWriteJobLogsFromDict:
         assert "node_stats" not in written
 
     def test_missing_start_time_defaults_to_zero(self, service, tmp_path):
-        """Nodes missing start_time are treated as 0 and do not raise."""
+        """Nodes missing start_time are treated as pending (0) and placed after executed nodes."""
         raw_node_stats = {
-            "node-b": {"name": "NodeB"},  # no start_time key
-            "node-a": {"name": "NodeA", "start_time": 100},
+            "node-b": {"name": "NodeB"},  # no start_time key (pending)
+            "node-a": {"name": "NodeA", "start_time": 100},  # executed
         }
         job_stats = _job_stats_dict(raw_node_stats)
         log_path = str(tmp_path / "job_stats.json")
@@ -218,9 +224,9 @@ class TestWriteJobLogsFromDict:
 
         with Path(log_path).open() as f:
             written = json.load(f)
-        # node-b has start_time=0, node-a has start_time=100 → node-b comes first
+        # node-a (executed, start_time=100) comes before node-b (pending, start_time=0)
         keys = list(written["node_stats"].keys())
-        assert keys.index("node-b") < keys.index("node-a")
+        assert keys.index("node-a") < keys.index("node-b")
 
 
 # ---------------------------------------------------------------------------

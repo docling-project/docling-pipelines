@@ -663,7 +663,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 - **Docling Serve** (for docling_serve text provider): Service at configured URL (default `http://localhost:5001`)
 - **LiteLLM** (for litellm entity provider): API keys for chosen provider (OpenAI, Anthropic, etc.)
 - **WatsonX** (for watsonx entity provider): Environment variables `WATSONX_API_KEY`, `WATSONX_CONTAINER_ID`, optional `WATSONX_API_BASE_URL`, `WATSONX_CONTAINER_KIND`
-- **ffmpeg** (for audio/video processing): Required for M4A, AAC, OGG, FLAC audio formats and all video formats (MP4, AVI, MOV). Not required for WAV/MP3. Install: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Linux)
+- **ffmpeg** (for audio/video processing): Required for M4A, AAC, OGG, FLAC audio formats and all video formats (MP4, AVI, MOV, MKV, WebM). Not required for WAV/MP3. Install: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Linux)
 
 **Usage Notes**
 
@@ -679,10 +679,10 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 - Docling Serve provider supports OCR for scanned documents and multi-language processing
 - **Text File Handling**: `.txt` files are automatically processed locally using UTF-8/latin-1 decoding, bypassing Docling Serve even when `docling_serve` provider is configured
 - **Extension Detection**: Files without extensions are automatically detected using magic byte analysis (supports PDF, DOCX, XLSX, PPTX, images, HTML, and text formats)
-- Audio/Video Support: Processes audio (WAV, MP3, M4A, AAC, OGG, FLAC) and video (MP4, AVI, MOV) files using ASR. Requires ffmpeg for M4A, AAC, OGG, FLAC, and all video formats
+- Audio/Video Support: Processes audio (WAV, MP3, M4A, AAC, OGG, FLAC) and video (MP4, AVI, MOV, MKV, WebM) files using ASR. Requires ffmpeg for M4A, AAC, OGG, FLAC, and all video formats
 - **Extension Validation**: Files with unsupported extensions are automatically skipped and logged. Supported extensions vary by provider:
-  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, HTML, Markdown, AsciiDoc, TXT, and audio/video (with ASR)
-  - `docling_serve`: Same as docling_library except NO audio/video support
+  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, CSV, EPUB, EML, MSG, LaTeX, AsciiDoc, WebVTT, HTML and Markdown variants, PPTM, XLSM, XLTX, XLTM, plus MP4, AVI, MOV, MKV, WebM, and audio when ASR is available; media conversion requires its dependencies
+  - `docling_serve`: PDF, DOCX, PPTX, XLSX, MD, TXT, HTML and the original image formats; no added document formats or audio/video
   - `docling` entity extraction: PDF, DOCX, PPTX, HTML, images (excludes XLSX, TXT, MD, WEBP)
 - See [ExtractOperator](../operators/extract/extract_operator_readme.md) for complete documentation including detailed extension support
 
@@ -1226,7 +1226,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 - **Docling Serve** (for docling_serve text provider): Service at configured URL (default `http://localhost:5001`)
 - **LiteLLM** (for litellm entity provider): API keys for chosen provider (OpenAI, Anthropic, etc.)
 - **WatsonX** (for watsonx entity provider): Environment variables `WATSONX_API_KEY`, `WATSONX_CONTAINER_ID`, optional `WATSONX_API_BASE_URL`, `WATSONX_CONTAINER_KIND`
-- **ffmpeg** (for audio/video processing): Required for M4A, AAC, OGG, FLAC audio formats and all video formats (MP4, AVI, MOV). Not required for WAV/MP3. Install: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Linux)
+- **ffmpeg** (for audio/video processing): Required for M4A, AAC, OGG, FLAC audio formats and all video formats (MP4, AVI, MOV, MKV, WebM). Not required for WAV/MP3. Install: `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Linux)
 
 **Usage Notes**
 
@@ -1242,10 +1242,10 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 - Docling Serve provider supports OCR for scanned documents and multi-language processing
 - **Text File Handling**: `.txt` files are automatically processed locally using UTF-8/latin-1 decoding, bypassing Docling Serve even when `docling_serve` provider is configured
 - **Extension Detection**: Files without extensions are automatically detected using magic byte analysis (supports PDF, DOCX, XLSX, PPTX, images, HTML, and text formats)
-- Audio/Video Support: Processes audio (WAV, MP3, M4A, AAC, OGG, FLAC) and video (MP4, AVI, MOV) files using ASR. Requires ffmpeg for M4A, AAC, OGG, FLAC, and all video formats
+- Audio/Video Support: Processes audio (WAV, MP3, M4A, AAC, OGG, FLAC) and video (MP4, AVI, MOV, MKV, WebM) files using ASR. Requires ffmpeg for M4A, AAC, OGG, FLAC, and all video formats
 - **Extension Validation**: Files with unsupported extensions are automatically skipped and logged. Supported extensions vary by provider:
-  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, HTML, Markdown, AsciiDoc, TXT, and audio/video (with ASR)
-  - `docling_serve`: Same as docling_library except NO audio/video support
+  - `docling_library`: PDF, DOCX, PPTX, XLSX, images, CSV, EPUB, EML, MSG, LaTeX, AsciiDoc, WebVTT, HTML and Markdown variants, PPTM, XLSM, XLTX, XLTM, plus MP4, AVI, MOV, MKV, WebM, and audio when ASR is available; media conversion requires its dependencies
+  - `docling_serve`: PDF, DOCX, PPTX, XLSX, MD, TXT, HTML and the original image formats; no added document formats or audio/video
   - `docling` entity extraction: PDF, DOCX, PPTX, HTML, images (excludes XLSX, TXT, MD, WEBP)
 - See [ExtractOperator](../operators/extract/extract_operator_readme.md) for complete documentation including detailed extension support
 

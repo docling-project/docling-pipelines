@@ -8,7 +8,11 @@ In this specification, **Tier 1** means pure-Python Docling formats that require
 ## ADDED Requirements
 
 ### Requirement: Classification accepts Tier 1 document formats
-`DocumentClassifierOperator` SHALL accept the Tier 1 formats `.csv`, `.epub`, `.tex`, `.latex`, `.adoc`, `.asciidoc`, `.asc`, `.eml`, `.msg`, `.vtt`, `.htm`, `.xhtml`, `.mhtml`, `.mht`, `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.pptm`, `.potm`, `.ppsm`, `.xlsm`, `.xltx`, and `.xltm` in addition to its existing supported extensions. The plain-markdown variants `.markdown`, `.text`, `.qmd`, and `.rmd` SHALL remain unsupported, consistent with `.md` and `.txt`.
+`DocumentClassifierOperator` SHALL accept the Tier 1 formats `.csv`, `.epub`, `.tex`, `.latex`, `.adoc`, `.asciidoc`, `.asc`, `.eml`, `.msg`, `.vtt`, `.htm`, `.xhtml`, `.mhtml`, `.mht`, `.pptm`, `.xlsm`, `.xltx`, and `.xltm` in addition to its existing supported extensions. The plain-markdown variants `.markdown`, `.text`, `.qmd`, and `.rmd` SHALL remain unsupported, consistent with `.md` and `.txt`.
+
+#### Scenario: Unsupported Office variants are not classified
+- **WHEN** a document has extension `.dotx`, `.docm`, `.dotm`, `.potx`, `.ppsx`, `.potm`, or `.ppsm`
+- **THEN** it is skipped because Docling's underlying readers reject the corresponding internal content types
 
 #### Scenario: Tier 1 document is classified rather than skipped
 - **WHEN** an input `pa.Table` contains `data.csv` or `mail.eml` and the operator fetches content for classification
