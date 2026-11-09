@@ -400,7 +400,14 @@ class DoclingAdapter(TextExtractionPort):
 
         return DoclingLibraryConfig
 
-    def extract_single_document(self, *, file_path: str, binary_content: bytes, **kwargs: Any) -> dict[str, Any]:
+    def extract_single_document(
+        self,
+        *,
+        file_path: str,
+        binary_content: bytes,
+        file_extension: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Extract content from a single document using Docling.
 
         Performs template-based extraction if a template is provided, otherwise
@@ -410,6 +417,7 @@ class DoclingAdapter(TextExtractionPort):
         Args:
             file_path: Path to the document file (used for logging and temp file)
             binary_content: Binary content of the document
+            file_extension: Optional effective extension that takes precedence over the suffix of file_path
             **kwargs: Additional parameters:
                 - template: Optional template dictionary for structured extraction
 
@@ -511,7 +519,7 @@ class DoclingAdapter(TextExtractionPort):
                     binary_content=binary_content,
                     converter_config=gpu_config or None,
                     additional_formats=self.additional_formats,
-                    file_extension=kwargs.get("file_extension"),
+                    file_extension=file_extension,
                     doc_format=self.global_config.get(
                         OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT
                     ),
@@ -523,7 +531,7 @@ class DoclingAdapter(TextExtractionPort):
                     binary_content=binary_content,
                     converter_config=converter_config,
                     additional_formats=self.additional_formats,
-                    file_extension=kwargs.get("file_extension"),
+                    file_extension=file_extension,
                     doc_format=self.global_config.get(
                         OperatorConstants.DOC_FORMAT_KEY, OperatorConstants.DOC_FORMAT_DEFAULT
                     ),

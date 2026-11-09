@@ -491,7 +491,14 @@ class TextExtractionPort(ABC):
         )
 
     @abstractmethod
-    def extract_single_document(self, *, file_path: str, binary_content: bytes, **kwargs: Any) -> dict[str, Any]:
+    def extract_single_document(
+        self,
+        *,
+        file_path: str,
+        binary_content: bytes,
+        file_extension: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Extract content from a single document.
 
         This is the adapter-specific extraction logic that runs in parallel workers.
@@ -500,6 +507,8 @@ class TextExtractionPort(ABC):
         Args:
             file_path: Path to the document (used for logging and file type detection)
             binary_content: Binary content of the document
+            file_extension: Optional effective extension (e.g. ".mp3") that takes precedence over the
+                suffix of file_path when resolving the document type
             **kwargs: Adapter-specific parameters (e.g., vlm_config)
 
         Returns:
