@@ -23,6 +23,7 @@ from docpipe.utils.core.memmap_file_utils import (
     yield_chunks_from_file,
     yield_embeddings_from_memmap_file,
 )
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
 from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
@@ -157,8 +158,9 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
 
             self.adapter: VectorStorePort = VectorStoreFactory.create(self.provider, **adapter_config)
         except Exception as e:
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
             raise DocpipeException(
-                message=f"Failed to initialize vector database adapter '{self.provider}': {e!s}",
+                message=f"Failed to initialize vector database adapter '{self.provider}': {safe_error}",
                 status_code=500,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             ) from e
@@ -206,7 +208,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             try:
                 self.adapter.validate_vector_feature_types(feature_types=feature_types)
             except DocpipeException as exc:
-                errors.append(str(exc))
+                errors.append(sanitize_exception(exc=exc, config_key=f"{self.short_name}.provider_config"))
 
         # Validate that feature mappings are present.
         feature_mappings: list[dict[str, str]] = self.config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
@@ -273,7 +275,11 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             try:
                 self.adapter.close()
             except Exception as e:
-                logger.warning("Failed to close adapter: %s", e, extra=self.common_log_arguments)
+                logger.warning(
+                    "Failed to close adapter: %s",
+                    sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
+                    extra=self.common_log_arguments,
+                )
 
     def _transform_internal(
         self,
@@ -336,7 +342,11 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         try:
             self.adapter.refresh_index()
         except Exception as e:
-            logger.warning("Failed to refresh index: %s", e, extra=self.common_log_arguments)
+            logger.warning(
+                "Failed to refresh index: %s",
+                sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
+                extra=self.common_log_arguments,
+            )
 
         return [table], metadata
 
@@ -481,7 +491,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 self.adapter.create_index(dimension_mapping=dimension_mapping)
             return True
         except Exception as e:
-            logger.error("Failed to create or validate index: %s", e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error("Failed to create or validate index: %s", safe_error, extra=self.common_log_arguments)
             # Mark all unique documents as failed when index creation fails
             # Use original document IDs (from 'id' column) for consistency
             for doc_hash in unique_doc_ids:
@@ -490,7 +501,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     metadata=metadata,
                     doc_id=original_id,
                     doc_name=doc_hash_to_name.get(doc_hash, original_id),
-                    reason=f"Failed to create index: {e!s}",
+                    reason=f"Failed to create index: {safe_error}",
                 )
             metadata[Metrics.External.PROCESSED_DOCS] = 0
             metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
@@ -665,17 +676,18 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                         chunk_id_to_doc_id[chunk_pk] = doc_id
 
             except Exception as e:
+                safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
                 logger.error(
                     "Error preparing document at row %s: %s",
                     idx,
-                    e,
+                    safe_error,
                     extra=self.common_log_arguments,
                 )
                 self.record_failed_document(
                     metadata=metadata,
                     doc_id=f"row_{idx}",
                     doc_name=row_data.get("name") or f"row_{idx}",
-                    reason=str(e),
+                    reason=safe_error,
                 )
 
         return documents, chunk_id_to_doc_id
@@ -850,7 +862,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         except Exception as e:
             logger.warning(
                 "Stale PK cleanup failed (insert will proceed): %s",
-                e,
+                sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
                 extra=self.common_log_arguments,
             )
 
@@ -933,7 +945,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             return True
 
         except Exception as e:
-            logger.error("Failed to index documents: %s", e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error("Failed to index documents: %s", safe_error, extra=self.common_log_arguments)
             # Mark all documents as failed when the entire indexing operation fails
             # Use original document IDs (from 'id' column) for consistency
             unique_doc_hashes_from_chunks: set[str] = set()
@@ -947,7 +960,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     metadata=metadata,
                     doc_id=original_id,
                     doc_name=doc_hash_to_name.get(doc_hash, original_id),
-                    reason=f"Indexing operation failed: {e!s}",
+                    reason=f"Indexing operation failed: {safe_error}",
                 )
             metadata[Metrics.External.PROCESSED_DOCS] = 0
             metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value

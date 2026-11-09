@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Validate source configuration and ingest documents through provider adapters."""
 
 import asyncio
@@ -27,6 +30,7 @@ from docpipe.core.operators.ingest.ingest_utils import (
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 if TYPE_CHECKING:
@@ -205,12 +209,13 @@ class MicrosoftGraphLoader:
             doc._binary_content = binary_content  # type: ignore[attr-defined]
             return doc
         except Exception as e:
-            logger.exception("Failed to download file %s: %s", item.get("name", ""), e)
+            safe_error = sanitize_exception(exc=e, config_key="ingest_source.provider_config")
+            logger.error("Failed to download file %s: %s", item.get("name", ""), safe_error)
             return Document(
                 page_content="",
                 metadata={
                     "source": item.get("name", ""),
-                    "error": str(e),
+                    "error": safe_error,
                     "drive_id": self.drive_id,
                     "item_id": item.get("id", ""),
                 },
@@ -241,7 +246,8 @@ class MicrosoftGraphLoader:
                 )
                 folder_item_id = data.get("id")
             except Exception as e:
-                msg = f"Folder path '{self.folder_path}' not found in drive '{self.drive_id}': {e!s}"
+                safe_error = sanitize_exception(exc=e, config_key="ingest_source.provider_config")
+                msg = f"Folder path '{self.folder_path}' not found in drive '{self.drive_id}': {safe_error}"
                 raise ValueError(msg) from e
 
         files = self._list_files(folder_item_id=folder_item_id)
@@ -343,7 +349,7 @@ class IngestSourceOperator(AbstractOperator):
                 _, _ = self._build_adapter_config(self.provider)
             except Exception as e:
                 # Extract meaningful error message from Pydantic validation errors
-                error_msg = str(e)
+                error_msg = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
                 # Format Pydantic validation errors more clearly
                 if "validation error" in error_msg.lower():
                     # Extract field-specific errors from Pydantic
@@ -601,12 +607,15 @@ class IngestSourceOperator(AbstractOperator):
             )
 
         except Exception as e:
-            logger.error("Error loading documents from %s: %s", self.provider, e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error(
+                "Error loading documents from %s: %s", self.provider, safe_error, extra=self.common_log_arguments
+            )
             self.record_failed_document(
                 metadata=metadata,
                 doc_id="loader_error",
                 doc_name=self.provider,
-                reason=f"Failed to load documents: {e!s}",
+                reason=f"Failed to load documents: {safe_error}",
             )
 
         return doc_data
@@ -853,12 +862,13 @@ class IngestSourceOperator(AbstractOperator):
             return processed_doc
 
         except Exception as e:
-            logger.error("Error processing document %s: %s", idx, e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error("Error processing document %s: %s", idx, safe_error, extra=self.common_log_arguments)
             self.record_failed_document(
                 metadata=metadata,
                 doc_id=str(idx),
                 doc_name=doc.metadata.get("source", f"unknown_{idx}"),
-                reason=f"Processing error: {e!s}",
+                reason=f"Processing error: {safe_error}",
             )
             return None
 
