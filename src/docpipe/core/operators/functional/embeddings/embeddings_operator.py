@@ -387,6 +387,24 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
         return LocalLLMAdapterFactory.list_adapters()
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each embeddings provider config class's secret-capable declarations."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+        from docpipe.core.operators.shared.llm_provider_config import (
+            LLMEmbeddingProviderConfig,
+            WatsonxEmbeddingProviderConfig,
+        )
+
+        return build_provider_secret_fields(
+            selector=OperatorConstants.Config.PROVIDER,
+            prefix=OperatorConstants.Config.PROVIDER_CONFIG,
+            classes={
+                OperatorConstants.Config.PROVIDER_LITELLM: LLMEmbeddingProviderConfig,
+                OperatorConstants.Config.PROVIDER_WATSONX: WatsonxEmbeddingProviderConfig,
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """
         Return operator metadata for UI and documentation.
@@ -395,6 +413,8 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
             dict: Operator metadata including features and attributes
         """
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": EmbeddingsOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: OperatorCategory.Functional.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: EmbeddingsOperator.is_available(),

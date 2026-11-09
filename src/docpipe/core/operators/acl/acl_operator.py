@@ -346,6 +346,7 @@ class ACLOperator(AbstractOperator):
             dict: Operator metadata including features and attributes
         """
         return {
+            "secret_fields": [f"{OperatorConstants.Config.CREDENTIALS}.*"],
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: OperatorCategory.Extract.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: ACLOperator.is_available(),

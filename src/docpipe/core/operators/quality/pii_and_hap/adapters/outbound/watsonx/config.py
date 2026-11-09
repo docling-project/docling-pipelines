@@ -3,6 +3,8 @@
 
 """Pydantic config model for the WatsonX PII/HAP detection adapter."""
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 ADAPTER_NAME = "watsonx"
@@ -14,6 +16,12 @@ class WatsonxPIIAndHAPConfig(BaseModel):
     Describes the fields the user writes inside ``provider_config`` when
     selecting the ``watsonx`` provider in the ``pii_and_hap`` operator node.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "url",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
