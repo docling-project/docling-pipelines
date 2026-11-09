@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """ACL Operator for extracting access control lists from documents.
 
 This operator extracts ACL (Access Control List) information from documents
@@ -38,6 +41,7 @@ from docpipe.core.operators.acl.adapters.outbound.factories.acl_adapter_factory 
 )
 from docpipe.core.operators.acl.domain.models import ACLRequest, ACLResponse
 from docpipe.core.operators.acl.ports.outbound.acl_extraction import ACLExtractionPort
+from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.exceptions.docpipe_exceptions import (
     ConfigurationError,
     DocpipeException,
@@ -117,14 +121,20 @@ class ACLOperator(AbstractOperator):
 
         Args:
             config: Configuration dictionary containing:
+                - credentials: Authentication credentials for the provider
+                  (``client_id``, ``client_secret``, ``tenant_id`` for SharePoint)
                 - provider_config: Optional ACL-specific settings (optional)
                 - fail_on_error: Whether to fail on ANY error (optional, default: true)
 
         Note:
-            Provider and credentials are extracted from the input PyArrow table
-            metadata (from IngestSourceOperator) at runtime.
+            The provider name is read from the input PyArrow table metadata
+            (from IngestSourceOperator) at runtime. Credentials are never read
+            from document metadata.
         """
         super().__init__(config)
+
+        # Operator's own credentials (never read from document metadata)
+        self.credentials: Any = config.get(OperatorConstants.Config.CREDENTIALS, {})
 
         # Optional ACL-specific configuration
         self.provider_config: dict[str, Any] = config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
@@ -141,16 +151,54 @@ class ACLOperator(AbstractOperator):
         }
 
         logger.info(
-            f"Initialized ACLOperator with fail_on_error: {self.fail_on_error}",
+            "Initialized ACLOperator with fail_on_error: %s",
+            self.fail_on_error,
             extra=self.common_log_arguments,
         )
 
+    @staticmethod
+    def _required_credential_keys(*, provider: str) -> tuple[str, ...]:
+        """Return the credential keys the given provider needs."""
+        if provider == OperatorConstants.ACL.PROVIDER_SHAREPOINT:
+            return ("client_id", "client_secret", "tenant_id")
+        return ()
+
+    def _resolve_credentials(self, *, provider: str) -> dict[str, Any]:
+        """Build the credentials dict from the operator's own ``credentials`` config.
+
+        Environment-variable references are expanded. Error messages name the
+        offending keys only and never include credential values.
+
+        Raises:
+            FlowExecutionFailedException: If credentials are absent or incomplete
+        """
+        required = self._required_credential_keys(provider=provider)
+        configured = self.credentials if isinstance(self.credentials, dict) else {}
+        missing = [key for key in required if not configured.get(key)]
+        if missing or (not required and not configured):
+            raise FlowExecutionFailedException(
+                f"ACL operator '{OperatorConstants.Config.CREDENTIALS}' config is missing required key(s) "
+                f"for provider '{provider}': {', '.join(missing or ['credentials'])}. "
+                "Set them in the ACL operator config; they are no longer read from document metadata."
+            )
+
+        resolved: dict[str, Any] = {}
+        for key, value in configured.items():
+            try:
+                resolved[key] = resolve_env_var(value)
+            except ValueError as e:
+                raise FlowExecutionFailedException(
+                    f"ACL operator credential '{key}' references an environment variable that is not set"
+                ) from e
+        return resolved
+
     def _extract_ingest_metadata(self, table: pa.Table) -> tuple[str, dict[str, Any], dict[str, Any]]:
-        """Extract provider and credentials from table metadata.
+        """Extract the provider from table metadata and credentials from operator config.
 
         Reads the first row's metadata column (JSON string from IngestSourceOperator)
-        to extract provider configuration. File paths from source_id are used directly
-        for ACL lookups, so drive_id is not needed.
+        to extract the provider name. File paths from source_id are used directly
+        for ACL lookups, so drive_id is not needed. Credentials come from this
+        operator's own ``credentials`` config, not from document metadata.
 
         Args:
             table: Input PyArrow table from IngestSourceOperator
@@ -159,7 +207,7 @@ class ACLOperator(AbstractOperator):
             Tuple of (provider, credentials, connection_params)
 
         Raises:
-            FlowExecutionFailedException: If required metadata is missing
+            FlowExecutionFailedException: If required metadata or credentials are missing
         """
         try:
             # Get first row's metadata column (JSON string)
@@ -183,27 +231,14 @@ class ACLOperator(AbstractOperator):
                     "Provider not found in metadata. IngestSourceOperator must include 'provider' field."
                 )
 
-            # Extract credentials from metadata (flat structure from SharePoint ingest adapter)
-            client_id = first_doc_metadata.get("client_id")
-            client_secret = first_doc_metadata.get("client_secret")
-            tenant_id = first_doc_metadata.get("tenant_id")
-
-            if not all([client_id, client_secret, tenant_id]):
-                raise FlowExecutionFailedException(
-                    "Credentials not found in metadata. IngestSourceOperator must include 'client_id', 'client_secret', and 'tenant_id' fields."
-                )
-
-            credentials: dict[str, Any] = {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "tenant_id": tenant_id,
-            }
+            credentials = self._resolve_credentials(provider=provider)
 
             # Connection params can be empty - we'll use file paths from source_id directly
             connection_params: dict[str, Any] = {}
 
             logger.info(
-                f"Extracted metadata from IngestSourceOperator: provider={provider}, has_credentials={bool(credentials)}",
+                "Extracted provider from IngestSourceOperator metadata: provider=%s",
+                provider,
                 extra=self.common_log_arguments,
             )
 
@@ -245,7 +280,8 @@ class ACLOperator(AbstractOperator):
             )
 
             logger.info(
-                f"Successfully initialized ACL adapter for provider: {provider}",
+                "Successfully initialized ACL adapter for provider: %s",
+                provider,
                 extra=self.common_log_arguments,
             )
 
@@ -261,9 +297,7 @@ class ACLOperator(AbstractOperator):
             raise
         except Exception as e:
             # Wrap unknown exceptions
-            logger.error(
-                f"Unexpected error initializing ACL adapter: {e!s}", extra=self.common_log_arguments, exc_info=True
-            )
+            logger.exception("Unexpected error initializing ACL adapter: %s", e, extra=self.common_log_arguments)
             raise FlowExecutionFailedException(
                 f"Failed to initialize ACL adapter for provider '{provider}': {e!s}"
             ) from e
@@ -280,8 +314,8 @@ class ACLOperator(AbstractOperator):
     def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
         """Validate operator configuration.
 
-        Note: Provider and credentials are extracted from input table metadata at runtime,
-        so they are not validated here.
+        Note: The provider is extracted from input table metadata at runtime and credentials
+        are checked when the operator runs, so neither is validated here.
 
         Args:
             errors: List to append validation errors
@@ -318,7 +352,8 @@ class ACLOperator(AbstractOperator):
             OperatorConstants.Misc.LABEL: "ACL Extraction",
             OperatorConstants.Config.DESCRIPTION: (
                 "Extract access control lists (ACLs) from documents. "
-                "Automatically uses credentials and provider info from IngestSourceOperator. "
+                "Reads the provider from IngestSourceOperator metadata and authenticates with the "
+                "credentials configured on this operator. "
                 "Supports multiple providers (SharePoint, S3, Google Drive, etc.) "
                 "and adds allowed_users column with effective permissions. "
                 "Behavior: fail_on_error=true (default) fails on ANY error; "
@@ -334,6 +369,16 @@ class ACLOperator(AbstractOperator):
                 },
             },
             OperatorConstants.Config.ATTRIBUTES: {
+                OperatorConstants.Config.CREDENTIALS: {
+                    OperatorConstants.Misc.NAME: "Credentials",
+                    OperatorConstants.Config.DESCRIPTION: (
+                        "Provider credentials (SharePoint: client_id, client_secret, tenant_id). "
+                        "Never read from document metadata."
+                    ),
+                    OperatorConstants.Config.REQUIRED: True,
+                    OperatorConstants.Misc.TYPE: AttributeDataTypes.JSON,
+                    OperatorConstants.Config.SENSITIVE: True,
+                },
                 OperatorConstants.Config.PROVIDER_CONFIG: {
                     OperatorConstants.Misc.NAME: "Provider Configuration",
                     OperatorConstants.Config.DESCRIPTION: "Optional ACL-specific configuration parameters (e.g., resolve_inheritance, expand_groups)",
@@ -360,8 +405,8 @@ class ACLOperator(AbstractOperator):
         information using the configured adapter, and adds an allowed_users
         column containing a JSON array of user identities.
 
-        Credentials and connection parameters are extracted from the first row's
-        metadata column (populated by IngestSourceOperator).
+        The provider is read from the first row's metadata column (populated by
+        IngestSourceOperator); credentials come from this operator's own config.
 
         Uses batch processing with a single event loop for efficient concurrent
         ACL extraction across all documents.
@@ -394,8 +439,10 @@ class ACLOperator(AbstractOperator):
         provider, credentials, connection_params = self._extract_ingest_metadata(table)
 
         logger.info(
-            f"Starting ACL extraction for {len(table)} documents using provider: {provider}, "
-            f"fail_on_error: {self.fail_on_error}",
+            "Starting ACL extraction for %s documents using provider: %s, fail_on_error: %s",
+            len(table),
+            provider,
+            self.fail_on_error,
             extra=self.common_log_arguments,
         )
 
@@ -424,7 +471,8 @@ class ACLOperator(AbstractOperator):
             if not doc_id or not source_id:
                 error_msg = f"Missing required metadata: {OperatorConstants.Columns.ID}={doc_id}, {OperatorConstants.Columns.SOURCE_ID}={source_id}"
                 logger.error(
-                    f"Document at index {idx} missing required metadata",
+                    "Document at index %s missing required metadata",
+                    idx,
                     extra=self.common_log_arguments,
                 )
 
@@ -449,7 +497,8 @@ class ACLOperator(AbstractOperator):
                     doc_metadata = json.loads(doc_metadata_str)
                 except json.JSONDecodeError:
                     logger.warning(
-                        f"Failed to parse metadata for document {doc_id}, using empty dict",
+                        "Failed to parse metadata for document %s, using empty dict",
+                        doc_id,
                         extra=self.common_log_arguments,
                     )
 
@@ -482,14 +531,15 @@ class ACLOperator(AbstractOperator):
         if acl_requests:
             try:
                 logger.info(
-                    f"Executing batch ACL extraction for {len(acl_requests)} documents",
+                    "Executing batch ACL extraction for %s documents",
+                    len(acl_requests),
                     extra=self.common_log_arguments,
                 )
 
                 responses: list[ACLResponse] = asyncio.run(acl_adapter.extract_acls_batch(requests=acl_requests))
 
             except Exception as e:
-                logger.error(f"Batch ACL extraction failed: {e!s}", extra=self.common_log_arguments, exc_info=True)
+                logger.exception("Batch ACL extraction failed: %s", e, extra=self.common_log_arguments)
 
                 if self.fail_on_error:
                     raise FlowExecutionFailedException(f"Batch ACL extraction failed: {e!s}") from e
@@ -520,7 +570,10 @@ class ACLOperator(AbstractOperator):
                 if not acl_response.extraction_success:
                     error_msg = acl_response.extraction_error or "Unknown error"
                     logger.error(
-                        f"ACL extraction failed for document {doc_id} ({doc_name}): {error_msg}",
+                        "ACL extraction failed for document %s (%s): %s",
+                        doc_id,
+                        doc_name,
+                        error_msg,
                         extra=self.common_log_arguments,
                     )
 
@@ -549,7 +602,9 @@ class ACLOperator(AbstractOperator):
                 if acl_response.extraction_warnings:
                     for warning in acl_response.extraction_warnings:
                         logger.warning(
-                            f"ACL extraction warning for document {doc_id}: {warning}",
+                            "ACL extraction warning for document %s: %s",
+                            doc_id,
+                            warning,
                             extra=self.common_log_arguments,
                         )
 
@@ -558,10 +613,11 @@ class ACLOperator(AbstractOperator):
                 raise
             except DocpipeException as e:
                 # Wrap other Docpipe exceptions with ACL context
-                logger.error(
-                    f"Docpipe exception processing document {doc_id}: {e!s}",
+                logger.exception(
+                    "Docpipe exception processing document %s: %s",
+                    doc_id,
+                    e,
                     extra=self.common_log_arguments,
-                    exc_info=True,
                 )
 
                 if self.fail_on_error:
@@ -576,10 +632,11 @@ class ACLOperator(AbstractOperator):
                 )
             except Exception as e:
                 # Wrap unknown exceptions
-                logger.error(
-                    f"Unexpected error processing document {doc_id}: {e!s}",
+                logger.exception(
+                    "Unexpected error processing document %s: %s",
+                    doc_id,
+                    e,
                     extra=self.common_log_arguments,
-                    exc_info=True,
                 )
 
                 if self.fail_on_error:
@@ -610,7 +667,7 @@ class ACLOperator(AbstractOperator):
                 schema = table.schema.append(pa.field(OperatorConstants.ACL.ALLOWED_USERS_COLUMN, pa.string()))
                 output_table = pa.Table.from_arrays([pa.array([], type=field.type) for field in schema], schema=schema)
         except Exception as e:
-            logger.error(f"Failed to create output table: {e!s}", extra=self.common_log_arguments, exc_info=True)
+            logger.exception("Failed to create output table: %s", e, extra=self.common_log_arguments)
             raise FlowExecutionFailedException(
                 f"Failed to create output table with {OperatorConstants.ACL.ALLOWED_USERS_COLUMN} column: {e!s}"
             ) from e
@@ -638,9 +695,11 @@ class ACLOperator(AbstractOperator):
 
         # Log statistics
         logger.info(
-            f"ACL extraction completed: {metadata[Metrics.External.PROCESSED_DOCS]} processed, "
-            f"{metadata[Metrics.External.FAILED_DOCS_COUNT]} failed, {metadata[Metrics.External.SKIPPED_DOCS_COUNT]} skipped "
-            f"in {processing_time:.2f} seconds",
+            "ACL extraction completed: %s processed, %s failed, %s skipped in %.2f seconds",
+            metadata[Metrics.External.PROCESSED_DOCS],
+            metadata[Metrics.External.FAILED_DOCS_COUNT],
+            metadata[Metrics.External.SKIPPED_DOCS_COUNT],
+            processing_time,
             extra=self.common_log_arguments,
         )
 
