@@ -1,4 +1,12 @@
 {
+  "canvas.editingDisabledOwnership": "Only the flow creator or an administrator can edit this flow",
+  "canvas.editingDisabledPermission": "You do not have permission to edit this flow",
+  "canvas.runDisabledPermission": "You do not have permission to run flows",
+  "canvas.saveDisabledOwnership": "Only the flow creator or an administrator can modify this flow",
+  "canvas.saveDisabledPermission": "You do not have permission to modify this flow",
+  "runStatus.runAgainDisabledPermission": "You do not have permission to run flows",
+  "runStatus.stopDisabledOwnership": "Only the user who started the run or an administrator can stop it",
+  "runStatus.stopDisabledPermission": "You do not have permission to stop this job run",
   "src.components.Canvas.FlowRunHistoryTearsheet.downloadLogsDescription": "Download logs",
   "src.components.Canvas.FlowRunHistoryTearsheet.emptySubtitle": "Run this flow to see execution history here.",
   "src.components.Canvas.FlowRunHistoryTearsheet.emptyTitle": "No runs yet",

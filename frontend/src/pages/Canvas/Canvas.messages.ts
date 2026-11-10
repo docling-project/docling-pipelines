@@ -241,4 +241,26 @@ export const messages = defineMessages({
     id: 'src.pages.Canvas.editModalTitle',
     defaultMessage: 'Edit flow details',
   },
+
+  // ── Permission & ownership tooltips ────────────────────────────────────────
+  saveDisabledPermission: {
+    id: 'canvas.saveDisabledPermission',
+    defaultMessage: 'You do not have permission to modify this flow',
+  },
+  saveDisabledOwnership: {
+    id: 'canvas.saveDisabledOwnership',
+    defaultMessage: 'Only the flow creator or an administrator can modify this flow',
+  },
+  runDisabledPermission: {
+    id: 'canvas.runDisabledPermission',
+    defaultMessage: 'You do not have permission to run flows',
+  },
+  editingDisabledPermission: {
+    id: 'canvas.editingDisabledPermission',
+    defaultMessage: 'You do not have permission to edit this flow',
+  },
+  editingDisabledOwnership: {
+    id: 'canvas.editingDisabledOwnership',
+    defaultMessage: 'Only the flow creator or an administrator can edit this flow',
+  },
 });

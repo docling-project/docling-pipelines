@@ -60,8 +60,8 @@ Each group below can merge on its own. The UI gating is a convenience, and every
 - [ ] 7.3 Preserve `created_by` on `FlowRow` (`flow-mapper.ts::fromResponse` and `types/projects.ts`) and apply the same gating on the project detail page for flow create, edit and delete; verify the corresponding tests
 - [ ] 7.4 Preserve `user_id` on `RunRow` (`FlowDetail.tsx::fetchRuns`) and gate cancel run and delete run on `canModifyAsset(run.user_id)` on the flow detail page while keeping run viewing available; verify tests for viewer, non-owner editor, run owner editor and admin
 - [ ] 7.5 Gate edit flow details (`FlowInfoPanel`) on `canModifyAsset(flowRow.created_by)`; verify tests for viewer, non-owner editor, owner and admin
-- [ ] 7.6 Gate the `Canvas` editing toolbar, palette, node save, properties save and Save on flow modify permission, and Run flow on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
-- [ ] 7.7 Gate `ReadOnlyCanvas` / `RunDetails` controls: `Stop` in `RunStatusTopPanel` on `canModifyAsset(jobStats.user_id)` and `Run Again` on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
+- [x] 7.6 Gate the `Canvas` editing toolbar, palette, node save, properties save and Save on flow modify permission, and Run flow on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
+- [x] 7.7 Gate `ReadOnlyCanvas` / `RunDetails` controls: `Stop` in `RunStatusTopPanel` on `canModifyAsset(jobStats.user_id)` and `Run Again` on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
 - [ ] 7.8 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings
 
 ## 8. Enable by default and finalize

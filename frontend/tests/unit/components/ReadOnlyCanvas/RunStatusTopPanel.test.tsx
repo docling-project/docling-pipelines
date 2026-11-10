@@ -5,6 +5,7 @@ import { RunStatusTopPanel } from '@/components/ReadOnlyCanvas/RunStatusTopPanel
 import type { JobStats } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 import { createMockJobStats, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
+import { authStateFixture, buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
 
 const BASE_STATS: JobStats = createMockJobStats({
   job_id: 'job-1',
@@ -18,7 +19,10 @@ const BASE_STATS: JobStats = createMockJobStats({
   skipped_docs: 0,
 });
 
-function renderPanel(overrides: Partial<Parameters<typeof RunStatusTopPanel>[0]> = {}) {
+function renderPanel(
+  overrides: Partial<Parameters<typeof RunStatusTopPanel>[0]> = {},
+  preloadedState?: Parameters<typeof buildPreloadedState>[0]
+) {
   const defaults = {
     jobStats: BASE_STATS,
     isMinimized: false,
@@ -30,7 +34,12 @@ function renderPanel(overrides: Partial<Parameters<typeof RunStatusTopPanel>[0]>
     onRunAgain: vi.fn(),
     ...overrides,
   };
-  return { ...renderWithProviders(<RunStatusTopPanel {...defaults} />), ...defaults };
+  return {
+    ...renderWithProviders(<RunStatusTopPanel {...defaults} />, {
+      preloadedState: buildPreloadedState(preloadedState),
+    }),
+    ...defaults,
+  };
 }
 
 describe('RunStatusTopPanel', () => {
@@ -143,5 +152,130 @@ describe('RunStatusTopPanel', () => {
   it('renders duration section with formatted time', () => {
     renderPanel({ jobStats: { ...BASE_STATS, duration: 3661 } });
     expect(screen.getByText('Duration')).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RBAC & Permission Gating (Task 7.7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('RunStatusTopPanel — RBAC & Permission Gating (Task 7.7)', () => {
+  const OTHER_USER_JOB_STATS: JobStats = {
+    ...BASE_STATS,
+    user_id: 'owner-user',
+  };
+
+  describe('Viewer role', () => {
+    it('disables Stop button with permission tooltip when running', () => {
+      renderPanel(
+        { isRunning: true, jobStats: OTHER_USER_JOB_STATS },
+        { auth: authStateFixture({ role: 'viewer', username: 'viewer-user' }) }
+      );
+      const stopBtn = screen.getByRole('button', { name: /stop/i });
+      expect(stopBtn).toHaveProperty('disabled', true);
+      expect(screen.getByText('You do not have permission to stop this job run')).toBeInTheDocument();
+    });
+
+    it('disables Run Again button with permission tooltip when completed', () => {
+      renderPanel(
+        {
+          isRunning: false,
+          jobStats: { ...OTHER_USER_JOB_STATS, status: JOB_RUN_STATUS.COMPLETED },
+        },
+        { auth: authStateFixture({ role: 'viewer', username: 'viewer-user' }) }
+      );
+      const runAgainBtn = screen.getByRole('button', { name: /run again/i });
+      expect(runAgainBtn).toHaveProperty('disabled', true);
+      expect(screen.getByText('You do not have permission to run flows')).toBeInTheDocument();
+    });
+  });
+
+  describe('Non-owner Editor role', () => {
+    it('disables Stop button with ownership tooltip when job run is owned by another user', () => {
+      renderPanel(
+        { isRunning: true, jobStats: OTHER_USER_JOB_STATS },
+        { auth: authStateFixture({ role: 'editor', username: 'non-owner-editor' }) }
+      );
+      const stopBtn = screen.getByRole('button', { name: /stop/i });
+      expect(stopBtn).toHaveProperty('disabled', true);
+      expect(
+        screen.getByText('Only the user who started the run or an administrator can stop it')
+      ).toBeInTheDocument();
+    });
+
+    it('enables Run Again button when completed', () => {
+      const { onRunAgain } = renderPanel(
+        {
+          isRunning: false,
+          jobStats: { ...OTHER_USER_JOB_STATS, status: JOB_RUN_STATUS.COMPLETED },
+        },
+        { auth: authStateFixture({ role: 'editor', username: 'non-owner-editor' }) }
+      );
+      const runAgainBtn = screen.getByRole('button', { name: /run again/i });
+      expect(runAgainBtn).toHaveProperty('disabled', false);
+      expect(screen.queryByText('You do not have permission to run flows')).toBeNull();
+      fireEvent.click(runAgainBtn);
+      expect(onRunAgain).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Owner Editor role', () => {
+    it('enables Stop button when job run is owned by the current editor', () => {
+      const { onStop } = renderPanel(
+        { isRunning: true, jobStats: { ...BASE_STATS, user_id: 'owner-editor' } },
+        { auth: authStateFixture({ role: 'editor', username: 'owner-editor' }) }
+      );
+      const stopBtn = screen.getByRole('button', { name: /stop/i });
+      expect(stopBtn).toHaveProperty('disabled', false);
+      expect(screen.queryByText('You do not have permission to stop this job run')).toBeNull();
+      expect(screen.queryByText('Only the user who started the run or an administrator can stop it')).toBeNull();
+      fireEvent.click(stopBtn);
+      expect(onStop).toHaveBeenCalledOnce();
+    });
+
+    it('enables Run Again button when completed', () => {
+      const { onRunAgain } = renderPanel(
+        {
+          isRunning: false,
+          jobStats: { ...BASE_STATS, user_id: 'owner-editor', status: JOB_RUN_STATUS.COMPLETED },
+        },
+        { auth: authStateFixture({ role: 'editor', username: 'owner-editor' }) }
+      );
+      const runAgainBtn = screen.getByRole('button', { name: /run again/i });
+      expect(runAgainBtn).toHaveProperty('disabled', false);
+      expect(screen.queryByText('You do not have permission to run flows')).toBeNull();
+      fireEvent.click(runAgainBtn);
+      expect(onRunAgain).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Admin role', () => {
+    it('enables Stop button even when job run is owned by another user', () => {
+      const { onStop } = renderPanel(
+        { isRunning: true, jobStats: OTHER_USER_JOB_STATS },
+        { auth: authStateFixture({ role: 'admin', username: 'admin-user' }) }
+      );
+      const stopBtn = screen.getByRole('button', { name: /stop/i });
+      expect(stopBtn).toHaveProperty('disabled', false);
+      expect(screen.queryByText('You do not have permission to stop this job run')).toBeNull();
+      expect(screen.queryByText('Only the user who started the run or an administrator can stop it')).toBeNull();
+      fireEvent.click(stopBtn);
+      expect(onStop).toHaveBeenCalledOnce();
+    });
+
+    it('enables Run Again button when completed', () => {
+      const { onRunAgain } = renderPanel(
+        {
+          isRunning: false,
+          jobStats: { ...OTHER_USER_JOB_STATS, status: JOB_RUN_STATUS.COMPLETED },
+        },
+        { auth: authStateFixture({ role: 'admin', username: 'admin-user' }) }
+      );
+      const runAgainBtn = screen.getByRole('button', { name: /run again/i });
+      expect(runAgainBtn).toHaveProperty('disabled', false);
+      expect(screen.queryByText('You do not have permission to run flows')).toBeNull();
+      fireEvent.click(runAgainBtn);
+      expect(onRunAgain).toHaveBeenCalledOnce();
+    });
   });
 });
