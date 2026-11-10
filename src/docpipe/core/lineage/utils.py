@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Utility functions and helpers for OpenLineage integration."""
 
 from __future__ import annotations
@@ -69,6 +72,17 @@ class LineageUtils:
         if isinstance(flow_def, list):
             return [LineageUtils.strip_credentials(item) for item in flow_def]
         return flow_def
+
+    @staticmethod
+    def is_secret_statistic_key(*, key: str, secret_field_names: frozenset[str]) -> bool:
+        """Return True when a statistics key must not reach a lineage event.
+
+        A key is secret when the node's operator declares it secret-capable (``secret_field_names``, from
+        ``declared_key_names``) or when it is on the fixed credential list, which stays as a floor for
+        operators without a declaration. Names compare case-insensitively.
+        """
+        lowered = key.lower()
+        return lowered in _CREDENTIALS_KEYS or lowered in {name.lower() for name in secret_field_names}
 
     @staticmethod
     def node_run_id(*, job_run_id: str, node_id: str) -> str:

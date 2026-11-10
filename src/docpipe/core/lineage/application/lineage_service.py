@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service that bridges execution context to OpenLineage events."""
 
 import traceback
@@ -10,7 +13,7 @@ from docpipe.core.lineage.domain.models.event_type import LineageEventType
 from docpipe.core.lineage.domain.models.job import LineageJob
 from docpipe.core.lineage.domain.models.run import LineageRun
 from docpipe.core.lineage.domain.ports.lineage_publisher import LineagePublisherPort
-from docpipe.core.lineage.utils import _CREDENTIALS_KEYS, LineageUtils
+from docpipe.core.lineage.utils import LineageUtils
 from docpipe.core.orchestration.models.execution_event_context import (
     FlowAbortContext,
     FlowCompleteContext,
@@ -212,7 +215,9 @@ class LineageService:
                     flow_name=context.flow_name,
                     job_run_id=context.job_run_id,
                 ),
-                **self._build_node_stats_facet(metadata=context.metadata),
+                **self._build_node_stats_facet(
+                    metadata=context.metadata, secret_field_names=context.secret_field_names
+                ),
             },
         )
         outputs = []
@@ -444,7 +449,9 @@ class LineageService:
             }
         }
 
-    def _build_node_stats_facet(self, *, metadata: dict[str, Any]) -> dict[str, Any]:
+    def _build_node_stats_facet(
+        self, *, metadata: dict[str, Any], secret_field_names: frozenset[str] = frozenset()
+    ) -> dict[str, Any]:
         """Build a ``docpipeStats`` run facet from an operator's output metadata dict.
 
         Includes all scalar (int, float, str, bool) values from the metadata that
@@ -452,6 +459,9 @@ class LineageService:
         both universal metrics (processedDocs, nodeStatus) and operator-specific
         ones (totalChunks, docsBeforeFilter, chunksIndexedSuccessfully, etc.)
         without any operator needing to know lineage exists.
+
+        A key is dropped when :meth:`LineageUtils.is_secret_statistic_key` says so: declared by the node's
+        operator as secret-capable, or on the fixed credential list.
         """
         if not metadata:
             return {}
@@ -461,7 +471,7 @@ class LineageService:
             if key in _INTERNAL_LINEAGE_KEYS:
                 continue
             # Skip credential keys — operator metadata must not leak secrets.
-            if key.lower() in _CREDENTIALS_KEYS:
+            if LineageUtils.is_secret_statistic_key(key=key, secret_field_names=secret_field_names):
                 continue
             # Only include scalar values — skip tables, lists, nested dicts.
             if not isinstance(value, (int, float, str, bool)):
