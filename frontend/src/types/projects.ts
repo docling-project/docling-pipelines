@@ -159,6 +159,8 @@ export interface ProjectRow {
   createdOn: string;
   /** ISO date string or raw timestamp for created-on date sorting. */
   createdOnRaw?: string;
+  /** Username of the project creator; null or absent when the project has no owner. */
+  createdBy?: string | null;
 }
 
 // ── Flow UI types ────────────────────────────────────────────────────────────
@@ -194,4 +196,6 @@ export interface FlowRow {
   created_on: string;
   /** Display string for the last-modified date. */
   modified_on: string;
+  /** Username of the flow creator; null or absent when the flow has no owner. */
+  created_by?: string | null;
 }

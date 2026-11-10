@@ -55,11 +55,11 @@
 
 Each group below can merge on its own. The UI gating is a convenience, and every hidden action needs a matching backend 403 test (task 8.3).
 
-- [ ] 7.1 Disable the sample project quick-start button on `Home` and the create-project actions on `ProjectsCard` with Carbon tooltips when `!canEdit`; verify component tests for viewer and editor
-- [ ] 7.2 Preserve `createdBy` on `ProjectRow` (`Projects.tsx::toProjectRow`) and disable create, edit and delete on the projects page with Carbon tooltips using `canEdit` and `canModifyAsset`; verify component tests for viewer, editor own, editor foreign, admin and ownerless
-- [ ] 7.3 Preserve `created_by` on `FlowRow` (`flow-mapper.ts::fromResponse` and `types/projects.ts`) and apply the same gating on the project detail page for flow create, edit and delete; verify the corresponding tests
-- [ ] 7.4 Preserve `user_id` on `RunRow` (`FlowDetail.tsx::fetchRuns`) and gate cancel run and delete run on `canModifyAsset(run.user_id)` on the flow detail page while keeping run viewing available; verify tests for viewer, non-owner editor, run owner editor and admin
-- [ ] 7.5 Gate edit flow details (`FlowInfoPanel`) on `canModifyAsset(flowRow.created_by)`; verify tests for viewer, non-owner editor, owner and admin
+- [x] 7.1 Disable the sample project quick-start button on `Home` and the create-project actions on `ProjectsCard` with Carbon tooltips when `!canEdit`; verify component tests for viewer and editor
+- [x] 7.2 Preserve `createdBy` on `ProjectRow` (`Projects.tsx::toProjectRow`) and disable create, edit and delete on the projects page with Carbon tooltips using `canEdit` and `canModifyAsset`; verify component tests for viewer, editor own, editor foreign, admin and ownerless
+- [x] 7.3 Preserve `created_by` on `FlowRow` (`flow-mapper.ts::fromResponse` and `types/projects.ts`) and apply the same gating on the project detail page for flow create, edit and delete; verify the corresponding tests
+- [x] 7.4 Preserve `user_id` on `RunRow` (`FlowDetail.tsx::fetchRuns`) and gate cancel run and delete run on `canModifyAsset(run.user_id)` on the flow detail page while keeping run viewing available; verify tests for viewer, non-owner editor, run owner editor and admin
+- [x] 7.5 Gate edit flow details (`FlowInfoPanel`) on `canModifyAsset(flowRow.created_by)`; verify tests for viewer, non-owner editor, owner and admin
 - [x] 7.6 Gate the `Canvas` editing toolbar, palette, node save, properties save and Save on flow modify permission, and Run flow on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
 - [x] 7.7 Gate `ReadOnlyCanvas` / `RunDetails` controls: `Stop` in `RunStatusTopPanel` on `canModifyAsset(jobStats.user_id)` and `Run Again` on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
 - [ ] 7.8 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings

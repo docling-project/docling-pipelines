@@ -32,6 +32,14 @@ describe('fromResponse', () => {
     expect(row.modified_on).toBe('2024-01-16T10:00:00Z');
   });
 
+  it('preserves created_by as the flow owner', () => {
+    expect(fromResponse({ ...fullFlow, created_by: 'alice' }).created_by).toBe('alice');
+  });
+
+  it('maps a missing created_by to null (ownerless flow)', () => {
+    expect(fromResponse(fullFlow).created_by).toBeNull();
+  });
+
   it('run_count from job_run_summary.total_runs', () => {
     const row = fromResponse(fullFlow);
     expect(row.run_count).toBe(5);

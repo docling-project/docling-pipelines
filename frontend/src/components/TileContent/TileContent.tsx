@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@carbon/react';
 import { ArrowRight } from '@carbon/icons-react';
+import { PermissionTooltip } from '@/components/common/PermissionTooltip';
 import styles from './TileContent.module.scss';
 
 interface TileContentProps {
@@ -10,6 +11,10 @@ interface TileContentProps {
   buttonLabel: string;
   href?: string;
   onAction?: () => void;
+  /** Disables the action button (ignored when `href` is set). */
+  disabled?: boolean;
+  /** Tooltip explaining why the action is disabled. Shown only when `disabled` is true. */
+  disabledReason?: string;
 }
 
 /** Figma glass tile body: label / title / subtitle / tertiary CTA button */
@@ -20,6 +25,8 @@ export function TileContent({
   buttonLabel,
   href,
   onAction,
+  disabled = false,
+  disabledReason,
 }: TileContentProps): React.JSX.Element {
   return (
     <div className={styles.tileContent}>
@@ -39,14 +46,17 @@ export function TileContent({
             {buttonLabel}
           </Button>
         ) : (
-          <Button
-            kind="tertiary"
-            size="sm"
-            renderIcon={ArrowRight}
-            onClick={() => { onAction?.(); }}
-          >
-            {buttonLabel}
-          </Button>
+          <PermissionTooltip reason={disabled ? disabledReason : null}>
+            <Button
+              kind="tertiary"
+              size="sm"
+              renderIcon={ArrowRight}
+              disabled={disabled}
+              onClick={() => { onAction?.(); }}
+            >
+              {buttonLabel}
+            </Button>
+          </PermissionTooltip>
         )}
       </div>
     </div>

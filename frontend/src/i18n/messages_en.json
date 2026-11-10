@@ -894,6 +894,8 @@
   "src.components.common.NotificationHistory.historyListLabel": "Notification history list",
   "src.components.common.NotificationHistory.panelAriaLabel": "Notification history",
   "src.components.common.NotificationHistory.panelTitle": "Notifications",
+  "src.components.common.PermissionTooltip.needEditor": "You need the editor role to do this",
+  "src.components.common.PermissionTooltip.needOwner": "Only the owner or an administrator can change this",
   "src.components.common.SharedDataTable.noResultsSubtitle": "No features match \"{searchValue}\". Try a different search term.",
   "src.components.common.SharedDataTable.noResultsTitle": "No results found",
   "src.components.common.SharedDataTable.searchPlaceholder": "Search",
