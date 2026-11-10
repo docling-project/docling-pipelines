@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """High-level flow executor that loads a flow definition and drives orchestration."""
 
 import argparse
@@ -15,7 +18,9 @@ from docpipe.core.orchestration.abstract_orchestrator import AbstractOrchestrato
 from docpipe.core.orchestration.flow_validator import FlowValidator
 from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
 from docpipe.exceptions.docpipe_exceptions import FlowValidationException, ValidationAlertEncoder
+from docpipe.integrations.secrets.registry import scrub
 from docpipe.types import FlowConfig
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -96,7 +101,7 @@ class FlowExecutor:
         try:
             data_access = self.__orchestrator.execute(flow_def=self.flow_def, params=params)
         except Exception as exc:
-            logger.error(exc)
+            logger.error("Flow execution failed: %s", scrub(sanitize_exception(exc=exc, config_key="flow")))
             raise exc
         with lock:
             gc.collect()
@@ -131,7 +136,8 @@ class FlowExecutor:
             if not exc.errors or len(exc.errors) == 0:
                 # if there are no errors (only warnings), go ahead with the flow execution
                 logger.warning(
-                    f"Flow definition has warnings: {json.dumps(exc.warnings, cls=ValidationAlertEncoder)}",
+                    "Flow definition has warnings: %s",
+                    json.dumps(exc.warnings, cls=ValidationAlertEncoder),
                     extra=self.common_log_arguments,
                 )
             else:
@@ -173,7 +179,7 @@ class FlowExecutor:
             )
         except Exception as e:
             # Log error but don't fail the flow execution
-            logger.error(f"Failed to save flow definition for job_run_id={job_run_id}: {e}", exc_info=True)
+            logger.exception("Failed to save flow definition for job_run_id=%s: %s", job_run_id, e)
 
     def cancel(self) -> None:
         """Cancel."""
@@ -215,7 +221,7 @@ class FlowExecutor:
         import linecache
 
         gc_stats = gc.get_stats()
-        logger.info(f"GC stats: {gc_stats}", extra=self.common_log_arguments)
+        logger.info("GC stats: %s", gc_stats, extra=self.common_log_arguments)
 
         if self.trace_memory_allocations:
             if snapshot is None:
@@ -224,30 +230,37 @@ class FlowExecutor:
             top_stats = snapshot.statistics(key_type)
 
             logger.info("-" * 80, extra=self.common_log_arguments)
-            logger.info(f"| Top {limit} lines", extra=self.common_log_arguments)
+            logger.info("| Top %s lines", limit, extra=self.common_log_arguments)
             logger.info("=" * 80, extra=self.common_log_arguments)
             for index, stat in enumerate(top_stats[:limit], 1):
                 frame = stat.traceback[0]
                 # replace "/path/to/module/file.py" with "module/file.py"
                 filename = str(Path(*Path(frame.filename).parts[-2:]))
                 logger.info(
-                    f"| #{index}: {filename}:{frame.lineno}: {stat.size / 1024:.1f} KiB",
+                    "| #%s: %s:%s: %.1f KiB",
+                    index,
+                    filename,
+                    frame.lineno,
+                    stat.size / 1024,
                     extra=self.common_log_arguments,
                 )
                 line = linecache.getline(frame.filename, frame.lineno).strip()
                 if line:
-                    logger.info(f"|     {line}", extra=self.common_log_arguments)
+                    logger.info("|     %s", line, extra=self.common_log_arguments)
 
             other = top_stats[limit:]
             if other:
                 size = sum(stat.size for stat in other)
                 logger.info(
-                    f"| {len(other)} other: {size / 1024:.1f} KiB",
+                    "| %s other: %.1f KiB",
+                    len(other),
+                    size / 1024,
                     extra=self.common_log_arguments,
                 )
             total = sum(stat.size for stat in top_stats)
             logger.info(
-                "| Total allocated size: %.1f KiB" % (total / 1024),
+                "| Total allocated size: %.1f KiB",
+                total / 1024,
                 extra=self.common_log_arguments,
             )
             logger.info("=" * 80, extra=self.common_log_arguments)
@@ -274,7 +287,7 @@ def main():  # pragma: no cover
     )
     args = parser.parse_args()
 
-    logger.info(f"Running flow [{args.file}] with orchestrator [{args.orchestrator}]")
+    logger.info("Running flow [%s] with orchestrator [%s]", args.file, args.orchestrator)
 
     with Path(args.file).open() as json_file:
         flow_dict = json.load(json_file)
@@ -284,7 +297,7 @@ def main():  # pragma: no cover
     flow_def = compiler.compile(authoring_flow=authoring_flow)
 
     flow = FlowExecutor(flow_def=flow_def)
-    logger.info(f">>> Loaded flow {flow!s}")
+    logger.info(">>> Loaded flow %s", flow)
     logger.debug(flow.flow_def)
 
     orchestrator = OrchestratorFactory.create_orchestrator()
@@ -304,10 +317,13 @@ def main():  # pragma: no cover
                 DocpipeConstants.JOB_RUN_ID: job_run_id,
             },
         )
-        logger.info(f"Successfully completed flow execution in background thread. orchestrator: {orchestrator}")
+        logger.info("Successfully completed flow execution in background thread. orchestrator: %s", orchestrator)
     except Exception as exc:
-        logger.error(f"Flow execution failed in background thread. message: {exc!s},\n orchestrator: {orchestrator}")
-        logger.error(exc, stack_info=True, exc_info=True)
+        logger.error(
+            "Flow execution failed in background thread. message: %s,\n orchestrator: %s",
+            scrub(sanitize_exception(exc=exc, config_key="flow")),
+            orchestrator,
+        )
 
 
 # main entry point into the program; used for launching the flow executor

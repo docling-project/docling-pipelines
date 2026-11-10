@@ -19,6 +19,7 @@ from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalSe
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.base_llm_client import BaseLLMClient, retry_with_backoff
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.integrations.watsonx.model_validator import get_available_foundation_models
 from docpipe.utils.infrastructure.iam_token_manager import IAMTokenManager
 from docpipe.utils.infrastructure.logging import get_logger
@@ -109,7 +110,13 @@ class WatsonxRestEmbeddingClient(BaseLLMClient):
             raise ConfigurationError(f"Invalid container_kind: {container_kind}. Must be 'project' or 'space'.")
 
         # Create cache key based on configuration
-        cache_key = (api_key, url, container_kind, container_id, model_name)
+        cache_key = (
+            cache_key_digest(namespace="watsonx_rest_client", parts=[api_key]),
+            url,
+            container_kind,
+            container_id,
+            model_name,
+        )
 
         # Check if client instance already exists in cache
         if cache_key in WatsonxRestEmbeddingClient._client_cache:

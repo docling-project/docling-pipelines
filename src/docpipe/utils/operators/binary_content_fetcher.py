@@ -18,7 +18,6 @@ cached per run, keyed by a digest of the unresolved configuration, so a single
 authenticated client is reused across all documents and the provider is asked once.
 """
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_fa
 )
 from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.archive import read_archive_uri
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
+from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -97,9 +97,11 @@ def _resolve_ingest_provider_config(
 
     run_id = global_config.get(DocpipeConstants.JOB_RUN_ID)
     _scope_caches_to_run(run_id=str(run_id) if run_id else None)
-    digest = hashlib.sha256(
-        json.dumps([provider, provider_config], sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
+    digest = cache_key_digest(
+        namespace="binary_content_fetcher",
+        parts=[json.dumps([provider, provider_config], sort_keys=True, default=str)],
+        run_id=str(run_id) if run_id else None,
+    )
     cached = _provider_config_cache.get(digest)
     if cached is not None:
         return cached, digest

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenLineage publisher adapter — concrete LineagePublisherPort using openlineage-python SDK."""
 
 from __future__ import annotations
@@ -9,6 +12,8 @@ from docpipe.core.lineage.domain.models.event_type import LineageEventType
 from docpipe.core.lineage.domain.models.job import LineageJob
 from docpipe.core.lineage.domain.models.run import LineageRun
 from docpipe.core.lineage.domain.ports.lineage_publisher import LineagePublisherPort
+from docpipe.integrations.secrets.registry import scrub
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 if TYPE_CHECKING:
@@ -103,4 +108,8 @@ class OpenLineagePublisherAdapter(LineagePublisherPort):
             logger.debug("Lineage event emitted: job=%s run=%s type=%s", job.name, run.run_id, event_type)
 
         except Exception as exc:
-            logger.warning("Failed to emit lineage event for job=%s: %s", job.name, exc)
+            logger.warning(
+                "Failed to emit lineage event for job=%s: %s",
+                job.name,
+                scrub(sanitize_exception(exc=exc, config_key="lineage")),
+            )

@@ -28,6 +28,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.s3.config imp
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
+from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -282,7 +283,8 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
     # ------------------------------------------------------------------
 
     def _cache_key(self, config: S3DestinationConfig) -> tuple[str | None, ...]:
-        return (config.access_key, config.secret_key, config.region, config.endpoint_url)
+        credentials = cache_key_digest(namespace="s3_destination_client", parts=[config.access_key, config.secret_key])
+        return (credentials, config.region, config.endpoint_url)
 
     def _create_s3_client(self, config: S3DestinationConfig) -> Any:
         """Return a cached boto3 S3 client, creating it once per unique credential set."""

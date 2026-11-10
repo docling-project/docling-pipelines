@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Box source adapter using Box SDK directly."""
 
-import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +15,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import B
 from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import register_source_adapter
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
+from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -58,7 +61,7 @@ class BoxSourceAdapter(DocumentSourcePort):
                 if isinstance(config.credentials_json, dict)
                 else str(config.credentials_json)
             )
-            key = hashlib.sha256(raw_str.encode()).hexdigest()
+            key = cache_key_digest(namespace="box_client", parts=[raw_str])
         else:
             key = config.credentials_path or "default"
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """IBM Cloud and MCSP IAM token manager for WatsonX API authentication.
 
 This module handles the exchange of IBM Cloud and MCSP API keys for IAM access tokens,
@@ -5,7 +8,6 @@ with automatic caching and refresh before expiration. Supports both IBM Cloud an
 MCSP (AWS) environments with different IAM endpoints and request formats.
 """
 
-import hashlib
 import logging
 import time
 from dataclasses import dataclass
@@ -120,8 +122,9 @@ class IAMTokenManager:
         Returns:
             Cache key string
         """
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        return f"iam_token:{key_hash}"
+        from docpipe.integrations.secrets.registry import cache_key_digest
+
+        return f"iam_token:{cache_key_digest(namespace='iam_token', parts=[api_key])}"
 
     def get_token(self) -> str:
         """Get valid IAM access token, refreshing if needed.
