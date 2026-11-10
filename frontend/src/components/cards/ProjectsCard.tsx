@@ -16,6 +16,7 @@ import { setFlow } from '@/slices/flowSlice';
 import { selectProjectsArray, selectProjectsLoading, selectProjectsError } from '@/selectors';
 import { formatRelativeTime } from '@/utils/formatRelativeTime';
 import { CreateProjectTearsheet } from '../common/CreateProjectTearsheet';
+import { usePermissionReason } from '../common/PermissionTooltip';
 import { HomeCard } from '../HomeCard';
 import { messages } from './ProjectsCard.messages';
 import cardStyles from '../HomeCard/HomeCard.module.scss';
@@ -37,6 +38,7 @@ export function ProjectsCard(): React.JSX.Element {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const notify = useNotify();
+  const { canEdit, createReason } = usePermissionReason();
 
   const projects = useAppSelector(selectProjectsArray);
   const loading = useAppSelector(selectProjectsLoading);
@@ -153,6 +155,8 @@ export function ProjectsCard(): React.JSX.Element {
         headerIcon={Add}
         headerIconDescription={intl.formatMessage(messages.createIconDescription)}
         onHeaderAction={() => { setTearsheetOpen(true); }}
+        headerActionDisabled={!canEdit}
+        headerActionDisabledReason={createReason ?? undefined}
         emptyTitle={intl.formatMessage(messages.emptyTitle)}
         emptySubtitle={intl.formatMessage(messages.emptySubtitle)}
         emptyAction={{
@@ -160,6 +164,8 @@ export function ProjectsCard(): React.JSX.Element {
           kind: 'tertiary',
           renderIcon: Add,
           onClick: () => { setTearsheetOpen(true); },
+          disabled: !canEdit,
+          disabledReason: createReason ?? undefined,
         }}
         wide
       >
