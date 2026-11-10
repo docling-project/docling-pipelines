@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for document set factories."""
 
 from unittest.mock import MagicMock, patch
@@ -5,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import docpipe.core.assets.document_sets.adapters.duckdb  # noqa: F401
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
 from docpipe.core.assets.document_sets.domain.types import DataStoreConfig
 from docpipe.core.assets.document_sets.factories import DataStoreFactory
@@ -71,7 +74,7 @@ class TestRepositoryFactoryDocumentSet:
     def test_create_unknown_adapter_raises(self):
         """RepositoryFactory raises for unknown adapter type."""
         with pytest.raises(RepositoryConfigurationException):
-            RepositoryFactory.create_repository(asset_type=DocumentSet, adapter_name="unknown_adapter")
+            AssetRepositoryFactory.create_repository(asset_type=DocumentSet, adapter_name="unknown_adapter")
 
     def test_invalid_config_missing_path_raises(self):
         """DuckDBAssetRepository.from_config raises for missing database_path."""

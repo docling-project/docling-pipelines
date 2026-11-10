@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config model for the Milvus vector store adapter."""
 
 from typing import Literal
@@ -68,6 +71,10 @@ class MilvusConfig(BaseModel):
         default=100,
         description="Number of documents to insert per batch.",
     )
+    vector_mode: Literal["dense", "sparse", "binary", "gpu"] | None = Field(
+        default=None,
+        description="Vector indexing mode: 'dense' (default CPU), 'sparse' (BM25), 'binary' (1-bit), or 'gpu' (GPU-accelerated).",
+    )
     index_type: Literal[
         "FLAT",
         "IVF_FLAT",
@@ -76,18 +83,33 @@ class MilvusConfig(BaseModel):
         "HNSW",
         "DISKANN",
         "AUTOINDEX",
+        "GPU_IVF_FLAT",
+        "GPU_IVF_PQ",
+        "GPU_CAGRA",
+        "GPU_BRUTE_FORCE",
         "SPARSE_INVERTED_INDEX",
         "SPARSE_WAND",
+        "BIN_FLAT",
+        "BIN_IVF_FLAT",
     ] = Field(
         default="HNSW",
         description=(
             "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
-            "Use HNSW for standalone/remote deployments."
+            "Use HNSW for standalone/remote deployments, "
+            "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for GPU-accelerated deployments, "
+            "or BIN_FLAT / BIN_IVF_FLAT for binary vectors."
         ),
     )
-    metric_type: Literal["L2", "IP", "COSINE", "BM25"] = Field(
+    metric_type: Literal[
+        "L2",
+        "IP",
+        "COSINE",
+        "BM25",
+        "HAMMING",
+        "JACCARD",
+    ] = Field(
         default="L2",
-        description="Vector similarity metric.",
+        description="Vector similarity metric. HAMMING and JACCARD are for binary vectors (Milvus 2.6).",
     )
     index_parameters: dict = Field(
         default_factory=dict,
@@ -95,5 +117,5 @@ class MilvusConfig(BaseModel):
     )
     add_sparse_vector: bool = Field(
         default=False,
-        description="Enable sparse vector support using BM25. When true, a sparse vector field and BM25 function are added alongside dense vectors.",
+        description="Enable sparse vector support using BM25. Kept for backward compatibility (maps to vector_mode='sparse').",
     )

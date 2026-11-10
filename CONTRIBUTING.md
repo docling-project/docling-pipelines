@@ -513,7 +513,7 @@ export DOCPIPE_CUSTOM_OPERATORS="my_company.operators,another_package.ops"
 
 **DOCPIPE_ENABLE_CUSTOM_OPERATORS:**
 
-Boolean flag to enable/disable custom operator loading (default: `true`).
+Boolean flag to enable/disable custom operator loading (default: `false`). Custom operators execute arbitrary Python, so they are off unless enabled. Accepted enabling values: `true`, `1`, `yes`; any other value disables. An explicit `enable_custom_operators` argument takes precedence over this variable.
 
 ```bash
 export DOCPIPE_ENABLE_CUSTOM_OPERATORS="true"  # or "false"
@@ -809,6 +809,8 @@ All PRs must pass:
 3. **Address feedback** - make requested changes
 4. **Approval** - at least one maintainer approval required
 5. **Merge** - maintainer will merge after approval
+
+An AI triage and first review may add `ai:*` labels, a triage comment, and inline review comments to your PR. The output is advisory, and a maintainer reviews every change. See [`.github/AI_TRIAGE.md`](.github/AI_TRIAGE.md) for what it checks and the `/ai` commands.
 
 ### Merge Requirements
 
