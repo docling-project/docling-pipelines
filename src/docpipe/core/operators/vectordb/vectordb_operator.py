@@ -1070,7 +1070,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 },
                 OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT: {
                     OperatorConstants.Misc.NAME: "Embeddings",
-                    OperatorConstants.Config.DESCRIPTION: "Dense vector embeddings for similarity search",
+                    OperatorConstants.Config.DESCRIPTION: "Vector embeddings for similarity search",
                     OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
                     OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB: True,
                     OperatorConstants.Misc.TYPE: "vector",

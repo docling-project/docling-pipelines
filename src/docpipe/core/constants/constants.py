@@ -453,6 +453,9 @@ class ServiceConstants:
     # a per-instance limit of 8 req/s, so concurrency stays opt-in).
     DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
     DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
+    # watsonx.ai request timeout (seconds) applied by every watsonx path (inference, embeddings,
+    # text detection).
+    DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
 
 
 class ProviderConstants:
