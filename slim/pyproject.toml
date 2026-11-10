@@ -200,8 +200,8 @@ root = ".."
 
 [tool.uv]
 override-dependencies = [
-    # Dependabot: bump oauthlib to 4.0.0 (transitive via requests-oauthlib).
-    "oauthlib==4.0.0",
+    # Dependabot: bump oauthlib to 4.0.1 (transitive via requests-oauthlib).
+    "oauthlib==4.0.1",
     # Dependabot: anyio < 4.14.2 — TLS spoofing (critical), process group leak (high), stderr deadlock (medium).
     "anyio>=4.14.2",
     # litellm 1.104.0+ (CVE-2026-114612 fix) caps filelock<4; filelock==4.2.1 is required by this project.
