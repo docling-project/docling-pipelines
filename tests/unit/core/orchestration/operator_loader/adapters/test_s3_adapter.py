@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for S3Adapter.
 
 S3 is replaced by an in-memory fake client (paginated listing and download_file that writes the
@@ -15,6 +18,7 @@ import pytest
 
 from docpipe.core.orchestration.operator_loader.adapters import s3_adapter
 from docpipe.core.orchestration.operator_loader.adapters.s3_adapter import S3Adapter
+from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 
 _OPERATOR_SOURCE = '''
 import pyarrow as pa
@@ -30,6 +34,10 @@ class {class_name}(AbstractOperator):
 
     def transform(self, table: pa.Table, file_name: str | None = None):
         return [table], {{}}
+
+    @staticmethod
+    def get_metadata():
+        return {{"label": "{short_name}"}}
 '''
 
 
@@ -109,17 +117,20 @@ class TestDownloadAndLoad:
         ]
         assert all(extra == {"ExpectedBucketOwner": "123456789012"} for _, _, extra in fake_aws.download_calls)
 
-    def test_lists_loads_and_validates_downloaded_operators(self, fake_aws: FakeS3Client, tmp_path: Path) -> None:
+    def test_lists_downloaded_operators_as_untrusted_without_importing(
+        self, fake_aws: FakeS3Client, tmp_path: Path
+    ) -> None:
         adapter = S3Adapter("s3://ops-bucket/operators", cache_dir=str(tmp_path))
 
         operators = sorted(adapter.list_operators(), key=lambda op: op.short_name)
 
         assert [op.short_name for op in operators] == ["cleaner_op", "tagger_op"]
         assert {op.source_location for op in operators} == {"s3:s3://ops-bucket/operators"}
+        assert {op.trust_class for op in operators} == {TrustClass.UNTRUSTED}
+        assert operators[0].static_metadata == {"label": "cleaner_op"}
 
-        module = adapter.load_operator(operator_info=operators[0])
-        assert hasattr(module, "CleanerOp")
-        assert adapter.validate_operator(module=module, operator_info=operators[0]).valid
+        with pytest.raises(PermissionError):
+            adapter.load_operator(operator_info=operators[0])
 
     def test_default_cache_is_per_bucket_under_home(self, fake_aws: FakeS3Client, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)

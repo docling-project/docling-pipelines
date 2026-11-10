@@ -1,12 +1,88 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """AST-based static validation for custom operator source files."""
 
 import ast
+import enum
 from pathlib import Path
 from typing import Any
 
-from docpipe.core.constants.constants import DocpipeConstants
+from docpipe.core.constants.constants import AttributeDataTypes, DocpipeConstants
+from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import OperatorCategory
 from docpipe.exceptions.docpipe_exceptions import CustomOperatorInvalidDataException
+
+# Names an operator file may use inside ``get_metadata()`` that are resolved by reading our own constants, never by
+# running the uploaded file. Anything else is treated as not statically known.
+_RESOLVABLE_CONSTANT_ROOTS: dict[str, Any] = {
+    "OperatorConstants": OperatorConstants,
+    "AttributeDataTypes": AttributeDataTypes,
+    "OperatorCategory": OperatorCategory,
+    "DocpipeConstants": DocpipeConstants,
+}
+
+_UNRESOLVED: Any = object()
+
+
+def _resolve_attribute_chain(*, node: ast.Attribute) -> Any:
+    """Resolve ``Root.a.b`` against an allowlisted constants class; ``_UNRESOLVED`` if it is anything else."""
+    names: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        names.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name) or current.id not in _RESOLVABLE_CONSTANT_ROOTS:
+        return _UNRESOLVED
+    value: Any = _RESOLVABLE_CONSTANT_ROOTS[current.id]
+    for name in reversed(names):
+        if name.startswith("_"):
+            return _UNRESOLVED
+        try:
+            value = getattr(value, name)
+        except AttributeError:
+            return _UNRESOLVED
+    if isinstance(value, enum.Enum):
+        value = value.value
+    return value if isinstance(value, (str, int, float, bool)) or value is None else _UNRESOLVED
+
+
+def _resolve_static_value(*, node: ast.expr) -> Any:
+    """Evaluate a literal-only expression without executing anything; ``_UNRESOLVED`` if it is not one.
+
+    Supports constants, lists, tuples, sets, dicts (entries that cannot be resolved are dropped) and attribute chains
+    on a small allowlist of docpipe constants classes.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Attribute):
+        return _resolve_attribute_chain(node=node)
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        items = [_resolve_static_value(node=element) for element in node.elts]
+        return _UNRESOLVED if any(item is _UNRESOLVED for item in items) else items
+    if isinstance(node, ast.Dict):
+        resolved: dict[Any, Any] = {}
+        for key_node, value_node in zip(node.keys, node.values, strict=True):
+            if key_node is None:  # ``**other`` cannot be expanded statically
+                continue
+            key = _resolve_static_value(node=key_node)
+            value = _resolve_static_value(node=value_node)
+            if key is _UNRESOLVED or value is _UNRESOLVED or not isinstance(key, str):
+                continue
+            resolved[key] = value
+        return resolved
+    return _UNRESOLVED
+
+
+def _extract_static_metadata(*, function: ast.FunctionDef) -> dict[str, Any]:
+    """Read the dict literal returned by ``get_metadata()``; entries that are not statically known are omitted."""
+    returned = [
+        stmt.value for stmt in ast.walk(function) if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Dict)
+    ]
+    if not returned:
+        return {}
+    resolved = _resolve_static_value(node=returned[-1])
+    return resolved if isinstance(resolved, dict) else {}
 
 
 class ASTOperatorValidator(ast.NodeVisitor):
@@ -38,6 +114,7 @@ class ASTOperatorValidator(ast.NodeVisitor):
             "short_name": None,
             "category": None,
             "owner": None,
+            "metadata": {},
         }
 
         # Inspect class body
@@ -89,6 +166,7 @@ class ASTOperatorValidator(ast.NodeVisitor):
                 if stmt.name == "transform":
                     class_info["has_transform"] = True
                 elif stmt.name == "get_metadata":
+                    class_info["metadata"] = _extract_static_metadata(function=stmt)
                     # Check for @staticmethod decorator
                     has_staticmethod = any(
                         (isinstance(dec, ast.Name) and dec.id == "staticmethod")
@@ -110,6 +188,30 @@ def validate_operator_file(*, operator_file_path: Path) -> dict[str, Any]:
 
     Returns:
         Dictionary containing extracted metadata: {"short_name": ..., "category": ..., "class_name": ...}
+
+    Raises:
+        CustomOperatorInvalidDataException: If the operator file does not meet contract requirements
+    """
+    described = describe_operator_file(operator_file_path=operator_file_path)
+    return {
+        "short_name": described["short_name"],
+        "category": described["category"],
+        "class_name": described["class_name"],
+    }
+
+
+def describe_operator_file(*, operator_file_path: Path) -> dict[str, Any]:
+    """Validate an operator file with AST and return the descriptor of its operator class, without importing it.
+
+    The descriptor is what the platform registers for an untrusted operator instead of the imported class.
+
+    Args:
+        operator_file_path: Path to the Python file to describe
+
+    Returns:
+        ``{"short_name", "category", "class_name", "metadata"}``. ``metadata`` is the dict literal returned by
+        ``get_metadata()`` restricted to the entries that are statically known (for example the declared
+        ``secret_fields``); it is empty when ``get_metadata()`` builds its result dynamically.
 
     Raises:
         CustomOperatorInvalidDataException: If the operator file does not meet contract requirements
@@ -208,4 +310,5 @@ def validate_operator_file(*, operator_file_path: Path) -> dict[str, Any]:
         "short_name": op_info["short_name"],
         "category": category_val,
         "class_name": op_info["name"],
+        "metadata": op_info["metadata"],
     }
