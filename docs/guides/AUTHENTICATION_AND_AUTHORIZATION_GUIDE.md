@@ -4,9 +4,9 @@ This guide describes how to configure authentication (who the caller is) and aut
 the Docling Pipelines REST API: login methods, roles, group-to-role mapping, the bootstrap administrator, session
 cookies and the settings that depend on your network topology.
 
-> **Default in this release of the change:** `DOCPIPE_AUTH_ENABLED` defaults to `false`, so existing deployments keep
-> working without credentials. A later pull request of the same change flips the default to `true`. Set the variable
-> explicitly if you depend on either behavior.
+> **Authentication is on by default.** `DOCPIPE_AUTH_ENABLED` defaults to `true`, so the API refuses to start until
+> `JWT_SECRET_KEY` is set, and every `/api/v1/*` request needs a session. To keep the previous open behavior on a
+> local, trusted setup, set `DOCPIPE_AUTH_ENABLED=false` explicitly. A blank value keeps the default (`true`).
 
 ## Table of Contents
 
@@ -64,7 +64,6 @@ local principal with the `admin` role. No `JWT_SECRET_KEY` is needed.
 3. Set the variables and start the API:
 
    ```bash
-   export DOCPIPE_AUTH_ENABLED=true
    export JWT_SECRET_KEY='<64-hex-character-secret-from-step-1>'
    export DOCPIPE_AUTH_BOOTSTRAP_USERNAME=admin
    export DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH='<bcrypt-hash-from-step-2>'
@@ -85,7 +84,7 @@ local principal with the `admin` role. No `JWT_SECRET_KEY` is needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DOCPIPE_AUTH_ENABLED` | `false` in this release of the change | Require a session on `/api/v1/*`. Accepts `1`, `true`, `yes`, `on` |
+| `DOCPIPE_AUTH_ENABLED` | `true` | Require a session on `/api/v1/*`. Accepts `1`, `true`, `yes`, `on` as true; any other non-blank value is false |
 | `JWT_SECRET_KEY` | none | HS256 signing secret. Required when auth is enabled: at least 32 characters, not a placeholder |
 | `JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Token and cookie lifetime in minutes |

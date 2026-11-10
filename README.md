@@ -118,6 +118,8 @@ docling-pipelines-api
 uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
 ```
 
+Authentication is on by default. Before the first start, set `JWT_SECRET_KEY` (at least 32 random characters) and a login method such as the bootstrap administrator, or set `DOCPIPE_AUTH_ENABLED=false` on a local, trusted machine. See the [Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
 Interactive OpenAPI documentation is available at `http://localhost:8080/api/v1/docs`.
 
 ### 4. Documentation MCP Server
