@@ -38,9 +38,9 @@
 
 ## 5. Frontend state and hook
 
-- [ ] 5.1 Add `types/` for user and auth config and `services/api/actions/auth-actions.ts` (config, me, login, logout) calling `/auth/*` and sending `X-Requested-With` on login and logout; verify action tests mock the client and assert paths and headers
-- [ ] 5.2 Add `slices/authSlice.ts` with the state shape (storing `user` only, never `access_token`), bootstrap, login and logout thunks, and register it in `store/index.ts`; verify slice tests for initial state, restored session, no session, auth disabled, login success and failure, and logout
-- [ ] 5.3 Replace the stub in `hooks/useAuth.ts` with slice-backed `user`, `authEnabled`, `isAuthenticated`, `isLoading`, `canEdit`, `canAdmin` and `canModifyAsset(createdBy)`; verify hook tests for viewer, editor (own, foreign, ownerless) and admin and for the loading status
+- [x] 5.1 Add `types/` for user and auth config and `services/api/actions/auth-actions.ts` (config, me, login, logout) calling `/auth/*` and sending `X-Requested-With` on login and logout; verify action tests mock the client and assert paths and headers
+- [x] 5.2 Add `slices/authSlice.ts` with the state shape (storing `user` only, never `access_token`), bootstrap, login and logout thunks, and register it in `store/index.ts`; verify slice tests for initial state, restored session, no session, auth disabled, login success and failure, and logout
+- [x] 5.3 Replace the stub in `hooks/useAuth.ts` with slice-backed `user`, `authEnabled`, `isAuthenticated`, `isLoading`, `canEdit`, `canAdmin` and `canModifyAsset(createdBy)`; verify hook tests for viewer, editor (own, foreign, ownerless) and admin and for the loading status
 - [ ] 5.4 Run the bootstrap once at app start; verify an integration test that the first render shows the loading indicator and then resolves
 
 ## 6. Frontend routing, login page, client
