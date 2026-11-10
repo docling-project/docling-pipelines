@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Pytest configuration and fixtures for docling-pipelines tests.
 """
@@ -360,3 +363,13 @@ def pytest_collection_modifyitems(config, items):
         # Auto-mark slow tests based on name
         if "slow" in item.nodeid.lower() or "performance" in item.nodeid.lower():
             item.add_marker(pytest.mark.slow)
+
+
+@pytest.fixture(autouse=True)
+def _reset_secret_registry():
+    """Drop scrubber entries registered by a test so they cannot alter later tests' log records."""
+    from docpipe.integrations.secrets.registry import get_registry
+
+    get_registry().clear_all()
+    yield
+    get_registry().clear_all()

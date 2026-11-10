@@ -40,6 +40,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     JobRunInvalidStateException,
 )
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.registry import scrub, scrub_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.node_ordering import order_node_items
@@ -252,7 +253,7 @@ class JobTrackerService(JobStatsService):
 
         if job_run_stats:
             if "message" in job_run_stats:
-                job_stats.message = job_run_stats["message"]
+                job_stats.message = scrub_value(job_run_stats["message"])
             if "report_status" in job_run_stats:
                 job_stats.report_status = job_run_stats["report_status"]
             if "report_generation_started_at" in job_run_stats:
@@ -381,6 +382,7 @@ class JobTrackerService(JobStatsService):
         else:
             # Already in proper format or None
             final_metadata = node_metadata
+        final_metadata = scrub_value(final_metadata)
 
         # Build complete node stats
         completed_node_stats: NodeStats = NodeStats(
@@ -462,6 +464,7 @@ class JobTrackerService(JobStatsService):
             error_message = exception_str if exception_str else exception.__class__.__name__
         else:
             error_message = error  # type: ignore
+        error_message = scrub_value(error_message)
 
         # Calculate timing
         end_time: int = round(datetime.now(tz=UTC).timestamp())
@@ -780,7 +783,7 @@ class JobTrackerService(JobStatsService):
         )
 
         # Create and persist merged NodeStats
-        node_stats_dto = NodeStats(**merged_dict)
+        node_stats_dto = NodeStats(**scrub_value(merged_dict))
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=node_stats_dto)
 
     def get_node_stats(self, *, job_id: str, job_run_id: str) -> dict[str, Any]:
@@ -1396,7 +1399,7 @@ class JobTrackerService(JobStatsService):
 
             # Write to file
             with Path(job_log_path).open("w") as f:
-                json.dump(job_stats_dict, f, indent=2)
+                json.dump(scrub_value(job_stats_dict), f, indent=2)
 
             logger.info("Wrote job logs to: %s", job_log_path)
         except Exception as e:
@@ -1721,7 +1724,7 @@ class JobTrackerService(JobStatsService):
             log_parts.append("\nError Details:")
             log_parts.append(f"  {error}")
 
-        return "\n".join(log_parts)
+        return scrub("\n".join(log_parts))
 
     def create_pending_batch_node_stats(
         self,

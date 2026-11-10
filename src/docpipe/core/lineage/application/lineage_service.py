@@ -26,6 +26,7 @@ from docpipe.core.orchestration.models.execution_event_context import (
     NodeStartContext,
     NodeTableSummary,
 )
+from docpipe.integrations.secrets.registry import scrub, scrub_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -316,6 +317,13 @@ class LineageService:
         inputs: list[LineageDataset] | None = None,
         outputs: list[LineageDataset] | None = None,
     ) -> None:
+        run.facets = scrub_value(run.facets)
+        job.facets = scrub_value(job.facets)
+        job.name = scrub(job.name)
+        for dataset in (*(inputs or ()), *(outputs or ())):
+            dataset.facets = scrub_value(dataset.facets)
+            dataset.name = scrub(dataset.name)
+            dataset.namespace = scrub(dataset.namespace)
         self._publisher.publish(event_type=event_type, run=run, job=job, inputs=inputs, outputs=outputs)
 
     def _build_flow_job(

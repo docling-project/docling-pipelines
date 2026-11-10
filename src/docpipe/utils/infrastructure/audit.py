@@ -33,9 +33,8 @@ from typing import Any
 
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.filesystem import get_data_path
-from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.logging import AUDIT_LOGGER_NAME, get_logger
 
-AUDIT_LOGGER_NAME = "docpipe.audit"
 AUDIT_CONFIG_KEY = "audit"
 DEFAULT_AUDIT_FILE_NAME = "docpipe-audit.log"
 
