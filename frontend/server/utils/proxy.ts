@@ -1,8 +1,8 @@
 import { Readable } from 'node:stream';
 import axios, { type AxiosResponse, type Method, type ResponseType } from 'axios';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from '../constants/http-headers';
+import { BODY_HEADERS, NO_BODY_HEADERS, buildForwardHeaders } from '../constants/http-headers';
 
 const logger = log4js.getLogger('bff.proxy');
 
@@ -20,6 +20,11 @@ export class InvalidPathSegmentError extends Error {
 }
 
 interface ProxyRequestOptions {
+  /**
+   * Browser request being proxied. Its `Cookie`, `Authorization`, `X-Requested-With` and
+   * `X-Transaction-ID` headers are forwarded to the backend so the session reaches the REST API.
+   */
+  req: Pick<Request, 'headers'>;
   method: Method;
   /**
    * Backend path as separate segments, e.g. `['api', 'v1', 'flows', flowId]`.
@@ -75,6 +80,7 @@ const buildQueryString = (query: Readonly<Record<string, QueryValue>>): string =
  * Throws `InvalidPathSegmentError` for unsafe path segments.
  */
 export const proxyRequest = async ({
+  req,
   method,
   path,
   query,
@@ -87,9 +93,11 @@ export const proxyRequest = async ({
   logUtil.debug({ logger, message: 'Proxying request', data: { method, url } });
 
   // Headers are built here and not accepted from callers, so a controller cannot
-  // accidentally replace the defaults. `accept` is the only supported override.
-  const headers = { ...(body !== undefined ? BODY_HEADERS : NO_BODY_HEADERS) };
-  if (accept) headers.Accept = accept;
+  // accidentally replace the defaults. `accept` is the only supported override. The
+  // credential and context headers come from the browser request, never from the caller.
+  const base: Record<string, string> = { ...(body !== undefined ? BODY_HEADERS : NO_BODY_HEADERS) };
+  if (accept) base.Accept = accept;
+  const headers = buildForwardHeaders(req, base);
 
   return axios.request({ method, url, data: body, headers, responseType });
 };

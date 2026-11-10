@@ -11,7 +11,7 @@ const logger = log4js.getLogger('flow.controller');
  */
 const createFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'flows'], query: { is_elyra: 'true' }, body: req.body });
+    const response = await proxyRequest({ req, method: 'POST', path: ['api', 'v1', 'flows'], query: { is_elyra: 'true' }, body: req.body });
 
     res.status(response.status).json(response.data);
   } catch (err) {
@@ -27,7 +27,7 @@ const getFlow = async (req: Request, res: Response): Promise<void> => {
   try {
     const flowId = routeParam(req.params.flowId);
 
-    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'flows', flowId] });
+    const response = await proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'flows', flowId] });
 
     res.json(response.data);
   } catch (err) {
@@ -43,7 +43,7 @@ const getFlows = async (req: Request, res: Response): Promise<void> => {
   try {
     const { limit, offset, name, tags, is_hidden } = req.query;
 
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'flows'],
       query: {
@@ -70,7 +70,7 @@ const updateFlow = async (req: Request, res: Response): Promise<void> => {
   try {
     const flowId = routeParam(req.params.flowId);
 
-    const response = await proxyRequest({ method: 'PUT', path: ['api', 'v1', 'flows', flowId], query: { is_elyra: 'true' }, body: req.body });
+    const response = await proxyRequest({ req, method: 'PUT', path: ['api', 'v1', 'flows', flowId], query: { is_elyra: 'true' }, body: req.body });
 
     res.json(response.data);
   } catch (err) {
@@ -114,14 +114,14 @@ const patchFlow = async (req: Request, res: Response): Promise<void> => {
     let body = req.body;
 
     if (req.body.name) {
-      const current = await proxyRequest({ method: 'GET', ...target });
+      const current = await proxyRequest({ req, method: 'GET', ...target });
       body = {
         ...req.body,
         definition: syncElyraDefinitionName(current.data.definition, req.body.name),
       };
     }
 
-    const response = await proxyRequest({ method: 'PATCH', ...target, body });
+    const response = await proxyRequest({ req, method: 'PATCH', ...target, body });
 
     res.json(response.data);
   } catch (err) {
@@ -137,7 +137,7 @@ const deleteFlow = async (req: Request, res: Response): Promise<void> => {
   try {
     const flowId = routeParam(req.params.flowId);
 
-    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'flows', flowId] });
+    const response = await proxyRequest({ req, method: 'DELETE', path: ['api', 'v1', 'flows', flowId] });
 
     res.status(response.status).send();
   } catch (err) {
@@ -158,7 +158,7 @@ const bulkDeleteFlows = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'DELETE',
       path: ['api', 'v1', 'flows'],
       query: { flow_ids: flowIds },
@@ -179,7 +179,7 @@ const getFlowsByProject = async (req: Request, res: Response): Promise<void> => 
     const projectId = routeParam(req.params.projectId);
     const { limit, offset, name, tags } = req.query;
 
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'projects', projectId, 'flows'],
       query: {

@@ -11,7 +11,7 @@ const logger = log4js.getLogger('job-run.controller');
  */
 const createJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'job_runs'], body: req.body });
+    const response = await proxyRequest({ req, method: 'POST', path: ['api', 'v1', 'job_runs'], body: req.body });
 
     res.status(response.status).json(response.data);
   } catch (err) {
@@ -27,7 +27,7 @@ const getJobRuns = async (req: Request, res: Response): Promise<void> => {
   try {
     const { job_id, status, limit } = req.query;
 
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'job_runs'],
       query: {
@@ -50,7 +50,7 @@ const getJobRuns = async (req: Request, res: Response): Promise<void> => {
 const getJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const jobRunId = routeParam(req.params.jobRunId);
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'job_runs', jobRunId],
       query: { include_logs: queryString(req.query.include_logs) ?? 'false' },
@@ -70,7 +70,7 @@ const cancelJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'job_runs', jobRunId, 'cancel'], body: {} });
+    const response = await proxyRequest({ req, method: 'POST', path: ['api', 'v1', 'job_runs', jobRunId, 'cancel'], body: {} });
 
     res.status(response.status).json(response.data);
   } catch (err) {
@@ -86,7 +86,7 @@ const deleteJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'job_runs', jobRunId] });
+    const response = await proxyRequest({ req, method: 'DELETE', path: ['api', 'v1', 'job_runs', jobRunId] });
 
     res.status(response.status).send();
   } catch (err) {
@@ -102,7 +102,7 @@ const downloadJobRunReport = async (req: Request, res: Response): Promise<void> 
   try {
     const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'job_runs', jobRunId, 'report'],
       accept: 'text/csv',
@@ -132,7 +132,7 @@ const getJobRunFlowDefinition = async (req: Request, res: Response): Promise<voi
   try {
     const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'job_runs', jobRunId, 'flow_definition'] });
+    const response = await proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'job_runs', jobRunId, 'flow_definition'] });
 
     res.json(response.data);
   } catch (err) {

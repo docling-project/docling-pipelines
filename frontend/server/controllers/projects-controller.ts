@@ -11,7 +11,7 @@ const logger = log4js.getLogger('projects.controller');
  */
 const createProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'projects'], body: req.body });
+    const response = await proxyRequest({ req, method: 'POST', path: ['api', 'v1', 'projects'], body: req.body });
 
     res.status(response.status).json(response.data);
   } catch (err) {
@@ -27,7 +27,7 @@ const getProjects = async (req: Request, res: Response): Promise<void> => {
   try {
     const { limit, offset, name, tags } = req.query;
 
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'projects'],
       query: {
@@ -52,7 +52,7 @@ const getProject = async (req: Request, res: Response): Promise<void> => {
   try {
     const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'projects', projectId] });
+    const response = await proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'projects', projectId] });
 
     res.json(response.data);
   } catch (err) {
@@ -68,7 +68,7 @@ const replaceProject = async (req: Request, res: Response): Promise<void> => {
   try {
     const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'PUT', path: ['api', 'v1', 'projects', projectId], body: req.body });
+    const response = await proxyRequest({ req, method: 'PUT', path: ['api', 'v1', 'projects', projectId], body: req.body });
 
     res.json(response.data);
   } catch (err) {
@@ -84,7 +84,7 @@ const patchProject = async (req: Request, res: Response): Promise<void> => {
   try {
     const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'PATCH', path: ['api', 'v1', 'projects', projectId], body: req.body });
+    const response = await proxyRequest({ req, method: 'PATCH', path: ['api', 'v1', 'projects', projectId], body: req.body });
 
     res.json(response.data);
   } catch (err) {
@@ -100,7 +100,7 @@ const deleteProject = async (req: Request, res: Response): Promise<void> => {
   try {
     const projectId = routeParam(req.params.projectId);
 
-    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'projects', projectId] });
+    const response = await proxyRequest({ req, method: 'DELETE', path: ['api', 'v1', 'projects', projectId] });
 
     res.status(response.status).send();
   } catch (err) {

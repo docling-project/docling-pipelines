@@ -14,9 +14,13 @@ const logger = log4js.getLogger('api.client');
 /**
  * Create configured axios instance.
  *
- *   dev (npm run dev)      — Vite proxy forwards /api/* to BFF:3001; BFF proxies to FastAPI /api/v1/*
- *   production (npm start) — BFF serves on 3001; proxies /api/* to FastAPI /api/v1/*
- *   wheel (test_server.py) — FastAPI reverse-proxies /api/* to the BFF at BFF_PORT (default 3001)
+ *   dev (npm run dev)      — Vite proxy forwards /api/* to BFF:3001 (BFF proxies to FastAPI /api/v1/*)
+ *                            and /auth/* straight to FastAPI (BACKEND_API_URL, default :8080)
+ *   production (npm start) — BFF serves on 3001; proxies /api/* to FastAPI /api/v1/*;
+ *                            /auth/* is never routed to the BFF
+ *   wheel (test_server.py) — FastAPI serves /auth/* itself and reverse-proxies /api/* to the BFF
+ *                            at BFF_PORT (default 3001)
+ *   Compose / Kubernetes   — a custom ingress must route /ui and /auth to FastAPI, not to the BFF
  */
 export const apiClient: AxiosInstance = axios.create({
   timeout: 10000,

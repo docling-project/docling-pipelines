@@ -30,11 +30,11 @@
 
 ## 4. BFF forwarding and Vite proxy
 
-- [ ] 4.1 Add `buildForwardHeaders(req, base)` in `frontend/server/controllers/http-headers.ts` forwarding `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` only, and use it in all six controllers, including `downloadJobRunReport` (`Accept: text/csv`), `operator-controller.ts` and `document-class-controller.ts` (inline `Accept` headers); verify BFF unit tests assert the four headers reach the upstream call and that `X-Forwarded-For` does not
-- [ ] 4.2 Make `downloadJobRunReport` answer an upstream 401 or 403 with the upstream status and a JSON body, falling back to `{ error: 'Failed to download job run report' }` when the body is a stream; verify a unit test that stubs a 403 stream response and asserts status 403 and a JSON body
-- [ ] 4.3 Bind the BFF to `127.0.0.1` by default with a `BFF_HOST` override read in `server.ts`, and set `ENV BFF_HOST=0.0.0.0` in `docker/bff.Dockerfile`; verify a test or startup log assertion for default and override, and `docker compose config` plus the Kubernetes probes against the image
-- [ ] 4.4 Add an `/auth` entry to the Vite proxy in `frontend/vite.config.ts` using `loadEnv(mode, __dirname, '')` for `BACKEND_API_URL` with a `http://localhost:8080` fallback, and update the topology comment in `services/api/client.ts`; verify the default and configured targets
-- [ ] 4.5 Run `npm run lint` and the BFF tests in `frontend/`; verify no errors
+- [x] 4.1 Add `buildForwardHeaders(req, base)` in `frontend/server/controllers/http-headers.ts` forwarding `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` only, and use it in all six controllers, including `downloadJobRunReport` (`Accept: text/csv`), `operator-controller.ts` and `document-class-controller.ts` (inline `Accept` headers); verify BFF unit tests assert the four headers reach the upstream call and that `X-Forwarded-For` does not
+- [x] 4.2 Make `downloadJobRunReport` answer an upstream 401 or 403 with the upstream status and a JSON body, falling back to `{ error: 'Failed to download job run report' }` when the body is a stream; verify a unit test that stubs a 403 stream response and asserts status 403 and a JSON body
+- [x] 4.3 Bind the BFF to `127.0.0.1` by default with a `BFF_HOST` override read in `server.ts`, and set `ENV BFF_HOST=0.0.0.0` in `docker/bff.Dockerfile`; verify a test or startup log assertion for default and override, and `docker compose config` plus the Kubernetes probes against the image
+- [x] 4.4 Add an `/auth` entry to the Vite proxy in `frontend/vite.config.ts` using `loadEnv(mode, __dirname, '')` for `BACKEND_API_URL` with a `http://localhost:8080` fallback, and update the topology comment in `services/api/client.ts`; verify the default and configured targets
+- [x] 4.5 Run `npm run lint` and the BFF tests in `frontend/`; verify no errors
 
 ## 5. Frontend state and hook
 

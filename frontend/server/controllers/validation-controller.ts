@@ -12,7 +12,7 @@ const logger = log4js.getLogger('validation.controller');
 const validateFlow = async (req: Request, res: Response): Promise<void> => {
   try {
     const { is_elyra = 'true' } = req.query;
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'POST',
       path: ['api', 'v1', 'validation', 'validate_flow'],
       query: { is_elyra: queryString(is_elyra) },
