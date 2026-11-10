@@ -57,6 +57,8 @@ export const ROUTES = {
   FLOW_RUN_DETAILS: '/flows/:flow_id/runs/:run_id',
   /** `/error` — Generic error page. */
   ERROR: '/error',
+  /** `/login` — Login page. */
+  LOGIN: '/login',
 } as const;
 
 /**
@@ -163,6 +165,15 @@ export const routeConfig: RouteConfig[] = [
       title: 'Error',
       description: 'An error occurred',
       breadcrumbLabel: 'Error',
+    },
+  },
+  {
+    path: '/login',
+    component: () => import('@/pages/Login').then((m) => ({ default: m.Login })),
+    meta: {
+      title: 'Sign in',
+      description: 'Sign in to Docling Pipelines',
+      breadcrumbLabel: 'Sign in',
     },
   },
 ];
