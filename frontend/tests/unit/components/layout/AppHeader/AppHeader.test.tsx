@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { AppHeader } from '@/components/layout/AppHeader/AppHeader';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 
@@ -96,5 +96,73 @@ describe('AppHeader – uncovered branches', () => {
     fireEvent.click(logoLink);
     // Component renders without error after click
     expect(screen.getByText('Docling Pipelines')).toBeInTheDocument();
+  });
+});
+
+describe('AppHeader – Auth integration', () => {
+  it('hides user menu when auth is disabled', () => {
+    renderWithProviders(<AppHeader />, {
+      preloadedState: {
+        auth: {
+          user: null,
+          authEnabled: false,
+          providers: [],
+          credentialLogin: false,
+          status: 'authenticated',
+          error: null,
+          errorStatus: null,
+          retryAfter: null,
+        },
+      },
+    });
+    expect(screen.queryByLabelText('User menu')).toBeNull();
+  });
+
+  it('shows user name and menu when auth is enabled and user is logged in', () => {
+    renderWithProviders(<AppHeader />, {
+      preloadedState: {
+        auth: {
+          user: { username: 'john_doe', email: '', full_name: 'John Doe', roles: ['editor'] },
+          authEnabled: true,
+          providers: [],
+          credentialLogin: true,
+          status: 'authenticated',
+          error: null,
+          errorStatus: null,
+          retryAfter: null,
+        },
+      },
+    });
+    expect(screen.getByText('John Doe')).toBeInTheDocument();
+  });
+
+  it('triggers sign-out action when sign-out is clicked', async () => {
+    const { store } = renderWithProviders(<AppHeader />, {
+      preloadedState: {
+        auth: {
+          user: { username: 'john_doe', email: '', full_name: 'John Doe', roles: ['editor'] },
+          authEnabled: true,
+          providers: [],
+          credentialLogin: true,
+          status: 'authenticated',
+          error: null,
+          errorStatus: null,
+          retryAfter: null,
+        },
+      },
+    });
+
+    // Open user menu
+    const menuBtn = screen.getByText('John Doe');
+    fireEvent.click(menuBtn);
+
+    const signOutBtn = screen.getByText('Sign out');
+    expect(signOutBtn).toBeInTheDocument();
+    fireEvent.click(signOutBtn);
+
+    // Verify logout is dispatched (which eventually clears user state to null)
+    await waitFor(() => {
+      expect(store.getState().auth.user).toBeNull();
+    });
   });
 });

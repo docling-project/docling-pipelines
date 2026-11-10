@@ -29,8 +29,8 @@ export function ProtectedRoute({ children }: ProtectedRouteProps): React.JSX.Ele
   }
 
   if (!isAuthenticated) {
-    // Redirect to login page, saving the attempted location
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    const returnTo = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?return_to=${returnTo}`} replace />;
   }
 
   return <>{children}</>;
