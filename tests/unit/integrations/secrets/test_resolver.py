@@ -188,6 +188,17 @@ class TestResolution:
         assert isinstance(result["credentials"]["api"], SecretValue)
         assert result["credentials"] is not config["credentials"]
 
+    def test_os_environ_is_unchanged_after_resolution(self, provider):
+        import os
+
+        _set_policy(allowed_paths=["hashicorp:**"])
+        original_env = dict(os.environ)
+
+        result = _resolve({"password": "vault://hashicorp/opensearch/credentials#password"})
+        assert result["password"].reveal() == "p@ss/word"
+
+        assert dict(os.environ) == original_env
+
     def test_nested_keys(self, provider):
         _set_policy(allowed_paths=["hashicorp:**"])
         result = _resolve(
