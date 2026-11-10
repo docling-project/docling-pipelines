@@ -20,6 +20,9 @@ bounded, deterministic keyword counter gives lexical enrichment without regex ri
 - Emit aggregate execution metadata (`documents_with_matches`, `total_matches`, `match_mode`) without per-keyword
   disclosure; never log keywords or document text.
 - Emit a flow-validation warning when all `keyword_count` nodes together exceed 100 keyword entries.
+- Keep lemma pipelines isolated per operator instance, with eager validation and per-micro-batch loading, explicit
+  cleanup, and documented concurrency/memory costs. Normalize adjacent punctuation into individual tokens in
+  stem and lemma matching.
 - Register the operator in `DOCPIPE_OPERATORS` and document it (operator README, operator reference, README table, and
   a sample flow).
 
@@ -31,8 +34,8 @@ bounded, deterministic keyword counter gives lexical enrichment without regex ri
 | **Linguistic awareness** | None. Matches exact character sequences. | Low. Reduces predictable inflected endings without vocabulary knowledge. | High. Resolves word forms using grammar and local sentence context. |
 | **Output form** | Original keyword string matched verbatim. | Truncated stem (often not a valid dictionary word, e.g. `studi`). | Canonical lemma (valid dictionary base form, e.g. `study`). |
 | **Contextual sensitivity** | None. | None. Words processed independently. | Context-aware: `saw` (tool) and `saw` (past of see) resolve to different lemmas. |
-| **Network / I/O at runtime** | Zero. RE2 compiled at import. | Zero. Algorithmic; no corpora loaded. | Zero at runtime. Pipeline package must be installed in advance; never downloaded by the operator. |
-| **Execution performance** | Fast; linear over document length. | Fast; uniform across large inputs. | Higher resource footprint; slower per document due to pipeline inference. |
+| **Network / I/O at runtime** | Zero. RE2 compiled at import. | Zero. Algorithmic; no corpora loaded. | No network access. Loads a local model for every validation instance and micro-batch; never downloads it. |
+| **Execution performance** | Fast; linear over document length. | Fast; uniform across large inputs. | Higher resource footprint; repeated model loading plus per-document inference. Concurrent batches hold separate model copies. |
 | **Case folding** | Simple Unicode case folding via RE2 (no multi-character folds such as `straße` → `SS`). | `str.casefold()` applied to tokens before stemming. | `str.casefold()` applied to lemmas. |
 | **Phrase handling** | Exact character sequence; whitespace and punctuation are literal. | Token-sequence match; extra whitespace between tokens is ignored, punctuation is significant. | Token-sequence match on lemmas; extra whitespace ignored, punctuation significant. |
 
@@ -57,7 +60,7 @@ bounded, deterministic keyword counter gives lexical enrichment without regex ri
   `src/docpipe/core/orchestration/flow_validator.py` with its message in `src/docpipe/exceptions/error_messages.py`,
   and `SUM` aggregation entries for the new match counters in
   `src/docpipe/core/job_management/application/aggregation/strategies.py`.
-- Dependencies: none added. Uses existing `google-re2==1.1.20251105`, `nltk==3.10.3`, and `spacy>=3.7.4`. Lemma mode
+- Dependencies: none added. Uses existing `google-re2==1.1.20251105`, `nltk==3.10.4`, and `spacy>=3.7.4`. Lemma mode
   requires a separately installed spaCy pipeline; no pipeline is installed in the base environment.
 - Tests: new `tests/unit/operators/keyword_count/`.
 - Docs: new `docs/operators/functional/keyword_count_readme.md`; updates to `docs/reference/OPERATORS.md` and

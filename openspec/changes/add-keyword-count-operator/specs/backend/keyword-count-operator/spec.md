@@ -26,7 +26,7 @@ The operator SHALL accept `keywords` (required list of strings), `match_mode` (d
 - **THEN** the operator runs in literal, case-insensitive, whole-word, NFC, non-overlapping mode against the `content` column
 
 #### Scenario: No output naming options
-- **WHEN** a node configures `output_format`, `output_prefix`, `column_names`, `include_total`, or `total_column`
+- **WHEN** a node configures `output_format`, `output_column`, `output_prefix`, `column_names`, `include_total`, or `total_column`
 - **THEN** none of these options changes the output, which is always the single `keyword_counts` column
 
 ### Requirement: Keyword list limits
@@ -111,6 +111,21 @@ Lemma mode MUST require `lemmatizer_model`, MUST accept only a valid installed p
 - **WHEN** the installed pipeline produces no usable lemmas
 - **THEN** validation fails stating that the model does not provide usable lemmas
 
+### Requirement: Lemma resource lifecycle
+Lemma mode SHALL eagerly load an isolated pipeline per validation and micro-batch instance. It SHALL release model/cache references after validation, on constructor failure, and through an idempotent execution `cleanup()` hook. Documentation MUST describe repeated loading costs, concurrent model copies, and guidance to lower batch concurrency or disable micro-batching.
+
+#### Scenario: Micro-batch instances are isolated
+- **WHEN** two micro-batches execute the same lemma node concurrently
+- **THEN** each instance owns a distinct pipeline and cleaning up one does not invalidate the other
+
+#### Scenario: Validation resources released
+- **WHEN** a lemma node completes validation successfully or fails after acquiring a pipeline
+- **THEN** its validation-only pipeline and cache references are released, including when keyword collision checks fail
+
+#### Scenario: Repeated execution cleanup
+- **WHEN** execution releases a constructed lemma operator after success, failure, or a skipped execution and cleanup is called again
+- **THEN** model and cache references are released without error on either cleanup call
+
 ### Requirement: Input column validation
 The operator MUST fail before row processing when the configured document column is missing, ambiguous, or not string or large-string data, and MUST NOT coerce other types.
 
@@ -176,7 +191,7 @@ When `whole_word` is true, a literal match SHALL count only if the characters im
 - **THEN** the count is 2
 
 ### Requirement: Stem matching semantics
-Stem mode SHALL tokenize keywords and documents with the same corpus-free tokenizer, case-fold and stem word tokens with the configured language, retain punctuation tokens, exclude whitespace, and count contiguous keyword token sequences in the document token sequence.
+Stem mode SHALL tokenize keywords and documents with the same corpus-free tokenizer using `\w+|[^\w\s]`, case-fold and stem word tokens with the configured language, retain every non-word, non-space character as an individual token, exclude whitespace, and count contiguous keyword token sequences in the document token sequence.
 
 #### Scenario: Inflections match
 - **WHEN** stem mode with `english` uses keyword `running` and the document is `He runs and ran while running`
@@ -190,8 +205,16 @@ Stem mode SHALL tokenize keywords and documents with the same corpus-free tokeni
 - **WHEN** the stem keyword is `machine learning` and the document contains `machine-learning`
 - **THEN** the occurrence is not counted
 
+#### Scenario: Parenthesized stem keyword beside punctuation
+- **WHEN** stem mode uses keyword `(draft)` and the document is `(draft).`
+- **THEN** the count is 1 because the trailing period is a separate token
+
+#### Scenario: Symbol-bearing stem keyword beside punctuation
+- **WHEN** stem mode uses keyword `C++` and the document is `C++,`
+- **THEN** the count is 1 because each plus sign and the comma are separate tokens
+
 ### Requirement: Lemma matching semantics
-Lemma mode SHALL process keywords and documents with the same configured installed pipeline, use lemmas of non-space tokens, case-fold the lemmas, retain punctuation tokens, and count contiguous keyword lemma sequences in the document lemma sequence.
+Lemma mode SHALL process keywords and documents with the same installed pipeline on normalized text, then exclude space tokens. It SHALL split punctuation/symbol-only surface tokens into characters and case-fold and split other tokens' lemmas using `\w+|[^\w\s]`. It SHALL count contiguous keyword sequences in this post-processed sequence, preserving the pipeline's contextual analysis.
 
 #### Scenario: Lemma sequence counted
 - **WHEN** the configured pipeline lemmatizes `ran` and `running` to `run` and the keyword is `run`
@@ -200,6 +223,14 @@ Lemma mode SHALL process keywords and documents with the same configured install
 #### Scenario: Same pipeline for keywords and documents
 - **WHEN** lemma mode is used
 - **THEN** keyword lemmas and document lemmas are produced by the same configured pipeline
+
+#### Scenario: Parenthesized lemma keyword beside punctuation
+- **WHEN** lemma mode uses keyword `(draft)`, the document is `(draft).`, and the pipeline preserves `draft` as its lemma
+- **THEN** the count is 1 even if the pipeline groups `).` in one punctuation token
+
+#### Scenario: Symbol-bearing lemma keyword beside punctuation
+- **WHEN** lemma mode uses keyword `C++`, the document is `C++,`, and the pipeline preserves the word and symbol text in its lemmas
+- **THEN** the count is 1 whether the pipeline emits the adjacent symbols separately or within one token
 
 ### Requirement: Occurrence counting
 The operator SHALL count each keyword independently, allowing different keywords to count the same span; non-overlapping matching SHALL resume after the matched span, while `allow_overlapping` SHALL advance one code point (literal) or one token (stem, lemma) after each match start.

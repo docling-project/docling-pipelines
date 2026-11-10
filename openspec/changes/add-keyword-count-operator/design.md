@@ -11,6 +11,9 @@ codebase that shape the approach:
 - `FlowValidator._validate_node` instantiates every operator with `VALIDATING_FLOW=True` and converts any exception
   raised from `__init__` into an `OPERATOR_VALIDATION_FAILED` error carrying `str(exc)`. Configuration validation in
   `__init__` is therefore the validation path for both flow validation and execution.
+- `PythonOperatorExecutor` is created per node per micro-batch and caches an operator only within that execution.
+  CLI, REST job runs, and `DocpipeFlowManager` enable micro-batching by default. The Python orchestrator calls
+  executor `release()`, which invokes operator `cleanup()` on executed, failed, and skipped paths.
 - `OperatorMetadata._extract_config_values` calls `cls.get_metadata()` and `cls.get_required_features()` on the **class**.
   An instance-method `get_required_features(self)` raises `TypeError`, and its fallback (`get_operator()` returns a class,
   not an instance) fails the same way. `get_required_features` must stay a `@staticmethod`.
@@ -21,7 +24,7 @@ codebase that shape the approach:
   counters need explicit `SUM` entries or micro-batched runs under-report.
 - `flow_validator.validate_dag` raises `FlowValidationException` for warnings; `FlowExecutor._validate_flow` proceeds on
   warnings-only exceptions.
-- Installed: `google-re2` (`re2`, with `Options.literal`), `nltk` (`SnowballStemmer`, `wordpunct_tokenize`, no corpora
+- Dependencies: `google-re2` (`re2`, with `Options.literal`), `nltk` (`SnowballStemmer`, `RegexpTokenizer`, no corpora
   needed), `spacy` 3.8. No spaCy pipeline package is installed.
 
 ## Goals / Non-Goals
@@ -76,9 +79,17 @@ pass; rejected in favour of the user's decision to keep RE2 as the folding engin
 Both modes reduce a text to a list of comparable tokens (non-space tokens, punctuation retained, case-folded) and
 count contiguous keyword sequences. The counter indexes document positions by first token, compares slices, and
 tracks `next_allowed` for the non-overlapping case; overlap advances one token.
-- Stem tokenizer: `nltk.tokenize.wordpunct_tokenize` (`\w+|[^\w\s]+`, no corpora). `machine-learning` yields three
-  tokens, so punctuation stays significant. Word tokens are case-folded then stemmed with `SnowballStemmer(language)`;
-  punctuation tokens are not stemmed. A per-instance dict memoizes stems.
+- Stem tokenizer: `nltk.tokenize.RegexpTokenizer(r"\w+|[^\w\s]")` (no corpora). Each non-word, non-space
+  character is a separate token: `(draft).` becomes `(`, `draft`, `)`, `.` and `C++,` becomes `C`, `+`, `+`, `,`.
+  Word tokens are case-folded then stemmed with `SnowballStemmer(language)`; punctuation/symbol tokens are retained
+  unchanged. A per-instance dict memoizes stems. `machine-learning` still differs from `machine learning`.
+- Lemma mode first runs the configured spaCy pipeline on the normalized text, preserving its contextual analysis.
+  Exclude space tokens; retain punctuation-only/symbol-only tokens from their surface text, split into individual
+  characters. For tokens containing word characters, case-fold the lemma and split it with the same
+  `\w+|[^\w\s]` tokenizer before sequence matching. Apply this to keywords and documents alike, so a pipeline
+  emitting `C++` or `C++,` as one lemma cannot merge the adjacent symbols into an unmatched punctuation run.
+  Tests use a controlled pipeline with identity lemmas for these examples; arbitrary installed model predictions
+  are not guaranteed to preserve a term's spelling.
 - Supported languages are `SnowballStemmer.languages` minus `porter` (15 languages, matching the spec).
 - Collision detection compares keyword token tuples, so `run` / `runs` collide in English stem mode.
 - Expected spec outcome to encode in tests: `He runs and ran while running` with keyword `running` counts 2 (`runs`,
@@ -94,16 +105,30 @@ tracks `next_allowed` for the non-overlapping case; overlap advances one token.
 - Self-check at load: run the pipeline on the first keyword; fail when it has no non-space tokens or any lemma is empty
   ("model does not provide usable lemmas"). Keywords with zero lemma tokens fail validation.
 - Loading is eager in `__init__` (spec requires validation-time failure). A pipeline is loaded per operator instance and
-  never shared, because spaCy `Language` objects are not documented as thread-safe and batches may run concurrently.
-  Cost: each flow validation of a lemma node loads the model.
+  never shared; each concurrent batch owns its model and mutable pipeline state. This retains validation-time
+  checks for usable lemmas, keyword canonicalization, and collisions.
+- Accepted cost: each validation request loads the full model once per lemma node, including REST validation.
+  Execution loads it again for every micro-batch, not once per flow. With one lemma node and default
+  `max_concurrent_batches=10`, up to ten executing instances can hold model copies concurrently; validation requests,
+  additional nodes, and simultaneous runs can add more. No process-wide memory bound is implied. Document these
+  costs and recommend lowering batch concurrency or disabling micro-batching for memory-constrained lemma flows.
+- `KeywordCountOperator.cleanup()` is an idempotent instance method that drops its matcher reference and clears
+  per-instance keyword, normalization, and stem caches. Matcher cleanup drops the spaCy pipeline reference and any
+  retained `Doc` objects. It must tolerate partial initialization and repeated calls. The constructor releases
+  partially acquired resources before re-raising failures; `validate()` releases validation-only resources in a
+  `finally` block when `self.validating_flow` is true. Do not rely on `FlowValidator` to call `cleanup()`.
+  Execution resources remain available until executor release. Dropping references permits collection but does not
+  promise that Python/native allocators immediately return memory to the operating system.
 - `import spacy` is deferred into lemma mode so literal/stem flows do not pay its import time.
+*Alternatives:* a shared model cache would require explicit synchronization and an eviction policy; deferred loading
+would move unusable-lemma and collision failures out of flow validation. Neither is part of this proposal.
 
 ### D6. Configuration validation lives in `__init__`
 `__init__` validates in a fixed order: option types/values, mode-specific option legality, keyword list limits, keyword
-value rules, canonicalization (using the selected matcher), collision check, then lemma/stem resource checks. All error
+value rules, matcher resource initialization (including eager lemma loading), canonicalization, then collision checks. All error
 messages reference keyword **indices** and counts only. Because `FlowValidator` surfaces constructor exceptions as
 validation errors, no separate `validate()` logic is needed for configuration; `validate()` is overridden only to require
-`self.doc_column` from upstream via `OperatorUtils.validate_columns`.
+`self.doc_column` from upstream via `OperatorUtils.validate_columns` and release validation-only resources as in D5.
 Resolution of the spec's "instantiated node SHALL require its configured document column": `get_required_features()` and
 `get_static_required_features()` both stay static and return `["content"]` (discovery cannot call an instance method —
 see Context); custom `doc_column` values are enforced by the `validate()` override.
@@ -157,7 +182,8 @@ proceeds. Unmapped message codes default to `FLOW_LEVEL` scope in the API DTO, w
   before apply, and the README must list the limitation.
 - [Bytes search loop is slower than `finditer`] → only used when boundary filtering or overlap is required; measured
   0.37 s per 300k matches.
-- [Lemma model loaded on every flow validation] → accepted for spec fidelity; document the cost in the README.
+- [Lemma models loaded per validation request and per micro-batch] → accepted for validation-time checks; document
+  repeated load latency, concurrent copies, lower-concurrency guidance, and cleanup behavior in the README.
 - [spaCy pipelines with different component sets may not lemmatize with `ner`/`parser` disabled] → load self-check
   fails closed with the "no usable lemmas" error rather than producing wrong counts.
 - [Entry-point allowlist excludes pipelines installed as directories on disk] → intentional; the spec forbids paths.
