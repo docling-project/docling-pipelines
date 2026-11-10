@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for OperatorUtils.doclang_to_markdown and strip_doclang_column."""
 
 from docpipe.core.constants.operator_constants import OperatorConstants
@@ -219,3 +222,47 @@ def test_doc_format_valid_values_contains_both():
     values = [m.value for m in OperatorConstants.DocFormat]
     assert "markdown" in values
     assert "doclang" in values
+
+
+# ---------------------------------------------------------------------------
+# get_doclang_deserializer: created on first use, once, and tolerant of a slim install
+# ---------------------------------------------------------------------------
+
+
+def _reset_deserializer_state(monkeypatch):
+    from docpipe.core.operators import operator_utils
+
+    monkeypatch.setattr(operator_utils, "_DOCLANG_DESERIALIZER", None)
+    monkeypatch.setattr(operator_utils, "_DOCLANG_DESERIALIZER_LOADED", False)
+    return operator_utils
+
+
+def test_get_doclang_deserializer_returns_one_shared_instance(monkeypatch):
+    """Concurrent first calls create exactly one deserializer."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    _reset_deserializer_state(monkeypatch)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        instances = list(pool.map(lambda _: OperatorUtils.get_doclang_deserializer(), range(16)))
+    assert instances[0] is not None
+    assert all(instance is instances[0] for instance in instances)
+
+
+def test_get_doclang_deserializer_is_none_when_docling_core_is_absent(monkeypatch):
+    """A slim install without docling_core gets None, and the absence is remembered."""
+    import builtins
+
+    _reset_deserializer_state(monkeypatch)
+    real_import = builtins.__import__
+    calls: list[str] = []
+
+    def blocked(name, *args, **kwargs):
+        if name.startswith("docling_core"):
+            calls.append(name)
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked)
+    assert OperatorUtils.get_doclang_deserializer() is None
+    assert OperatorUtils.get_doclang_deserializer() is None
+    assert len(calls) == 1
