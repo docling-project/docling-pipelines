@@ -28,6 +28,8 @@ from docpipe.core.orchestration.operator_loader.isolation.worker_client import (
 )
 from docpipe.core.orchestration.operator_loader.untrusted_descriptor import UntrustedOperatorDescriptor
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.integrations.secrets.registry import get_registry, scrub
+from docpipe.integrations.secrets.resolver import SecretResolutionError
 from docpipe.integrations.secrets.secret_provider import SecretProvider, clear_providers, register_provider
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 
@@ -68,6 +70,21 @@ class IsoOp(AbstractOperator):
             "cwd": os.getcwd(),
             "argv": sys.argv,
         }
+        api_key = self.config.get("api_key")
+        files = {}
+        for root, _, names in os.walk(os.getcwd()):
+            for name in names:
+                path = os.path.join(root, name)
+                try:
+                    with open(path, "rb") as handle:
+                        files[path] = handle.read().decode("utf-8", "replace")
+                except OSError:
+                    pass
+        report["api_key_class"] = type(api_key).__name__
+        report["api_key_str"] = str(api_key)
+        report["api_key_revealed"] = api_key.reveal() if hasattr(api_key, "reveal") else api_key
+        report["files"] = files
+        report["argv_text"] = " ".join(sys.argv)
         out = table.append_column("upper", pa.array([str(v).upper() for v in table.column(0).to_pylist()]))
         return [out], {"report": json.dumps(report, default=str), "rows": table.num_rows}
 
@@ -77,12 +94,19 @@ class IsoOp(AbstractOperator):
 """
 
 
+HANDED_OVER_VALUE = "s3cr3t-HANDED-OVER-9f2"  # pragma: allowlist secret # nosec B105
+
+
 class _Provider(SecretProvider):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None]] = []
+
     def authenticate(self) -> None:
         pass
 
     def get_secret(self, *, path: str, key: str | None = None) -> str:
-        return "unused"
+        self.calls.append((path, key))
+        return HANDED_OVER_VALUE
 
     def is_available(self) -> bool:
         return True
@@ -94,11 +118,20 @@ def _clean_state(*, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Generato
     monkeypatch.setenv(DocpipeConstants.DOCPIPE_DATA_PATH, str(tmp_path / "data"))
     yield
     get_worker_pool().release_all()
+    get_registry().clear_all()
     clear_providers()
 
 
-def _set_isolation(*, value: str | None) -> None:
-    DocpipeConfigLoader._config = {"custom_operators": {"isolation": value}} if value is not None else {}
+def _set_isolation(*, value: str | None, custom_paths: list[str] | None = None, paths: list[str] | None = None) -> None:
+    config: dict[str, Any] = {"custom_operators": {"isolation": value}} if value is not None else {}
+    vault: dict[str, Any] = {}
+    if custom_paths is not None:
+        vault["custom_operator_allowed_paths"] = custom_paths
+    if paths is not None:
+        vault["allowed_paths"] = paths
+    if vault:
+        config["secrets"] = {"vault": vault}
+    DocpipeConfigLoader._config = config
 
 
 @pytest.fixture
@@ -348,17 +381,6 @@ class TestProcessIsolation:
 
         assert tables[0].num_rows == 3
 
-    def test_reference_in_the_nodes_own_config_is_not_permitted(
-        self, *, descriptor: type[UntrustedOperatorDescriptor]
-    ) -> None:
-        register_provider(name="hashicorp", provider=_Provider())
-        _set_isolation(value="process")
-
-        with pytest.raises(DocpipeException, match="not permitted"):
-            descriptor(config=_merged_config(own={"api_key": "vault://hashicorp/x/y#k"}))  # pragma: allowlist secret
-
-        assert get_worker_pool().size() == 0
-
 
 class TestExecutorIntegration:
     def test_python_executor_builds_the_proxy_and_releases_the_run(
@@ -441,3 +463,183 @@ class TestHostileOperator:
         assert "docpipe-worker-" in report["cwd"]
         assert report["argv"][0].endswith("worker_main.py")
         assert report["argv"][1] == "--fd"
+
+
+REFERENCE = "vault://hashicorp/custom-ops/team-a/svc#token"  # pragma: allowlist secret
+
+
+class TestCustomOperatorSecrets:
+    """Task D.4: references reach an untrusted operator only through the parent, the custom-operator policy and the pipe."""
+
+    @pytest.fixture
+    def provider(self) -> _Provider:
+        provider = _Provider()
+        register_provider(name="hashicorp", provider=provider)
+        return provider
+
+    def _build(self, *, descriptor: type[UntrustedOperatorDescriptor], reference: str = REFERENCE) -> Any:
+        return descriptor(config=_merged_config(own={"api_key": reference}))
+
+    @pytest.mark.parametrize("custom_paths", [None, []])
+    def test_default_deny_rejects_execution_without_contacting_vault(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider, custom_paths: list[str] | None
+    ) -> None:
+        _set_isolation(value="process", custom_paths=custom_paths, paths=["*:**"])
+
+        with pytest.raises(SecretResolutionError, match="not permitted"):
+            self._build(descriptor=descriptor)
+
+        assert provider.calls == []
+        assert get_worker_pool().size() == 0
+
+    def test_the_trusted_policy_does_not_open_the_custom_operator_policy(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", paths=["hashicorp:**"])
+
+        with pytest.raises(SecretResolutionError, match="not permitted"):
+            self._build(descriptor=descriptor)
+
+        assert provider.calls == []
+
+    def test_default_deny_is_reported_by_validation_without_contacting_vault(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        from docpipe.integrations.secrets.resolver import FindingKind, inspect_node_references
+
+        _set_isolation(value="process", paths=["*:**"])
+
+        findings = inspect_node_references(operator_class=descriptor, config={"api_key": REFERENCE})
+
+        assert [(f.config_key, f.kind) for f in findings] == [("api_key", FindingKind.PATH_NOT_PERMITTED)]
+        assert provider.calls == []
+
+    def test_validation_accepts_a_reference_that_matches(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        from docpipe.integrations.secrets.resolver import inspect_node_references
+
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+
+        assert inspect_node_references(operator_class=descriptor, config={"api_key": REFERENCE}) == []
+        assert provider.calls == []
+
+    def test_a_reference_in_an_undeclared_field_is_not_permitted_even_when_the_path_matches(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:**"])
+
+        with pytest.raises(SecretResolutionError, match="not permitted"):
+            descriptor(config=_merged_config(own={"other": REFERENCE}))
+
+        assert provider.calls == []
+
+    def test_a_path_outside_the_setting_is_not_permitted(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+
+        with pytest.raises(SecretResolutionError, match="not permitted"):
+            self._build(
+                descriptor=descriptor, reference="vault://hashicorp/custom-ops/team-b/svc#token"
+            )  # pragma: allowlist secret
+
+        assert provider.calls == []
+
+    def test_allowed_path_delivers_the_real_value_to_the_worker_as_a_secret_value(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+
+        operator = self._build(descriptor=descriptor)
+        _, metadata = operator.transform(_table())
+        report = json.loads(metadata["report"])
+
+        assert provider.calls == [("custom-ops/team-a/svc", "token")]
+        assert report["api_key_class"] == "SecretValue"  # pragma: allowlist secret
+        assert report["api_key_str"] == "***"  # pragma: allowlist secret
+        assert report["api_key_revealed"] == HANDED_OVER_VALUE  # pragma: allowlist secret
+
+    def test_the_parent_holds_no_plain_value_and_the_scrubber_knows_it(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+
+        operator = self._build(descriptor=descriptor)
+
+        assert HANDED_OVER_VALUE not in json.dumps(operator.config, default=str)
+        assert HANDED_OVER_VALUE not in repr(operator.__dict__)
+        assert scrub("token=" + HANDED_OVER_VALUE) == "token=***"
+
+    def test_value_is_resent_with_every_batch_and_only_to_that_worker(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+        operator = self._build(descriptor=descriptor)
+
+        reports = [json.loads(operator.transform(_table())[1]["report"]) for _ in range(2)]
+
+        assert len(provider.calls) == 1
+        assert {r["pid"] for r in reports} != {os.getpid()}
+        assert all(r["api_key_revealed"] == HANDED_OVER_VALUE for r in reports)
+
+    def test_the_value_is_absent_from_the_workers_environment_arguments_and_files(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+        operator = self._build(descriptor=descriptor)
+        _, metadata = operator.transform(_table())
+        report = json.loads(metadata["report"])
+
+        assert HANDED_OVER_VALUE not in json.dumps(report["env"])
+        assert HANDED_OVER_VALUE not in report["argv_text"]
+        assert HANDED_OVER_VALUE not in json.dumps(report["files"])
+        assert REFERENCE not in json.dumps(report["env"]) + report["argv_text"]
+
+    def test_ingest_credentials_never_reach_the_operators_config_table_or_metadata(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+        merged = _merged_config(own={"api_key": REFERENCE})
+        merged["ingest_source"]["provider_config"]["password"] = (
+            "vault://hashicorp/ingest/creds#password"  # pragma: allowlist secret
+        )
+        operator = descriptor(config=merged)
+        table = _table()
+
+        tables, metadata = operator.transform(table)
+        report = json.loads(metadata["report"])
+
+        text = (
+            json.dumps(report["config"], default=str)
+            + json.dumps(metadata)
+            + json.dumps([t.to_pydict() for t in tables])
+        )
+        assert "INGEST-CANARY" not in text and "OVERRIDE-CANARY" not in text
+        assert "vault://hashicorp/ingest" not in text
+        assert provider.calls == [("custom-ops/team-a/svc", "token")]
+
+    def test_a_reference_in_the_ingest_node_is_not_resolved_for_the_custom_operator(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider
+    ) -> None:
+        _set_isolation(value="process", custom_paths=[])
+        merged = _merged_config()
+        merged["ingest_source"]["provider_config"]["password"] = (
+            "vault://hashicorp/ingest/creds#password"  # pragma: allowlist secret
+        )
+
+        operator = descriptor(config=merged)
+
+        assert isinstance(operator, IsolatedOperatorProxy)
+        assert provider.calls == []
+
+    def test_worker_protocol_carries_secrets_outside_the_config(self) -> None:
+        from docpipe.core.orchestration.operator_loader.isolation.proxy import detach_secrets, encode_secrets
+        from docpipe.integrations.secrets.secret_value import SecretValue
+
+        config = {"a": SecretValue(value="v1"), "n": {"b": [SecretValue(value="v2")]}, "plain": "x"}
+
+        safe, detached = detach_secrets(node=config)
+
+        assert safe == {"a": None, "n": {"b": [None]}, "plain": "x"}
+        assert encode_secrets(secrets=detached) == {'["a"]': "v1", '["n", "b", 0]': "v2"}

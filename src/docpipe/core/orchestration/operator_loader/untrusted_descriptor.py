@@ -59,7 +59,9 @@ class UntrustedOperatorDescriptor(AbstractOperator):
         if mode is IsolationMode.DISABLED:
             raise DocpipeException(NOT_PERMITTED_MESSAGE % cls.operator_info.short_name, status_code=403)
         if mode is IsolationMode.PROCESS:
-            return IsolatedOperatorProxy.for_node(operator_info=cls.operator_info, merged_config=config)
+            return IsolatedOperatorProxy.for_node(
+                operator_class=cls, operator_info=cls.operator_info, merged_config=config
+            )
         return cls._load_real_class()(config=config)
 
     @classmethod
