@@ -21,6 +21,8 @@ uvicorn docpipe.api.main:app --reload --host 0.0.0.0 --port 8080
 uv run uvicorn docpipe.api.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
+Authentication is on by default: the server refuses to start until `JWT_SECRET_KEY` is set (at least 32 random characters). Set `DOCPIPE_AUTH_ENABLED=false` to run without authentication on a local, trusted machine. See the [Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
 Once running, the following URLs are available:
 
 | URL | Description |
@@ -177,7 +179,7 @@ See [ACL Document Retrieval](ACL_DOCUMENT_RETRIEVAL.md) for full details on ACL 
 |----------|---------|-------------|
 | `DS_LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed CORS origins; a `*` entry logs a security warning at startup |
-| `DOCPIPE_AUTH_ENABLED` | `false` in this release of the change | Require a session on `/api/v1/*` |
+| `DOCPIPE_AUTH_ENABLED` | `true` | Require a session on `/api/v1/*`; set `false` only for a local, trusted setup |
 | `JWT_SECRET_KEY` | — | JWT signing secret; required when auth is enabled (at least 32 characters, not a placeholder) |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Token and session cookie lifetime in minutes |
 | `DOCPIPE_AUTH_DEFAULT_ROLE` | `viewer` | Role of an authenticated user that matches no mapped group |

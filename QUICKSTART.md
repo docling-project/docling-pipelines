@@ -316,6 +316,8 @@ source .venv/bin/activate
 uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
 ```
 
+> **Authentication is on by default.** Before the first start, set `JWT_SECRET_KEY` (at least 32 random characters) and a login method such as the bootstrap administrator, or run `export DOCPIPE_AUTH_ENABLED=false` on a local, trusted machine. See the [Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
 > **Do not use `python src/docpipe/api/main.py`** when running the UI in dev mode. That invocation automatically starts a BFF sidecar on port 3001, which conflicts with `npm run dev` (which also starts the BFF). Use `uvicorn` as shown above to avoid the port conflict.
 
 ### Step 3 — Start the UI
