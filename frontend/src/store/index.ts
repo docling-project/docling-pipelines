@@ -10,6 +10,7 @@ import jobRunReducer from '@/slices/jobRunSlice';
 import assetsReducer from '@/slices/assetsSlice';
 import projectsReducer from '@/slices/projectsSlice';
 import notificationsReducer from '@/slices/notificationsSlice';
+import authReducer from '@/slices/authSlice';
 
 /**
  * The Redux store instance for the application.
@@ -19,6 +20,7 @@ import notificationsReducer from '@/slices/notificationsSlice';
  * - jobRun: Job run executions, logs, and statistics
  * - assets: Flows and job runs for navigation (legacy; will be split further)
  * - projects: Full project lifecycle — list, detail, loading, error
+ * - auth: Current user, auth config and session status (no token is stored)
  */
 export const store = configureStore({
   reducer: {
@@ -28,6 +30,7 @@ export const store = configureStore({
     assets: assetsReducer,
     projects: projectsReducer,
     notifications: notificationsReducer,
+    auth: authReducer,
   },
 });
 
