@@ -62,7 +62,7 @@ Each group below can merge on its own. The UI gating is a convenience, and every
 - [x] 7.5 Gate edit flow details (`FlowInfoPanel`) on `canModifyAsset(flowRow.created_by)`; verify tests for viewer, non-owner editor, owner and admin
 - [x] 7.6 Gate the `Canvas` editing toolbar, palette, node save, properties save and Save on flow modify permission, and Run flow on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
 - [x] 7.7 Gate `ReadOnlyCanvas` / `RunDetails` controls: `Stop` in `RunStatusTopPanel` on `canModifyAsset(jobStats.user_id)` and `Run Again` on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
-- [ ] 7.8 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings
+- [x] 7.8 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings
 
 ## 8. Enable by default and finalize
 
