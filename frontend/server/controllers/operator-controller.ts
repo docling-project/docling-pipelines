@@ -9,9 +9,9 @@ const logger = log4js.getLogger('operator.controller');
  * Fetch operator metadata from backend API
  * This is the BFF controller that proxies requests to the Python FastAPI backend
  */
-const fetchOperatorMetadata = async (_req: Request, res: Response): Promise<void> => {
+const fetchOperatorMetadata = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'operators', 'metadata'] });
+    const response = await proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'operators', 'metadata'] });
 
     res.json(response.data);
   } catch (err) {
@@ -25,7 +25,7 @@ const fetchOperatorMetadata = async (_req: Request, res: Response): Promise<void
  */
 const enrichFlowFeatures = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'POST',
       path: ['api', 'v1', 'validation', 'enrich_flow_features'],
       body: req.body,
@@ -56,7 +56,7 @@ const fetchProviderModels = async (req: Request, res: Response): Promise<void> =
   }
 
   try {
-    const response = await proxyRequest({
+    const response = await proxyRequest({ req,
       method: 'GET',
       path: ['api', 'v1', 'providers', provider, 'models'],
       query: { api_base: apiBase },
