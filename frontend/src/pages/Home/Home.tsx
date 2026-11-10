@@ -15,6 +15,7 @@ import {
 } from '@carbon-labs/react-animated-header';
 import { ROUTES, generateRoute } from '@/config';
 import { useTheme } from '@/hooks';
+import { usePermissionReason } from '@/components/common/PermissionTooltip';
 import { useAppSelector } from '@/hooks/useAppSelector';
 import { useRecentlyVisited, type RecentItemType } from '@/hooks/useRecentlyVisited';
 import { selectProjectsArray } from '@/selectors/projectsSelectors';
@@ -37,6 +38,7 @@ export function Home(): React.JSX.Element {
   const intl = useIntl();
   const navigate = useNavigate();
   const { theme } = useTheme();
+  const { canEdit, createReason } = usePermissionReason();
   const [sampleModalOpen, setSampleModalOpen] = useState(false);
 
   const ariaLabels: AriaLabels = useMemo(() => ({
@@ -110,6 +112,8 @@ export function Home(): React.JSX.Element {
               subtitle={intl.formatMessage(messages.sampleTileSubtitle)}
               buttonLabel={intl.formatMessage(messages.sampleTileButton)}
               onAction={() => { setSampleModalOpen(true); }}
+              disabled={!canEdit}
+              disabledReason={createReason ?? undefined}
             />
           ),
         },
@@ -129,10 +133,12 @@ export function Home(): React.JSX.Element {
         },
       ],
     },
-  ], [intl]);
+  ], [intl, canEdit, createReason]);
 
   const defaultTileGroup: TileGroup | undefined = headerTiles[0];
   const [selectedTileGroup, setSelectedTileGroup] = useState<TileGroup | undefined>(defaultTileGroup);
+  // Resolve against the current tiles so permission changes reach the rendered tile.
+  const activeTileGroup = headerTiles.find((group) => group.id === selectedTileGroup?.id) ?? defaultTileGroup;
 
   return (
     <PageLayout fullBleed>
@@ -159,7 +165,7 @@ export function Home(): React.JSX.Element {
           headerAnimation={(theme === 'g100' ? watsonXAnimatedDark : watsonXAnimatedLight) as object}
           headerStatic={(theme === 'g100' ? watsonXStaticDark : watsonXStaticLight) as string}
           allTileGroups={headerTiles}
-          selectedTileGroup={selectedTileGroup}
+          selectedTileGroup={activeTileGroup}
           setSelectedTileGroup={setSelectedTileGroup}
         />
       </div>

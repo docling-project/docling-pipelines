@@ -15,6 +15,7 @@ import {
 } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
+import { usePermissionReason } from '@/components/common/PermissionTooltip';
 import { messages } from './FlowRunsTable.messages';
 import styles from './FlowRunsTable.module.scss';
 
@@ -52,6 +53,8 @@ export interface RunRow {
   duration: string;
   /** Raw duration in seconds for accurate sorting. */
   duration_seconds?: number;
+  /** Username of the user who created the run, or null/absent when the run has no owner. */
+  user_id?: string | null;
 }
 
 // ─── StatusIcon ───────────────────────────────────────────────────────────────
@@ -110,6 +113,7 @@ export function FlowRunsTable({
   onViewRun,
 }: FlowRunsTableProps): React.JSX.Element {
   const intl = useIntl();
+  const { getModifyReason } = usePermissionReason();
 
   const STATUS_LABELS: Record<RunStatus, string> = {
     run:             intl.formatMessage(messages.statusCompleted),
@@ -214,6 +218,7 @@ export function FlowRunsTable({
           const original = rowMap.get(row.id);
           if (!original) { return undefined; }
           const isInProgress = original.status === 'in_progress';
+          const modifyReason = getModifyReason(original.user_id);
           switch (cell.info.header) {
             case 'start_time':
               return (
@@ -248,6 +253,9 @@ export function FlowRunsTable({
                    {isInProgress ? (
                      <OverflowMenuItem
                        itemText={intl.formatMessage(messages.actionCancelRun)}
+                       disabled={modifyReason !== null}
+                       requireTitle={modifyReason !== null}
+                       title={modifyReason ?? undefined}
                        isDelete
                        hasDivider
                        onClick={() => { onCancelRun(original.run_id); }}
@@ -255,6 +263,9 @@ export function FlowRunsTable({
                    ) : (
                      <OverflowMenuItem
                        itemText={intl.formatMessage(messages.actionDelete)}
+                       disabled={modifyReason !== null}
+                       requireTitle={modifyReason !== null}
+                       title={modifyReason ?? undefined}
                        isDelete
                        hasDivider
                        onClick={() => { onDeleteRun(original); }}

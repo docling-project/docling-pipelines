@@ -9,6 +9,7 @@ import { CreateProjectTearsheet } from '@/components/common/CreateProjectTearshe
 import { ProjectsTable } from '@/components/Projects';
 import type { CreateProjectFormValues, Project, ProjectRow } from '@/types';
 import { useAppDispatch, useAppSelector, useTheme } from '@/hooks';
+import { PermissionButtonElement, usePermissionReason } from '@/components/common/PermissionTooltip';
 import { generateRoute } from '@/config';
 import { createFlow, createProject, deleteProject, getProjects, replaceProject } from '@/services/api';
 import * as projectMapper from '@/services/api/mappers/project-mapper';
@@ -38,6 +39,7 @@ function toProjectRow(p: Project): ProjectRow {
     lastModifiedRaw: p.modifiedOn,
     createdOn: new Date(p.createdOn).toLocaleDateString(),
     createdOnRaw: p.createdOn,
+    createdBy: p.createdBy,
   };
 }
 
@@ -65,6 +67,7 @@ export function Projects(): React.JSX.Element {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const notify = useNotify();
+  const { canEdit, createReason } = usePermissionReason();
 
   const projectsArray = useAppSelector(selectProjectsArray);
   const loading = useAppSelector(selectProjectsLoading);
@@ -273,6 +276,8 @@ export function Projects(): React.JSX.Element {
                 onClick: () => { setTearsheetOpen(true); },
                 renderIcon: Add,
                 kind: 'tertiary',
+                disabled: !canEdit,
+                ...(!canEdit && { as: PermissionButtonElement, permissionReason: createReason }),
               }}
             />
           </div>

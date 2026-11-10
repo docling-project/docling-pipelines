@@ -22,3 +22,4 @@ export type { FlowPanelData } from './FlowInfoPanel';
 export { RequiredParamTooltip } from './RequiredParamTooltip/RequiredParamTooltip';
 export { VaultInput } from './VaultInput';
 export type { VaultInputProps } from './VaultInput';
+export { PermissionTooltip, PermissionButtonElement, usePermissionReason } from './PermissionTooltip';
