@@ -42,6 +42,9 @@ services:
       # Python Path
       - PYTHONPATH=/app/src
 
+      # Authentication is on by default; this stack is for local telemetry work, so opt out.
+      - DOCPIPE_AUTH_ENABLED=false
+
       # Optional: Add other Docling Pipelines configuration
       # - OPENSEARCH_HOST=opensearch
       # - OLLAMA_HOST=http://ollama:11434

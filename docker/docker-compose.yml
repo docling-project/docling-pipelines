@@ -17,6 +17,12 @@ services:
       OPENSEARCH_HOST: opensearch
       OPENSEARCH_USERNAME: admin
       OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:?Set OPENSEARCH_PASSWORD}
+      # Authentication is on by default. Set DOCPIPE_AUTH_ENABLED=false only for a local, trusted setup.
+      DOCPIPE_AUTH_ENABLED: ${DOCPIPE_AUTH_ENABLED:-true}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY to at least 32 random characters}
+      # Optional break-glass administrator. Supply a bcrypt hash; no default is shipped.
+      DOCPIPE_AUTH_BOOTSTRAP_USERNAME: ${DOCPIPE_AUTH_BOOTSTRAP_USERNAME:-}
+      DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH: ${DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH:-}
     volumes:
       - docpipe-data:/data
       - ../tests/fixtures/invoices:/documents:ro
