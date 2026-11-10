@@ -90,6 +90,10 @@ custom_operators_router = APIRouter(
             "model": ErrorResponse,
             "description": "Invalid input data or validation failure",
         },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "A secret provider is registered and the caller is not in custom_operators.allowed_uploaders",
+        },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Custom operator not found"},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Custom operator conflict"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"model": ErrorResponse, "description": "Internal server error"},

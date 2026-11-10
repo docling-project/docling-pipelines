@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Secret provider abstraction and reference resolver.
 
 This module provides:
@@ -248,6 +251,11 @@ def resolve_value(value: Any) -> Any:
         return [resolve_value(item) for item in value]
 
     return value
+
+
+def has_registered_provider() -> bool:
+    """Return True when at least one secret provider is registered."""
+    return bool(_providers)
 
 
 def clear_providers() -> None:
