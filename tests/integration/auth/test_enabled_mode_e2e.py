@@ -127,6 +127,7 @@ def stack(*, tmp_path: Path, auth_enabled: None, monkeypatch: pytest.MonkeyPatch
     """Build real services over ``tmp_path`` and enable authentication with a bootstrap admin."""
     del auth_enabled
     monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
+    monkeypatch.setenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", "true")
     for name in ("DOCPIPE_TRUST_PROXY_HEADERS", "DOCPIPE_AUTH_COOKIE_SECURE", "DOCPIPE_AUTH_COOKIE_NAME"):
         monkeypatch.delenv(name, raising=False)
 
