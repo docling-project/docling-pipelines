@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 from docpipe.integrations.secrets.resolver import resolve_node_config
 from docpipe.integrations.secrets.secret_provider import has_vault_references
 from docpipe.integrations.secrets.secret_value import SecretValue
@@ -143,8 +144,11 @@ def prepare_operator_config(*, operator_class: "type[AbstractOperator]", config:
     turns each resolved value back into a plain value. A configuration that was already
     prepared is returned unchanged, so the executor and the constructor never both call
     a provider. A configuration without references is returned as is.
+
+    An untrusted custom operator is not resolved here: its references are never resolved in the process that holds
+    the provider, and its isolation proxy decides what crosses to the worker (design D12).
     """
-    if isinstance(config, ResolvedNodeConfig):
+    if isinstance(config, ResolvedNodeConfig) or getattr(operator_class, "trust_class", None) == TrustClass.UNTRUSTED:
         return config
     resolved = resolve_operator_config(operator_class=operator_class, config=config)
     if resolved is config:
