@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for ingest_source global_config population."""
 
 from unittest.mock import Mock, patch
@@ -83,11 +86,10 @@ class TestIngestSourceGlobalConfig:
                     with patch("docpipe.core.orchestration.abstract_orchestrator.clean_up_prefect_home"):
                         # Execute the flow
                         orchestrator.execute(flow_def=flow_def, params=params)
-                        # Verify that ingest_source params were added to global_config
-                        assert "ingest_source" in captured_global_config
-                        assert captured_global_config["ingest_source"]["provider"] == "s3"
-                        assert captured_global_config["ingest_source"]["provider_config"]["bucket"] == "test-bucket"
-                        assert (
-                            captured_global_config["ingest_source"]["provider_config"]["aws_access_key_id"]
-                            == "test_key"
-                        )
+                        # Only non-secret source facts reach shared configuration (design D6)
+                        ingest_source = captured_global_config["ingest_source"]
+                        assert ingest_source["provider"] == "s3"
+                        assert ingest_source["node_id"] == "ingest_node"
+                        assert ingest_source["provider_config"] == {"prefix": "test-prefix"}
+                        assert "test_key" not in str(ingest_source)
+                        assert "test_secret" not in str(ingest_source)

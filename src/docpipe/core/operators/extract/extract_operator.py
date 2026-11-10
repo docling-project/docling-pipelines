@@ -319,8 +319,12 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         }
 
         # Preserve ingest_source from config if present (for cloud source binary fetching)
+        # The flow definition lets the on-demand fetch find the ingest node's own (unresolved)
+        # configuration and resolve its references at fetch time.
         if OperatorConstants.Config.INGEST_SOURCE in config:
             global_config[OperatorConstants.Config.INGEST_SOURCE] = config[OperatorConstants.Config.INGEST_SOURCE]
+            if DocpipeConstants.FLOW_DEFINITION in config:
+                global_config[DocpipeConstants.FLOW_DEFINITION] = config[DocpipeConstants.FLOW_DEFINITION]
 
         # Propagate doc_format to global_config so text adapters know the primary target format
         if self.doc_format == OperatorConstants.DocFormat.DOCLANG:

@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
-"""Characterization tests for secret resolution leak to downstream nodes on current main.
+"""Regression tests: a downstream node never sees, or resolves, the ingest node's secret.
 
-These tests document and pin existing behavior:
-1. Ingest source operator config with vault:// reference is copied into global_config['ingest_source'].
-2. Downstream node executor resolves all vault references in its merged params (including global_config).
-3. The downstream node receives the resolved canary secret in its executor params / global_config.
+The A0 characterization pinned the leak (the ingest ``provider_config`` was copied unresolved
+into ``global_config['ingest_source']`` and every node resolved it). Task B.4 closes it:
+1. ``global_config['ingest_source']`` carries naming facts only, no credential field.
+2. A downstream node resolves only its own declared fields, so it makes no provider request.
+3. The canary secret appears nowhere in the downstream node's configuration.
 """
 
 import pytest
@@ -19,6 +20,7 @@ from docpipe.integrations.secrets.secret_provider import (
     clear_providers,
     register_provider,
 )
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 
 
 class FakeOrchestratorSecretProvider(SecretProvider):
@@ -26,11 +28,13 @@ class FakeOrchestratorSecretProvider(SecretProvider):
 
     def __init__(self, *, secrets: dict[str, dict[str, str]]) -> None:
         self._secrets = secrets
+        self.calls: list[tuple[str, str | None]] = []
 
     def authenticate(self) -> None:
         pass
 
     def get_secret(self, *, path: str, key: str | None = None) -> str:
+        self.calls.append((path, key))
         data = self._secrets.get(path)
         if data is None:
             raise ExternalServiceError(f"Secret not found: {path}")
@@ -48,23 +52,22 @@ class FakeOrchestratorSecretProvider(SecretProvider):
 
 @pytest.fixture(autouse=True)
 def _cleanup_providers():
-    """Ensure providers are cleared before and after tests."""
+    """Ensure providers and the deployment policy are cleared before and after tests."""
     clear_providers()
+    DocpipeConfigLoader.reset()
     yield
     clear_providers()
+    DocpipeConfigLoader.reset()
 
 
-class TestDownstreamNodeSecretLeakCharacterization:
-    """Characterization tests documenting that downstream nodes receive resolved ingest secrets."""
+class TestDownstreamNodeSecretIsolation:
+    """A downstream node neither receives nor resolves the ingest node's reference."""
 
-    def test_downstream_executor_resolves_ingest_vault_secret_in_global_config(self) -> None:
-        """On current main, downstream PythonOperatorExecutor resolves vault secret in global_config['ingest_source']."""
-        canary_secret = "CANARY_S3_SECRET_KEY_99999"  # pragma: allowlist secret
-        provider = FakeOrchestratorSecretProvider(secrets={"s3/creds": {"secret_key": canary_secret}})
-        register_provider(name="fake", provider=provider)
+    CANARY = "CANARY_S3_SECRET_KEY_99999"  # pragma: allowlist secret
+    REFERENCE = "vault://fake/s3/creds#secret_key"  # pragma: allowlist secret
 
-        # Ingest operator definition with vault reference
-        ingest_op_def = {
+    def _ingest_op_def(self) -> dict:
+        return {
             "id": "ingest_node",
             "name": "ingest_source_node",
             "operator": "ingest_source",
@@ -73,42 +76,58 @@ class TestDownstreamNodeSecretLeakCharacterization:
                 "provider_config": {
                     "bucket": "my-bucket",
                     "access_key": "my-access-key",
-                    "secret_key": "vault://fake/s3/creds#secret_key",  # pragma: allowlist secret
+                    "secret_key": self.REFERENCE,
                 },
             },
         }
 
-        # 1. Orchestrator populates global_config with unresolved provider_config
-        orchestrator = PythonOrchestrator()
-        global_config: dict = {
+    def _downstream_op_def(self) -> dict:
+        return {"id": "downstream_node", "name": "noop_node", "operator": "noop", "config": {}}
+
+    def _global_config(self) -> dict:
+        return {
             DocpipeConstants.JOB_ID: "job-1",
             DocpipeConstants.JOB_RUN_ID: "run-1",
+            DocpipeConstants.FLOW_DEFINITION: {
+                DocpipeConstants.DAG: [self._ingest_op_def(), self._downstream_op_def()],
+            },
         }
-        orchestrator._populate_ingest_source_config(
-            ingest_operator=ingest_op_def,
-            global_config=global_config,
-        )
 
-        # Assert global_config now contains the unresolved vault reference
-        ingest_source_config = global_config.get("ingest_source", {})
-        assert ingest_source_config.get("provider_config", {}).get("secret_key") == "vault://fake/s3/creds#secret_key"
+    def _provider(self) -> FakeOrchestratorSecretProvider:
+        provider = FakeOrchestratorSecretProvider(secrets={"s3/creds": {"secret_key": self.CANARY}})
+        register_provider(name="fake", provider=provider)
+        return provider
 
-        # 2. Downstream node (e.g. noop) executor is created with global_config merged into params
-        downstream_op_def = {
-            "id": "downstream_node",
-            "name": "noop_node",
-            "operator": "noop",
-            "config": {},
-        }
-        executor = orchestrator.create_executor(
-            op_def=downstream_op_def,
-            global_config=global_config,
-        )
+    def test_global_config_carries_no_credential_field(self) -> None:
+        orchestrator = PythonOrchestrator()
+        global_config = self._global_config()
+        orchestrator._populate_ingest_source_config(ingest_operator=self._ingest_op_def(), global_config=global_config)
 
-        # 3. When executor resolves operator params, it resolves vault references across all params
-        # including global_config['ingest_source']!
-        resolved_params = executor._resolve_operator_params()
+        ingest_source = global_config["ingest_source"]
+        assert ingest_source["provider"] == "s3"
+        assert "secret_key" not in ingest_source["provider_config"]
+        assert "access_key" not in ingest_source["provider_config"]
+        assert self.REFERENCE not in repr(ingest_source)
 
-        # On current main, this exposes the resolved canary secret to the downstream node
-        resolved_ingest_secret = resolved_params.get("ingest_source", {}).get("provider_config", {}).get("secret_key")
-        assert resolved_ingest_secret == canary_secret
+    def test_downstream_node_makes_no_provider_request(self) -> None:
+        DocpipeConfigLoader._config = {"secrets": {"vault": {"allowed_paths": ["*:**"]}}}
+        provider = self._provider()
+        orchestrator = PythonOrchestrator()
+        global_config = self._global_config()
+        orchestrator._populate_ingest_source_config(ingest_operator=self._ingest_op_def(), global_config=global_config)
+
+        executor = orchestrator.create_executor(op_def=self._downstream_op_def(), global_config=global_config)
+        executor.get_operator()
+
+        assert provider.calls == []
+        assert self.CANARY not in repr(executor._params)
+
+    def test_downstream_node_survives_a_vault_outage(self) -> None:
+        """No provider is registered at all: a node without its own references still builds."""
+        orchestrator = PythonOrchestrator()
+        global_config = self._global_config()
+        orchestrator._populate_ingest_source_config(ingest_operator=self._ingest_op_def(), global_config=global_config)
+
+        executor = orchestrator.create_executor(op_def=self._downstream_op_def(), global_config=global_config)
+
+        assert executor.get_operator() is not None

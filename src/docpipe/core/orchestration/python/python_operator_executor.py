@@ -22,6 +22,7 @@ from docpipe.core.orchestration.abstract_operator_executor import AbstractOperat
 from docpipe.core.orchestration.operator_factory import OperatorFactoryProvider
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_messages import ValidationCodeMessages
+from docpipe.integrations.secrets.node_config import prepare_operator_config
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.infrastructure.performance import cleanup_pyarrow_buffers, log_memory_usage
 
@@ -176,43 +177,13 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
             exc_info=True,
         )
 
-    @staticmethod
-    def _collect_vault_paths(obj: object, *, prefix: str = "") -> list[str]:
-        """Recursively collect JSON paths of vault references in an object."""
-        from docpipe.integrations.secrets.secret_provider import is_vault_reference
+    def _prepare_operator_config(self, *, operator_class: type[AbstractOperator]) -> dict[str, Any]:
+        """Resolve the references in this node's own declared fields (design D6).
 
-        if isinstance(obj, str) and is_vault_reference(obj):
-            return [prefix]
-        if isinstance(obj, dict):
-            found_dict: list[str] = []
-            for k, v in obj.items():
-                found_dict.extend(
-                    PythonOperatorExecutor._collect_vault_paths(v, prefix=f"{prefix}.{k}" if prefix else str(k))
-                )
-            return found_dict
-        if isinstance(obj, list):
-            found_list: list[str] = []
-            for i, item in enumerate(obj):
-                found_list.extend(PythonOperatorExecutor._collect_vault_paths(item, prefix=f"{prefix}[{i}]"))
-            return found_list
-        return []
-
-    def _resolve_operator_params(self) -> dict[str, Any]:
-        """Resolve any vault references in operator parameters."""
-        from docpipe.integrations.secrets.secret_provider import resolve_value
-
-        vault_paths = self._collect_vault_paths(self._params)
-        if not vault_paths:
-            return self._params
-
-        logger.info(
-            "Resolving vault references in operator '%s' config for paths: %s",
-            self._operator,
-            vault_paths,
-        )
-        resolved_params = resolve_value(self._params)
-        logger.info("Vault references resolved successfully for operator '%s'", self._operator)
-        return resolved_params
+        The merged ``_params`` also carry ``global_config`` and the flow definition;
+        a reference there is not this node's and is left alone.
+        """
+        return prepare_operator_config(operator_class=operator_class, config=self._params)
 
     def get_operator(self) -> AbstractOperator:
         """Return this executor's operator, constructing it on first use.
@@ -228,8 +199,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
         if clazz is None:
             raise DocpipeException(f"{ValidationCodeMessages.GET_OPERATOR_FAILED.value}: {self._operator}")
 
-        resolved_params = self._resolve_operator_params()
-        self._operator_instance = clazz(config=resolved_params)
+        self._operator_instance = clazz(config=self._prepare_operator_config(operator_class=clazz))
         return self._operator_instance
 
     def release(self) -> None:

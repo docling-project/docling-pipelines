@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for feature dropping and renaming in PythonOperatorExecutor."""
 
 from unittest.mock import Mock, patch
@@ -137,52 +140,3 @@ class TestPythonOperatorExecutorFeatures:
             assert "secret" not in out_tables[0].column_names
             assert "text" in out_tables[0].column_names
             assert "content" not in out_tables[0].column_names
-
-
-class TestPythonOperatorExecutorVaultResolution:
-    """Test vault reference collection and resolution in PythonOperatorExecutor."""
-
-    def test_collect_vault_paths(self) -> None:
-        """Test _collect_vault_paths finds all vault paths in nested config."""
-        config = {
-            "api_key": "vault://hashicorp/llm/openai#key",  # pragma: allowlist secret
-            "options": {
-                "secret_token": "vault://provider/auth#tok",  # pragma: allowlist secret
-                "normal": "val",
-            },
-            "array": [
-                "plain",
-                "vault://provider/items#0",
-            ],
-            "number": 123,
-        }
-        paths = PythonOperatorExecutor._collect_vault_paths(config)
-        assert "api_key" in paths
-        assert "options.secret_token" in paths
-        assert "array[1]" in paths
-        assert len(paths) == 3
-
-    @patch("docpipe.integrations.secrets.secret_provider.resolve_value")
-    def test_resolve_operator_params_with_vault_refs(self, mock_resolve_value: Mock) -> None:
-        """Test _resolve_operator_params invokes resolve_value when vault refs exist."""
-        mock_resolve_value.return_value = {"api_key": "resolved_key"}  # pragma: allowlist secret
-        executor = PythonOperatorExecutor(
-            name="test_executor",
-            operator="test_operator",
-            params={"api_key": "vault://hashicorp/llm#key"},  # pragma: allowlist secret
-        )
-        resolved = executor._resolve_operator_params()
-        mock_resolve_value.assert_called_once_with(executor._params)
-        assert resolved == {"api_key": "resolved_key"}  # pragma: allowlist secret
-
-    @patch("docpipe.integrations.secrets.secret_provider.resolve_value")
-    def test_resolve_operator_params_without_vault_refs(self, mock_resolve_value: Mock) -> None:
-        """Test _resolve_operator_params returns original params directly when no vault refs exist."""
-        executor = PythonOperatorExecutor(
-            name="test_executor",
-            operator="test_operator",
-            params={"normal_key": "normal_val"},
-        )
-        resolved = executor._resolve_operator_params()
-        mock_resolve_value.assert_not_called()
-        assert resolved == executor._params

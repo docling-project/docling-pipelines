@@ -3,6 +3,7 @@
 
 """Abstract base class and supporting types for all docpipe operators."""
 
+from abc import ABCMeta
 from enum import StrEnum
 from typing import Any
 
@@ -36,7 +37,27 @@ class OperatorCategory(StrEnum):
     Storage = "Storage"
 
 
-class AbstractOperator(AbstractTableTransform):  # type: ignore[misc]
+class _ConfigResolvingMeta(ABCMeta):
+    """Resolves the node's ``vault://`` references before any operator constructor runs.
+
+    Subclass constructors call ``super().__init__(config)`` and then keep reading their
+    own ``config`` argument, so a resolver call inside ``AbstractOperator.__init__`` alone
+    could not hand them the resolved values. Resolving here, once, covers direct
+    construction, the Python executor, and every custom operator (design D1). The
+    executor resolves first; its result is marked so this pass makes no second request.
+    """
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        from docpipe.integrations.secrets.node_config import prepare_operator_config
+
+        if "config" in kwargs:
+            kwargs["config"] = prepare_operator_config(operator_class=cls, config=kwargs["config"])
+        elif args and isinstance(args[0], dict):
+            args = (prepare_operator_config(operator_class=cls, config=args[0]), *args[1:])
+        return super().__call__(*args, **kwargs)
+
+
+class AbstractOperator(AbstractTableTransform, metaclass=_ConfigResolvingMeta):  # type: ignore[misc]
     """Base class for all docpipe operators.
 
     Extends ``AbstractTableTransform`` from data-prep-toolkit and enforces
