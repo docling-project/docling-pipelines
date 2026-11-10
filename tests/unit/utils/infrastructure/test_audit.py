@@ -172,3 +172,69 @@ def test_stdout_is_not_required_for_capture() -> None:
         logging.getLogger(AUDIT_LOGGER_NAME).removeHandler(handler)
 
     assert json.loads(stream.getvalue())["short_name"] == "op"
+
+
+def test_emit_resolution_audit_record(capsys: pytest.CaptureFixture[str]) -> None:
+    from docpipe.core.models.session_info import create_session_info
+    from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
+
+    # Set up session info
+    create_session_info(job_id="test-job", job_run_id="test-run")
+
+    # Emit a resolved record
+    emit_resolution_audit_record(
+        node_name="node_1",
+        config_key="provider_config.password",
+        provider="hashicorp",
+        outcome="resolved",
+        correlation_id="corr-123",
+    )
+
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.startswith("{")]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["job_id"] == "test-job"
+    assert record["job_run_id"] == "test-run"
+    assert record["node"] == "node_1"
+    assert record["config_key"] == "provider_config.password"
+    assert record["provider"] == "hashicorp"
+    assert record["outcome"] == "resolved"
+    assert record["correlation_id"] == "corr-123"
+    assert "timestamp" in record
+
+    # Emit a policy denial record (which should go as WARNING)
+    emit_resolution_audit_record(
+        node_name="node_2",
+        config_key="provider_config.token",
+        provider="hashicorp",
+        outcome="not permitted",
+        correlation_id="corr-456",
+    )
+
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.startswith("{")]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["node"] == "node_2"
+    assert record["outcome"] == "not permitted"
+
+
+def test_ds_log_level_warning_does_not_hide_resolution_records(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from docpipe.core.models.session_info import create_session_info
+    from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
+
+    create_session_info(job_id="test-job", job_run_id="test-run")
+    monkeypatch.setenv("DS_LOG_LEVEL", "WARNING")
+
+    emit_resolution_audit_record(
+        node_name="node_1",
+        config_key="provider_config.password",
+        provider="hashicorp",
+        outcome="resolved",
+        correlation_id="corr-123",
+    )
+
+    assert '"outcome":"resolved"' in capsys.readouterr().out
