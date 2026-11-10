@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS } from './http-headers';
+import { BODY_HEADERS, buildForwardHeaders } from './http-headers';
 
 const logger = log4js.getLogger('validation.controller');
 
@@ -15,7 +15,7 @@ const validateFlow = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/validation/validate_flow?is_elyra=${is_elyra}`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.post(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.json(response.data);
 

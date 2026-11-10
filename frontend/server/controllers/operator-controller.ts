@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from './http-headers';
+import { BODY_HEADERS, NO_BODY_HEADERS, buildForwardHeaders } from './http-headers';
 
 const logger = log4js.getLogger('operator.controller');
 
@@ -9,12 +9,12 @@ const logger = log4js.getLogger('operator.controller');
  * Fetch operator metadata from backend API
  * This is the BFF controller that proxies requests to the Python FastAPI backend
  */
-const fetchOperatorMetadata = async (_req: Request, res: Response) => {
+const fetchOperatorMetadata = async (req: Request, res: Response) => {
   try {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/operators/metadata`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -37,7 +37,7 @@ const enrichFlowFeatures = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/validation/enrich_flow_features`;
     logUtil.debug({ logger, message: 'Enriching flow features', data: requestUrl });
 
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.post(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -77,7 +77,7 @@ const fetchProviderModels = async (req: Request, res: Response) => {
     logUtil.debug({ logger, message: 'Fetching provider models', data: { provider, url: requestUrl } });
 
     const response = await axios.get(requestUrl, {
-      headers: { Accept: 'application/json' },
+      headers: buildForwardHeaders(req, NO_BODY_HEADERS),
     });
 
     res.json(response.data);

@@ -7,6 +7,7 @@ import { routes as projectsRoutes } from './controllers/projects-controller';
 import { routes as documentClassRoutes } from './controllers/document-class-controller';
 import { routes as validationRoutes } from './controllers/validation-controller';
 import { log4js, logUtil } from '../src/utils/logger';
+import { resolveBffHost } from './bind-host';
 
 const logger = log4js.getLogger('bff.server');
 
@@ -22,7 +23,8 @@ if (!process.env.BACKEND_API_URL) {
 }
 
 const app = express();
-const PORT = process.env.BFF_PORT || 3001;
+const PORT = Number(process.env.BFF_PORT) || 3001;
+const HOST = resolveBffHost();
 
 // Middleware
 app.use(express.json());
@@ -51,7 +53,7 @@ app.use((err: Error & { status?: number }, req: express.Request, res: express.Re
 });
 
 // Start server
-app.listen(PORT, () => {
-  logUtil.info({ logger, message: 'Server running', data: { url: `http://localhost:${PORT}` } });
+app.listen(PORT, HOST, () => {
+  logUtil.info({ logger, message: 'Server running', data: { url: `http://${HOST}:${PORT}`, host: HOST } });
   logUtil.info({ logger, message: 'Ready to proxy API requests to backend' });
 });

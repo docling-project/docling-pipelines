@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from './http-headers';
+import { BODY_HEADERS, NO_BODY_HEADERS, buildForwardHeaders } from './http-headers';
 
 const logger = log4js.getLogger('job-run.controller');
 
@@ -13,7 +13,7 @@ const createJobRun = async (req: Request, res: Response) => {
   try {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs`;
 
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.post(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.status(response.status).json(response.data);
 
@@ -43,7 +43,7 @@ const getJobRuns = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs?${params.toString()}`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -69,7 +69,7 @@ const getJobRun = async (req: Request, res: Response) => {
     const params = new URLSearchParams({ include_logs: include_logs.toString() });
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}?${params.toString()}`;
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -92,7 +92,7 @@ const cancelJobRun = async (req: Request, res: Response) => {
     const { jobRunId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}/cancel`;
 
-    const response = await axios.post(requestUrl, {}, { headers: BODY_HEADERS });
+    const response = await axios.post(requestUrl, {}, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.status(response.status).json(response.data);
 
@@ -115,7 +115,7 @@ const deleteJobRun = async (req: Request, res: Response) => {
     const { jobRunId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}`;
 
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.delete(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.status(response.status).send();
 
@@ -129,6 +129,9 @@ const deleteJobRun = async (req: Request, res: Response) => {
   }
 };
 
+const isReadableStream = (value: unknown): boolean =>
+  typeof value === 'object' && value !== null && typeof (value as { pipe?: unknown }).pipe === 'function';
+
 /**
  * Download job run report
  * BFF controller that proxies job run report download to Python FastAPI backend
@@ -139,7 +142,7 @@ const downloadJobRunReport = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}/report`;
 
     const response = await axios.get(requestUrl, {
-      headers: { 'Accept': 'text/csv' },
+      headers: buildForwardHeaders(req, { Accept: 'text/csv' }),
       responseType: 'stream',
     });
 
@@ -158,7 +161,12 @@ const downloadJobRunReport = async (req: Request, res: Response) => {
     logUtil.error({ logger, message: 'Error downloading job run report', data: error.message });
 
     const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to download job run report' };
+    // With responseType 'stream' the upstream error body is a stream, which
+    // cannot be serialised as JSON, so fall back to a generic message.
+    const upstreamBody = error.response?.data;
+    const errorData = isReadableStream(upstreamBody) || upstreamBody === undefined || upstreamBody === null
+      ? { error: 'Failed to download job run report' }
+      : upstreamBody;
 
     res.status(status).json(errorData);
   }
@@ -173,7 +181,7 @@ const getJobRunFlowDefinition = async (req: Request, res: Response) => {
     const { jobRunId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/job_runs/${jobRunId}/flow_definition`;
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 

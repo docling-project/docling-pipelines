@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from './http-headers';
+import { BODY_HEADERS, NO_BODY_HEADERS, buildForwardHeaders } from './http-headers';
 
 const logger = log4js.getLogger('flow.controller');
 
@@ -13,7 +13,7 @@ const createFlow = async (req: Request, res: Response) => {
   try {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows?is_elyra=true`;
 
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.post(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.status(response.status).json(response.data);
 
@@ -36,7 +36,7 @@ const getFlow = async (req: Request, res: Response) => {
     const { flowId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}`;
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -71,7 +71,7 @@ const getFlows = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows?${params.toString()}`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -94,7 +94,7 @@ const updateFlow = async (req: Request, res: Response) => {
     const { flowId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}?is_elyra=true`;
 
-    const response = await axios.put(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.put(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -144,14 +144,14 @@ const patchFlow = async (req: Request, res: Response) => {
     let body = req.body;
 
     if (req.body.name) {
-      const current = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+      const current = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
       body = {
         ...req.body,
         definition: syncElyraDefinitionName(current.data.definition, req.body.name),
       };
     }
 
-    const response = await axios.patch(requestUrl, body, { headers: BODY_HEADERS });
+    const response = await axios.patch(requestUrl, body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -174,7 +174,7 @@ const deleteFlow = async (req: Request, res: Response) => {
     const { flowId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}`;
 
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.delete(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.status(response.status).send();
 
@@ -203,7 +203,7 @@ const bulkDeleteFlows = async (req: Request, res: Response) => {
     const params = new URLSearchParams({ flow_ids });
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows?${params.toString()}`;
 
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.delete(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -241,7 +241,7 @@ const getFlowsByProject = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects/${projectId}/flows?${params.toString()}`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 

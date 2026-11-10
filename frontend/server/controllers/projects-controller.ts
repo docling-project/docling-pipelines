@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from './http-headers';
+import { BODY_HEADERS, NO_BODY_HEADERS, buildForwardHeaders } from './http-headers';
 
 const logger = log4js.getLogger('projects.controller');
 
@@ -13,7 +13,7 @@ const createProject = async (req: Request, res: Response) => {
   try {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects`;
 
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.post(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.status(response.status).json(response.data);
 
@@ -49,7 +49,7 @@ const getProjects = async (req: Request, res: Response) => {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects?${params.toString()}`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -72,7 +72,7 @@ const getProject = async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects/${projectId}`;
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.get(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -95,7 +95,7 @@ const replaceProject = async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects/${projectId}`;
 
-    const response = await axios.put(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.put(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -118,7 +118,7 @@ const patchProject = async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects/${projectId}`;
 
-    const response = await axios.patch(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await axios.patch(requestUrl, req.body, { headers: buildForwardHeaders(req, BODY_HEADERS) });
 
     res.json(response.data);
 
@@ -141,7 +141,7 @@ const deleteProject = async (req: Request, res: Response) => {
     const { projectId } = req.params;
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects/${projectId}`;
 
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await axios.delete(requestUrl, { headers: buildForwardHeaders(req, NO_BODY_HEADERS) });
 
     res.status(response.status).send();
 
