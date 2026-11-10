@@ -159,7 +159,7 @@ class MilvusResourceMetadata:
                 "is_primary": field.get("is_primary", False),
                 "description": field.get("description", ""),
             }
-            if "FLOAT_VECTOR" in dtype:
+            if "FLOAT_VECTOR" in dtype or "BINARY_VECTOR" in dtype:
                 params = field.get("params", {})
                 entry["dimension"] = params.get("dim")
                 indexes = field.get("indexes", [])
@@ -263,20 +263,26 @@ class MilvusResourceMetadata:
             return {"collection_name": collection_name, "supported": True}
 
         # "type" is always a normalised uppercase string produced by _dtype_name()
-        has_float_vector = any("FLOAT_VECTOR" in f.get("type", "") for f in schema.values())
-        if not has_float_vector:
+        has_vector = any(
+            any(v in f.get("type", "") for v in ("FLOAT_VECTOR", "BINARY_VECTOR")) for f in schema.values()
+        )
+        if not has_vector:
             return {
                 "collection_name": collection_name,
                 "supported": False,
-                "reason": "no FLOAT_VECTOR field",
+                "reason": "no vector field",
             }
 
-        has_index = any(f.get("index_created", False) for f in schema.values() if "FLOAT_VECTOR" in f.get("type", ""))
+        has_index = any(
+            f.get("index_created", False)
+            for f in schema.values()
+            if any(v in f.get("type", "") for v in ("FLOAT_VECTOR", "BINARY_VECTOR"))
+        )
         if not has_index:
             return {
                 "collection_name": collection_name,
                 "supported": False,
-                "reason": "no index on FLOAT_VECTOR field",
+                "reason": "no index on vector field",
             }
 
         return {"collection_name": collection_name, "supported": True}
