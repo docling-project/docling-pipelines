@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Lifecycle execution event contexts passed to ExecutionLifecycleObserverPort."""
 
 from dataclasses import dataclass, field
@@ -157,6 +160,8 @@ class NodeCompleteContext:
     end_time: datetime | str | None = None
     batch_id: str | None = None
     batch_num: int | None = None
+    # Key names the node's operator declares as secret-capable; lineage statistics drop them.
+    secret_field_names: frozenset[str] = frozenset()
 
 
 @dataclass

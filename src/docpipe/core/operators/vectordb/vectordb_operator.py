@@ -156,7 +156,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             if schema_template_path:
                 adapter_config[SCHEMA_TEMPLATE_PATH_KEY] = schema_template_path
 
-            self.adapter: VectorStorePort = VectorStoreFactory.create(self.provider, **adapter_config)
+            self.adapter: VectorStorePort
+            self._schema_cls = VectorStoreFactory.get_adapter_class(self.provider).get_config_schema()
+            # While a flow is validated, a reference is replaced by a stand-in. The adapter
+            # connects when it is built, so it is not built then (the attribute stays unset and
+            # validate() reads only the config schema); no server sees the stand-in.
+            if not self._holds_validation_sentinel(config=config):
+                self.adapter = VectorStoreFactory.create(self.provider, **adapter_config)
         except Exception as e:
             safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
             raise DocpipeException(
@@ -170,6 +176,14 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             self.provider,
             extra=self.common_log_arguments,
         )
+
+    @staticmethod
+    def _holds_validation_sentinel(*, config: dict[str, Any]) -> bool:
+        """Return True while a flow is validated and a provider setting is the reference stand-in."""
+        if not config.get(DocpipeConstants.VALIDATING_FLOW):
+            return False
+        provider_config = config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
+        return DocpipeConstants.VALIDATION_SECRET_SENTINEL in provider_config.values()
 
     def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
         """
@@ -190,9 +204,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         # Validate provider_config required fields via the adapter's own Pydantic schema.
         # This keeps VectorDBOperator provider-agnostic: adding a new adapter only requires
         # its config model to declare required fields — no if/elif changes here.
-        schema_cls = self.adapter.get_config_schema()
         try:
-            schema_cls.model_validate(provider_config)
+            self._schema_cls.model_validate(provider_config)
         except ValidationError as exc:
             for error in exc.errors():
                 field_name = ".".join(str(loc) for loc in error["loc"])
@@ -204,7 +217,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         # Reject index settings that cannot work with the vector kinds produced upstream (e.g. BIN_* without
         # a binary vector feature). Only possible when the validator supplied the propagated feature types.
         feature_types: dict[str, str | None] | None = self.config.get(DocpipeConstants.VALIDATION_FEATURE_TYPES)
-        if feature_types is not None and not errors:
+        if feature_types is not None and not errors and hasattr(self, "adapter"):
             try:
                 self.adapter.validate_vector_feature_types(feature_types=feature_types)
             except DocpipeException as exc:

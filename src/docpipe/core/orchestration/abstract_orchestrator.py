@@ -579,6 +579,7 @@ class AbstractOrchestrator(ABC):
 
         if not skip:
             from docpipe.core.lineage.utils import LineageUtils
+            from docpipe.core.operators.secret_fields import declared_key_names
             from docpipe.core.orchestration.models.execution_event_context import NodeCompleteContext
 
             # Track the last output table for flow-level COMPLETE lineage event
@@ -610,6 +611,7 @@ class AbstractOrchestrator(ABC):
                     sink_dataset_namespace=sink_ns,
                     sink_dataset_name=sink_name,
                     has_downstream=bool(op_def.get(DocpipeConstants.OUTPUT_EDGES)),
+                    secret_field_names=declared_key_names(metadata=type(executor.get_operator()).get_metadata()),
                 ),
             )
 

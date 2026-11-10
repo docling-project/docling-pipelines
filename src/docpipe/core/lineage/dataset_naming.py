@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenLineage dataset identity: maps an adapter config to a ``(namespace, name)`` pair.
 
 Sources and sinks both go through :func:`get_dataset_info`, so the same physical location gets the same
@@ -18,6 +21,11 @@ from urllib.parse import urlparse
 
 # Placeholder used in a dataset ID when the config does not say (e.g. no bucket configured).
 _UNKNOWN = "unknown"
+# Stands in for any component of a dataset ID whose config field holds a ``vault://`` reference. The
+# reference text and the value it resolves to must never reach a lineage event, so a component that
+# would be built from one is replaced by this fixed text (design D11).
+REFERENCE_PLACEHOLDER = "secret-reference"
+_REFERENCE_MARKER = "vault://"
 # Dataset name used by the fallback for an unrecognised provider with nothing configured to name it.
 _ROLE_DEFAULT_NAMES: dict[str, str] = {"source": "source", "destination": "output"}
 
@@ -208,7 +216,7 @@ def get_dataset_info(*, dataset_type: str, config: dict[str, Any], role: str | N
 
     # Normalise the provider the way IngestSourceOperator does (``.lower()``, plus ``.strip()`` for stray
     # whitespace), then apply aliases. Without this, "Box_Driver" or " S3 " would miss every rule below.
-    dataset_type = str(_resolve_value(value=dataset_type)).strip().lower()
+    dataset_type = str(_resolve_value(value=_mask_references(value=dataset_type))).strip().lower()
     dataset_type = _PROVIDER_ALIASES.get(dataset_type, dataset_type)
     resolved = _resolve_config(config=config)
 
@@ -226,6 +234,21 @@ def get_dataset_info(*, dataset_type: str, config: dict[str, Any], role: str | N
     return info or _generic_info(dataset_type=dataset_type, config=resolved, role=role)
 
 
+def _mask_references(*, value: Any) -> Any:
+    """Replace every string holding ``vault://`` text with :data:`REFERENCE_PLACEHOLDER`, keeping the shape.
+
+    A string that merely contains the marker is replaced whole, so a URL with a reference embedded in
+    its query cannot leak the rest of the reference.
+    """
+    if isinstance(value, str):
+        return REFERENCE_PLACEHOLDER if _REFERENCE_MARKER in value else value
+    if isinstance(value, list):
+        return [_mask_references(value=v) for v in value]
+    if isinstance(value, dict):
+        return {k: _mask_references(value=v) for k, v in value.items()}
+    return value
+
+
 def _resolve_value(*, value: Any) -> Any:
     """Resolve ``${VAR}`` / ``$VAR`` the way the adapters do, leaving unset variables as written."""
     from docpipe.core.operators.operator_utils import resolve_env_var
@@ -239,7 +262,11 @@ def _resolve_value(*, value: Any) -> Any:
 
 
 def _resolve_config(*, config: Any) -> dict[str, Any]:
-    """Return a shallow copy of a config dict with string (and list-of-string) values resolved."""
+    """Return a shallow copy of a config dict with string (and list-of-string) values resolved.
+
+    A value holding a ``vault://`` reference is replaced by :data:`REFERENCE_PLACEHOLDER` first, so the
+    reference is never expanded, parsed or copied into a dataset ID.
+    """
     if not isinstance(config, dict):
         return {}
-    return {k: _resolve_value(value=v) for k, v in config.items()}
+    return {k: _resolve_value(value=_mask_references(value=v)) for k, v in config.items()}

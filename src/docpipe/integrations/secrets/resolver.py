@@ -26,8 +26,12 @@ Failures raise :class:`SecretResolutionError`. Its message holds only a fixed
 category, the config key path, the provider name and a correlation identifier.
 The detail goes to the server-side log under the same identifier.
 
-The resolver does not expand ``$ENV`` forms, does not wire itself into any
-executor, and writes nothing to the ``docpipe.audit`` logger yet.
+:func:`inspect_node_references` applies the same checks that need no provider
+call (grammar, declaration, registration, path policy, destination binding) to a
+whole node without raising and without reading a secret. Flow validation uses it.
+
+The resolver does not expand ``$ENV`` forms and writes nothing to the
+``docpipe.audit`` logger yet.
 """
 
 import fnmatch
@@ -86,6 +90,32 @@ class SecretErrorCategory(StrEnum):
     MALFORMED_REFERENCE = "malformed reference"
     NOT_PERMITTED = "not permitted"
     VALUE_MUST_BE_STRING = "value must be a string"
+
+
+class FindingKind(StrEnum):
+    """Why :func:`inspect_node_references` reports a reference."""
+
+    MALFORMED = "malformed"
+    FIELD_NOT_SECRET_CAPABLE = "field not secret-capable"  # nosec B105  # pragma: allowlist secret
+    PROVIDER_NOT_REGISTERED = "provider not registered"
+    PATH_NOT_PERMITTED = "path not permitted"
+    DESTINATION_NOT_PERMITTED = "destination not permitted"
+
+
+@dataclass(frozen=True)
+class ReferenceFinding:
+    """One problem found with a reference by :func:`inspect_node_references`.
+
+    Attributes:
+        config_key: Dotted config key path of the field (display-safe).
+        kind: What is wrong.
+        provider: Provider name from the reference, or None when it did not parse
+            or the finding concerns a destination field.
+    """
+
+    config_key: str
+    kind: FindingKind
+    provider: str | None
 
 
 def _display(*, text: str) -> str:
@@ -483,6 +513,57 @@ class SecretResolver:
     # -- phase 1: checks that need no provider call --------------------------------
 
     @staticmethod
+    def _classify(
+        *,
+        path: ConfigPath,
+        text: str,
+        operator: str,
+        declared: list[tuple[str, ...]],
+        policy: SecretPolicy,
+    ) -> tuple[FindingKind | None, SecretReference | None]:
+        """Apply grammar, declaration, registration, and path policy to one reference-looking string.
+
+        Returns ``(None, None)`` when the text is not a reference at all, ``(None, reference)``
+        when it passed every check, and ``(kind, reference_or_None)`` for the first failing
+        check. No provider is called.
+        """
+        try:
+            reference = parse_reference(value=text)
+        except MalformedSecretReferenceError:
+            return FindingKind.MALFORMED, None
+        if reference is None:
+            return None, None
+        if not SecretResolver._is_declared(path=path, declared=declared):
+            return FindingKind.FIELD_NOT_SECRET_CAPABLE, reference
+        if get_provider(name=reference.provider) is None:
+            return FindingKind.PROVIDER_NOT_REGISTERED, reference
+        if not policy.permits(
+            reference=reference, operator=operator, config_key=".".join(str(segment) for segment in path)
+        ):
+            return FindingKind.PATH_NOT_PERMITTED, reference
+        return None, reference
+
+    _FAILURES: Final[dict[FindingKind, tuple[SecretErrorCategory, str]]] = {
+        FindingKind.MALFORMED: (SecretErrorCategory.MALFORMED_REFERENCE, "value is not exactly one valid reference"),
+        FindingKind.FIELD_NOT_SECRET_CAPABLE: (
+            SecretErrorCategory.NOT_PERMITTED,
+            "field is not secret-capable for this operator",
+        ),
+        FindingKind.PROVIDER_NOT_REGISTERED: (
+            SecretErrorCategory.PROVIDER_NOT_REGISTERED,
+            "provider is not registered",
+        ),
+        FindingKind.PATH_NOT_PERMITTED: (
+            SecretErrorCategory.NOT_PERMITTED,
+            "reference is outside secrets.vault.allowed_paths",
+        ),
+        FindingKind.DESTINATION_NOT_PERMITTED: (
+            SecretErrorCategory.NOT_PERMITTED,
+            "destination is not a reference and its host is not in secrets.vault.allowed_destinations",
+        ),
+    }
+
+    @staticmethod
     def _plan(
         *,
         node_name: str,
@@ -497,46 +578,22 @@ class SecretResolver:
         for path, text in SecretResolver._iter_strings(node=config):
             if not is_vault_reference(text):
                 continue
-            fail: dict[str, Any] = {
-                "node_name": node_name,
-                "operator": operator,
-                "path": path,
-                "correlation_id": correlation_id,
-            }
-            try:
-                reference = parse_reference(value=text)
-            except MalformedSecretReferenceError:
+            kind, reference = SecretResolver._classify(
+                path=path, text=text, operator=operator, declared=declared, policy=policy
+            )
+            if kind is not None:
+                category, reason = SecretResolver._FAILURES[kind]
                 raise SecretResolver._fail(
-                    category=SecretErrorCategory.MALFORMED_REFERENCE,
-                    provider=None,
-                    reason="value is not exactly one valid reference",
-                    **fail,
-                ) from None
+                    category=category,
+                    node_name=node_name,
+                    operator=operator,
+                    path=path,
+                    provider=reference.provider if reference is not None else None,
+                    correlation_id=correlation_id,
+                    reason=reason,
+                )
             if reference is None:
                 continue
-            if not SecretResolver._is_declared(path=path, declared=declared):
-                raise SecretResolver._fail(
-                    category=SecretErrorCategory.NOT_PERMITTED,
-                    provider=reference.provider,
-                    reason="field is not secret-capable for this operator",
-                    **fail,
-                )
-            if get_provider(name=reference.provider) is None:
-                raise SecretResolver._fail(
-                    category=SecretErrorCategory.PROVIDER_NOT_REGISTERED,
-                    provider=reference.provider,
-                    reason="provider is not registered",
-                    **fail,
-                )
-            if not policy.permits(
-                reference=reference, operator=operator, config_key=".".join(str(segment) for segment in path)
-            ):
-                raise SecretResolver._fail(
-                    category=SecretErrorCategory.NOT_PERMITTED,
-                    provider=reference.provider,
-                    reason="reference is outside secrets.vault.allowed_paths",
-                    **fail,
-                )
             sites.append(
                 _Site(
                     path=path,
@@ -561,6 +618,27 @@ class SecretResolver:
         return expanded if isinstance(expanded, str) else None
 
     @staticmethod
+    def _destination_violations(
+        *,
+        config: Mapping[str, Any],
+        declared: list[tuple[str, ...]],
+        policy: SecretPolicy,
+    ) -> list[tuple[str, ...]]:
+        """Return the declared destination fields whose literal host is not in ``allowed_destinations`` (D4b)."""
+        violations: list[tuple[str, ...]] = []
+        for field in declared:
+            if field[-1] not in DESTINATION_FIELD_NAMES:
+                continue
+            value = SecretResolver._get_path(config=config, path=field)
+            if not isinstance(value, str) or not value.strip() or is_vault_reference(value):
+                continue
+            literal = SecretResolver._expand_environment(value=value)
+            if literal is None or not literal.strip() or policy.destination_allowed(value=literal):
+                continue
+            violations.append(field)
+        return violations
+
+    @staticmethod
     def _check_destinations(
         *,
         node_name: str,
@@ -572,24 +650,58 @@ class SecretResolver:
         correlation_id: str,
     ) -> None:
         """Reject a literal destination that is not in ``allowed_destinations`` (design D4b)."""
-        for field in declared:
-            if field[-1] not in DESTINATION_FIELD_NAMES:
-                continue
-            value = SecretResolver._get_path(config=config, path=field)
-            if not isinstance(value, str) or not value.strip() or is_vault_reference(value):
-                continue
-            literal = SecretResolver._expand_environment(value=value)
-            if literal is None or not literal.strip() or policy.destination_allowed(value=literal):
-                continue
+        violations = SecretResolver._destination_violations(config=config, declared=declared, policy=policy)
+        if violations:
+            category, reason = SecretResolver._FAILURES[FindingKind.DESTINATION_NOT_PERMITTED]
             raise SecretResolver._fail(
-                category=SecretErrorCategory.NOT_PERMITTED,
+                category=category,
                 node_name=node_name,
                 operator=operator,
-                path=field,
+                path=violations[0],
                 provider=provider,
                 correlation_id=correlation_id,
-                reason="destination is not a reference and its host is not in secrets.vault.allowed_destinations",
+                reason=reason,
             )
+
+    @staticmethod
+    def inspect(*, operator_class: "type[AbstractOperator]", config: dict[str, Any]) -> list[ReferenceFinding]:
+        """Report every reference problem in ``config`` without raising and without a provider call.
+
+        Applies the phase-1 checks of :meth:`resolve` to all references (not only the first
+        failure) and the destination rule when at least one reference passed them.
+        Nothing is logged or audited: this is validation, not a resolution attempt.
+        """
+        if not has_vault_references(config):
+            return []
+        operator = str(getattr(operator_class, "short_name", "") or "")
+        declared = SecretResolver._declared_paths(metadata=operator_class.get_metadata(), config=config)
+        policy = SecretPolicy.load()
+        findings: list[ReferenceFinding] = []
+        passed = False
+        for path, text in SecretResolver._iter_strings(node=config):
+            if not is_vault_reference(text):
+                continue
+            kind, reference = SecretResolver._classify(
+                path=path, text=text, operator=operator, declared=declared, policy=policy
+            )
+            if kind is not None:
+                findings.append(
+                    ReferenceFinding(
+                        config_key=_display_path(path=path),
+                        kind=kind,
+                        provider=_display(text=reference.provider) if reference is not None else None,
+                    )
+                )
+            elif reference is not None:
+                passed = True
+        if passed:
+            findings.extend(
+                ReferenceFinding(
+                    config_key=_display_path(path=field), kind=FindingKind.DESTINATION_NOT_PERMITTED, provider=None
+                )
+                for field in SecretResolver._destination_violations(config=config, declared=declared, policy=policy)
+            )
+        return findings
 
     # -- phase 2: provider calls -----------------------------------------------------
 
@@ -736,3 +848,15 @@ def resolve_node_config(
             correlation identifier. The detail is in the server-side log.
     """
     return SecretResolver.resolve(node_name=node_name, operator_class=operator_class, config=config)
+
+
+def inspect_node_references(
+    *, operator_class: "type[AbstractOperator]", config: dict[str, Any]
+) -> list[ReferenceFinding]:
+    """List the problems with the ``vault://`` references in one node's configuration.
+
+    Used by flow validation. It checks grammar (malformed and embedded values), declaration,
+    provider registration, ``secrets.vault.allowed_paths``, and destination binding. It never
+    contacts a provider, never raises for a bad reference, and returns key paths only.
+    """
+    return SecretResolver.inspect(operator_class=operator_class, config=config)
