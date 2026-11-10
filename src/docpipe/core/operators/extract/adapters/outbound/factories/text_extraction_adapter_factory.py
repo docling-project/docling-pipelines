@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating text extraction adapters.
 
 This factory creates appropriate text extraction adapter instances based on the
@@ -346,6 +349,12 @@ class TextExtractionAdapterFactory:
             gpu_device = adapter_config.get(OperatorConstants.Extraction.DEVICE)
 
             if use_vlm:
+                if gpu_device:
+                    TextExtractionAdapterFactory._validate_gpu_config(
+                        adapter_config=adapter_config,
+                        max_workers=max_workers,
+                        use_processes=use_processes,
+                    )
                 TextExtractionAdapterFactory._validate_vlm_config(adapter_config)
                 logger.info(
                     "Creating DoclingAdapter with VLM enabled (preset: %s) and %s workers",

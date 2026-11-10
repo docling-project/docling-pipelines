@@ -145,15 +145,21 @@ class FeaturePropagator:
         - FlowValidator: Uses propagator for validation
     """
 
-    def __init__(self):
+    def __init__(self, *, orchestrator: Any = None):
         """Initialize the feature propagator.
 
         Loads operator metadata once during initialization for efficient
         feature lookups during propagation. Metadata loading failures for
         operators requiring external services are logged but don't prevent
         propagator initialization.
+
+        Args:
+            orchestrator: Optional orchestrator whose custom operator packages and
+                enable_custom_operators setting decide which operators (and so which
+                output features) are known. Without it, only the environment-resolved
+                setting applies, so an opt-in passed as a Python argument is lost.
         """
-        self.operator_metadata = OperatorMetadata()
+        self.operator_metadata = OperatorMetadata(orchestrator=orchestrator)
         # Load operator metadata once during initialization
         self.operator_metadata.get_operator_metadata(internal_features=True)
 
@@ -322,7 +328,8 @@ class FeaturePropagator:
             result.add_feature(
                 feature_name=feature_name,
                 node_id=node_id,
-                description=feature_def.get(OperatorConstants.Config.DESCRIPTION, ""),
+                description=input_feature.get(OperatorConstants.Config.DESCRIPTION)
+                or feature_def.get(OperatorConstants.Config.DESCRIPTION, ""),
                 tags=feature_def.get("tags", []),
                 available_for_filter=feature_def.get(
                     available_for_filter_key,
@@ -466,13 +473,15 @@ class FeaturePropagator:
         operator_config: dict[str, Any],
         result: FeaturePropagationResult,
     ) -> None:
-        """Mark the embeddings feature as a binary vector when the operator quantizes to packed bits."""
+        """Mark the embeddings feature as a binary vector and update its description when quantized to packed bits."""
         quantization = str(operator_config.get(OperatorConstants.Config.QUANTIZATION, "none")).lower()
-        if quantization not in ("binary", "ubinary"):
-            return
         embeddings_feature = result.feature_metadata.get(OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT)
         if embeddings_feature is not None:
-            embeddings_feature.type = OperatorConstants.Types.TYPE_VECTOR_BINARY
+            if quantization in ("binary", "ubinary"):
+                embeddings_feature.type = OperatorConstants.Types.TYPE_VECTOR_BINARY
+                embeddings_feature.description = "Binary vector embeddings for similarity search"
+            else:
+                embeddings_feature.description = "Dense vector embeddings for similarity search"
 
     @staticmethod
     def _apply_sql_filter_special_case(

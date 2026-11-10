@@ -9,7 +9,8 @@ The Milvus adapter provides vector database capabilities for the docpipe project
 - **Milvus Lite (container-free)**: Run locally without Docker, Podman, or Kubernetes — data persists to a local `.db` file
 - **Dual Deployment Support**: Works with standalone Milvus and wx.data in addition to Lite
 - **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX, SPARSE_INVERTED_INDEX, SPARSE_WAND
-- **Flexible Similarity Metrics**: L2, Inner Product (IP), COSINE, BM25 (only for sparse vectors)
+- **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE via `vector_mode: "gpu"` (standalone/remote Milvus built with GPU support)
+- **Flexible Similarity Metrics**: L2, Inner Product (IP), COSINE, BM25 (only for sparse vectors); GPU indexes support L2 and IP only
 - **Dense and Sparse Vectors**: Support for both dense embeddings and BM25 sparse vectors
 - **Batch Processing**: Efficient bulk operations with size-aware batching
 - **Automatic Schema Management**: Dynamic collection creation based on feature mappings
@@ -321,9 +322,10 @@ No Docker, Podman, or Kubernetes required. Data is persisted to a local `.db` fi
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `index_type` | string | No | "HNSW" | Index type (HNSW, IVF_FLAT, etc. Auto-set to SPARSE_INVERTED_INDEX in sparse mode) |
-| `metric_type` | string | No | "L2" | Similarity metric (L2, IP, COSINE for dense; BM25 for sparse) |
-| `index_parameters` | object | No | {} | Index-specific parameters |
+| `vector_mode` | string | No | inferred | `dense`, `sparse`, `binary` or `gpu`. When omitted: `sparse` if `add_sparse_vector` is true, otherwise inferred from `index_type` (`BIN_*` gives `binary`, `GPU_*` gives `gpu`, else `dense`) |
+| `index_type` | string | No | "HNSW" | Index type (HNSW, IVF_FLAT, GPU_CAGRA, etc.). Must belong to the `vector_mode`. The sparse field always uses SPARSE_INVERTED_INDEX in sparse mode |
+| `metric_type` | string | No | "L2" | Similarity metric (L2, IP, COSINE for dense; L2, IP for GPU indexes; HAMMING, JACCARD for binary; BM25 is used internally for the sparse field) |
+| `index_parameters` | object | No | {} | Index-specific parameters. For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree` |
 
 ### Operator Parameters
 
@@ -333,7 +335,7 @@ No Docker, Podman, or Kubernetes required. Data is persisted to a local `.db` fi
 | `provider_config.collection_name` | string | Yes | - | Name of the Milvus collection |
 | `embeddings_column` | string | No | "embeddings" | Column containing vectors |
 | `vector_dimension` | integer | No | 384 | Vector dimension (dense mode only) |
-| `add_sparse_vector` | boolean | No | false | Use BM25 sparse vectors instead of dense |
+| `add_sparse_vector` | boolean | No | false | Add BM25 sparse vectors (pure sparse or hybrid with dense). Equivalent to `vector_mode: "sparse"`; combining it with another `vector_mode` is rejected |
 | `batch_size` | integer | No | 100 | Batch size for operations |
 | `primary_key_field` | string | No | "pk" | Primary key field name |
 | `auto_id` | boolean | No | false | Auto-generate IDs |
@@ -389,6 +391,47 @@ No Docker, Podman, or Kubernetes required. Data is persisted to a local `.db` fi
 ### AUTOINDEX
 - **Best for**: Automatic optimization
 - **Parameters**: None (Milvus chooses optimal settings)
+
+## GPU Indexes
+
+Set `vector_mode: "gpu"` (or just a `GPU_*` `index_type`, which is inferred) to build a GPU index on dense `FLOAT_VECTOR` fields. The schema and ingestion path are the same as for CPU dense vectors, and index building runs on the Milvus server, so the server must be a GPU build (for example `milvusdb/milvus:<version>-gpu`).
+
+```json
+{
+  "provider": "milvus",
+  "provider_config": {
+    "collection_name": "docs_gpu",
+    "auth_type": "standalone",
+    "host": "localhost",
+    "port": 19530,
+    "vector_mode": "gpu",
+    "index_type": "GPU_CAGRA",
+    "metric_type": "IP",
+    "index_parameters": {
+      "intermediate_graph_degree": 64,
+      "graph_degree": 32
+    }
+  }
+}
+```
+
+| GPU index | Notes |
+|-----------|-------|
+| `GPU_CAGRA` | Graph-based index; `graph_degree` must be <= `intermediate_graph_degree` |
+| `GPU_IVF_FLAT` | Balance of speed and recall |
+| `GPU_IVF_PQ` | Lower GPU memory through product quantization |
+| `GPU_BRUTE_FORCE` | Exact search |
+
+Limits and validation (all checked before connecting, so flow validation reports them even when Milvus is unreachable):
+- Metrics: `L2` and `IP` only; `COSINE` is rejected.
+- GPU index types are rejected for `auth_type: "lite"`.
+- A CPU index type with `vector_mode: "gpu"`, or a GPU index type with `vector_mode: "dense"`, is rejected.
+- GPU indexes do not apply to binary vectors: a binary field in a mixed collection uses `BIN_FLAT`/`HAMMING`, and `vector_mode: "gpu"` with only binary vector features is rejected.
+- In a hybrid collection (`add_sparse_vector: true` with dense embeddings) the sparse field keeps `SPARSE_INVERTED_INDEX`/`BM25`, and the dense field's `index_type`, `metric_type` and `GPU_CAGRA` parameters are validated.
+- If the collection already exists it is not recreated, and `vector_mode`/`index_type` are not compared with its existing indexes.
+- If index creation fails after the collection was created, the collection is dropped.
+
+See [Milvus operator documentation](../../operators/vectordb/milvus.md#gpu-indexes) for GPU prerequisites and tuning.
 
 ## Similarity Metrics
 
