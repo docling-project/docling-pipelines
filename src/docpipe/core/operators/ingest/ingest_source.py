@@ -332,17 +332,7 @@ class IngestSourceOperator(AbstractOperator):
             return
 
         # Validate adapter configuration for adapter-managed providers.
-        # Skip when provider_config contains vault references — either still a
-        # vault:// string (execution path) or already replaced with the
-        # {"__vault_mock__": True} sentinel by the flow validator sanitizer.
-        # In both cases the real values are unavailable here and will be
-        # resolved at execution time.
-        from docpipe.integrations.secrets.secret_provider import is_vault_reference
-
-        provider_config_has_vault = any(
-            is_vault_reference(v) for v in self.provider_config.values() if isinstance(v, str)
-        ) or self.provider_config.get("__vault_mock__")
-        if self.provider in ADAPTER_MANAGED_PROVIDERS and not provider_config_has_vault:
+        if self.provider in ADAPTER_MANAGED_PROVIDERS:
             try:
                 # Attempt to build adapter config to trigger Pydantic validation
                 # This will catch missing required fields like secret_key
