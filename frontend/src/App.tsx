@@ -1,12 +1,13 @@
-import React, { lazy, Suspense, useState, useMemo, useCallback } from 'react';
+import React, { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Theme } from '@carbon/react';
-import { useTheme } from '@/hooks';
+import { useTheme, useAppDispatch } from '@/hooks';
 import { AppHeader, ErrorBoundary, Breadcrumb } from '@/components';
 import { ToastContainer, ProtectedRoute } from '@/components/common';
 import { BreadcrumbActionsContext, ThemeElementContext } from '@/contexts';
 import { ROUTES, routeConfig } from '@/config';
 import type { RouteConfig } from '@/config';
+import { bootstrapAuth } from '@/slices/authSlice';
 import styles from './App.module.scss';
 
 /**
@@ -64,6 +65,16 @@ const notFoundPage = lazyPage(() =>
 
 function App(): React.JSX.Element {
   const { theme } = useTheme();
+  const dispatch = useAppDispatch();
+  const bootstrappedRef = useRef(false);
+
+  useEffect(() => {
+    if (!bootstrappedRef.current) {
+      bootstrappedRef.current = true;
+      void dispatch(bootstrapAuth());
+    }
+  }, [dispatch]);
+
   // Callback ref stored in state: firing setThemeElement once after mount gives
   // ThemeElementContext a non-null value and triggers the single re-render needed
   // to propagate it to all consumers.  useRef alone won't work here because
