@@ -1077,6 +1077,47 @@ describe('MyComponent', () => {
 4. **Mock external dependencies**
 5. **Write descriptive test names**
 
+### Testing Role-Gated Components
+
+Components that gate actions by role read `useAuth()`, which reads the `auth` slice of the store. Render them with `renderWithProviders` and set the slice with `authStateFixture` from `tests/mocks/fixtures/store.fixture.ts`:
+
+```typescript
+// tests/unit/components/MyGatedButton.test.tsx
+import { screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { renderWithProviders } from '../../utils/renderWithProviders';
+import { authStateFixture } from '../../mocks/fixtures/store.fixture';
+import { MyGatedButton } from '@/components/MyGatedButton';
+
+describe('MyGatedButton', () => {
+  it('is disabled for a viewer', () => {
+    renderWithProviders(<MyGatedButton createdBy="eve" />, {
+      preloadedState: { auth: authStateFixture({ role: 'viewer' }) },
+    });
+    expect(screen.getByRole('button', { name: /create/i })).toBeDisabled();
+  });
+
+  it('is disabled for an editor on another user\'s asset', () => {
+    renderWithProviders(<MyGatedButton createdBy="eve" />, {
+      preloadedState: { auth: authStateFixture({ role: 'editor', username: 'sam' }) },
+    });
+    expect(screen.getByRole('button', { name: /create/i })).toBeDisabled();
+  });
+
+  it('is enabled for the owner and for an admin', () => {
+    renderWithProviders(<MyGatedButton createdBy="eve" />, {
+      preloadedState: { auth: authStateFixture({ role: 'editor', username: 'eve' }) },
+    });
+    expect(screen.getByRole('button', { name: /create/i })).toBeEnabled();
+  });
+});
+```
+
+- `authStateFixture({ role, username, overrides })` defaults to an authenticated `admin` named `test-user`.
+- The default test store is authenticated with auth disabled (administrator rights), so existing tests need no change.
+- Cover a viewer, an editor on their own asset, an editor on another user's asset, an admin and an asset without an owner for every gated action.
+- Gated controls are disabled, not hidden, and carry a tooltip. Assert on the disabled state and on the tooltip text.
+
 ---
 
 ## Accessibility
@@ -1180,7 +1221,23 @@ The frontend makes all API calls to relative `/api/*` paths. The BFF proxies the
 # frontend/.env
 BACKEND_API_URL=http://localhost:8000
 BFF_PORT=3001
+# BFF_HOST=127.0.0.1
 ```
+
+`BFF_HOST` is the BFF bind address. It defaults to `127.0.0.1`; the BFF container image sets it to `0.0.0.0`. `BACKEND_API_URL` is also read by `vite.config.ts` as the target of the `/auth` dev proxy.
+
+### Request Flow and Authentication
+
+```text
+Browser -> Vite (:3000) -- /api/* --> BFF (:3001) --> REST API /api/v1/*
+                        -- /auth/* --> REST API /auth/*   (never through the BFF)
+```
+
+- The axios client in `src/services/api/client.ts` sends cookies (`withCredentials`) and adds `X-Requested-With` on POST, PUT, PATCH and DELETE. It never reads or stores a token.
+- The BFF forwards only `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` to the REST API (`server/controllers/http-headers.ts`). New BFF controllers must build their upstream headers with `buildForwardHeaders` so the session reaches the backend.
+- `/auth/*` is served by the REST API only. A custom ingress must never route `/auth` to the BFF.
+- In development, register `http://localhost:3000/auth/oauth2/callback` as the OIDC redirect URI; the `/auth` Vite proxy forwards it to the REST API.
+- Gate UI actions with `useAuth()` (`canEdit`, `canAdmin`, `canModifyAsset(createdBy)`): disable the control and explain why in a tooltip. The backend enforces permissions.
 
 ### Usage in BFF controllers
 

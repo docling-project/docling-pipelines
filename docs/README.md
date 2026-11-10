@@ -41,7 +41,8 @@ Task-oriented guides to help you accomplish specific goals:
 - **[Document Libraries](guides/USER_GUIDE_DOCUMENT_LIBRARIES.md)** - Managing document collections
 - **[Document Class Utils](guides/DOCUMENT_CLASS_UTILS.md)** - Document schema utilities
 - **[Vault Integration](guides/VAULT_INTEGRATION_GUIDE.md)** - HashiCorp Vault secret resolution via `vault://` URIs
-- **[UI User Guide](guides/UI_USER_GUIDE.md)** - Using the React frontend
+- **[UI User Guide](guides/UI_USER_GUIDE.md)** - Using the React frontend: signing in, roles, and permission-gated actions
+- **[Frontend README](../frontend/README.md)** - Frontend development setup, BFF and `/auth` proxy topology, and testing role-gated components
 
 ### Best Practices
 - **[Logging Best Practices](guides/LOGGING_BEST_PRACTICES.md)** - Security-first logging, sensitive data handling, and NFR Point 12 compliance
