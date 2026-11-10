@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Dropbox source adapter using the official Dropbox Python SDK."""
 
-import hashlib
 import mimetypes
 from collections.abc import AsyncGenerator, Iterator
 from fnmatch import fnmatch
@@ -16,6 +18,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_fa
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
+from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -68,7 +71,7 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
                 config.app_key or "",
             ]
         )
-        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+        return cache_key_digest(namespace="dropbox_client", parts=[material])
 
     def _get_dropbox_client(self, *, config: DropboxSourceConfig) -> Dropbox:
         """Return a cached authenticated Dropbox client for the given credentials."""

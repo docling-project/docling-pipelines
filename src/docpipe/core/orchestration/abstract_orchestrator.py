@@ -3,6 +3,7 @@
 
 """Abstract base class for all docpipe flow orchestrators."""
 
+import sys
 import threading
 from abc import ABC, abstractmethod
 from operator import itemgetter
@@ -246,8 +247,24 @@ class AbstractOrchestrator(ABC):
         try:
             self.execute_flow(op_flow=op_flow, global_config=global_config)
         finally:
-            self._check_and_upload_deleted_rows()
-            self._cleanup_memmap_files()
+            try:
+                self._check_and_upload_deleted_rows()
+                self._cleanup_memmap_files()
+            finally:
+                self._release_run_secrets(job_run_id=job_run_id)
+
+    @staticmethod
+    def _release_run_secrets(*, job_run_id: str | None) -> None:
+        """Drop the run's scrubber entries, cache-key secret, and fetch caches when the run ends."""
+        from docpipe.integrations.secrets.registry import clear_run
+        from docpipe.utils.operators.binary_content_fetcher import clear_fetch_caches
+
+        clear_run(run_id=str(job_run_id) if job_run_id else None)
+        clear_fetch_caches()
+        # The REST client cache is keyed by digests under the run's key, so its entries cannot be hit again.
+        watsonx_module = sys.modules.get("docpipe.integrations.watsonx.rest_client")
+        if watsonx_module is not None:
+            watsonx_module.WatsonxRestEmbeddingClient.clear_client_cache()
 
     def _get_ingest_summary_message(self, *, output_table, deleted_docs_count: int, operator: dict) -> str | None:
         """Process and log ingest step results."""
