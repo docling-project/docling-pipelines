@@ -9,6 +9,8 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+
 
 def _make_adapter(extra_config=None):
     """Build a MilvusAdapter with all heavy dependencies mocked."""
@@ -250,3 +252,86 @@ class TestMilvusAdapterMissingCollectionName:
 
         with pytest.raises(ValueError, match="collection_name is required for the Milvus adapter"):
             MilvusAdapter(host="localhost", port=19530)
+
+
+class TestMilvusAdapterVectorMode:
+    """The adapter must resolve vector_mode and forward it to MilvusIndexManager and MilvusBatchProcessor."""
+
+    @staticmethod
+    def _build(extra_config):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.adapter import MilvusAdapter
+
+        base = "docpipe.core.operators.vectordb.adapters.outbound.milvus"
+        with (
+            patch(f"{base}.client.MilvusClient.__init__", return_value=None),
+            patch(f"{base}.client.MilvusClient.get_client", return_value=MagicMock()),
+            patch(f"{base}.adapter.MilvusIndexManager") as mock_manager,
+            patch(f"{base}.batch_processor.MilvusBatchProcessor.__init__", return_value=None) as mock_batch,
+        ):
+            adapter = MilvusAdapter(collection_name="c", **extra_config)
+        return adapter, mock_manager, mock_batch
+
+    def test_vector_mode_forwarded_to_index_manager(self):
+        _, mock_manager, _ = self._build({"vector_mode": "gpu", "index_type": "GPU_CAGRA"})
+        kwargs = mock_manager.call_args.kwargs
+        assert kwargs["vector_mode"] == "gpu"
+        assert kwargs["index_type"] == "GPU_CAGRA"
+
+    def test_vector_mode_defaults_to_dense(self):
+        adapter, mock_manager, _ = self._build({})
+        assert adapter.vector_mode == "dense"
+        assert adapter.add_sparse_vector is False
+        assert mock_manager.call_args.kwargs["vector_mode"] == "dense"
+
+    def test_add_sparse_vector_maps_to_sparse_mode(self):
+        adapter, mock_manager, _ = self._build({"add_sparse_vector": True})
+        assert adapter.vector_mode == "sparse"
+        assert adapter.add_sparse_vector is True
+        assert mock_manager.call_args.kwargs["vector_mode"] == "sparse"
+
+    def test_add_sparse_vector_conflicting_with_vector_mode_is_rejected(self):
+        with pytest.raises(DocpipeException, match="conflicts with vector_mode='gpu'"):
+            self._build({"vector_mode": "gpu", "index_type": "GPU_CAGRA", "add_sparse_vector": True})
+
+    def test_add_sparse_vector_with_sparse_vector_mode_is_accepted(self):
+        adapter, _, _ = self._build({"vector_mode": "sparse", "add_sparse_vector": True})
+        assert adapter.vector_mode == "sparse"
+        assert adapter.add_sparse_vector is True
+
+
+class TestMilvusAdapterValidatesBeforeConnecting:
+    """Invalid index configuration must fail before any Milvus client is created."""
+
+    @staticmethod
+    def _build_expecting_error(extra_config):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.adapter import MilvusAdapter
+
+        base = "docpipe.core.operators.vectordb.adapters.outbound.milvus"
+        with (
+            patch(f"{base}.adapter.MilvusClient") as mock_client_cls,
+            pytest.raises(DocpipeException) as exc_info,
+        ):
+            MilvusAdapter(collection_name="c", **extra_config)
+        return exc_info.value, mock_client_cls
+
+    @pytest.mark.parametrize(
+        ("config", "message"),
+        [
+            ({"vector_mode": "gpu", "index_type": "GPU_CAGRA", "metric_type": "COSINE"}, "COSINE"),
+            ({"vector_mode": "gpu", "index_type": "HNSW"}, "not supported in vector_mode='gpu'"),
+            ({"vector_mode": "quantum"}, "Invalid vector_mode"),
+            (
+                {
+                    "vector_mode": "gpu",
+                    "index_type": "GPU_CAGRA",
+                    "index_parameters": {"graph_degree": 64, "intermediate_graph_degree": 32},
+                },
+                "graph_degree",
+            ),
+            ({"vector_mode": "gpu", "index_type": "GPU_CAGRA", "auth_type": "lite"}, "Milvus Lite"),
+        ],
+    )
+    def test_invalid_config_never_creates_client(self, config, message):
+        error, mock_client_cls = self._build_expecting_error(config)
+        assert message in str(error)
+        mock_client_cls.assert_not_called()
