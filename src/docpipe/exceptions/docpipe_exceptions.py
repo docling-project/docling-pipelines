@@ -945,11 +945,23 @@ class CustomOperatorsDisabledException(DocpipeException):
         )
 
 
+class CustomOperatorUploadForbiddenException(DocpipeException):
+    """Exception raised when the caller is not an allowed custom operator uploader."""
+
+    def __init__(self, *, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=403,
+            error_code=ErrorCode.CUSTOM_OPERATOR_UPLOAD_FORBIDDEN,
+        )
+
+
 __all__ = [
     "ConfigurationError",
     "CustomOperatorAlreadyExistsException",
     "CustomOperatorInvalidDataException",
     "CustomOperatorNotFoundException",
+    "CustomOperatorUploadForbiddenException",
     "CustomOperatorsDisabledException",
     "DatabaseMigrationException",
     "DependencyError",

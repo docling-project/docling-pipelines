@@ -22,16 +22,21 @@ from docpipe.exceptions.docpipe_exceptions import (
     CustomOperatorInvalidDataException,
     CustomOperatorNotFoundException,
     CustomOperatorsDisabledException,
+    CustomOperatorUploadForbiddenException,
 )
+from docpipe.integrations.secrets.secret_provider import has_registered_provider
 from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
 from docpipe.storage.interfaces.key_value_storage_port import KeyValueStoragePort
 from docpipe.utils.infrastructure.audit import AuditAction, AuditOutcome, emit_audit_record
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
 CUSTOM_OPERATORS_COLLECTION = "custom_operators"
+CUSTOM_OPERATORS_CONFIG_SECTION = "custom_operators"
+ALLOWED_UPLOADERS_KEY = "allowed_uploaders"
 
 
 @dataclass
@@ -135,6 +140,23 @@ class CustomOperatorService:
                 )
             )
 
+    @staticmethod
+    def _require_allowed_uploader(*, caller: str | None) -> None:
+        """Restrict create, update and delete to ``custom_operators.allowed_uploaders`` when secrets are in use.
+
+        With no secret provider registered every authenticated caller is permitted. With one, an unset, empty or
+        malformed list permits nobody, and so does a missing caller. The refusal never names the configured list.
+        """
+        if not has_registered_provider():
+            return
+        section = DocpipeConfigLoader.get_config().get(CUSTOM_OPERATORS_CONFIG_SECTION)
+        allowed = section.get(ALLOWED_UPLOADERS_KEY) if isinstance(section, dict) else None
+        if caller and isinstance(allowed, list) and caller in allowed:
+            return
+        raise CustomOperatorUploadForbiddenException(
+            message="You are not permitted to create, update, or delete custom operators."
+        )
+
     def _refresh_operator_factories(self) -> None:
         """Safely refresh the existing cached operator factory in the current process."""
         if not OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None):
@@ -176,6 +198,7 @@ class CustomOperatorService:
                 description=description,
                 operator_file_path=operator_file_path,
                 original_filename=original_filename,
+                caller=caller,
                 ctx=ctx,
             )
 
@@ -186,10 +209,12 @@ class CustomOperatorService:
         description: str,
         operator_file_path: Path,
         original_filename: str | None,
+        caller: str | None,
         ctx: _AuditContext,
     ) -> CustomOperator:
         """Create an operator; records the learned audit fields on ``ctx``."""
         self._require_custom_operators_enabled()
+        self._require_allowed_uploader(caller=caller)
         if not name or not name.strip():
             raise CustomOperatorInvalidDataException(message="Operator name cannot be empty", field_name="name")
 
@@ -339,6 +364,7 @@ class CustomOperatorService:
                 description=description,
                 operator_file_path=operator_file_path,
                 original_filename=original_filename,
+                caller=caller,
                 ctx=ctx,
             )
 
@@ -350,9 +376,13 @@ class CustomOperatorService:
         description: str | None,
         operator_file_path: Path | None,
         original_filename: str | None,
+        caller: str | None,
         ctx: _AuditContext,
     ) -> CustomOperator:
         """Update an operator; records the learned audit fields on ``ctx``."""
+        if operator_file_path is not None:
+            self._require_custom_operators_enabled()
+        self._require_allowed_uploader(caller=caller)
         self._validate_uuid(operator_id=operator_id)
         current = self.get_operator(operator_id=operator_id)
         ctx.short_name = current.short_name
@@ -387,7 +417,6 @@ class CustomOperatorService:
             return current
 
         # File replacement update
-        self._require_custom_operators_enabled()
         validation_info = validate_operator_file(operator_file_path=operator_file_path)
         new_short_name = validation_info["short_name"]
 
@@ -438,10 +467,11 @@ class CustomOperatorService:
         """
         ctx = _AuditContext(operator_id=operator_id)
         with self._audited(action=AuditAction.DELETE, caller=caller, ctx=ctx):
-            self._delete_operator(operator_id=operator_id, ctx=ctx)
+            self._delete_operator(operator_id=operator_id, caller=caller, ctx=ctx)
 
-    def _delete_operator(self, *, operator_id: str, ctx: _AuditContext) -> None:
+    def _delete_operator(self, *, operator_id: str, caller: str | None, ctx: _AuditContext) -> None:
         """Delete an operator; records the learned audit fields on ``ctx``."""
+        self._require_allowed_uploader(caller=caller)
         self._validate_uuid(operator_id=operator_id)
 
         # 1. Ensure operator exists

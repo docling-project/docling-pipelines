@@ -261,6 +261,10 @@ class AbstractOrchestrator(ABC):
 
         clear_run(run_id=str(job_run_id) if job_run_id else None)
         clear_fetch_caches()
+        # Workers exist only when an untrusted custom operator ran under custom_operators.isolation=process.
+        worker_module = sys.modules.get("docpipe.core.orchestration.operator_loader.isolation.worker_client")
+        if worker_module is not None:
+            worker_module.get_worker_pool().release_run(run_id=str(job_run_id) if job_run_id else "")
         # The REST client cache is keyed by digests under the run's key, so its entries cannot be hit again.
         watsonx_module = sys.modules.get("docpipe.integrations.watsonx.rest_client")
         if watsonx_module is not None:

@@ -106,6 +106,20 @@ secrets:
 #   retention_days: 90
 #   file: ./data/audit/docpipe-audit.log   # default: <DOCPIPE_DATA_PATH>/audit/docpipe-audit.log
 
+# Who may create, update or delete custom operators once a secret provider is registered.
+# Usernames as authenticated by the API. An unset or empty list permits nobody (403).
+# With no secret provider registered every authenticated user may upload, as before.
+# Read routes stay open to any authenticated user.
+#
+# How an untrusted custom operator (uploaded through the API or fetched from an object store) may run.
+#   process   - in a separate worker process that holds no secret provider, token or other node's configuration.
+#   disabled  - the operator is refused ("not permitted").
+# Unset: "disabled" while a secret provider is registered; without a provider operators run as before.
+# custom_operators:
+#   allowed_uploaders:
+#     - alice
+#   isolation: process
+
 #
 #    # To use DuckDB (embedded database, no server required), uncomment below:
 #    type: duckdb

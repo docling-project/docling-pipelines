@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -31,8 +32,6 @@ from docpipe.core.constants.constants import (
     internal_metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
-from docpipe.core.job_management import NodeStats
-from docpipe.core.job_management.domain.utils import normalize_node_stats_for_dto
 from docpipe.exceptions.docpipe_exceptions import (
     FlowExecutionFailedException,
     FlowValidationException,
@@ -78,15 +77,12 @@ try:
 except ValueError:
     _DOCLING_AVAILABLE = "docling" in sys.modules
 
-# Pre-instantiate DocLangDocDeserializer at module import time under Python's import lock.
-# DocLangDocDeserializer is stateless pure-Python/Pydantic code and completely thread-safe.
+# DocLangDocDeserializer is stateless pure-Python/Pydantic code and completely thread-safe. It is created on first
+# use under a lock, not at import time: importing ``docling_core`` costs about 1.7 s, which every process that only
+# imports this module (for example an isolated custom operator worker) would otherwise pay.
 _DOCLANG_DESERIALIZER: Any | None = None
-try:
-    from docling_core.transforms.deserializer.doclang import DocLangDocDeserializer
-
-    _DOCLANG_DESERIALIZER = DocLangDocDeserializer()
-except ImportError:
-    pass
+_DOCLANG_DESERIALIZER_LOADED = False
+_DOCLANG_DESERIALIZER_LOCK = threading.Lock()
 
 _CONVERTER_POOL_KEY_PREFIX = "DocumentConverter:"
 
@@ -491,6 +487,7 @@ class OperatorUtils:
         Returns:
             A dictionary containing the operator logs.
         """
+        from docpipe.core.job_management.domain.utils import normalize_node_stats_for_dto
         from docpipe.utils.operators.logging import get_log_and_job_file_path
 
         _log_final_path, _, _, aggregated_job_log_path = get_log_and_job_file_path(job_id=job_id, jobrun_id=jobrun_id)
@@ -511,6 +508,8 @@ class OperatorUtils:
     @staticmethod
     def determine_final_job_status(*, node_stats_list: dict[str, Any]) -> ExecutionStatus:
         """Determines the most severe job status from a list of node statuses."""
+        from docpipe.core.job_management import NodeStats
+
         if not node_stats_list:
             return ExecutionStatus.STARTING
 
@@ -1548,7 +1547,19 @@ class OperatorUtils:
 
     @staticmethod
     def get_doclang_deserializer() -> Any | None:
-        """Get the module-level pre-instantiated DocLangDocDeserializer instance."""
+        """Return the shared DocLangDocDeserializer, creating it on first use, or None when docling_core is absent."""
+        global _DOCLANG_DESERIALIZER, _DOCLANG_DESERIALIZER_LOADED
+        if _DOCLANG_DESERIALIZER_LOADED:
+            return _DOCLANG_DESERIALIZER
+        with _DOCLANG_DESERIALIZER_LOCK:
+            if not _DOCLANG_DESERIALIZER_LOADED:
+                try:
+                    from docling_core.transforms.deserializer.doclang import DocLangDocDeserializer
+
+                    _DOCLANG_DESERIALIZER = DocLangDocDeserializer()
+                except ImportError:
+                    _DOCLANG_DESERIALIZER = None
+                _DOCLANG_DESERIALIZER_LOADED = True
         return _DOCLANG_DESERIALIZER
 
     @staticmethod
