@@ -215,7 +215,7 @@ Before starting, you'll need:
 - **Ollama** - Local LLM server for embeddings
 - **Podman or Docker** - For running OpenSearch
 - **Basic command-line knowledge** - For running commands
-- **ffmpeg** - Required for audio/video processing (M4A, AAC, OGG, FLAC, MP4, AVI, MOV formats)
+- **ffmpeg** - Required for audio/video processing (M4A, AAC, OGG, FLAC, MP4, AVI, MOV, MKV, WebM formats)
 
 ---
 
@@ -263,7 +263,7 @@ uv --version
 
 ### Installing ffmpeg (Required for Audio/Video Processing)
 
-ffmpeg is required for processing audio formats (M4A, AAC, OGG, FLAC) and all video formats (MP4, AVI, MOV) with Docling ASR.
+ffmpeg is required for processing audio formats (M4A, AAC, OGG, FLAC) and all video formats (MP4, AVI, MOV, MKV, WebM) with Docling ASR.
 
 **macOS (using Homebrew):**
 
@@ -325,7 +325,7 @@ This command:
 > If you intend to use VLM-based text extraction (`text_extraction.provider_config.vlm_pipeline`),
 > ASR transcription (`text_extraction.provider_config.asr_pipeline`), or Docling template-based
 > entity extraction (`entity_extraction.provider: "docling"`), install the `vlm_asr` optional
-> dependency group which provides `docling[vlm,asr]`:
+> dependency group which provides `docling[vlm,asr]` and the separate video dependencies:
 >
 > ```bash
 > uv sync --extra vlm_asr

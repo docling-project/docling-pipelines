@@ -179,7 +179,14 @@ class DoclingServeAdapter(TextExtractionPort):
 
         return DoclingServeConfig
 
-    def extract_single_document(self, *, file_path: str, binary_content: bytes, **kwargs: Any) -> dict[str, Any]:
+    def extract_single_document(
+        self,
+        *,
+        file_path: str,
+        binary_content: bytes,
+        file_extension: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Extract content from a single document using Docling Serve API.
 
         Sends the document to a remote Docling Serve instance for extraction.
@@ -188,6 +195,7 @@ class DoclingServeAdapter(TextExtractionPort):
         Args:
             file_path: Path to the document file (used for logging and filename preservation)
             binary_content: Binary content of the document
+            file_extension: Optional effective extension that takes precedence over the suffix of file_path
             **kwargs: Additional parameters (currently unused)
 
         Returns:
@@ -205,7 +213,7 @@ class DoclingServeAdapter(TextExtractionPort):
         logger.info("Processing file with docling-serve (formats: md + %s): %s", self.additional_formats, file_path)
 
         try:
-            file_suffix = Path(file_path).suffix.lower()
+            file_suffix = OperatorUtils.resolve_file_extension(doc_name=file_path, document_format=file_extension)
             if not file_suffix:
                 file_suffix = OperatorUtils.detect_extension_from_bytes(binary_content)
 
@@ -222,6 +230,8 @@ class DoclingServeAdapter(TextExtractionPort):
 
             # Extract filename from path to preserve extension for remote processing
             filename = Path(file_path).name
+            if file_suffix and Path(filename).suffix.lower() != file_suffix:
+                filename = str(Path(filename).with_suffix(file_suffix))
 
             # Initialize client and process document
             client = DoclingServeClient(

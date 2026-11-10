@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Service layer for custom operator management."""
 
 import uuid
@@ -9,11 +12,12 @@ from docpipe.core.constants.constants import OrchestratorType
 from docpipe.core.custom_operators.file_store import CustomOperatorFileStore, LocalFileStore
 from docpipe.core.custom_operators.models import CustomOperator, CustomOperatorStatus
 from docpipe.core.custom_operators.validation import validate_operator_file
-from docpipe.core.orchestration.operator_factory import OperatorFactoryProvider
+from docpipe.core.orchestration.operator_factory import OperatorFactory, OperatorFactoryProvider
 from docpipe.exceptions.docpipe_exceptions import (
     CustomOperatorAlreadyExistsException,
     CustomOperatorInvalidDataException,
     CustomOperatorNotFoundException,
+    CustomOperatorsDisabledException,
 )
 from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
 from docpipe.storage.interfaces.key_value_storage_port import KeyValueStoragePort
@@ -57,8 +61,22 @@ class CustomOperatorService:
                 field_name="operator_id",
             ) from e
 
+    @staticmethod
+    def _require_custom_operators_enabled() -> None:
+        """Refuse to store executable operator code that could never be loaded."""
+        if not OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None):
+            raise CustomOperatorsDisabledException(
+                message=(
+                    "Custom operators are disabled, so the operator was not stored. "
+                    "Set DOCPIPE_ENABLE_CUSTOM_OPERATORS=true to enable them."
+                )
+            )
+
     def _refresh_operator_factories(self) -> None:
         """Safely refresh the existing cached operator factory in the current process."""
+        if not OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None):
+            logger.info("Custom operators are disabled; skipping operator factory refresh")
+            return
         try:
             factory = OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON)
             factory.refresh_operators()
@@ -86,6 +104,7 @@ class CustomOperatorService:
         Returns:
             Created CustomOperator instance
         """
+        self._require_custom_operators_enabled()
         if not name or not name.strip():
             raise CustomOperatorInvalidDataException(message="Operator name cannot be empty", field_name="name")
 
@@ -249,6 +268,7 @@ class CustomOperatorService:
             return current
 
         # File replacement update
+        self._require_custom_operators_enabled()
         validation_info = validate_operator_file(operator_file_path=operator_file_path)
         new_short_name = validation_info["short_name"]
 
