@@ -319,3 +319,38 @@ class TestDocumentSetSerialization:
         assert restored.name == original.name
         assert restored.description == original.description
         assert restored.total_documents == original.total_documents
+
+
+class TestDocumentSetAccessors:
+    """Backward-compatible id alias, defaults and the timestamp accessors used for sorting."""
+
+    def test_id_aliases_asset_id(self):
+        doc_set = DocumentSet(name="Alias Set", asset_id="first-id")
+
+        assert doc_set.id == "first-id"
+        doc_set.id = "second-id"
+        assert doc_set.asset_id == "second-id"
+
+    def test_metadata_none_becomes_empty_dict(self):
+        assert DocumentSet(name="No Metadata", metadata=None).metadata == {}
+
+    def test_timestamp_accessors(self):
+        doc_set = DocumentSet(name="Timed Set")
+
+        assert doc_set.get_created_at() == doc_set.created_at
+        assert doc_set.get_updated_at() == doc_set.updated_at
+
+    def test_update_statistics_keeps_document_count_when_not_given(self):
+        doc_set = DocumentSet(name="Counted Set", total_documents=5)
+
+        doc_set.update_statistics(total_size_bytes=2048)
+
+        assert (doc_set.total_documents, doc_set.total_size_bytes) == (5, 2048)
+
+    def test_from_dict_restores_data_card(self):
+        card = DataCard(flow_id="flow-1", flow_name="Ingest", operators=["ingest_source", "document_set"])
+        data = DocumentSet(name="Carded Set", data_card=card).to_dict()
+
+        restored = DocumentSet.from_dict(data=data)
+
+        assert restored.data_card == card

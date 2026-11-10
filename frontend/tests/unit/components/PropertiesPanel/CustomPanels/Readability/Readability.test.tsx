@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen } from '@testing-library/react';
 import { ReadabilityPanelBody } from '@/components/PropertiesPanel/CustomPanels/Readability/Readability';
 
 function makeController(overrides: Record<string, unknown> = {}) {
@@ -13,13 +14,13 @@ function makeController(overrides: Record<string, unknown> = {}) {
 
 describe('ReadabilityPanelBody', () => {
   it('renders readability_score_list multi-select', () => {
-    render(<ReadabilityPanelBody controller={makeController()} />);
+    renderWithProviders(<ReadabilityPanelBody controller={makeController()} />);
     // FilterableMultiSelect renders a combobox
     expect(document.getElementById('readability_score_list')).not.toBeNull();
   });
 
   it('renders Readability scores label', () => {
-    render(<ReadabilityPanelBody controller={makeController()} />);
+    renderWithProviders(<ReadabilityPanelBody controller={makeController()} />);
     expect(screen.getAllByText('Readability scores').length).toBeGreaterThan(0);
   });
 
@@ -29,12 +30,12 @@ describe('ReadabilityPanelBody', () => {
         p.name === 'readability_score_list' ? ['flesch_kincaid_grade'] : undefined
       ),
     });
-    const { container } = render(<ReadabilityPanelBody controller={controller} />);
+    const { container } = renderWithProviders(<ReadabilityPanelBody controller={controller} />);
     expect(container.querySelector('#readability_score_list')).not.toBeNull();
   });
 
   it('renders panel container', () => {
-    const { container } = render(<ReadabilityPanelBody controller={makeController()} />);
+    const { container } = renderWithProviders(<ReadabilityPanelBody controller={makeController()} />);
     expect(container.firstChild).not.toBeNull();
   });
 });

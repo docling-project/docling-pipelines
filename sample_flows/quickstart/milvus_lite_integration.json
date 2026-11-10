@@ -1,0 +1,92 @@
+{
+  "flow_name": "milvus-lite-local-pipeline",
+  "description": "Container-free local pipeline using Milvus Lite: Ingest -> Extract -> Chunk -> Embeddings (sentence-transformers) -> Milvus Lite (.db file). No Docker, Podman, or Kubernetes required.",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "storage": "in-memory",
+    "execute_type": "local",
+    "enable_micro_batching": false
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_documents",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "./sample_documents"
+          ]
+        },
+        "include_filter": "pdf,txt,docx"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_content",
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        },
+        "entity_extraction": {
+          "provider": "none"
+        }
+      },
+      "depends_on": [
+        "ingest_documents"
+      ]
+    },
+    {
+      "type": "chunker",
+      "name": "chunk_documents",
+      "config": {
+        "chunk_type": "hybrid",
+        "doc_column": "content",
+        "chunk_size": 512,
+        "chunk_overlap": 50,
+        "retain_original_content": false
+      },
+      "depends_on": [
+        "extract_content"
+      ]
+    },
+    {
+      "type": "embeddings",
+      "name": "generate_embeddings",
+      "config": {
+        "provider": "huggingface",
+        "embeddings_column": "embeddings",
+        "provider_config": {
+          "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+          "use_local": true
+        }
+      },
+      "depends_on": [
+        "chunk_documents"
+      ]
+    },
+    {
+      "type": "vectordb",
+      "name": "store_in_milvus_lite",
+      "config": {
+        "provider": "milvus",
+        "doc_id_column": "doc_id_hash",
+        "add_sparse_vector": false,
+        "provider_config": {
+          "collection_name": "local_documents",
+          "auth_type": "lite",
+          "uri": "./data/milvus/local_documents.db",
+          "index_type": "FLAT",
+          "metric_type": "COSINE",
+          "batch_size": 100
+        }
+      },
+      "depends_on": [
+        "generate_embeddings"
+      ]
+    }
+  ]
+}

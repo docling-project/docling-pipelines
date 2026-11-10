@@ -15,19 +15,38 @@ Docling pipelines is an enterprise-grade document curation pipeline for Retrieva
 
 It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, Box, and more) and extracts content and entities from PDF, DOCX, HTML, images, and other formats using [Docling](https://github.com/docling-project/docling). Extracted content is curated for LLMs, converted into chunks and embeddings, and stored in a vector database such as Milvus or OpenSearch.
 
+## What's new in 2.1.0
+
+- **[Event-driven pipelines](docs/guides/EVENT_STREAMING_GUIDE.md)** — route Kafka events to saved flows, with file event support for Box, Dropbox, Google Drive, OneDrive, and SharePoint.
+- **[Entity storage](docs/operators/storage/entity_store_operator_readme.md)** — store curated entities in DuckDB or PostgreSQL with upserts and automatic schema evolution.
+- **[Local PII detection](docs/operators/quality/pii_and_hap_readme.md)** — use Microsoft Presidio as a local PII detection provider.
+- **[Distributed deduplication](docs/operators/quality/ededup_readme.md)** — deduplicate content across batches and workers using a shared registry.
+- **[Local archive ingestion](docs/operators/ingest/ingest_source_readme.md)** — process files from ZIP, TAR, TAR.GZ, TGZ, and GZ archives.
+- **[PostgreSQL asset repositories](docs/guides/ADVANCED_CONFIGURATION.md)** — store document library and document set assets in PostgreSQL.
+- **Faster processing** — improve embedding throughput with [cross-document batching](docs/operators/functional/embeddings_readme.md) and reuse [Docling converters](docs/operators/extract/extract_operator_readme.md) across extraction tasks.
+- **[CPU and GPU containers](docs/deployment/DOCKER_COMPOSE.md)** — build Docker images for the desired compute backend.
+- **[Automatic vector index management](docs/operators/vectordb/vectordb_readme.md)** — create missing indexes and validate existing schemas automatically.
+
+**Upgrade note:** The VectorDB `create_index` option is ignored with a warning. Index management is now automatic. See the [changelog](CHANGELOG.md#210---2026-11-04) for more details.
+
 ## Features
 
-- 📥 **Multi-source ingestion** — local filesystem, Amazon S3, IBM COS, SharePoint, OneDrive, Google Drive, Box, Dropbox, and web pages
-- 📄 **Document extraction** — PDF, DOCX, HTML, images, and more via Docling, with optional VLM and ASR pipelines
-- 🧠 **Entity extraction** — LLM-based extraction via LiteLLM (100+ providers), IBM watsonx.ai, or Docling templates
-- ✂️ **Chunking** — Docling-native and semantic chunking strategies
-- 🔢 **Embeddings** — vector embedding generation for any downstream vector store
-- 🔍 **Quality operators** — language detection, readability scoring, PII/HAP detection, deduplication, redaction, SQL filtering, document classification, and ML enrichment
-- 🗄️ **Vector storage** — write to OpenSearch or Milvus
-- 🔀 **DAG-based flows** — define pipelines as JSON with automatic dependency resolution and parallel execution
-- 🔌 **Extensible** — load custom operators from Python packages, local paths, or S3 without modifying core code
-- 🖥️ **Multiple interfaces** — CLI, Python API (`DocpipeFlowManager`), and REST API (FastAPI)
-- 🌐 **Web UI** *(beta)* — browser-based pipeline builder and run monitor; experimental and not yet recommended for production workloads
+- 📥 **[Multi-source ingestion](docs/operators/ingest/ingest_source_readme.md)** — local filesystem, Amazon S3, IBM COS, SharePoint, OneDrive, Google Drive, Box, Dropbox, and web pages
+- 📄 **[Document extraction](docs/operators/extract/extract_operator_readme.md)** — PDF, DOCX, HTML, images, and more via Docling, with configurable OCR engines, GPU acceleration, and optional VLM and ASR pipelines
+- 🧠 **[Entity extraction](docs/guides/UNIFIED_LLM_ARCHITECTURE_GUIDE.md)** — LLM-based extraction via LiteLLM (100+ providers), IBM watsonx.ai, or Docling templates
+- ✂️ **[Chunking](docs/operators/functional/chunker_readme.md)** — Docling-native and semantic chunking strategies
+- 🔢 **[Embeddings](docs/operators/functional/embeddings_readme.md)** — vector embedding generation for any downstream vector store
+- 🔍 **[Quality operators](docs/reference/OPERATORS.md)** — language detection, readability scoring, PII/HAP detection, deduplication, redaction, SQL filtering, document classification, and ML enrichment
+- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch or Milvus (including container-free Milvus Lite), or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
+- 🔀 **[DAG-based flows](docs/guides/FLOW_AUTHORING_FORMAT.md) & [micro-batching](docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md)** — define pipelines as JSON with automatic dependency resolution, parallel micro-batching, and distributed execution via Prefect (thread pools, process pools, or Docker work pools)
+- 🔄 **[Incremental processing](docs/reference/GLOBAL_CONFIG.md#incremental-processing)** — stateful delta runs (backed by Parquet or PostgreSQL) that track document changes, skip unchanged files, and optionally synchronize source deletions
+- ⚡ **[Event-driven streaming](docs/guides/EVENT_STREAMING_GUIDE.md)** — real-time Kafka event consumption with Schema Registry support and routing-key-to-flow mappings for automated create/update/delete triggers
+- 🔐 **[Enterprise security & governance](docs/guides/SECURITY_BEST_PRACTICES.md)** — [HashiCorp Vault](docs/guides/VAULT_INTEGRATION_GUIDE.md) (`vault://`) secret resolution, document [ACL extraction](docs/operators/extract/acl_readme.md) and [query-time enforcement](docs/api/ACL_DOCUMENT_RETRIEVAL.md), and [OAuth2/OIDC](docs/api/OAUTH2_AUTHENTICATION.md) + LDAP/JWT REST API authentication
+- 📊 **Observability, lineage & reporting** — [OpenLineage](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md) event emission, [OpenTelemetry](docs/guides/TELEMETRY_SETUP.md) distributed tracing and metrics, and automated per-run [CSV job reports](docs/guides/JOB_REPORT_GENERATION.md)
+- 🗂️ **Asset management** — organize pipelines and data with Projects, [Document Libraries](docs/guides/USER_GUIDE_DOCUMENT_LIBRARIES.md), [Document Sets](docs/operators/storage/document_set_readme.md), and custom [Document Class schemas](docs/reference/DOCUMENT_SCHEMAS.md) (backed by DuckDB or PostgreSQL)
+- 🔌 **[Extensible](docs/guides/CUSTOM_OPERATORS_GUIDE.md)** — load custom operators from Python packages, local paths, or S3 without modifying core code
+- 🖥️ **Multiple interfaces** — CLI (`docling-pipelines`, `docling-pipelines-api`), [Python API](docs/guides/PYTHON_API_GUIDE.md) (`DocpipeFlowManager`), [REST API](docs/api/REST_API_SERVER.md) (FastAPI), and a built-in [Documentation MCP server](docs_mcp/README.md) (`docling-pipelines-docs-mcp`) for AI coding agents
+- 🌐 **[Web UI](docs/guides/UI_USER_GUIDE.md)** *(beta)* — browser-based pipeline builder and run monitor; experimental and not yet recommended for production workloads
 
 ## Installation
 
@@ -37,9 +56,21 @@ pip install docling-pipelines
 
 Requires Python 3.12. Works on macOS and Linux (x86_64 and arm64).
 
+### Optional extras
+
+Install optional capabilities as needed:
+
+```bash
+pip install "docling-pipelines[event-streaming]"  # Kafka event consumer & Schema Registry
+pip install "docling-pipelines[lineage]"          # OpenLineage data lineage tracking
+pip install "docling-pipelines[telemetry]"        # OpenTelemetry tracing & metrics
+pip install "docling-pipelines[presidio]"         # Local Presidio PII detection provider
+pip install "docling-pipelines[vlm_asr]"          # Docling VLM and ASR pipelines
+```
+
 ### OCR Installation
 
-RapidOCR is included in the default PyPI installation and works out of the box. For advanced setups, platform-specific extras, or other OCR backends, see the [Extract Operator Guide](docs/operators/extract/extract_operator_readme.md).
+RapidOCR is included in the default PyPI installation and works out of the box. Additional OCR extras (`easyocr`, `tesserocr`, `ocrmac`) are also available. For advanced setups, platform-specific extras, or other OCR backends, see the [Extract Operator Guide](docs/operators/extract/extract_operator_readme.md).
 
 ### Lightweight variant
 
@@ -59,10 +90,11 @@ Validate without executing:
 docling-pipelines --flow-file flow.json --validate
 ```
 
-List all available operators:
+List all available operators or global configuration parameters:
 
 ```bash
 docling-pipelines --list-operators
+docling-pipelines --list-global-config
 ```
 
 ### 2. Python API
@@ -76,6 +108,26 @@ result = manager.execute()
 
 Log verbosity is controlled via `DS_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`).
 
+### 3. REST API
+
+Start the FastAPI server (and bundled UI at `/ui`):
+
+```bash
+docling-pipelines-api
+# or with custom host/port:
+uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
+```
+
+Interactive OpenAPI documentation is available at `http://localhost:8080/api/v1/docs`.
+
+### 4. Documentation MCP Server
+
+Give AI coding assistants searchable access to the documentation corpus:
+
+```bash
+docling-pipelines-docs-mcp
+```
+
 ## UI *(beta)*
 
 > **⚠️ Beta notice:** The web UI is experimental and **not production-ready**. It is under active development and may change significantly between releases. For production workloads, use the CLI, Python API, or REST API.
@@ -86,7 +138,7 @@ Docling pipelines includes a React + TypeScript frontend (IBM Carbon Design Syst
 
 ### Development setup
 
-**Prerequisites:** Node.js 22.15.1 (use `nvm use` in the `frontend/` directory), npm.
+**Prerequisites:** Node.js 22.15.1 (use `nvm use` in the `frontend/` directory), npm. Node.js is also required to install the Python package (`uv sync`, `uv pip install -e .`, `uv build`), because the build hook compiles the frontend.
 
 **1. Start the backend:**
 ```bash
@@ -104,7 +156,7 @@ npm run dev
 
 ### Production (bundled with the wheel)
 
-The frontend is automatically built and bundled into the wheel during `uv build`. After installing:
+The frontend is automatically built and bundled into the wheel during `uv build`. When `node` is available on `PATH`, the bundled Node.js BFF sidecar starts automatically alongside FastAPI. After installing:
 ```bash
 uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
 # UI available at http://localhost:8080/ui
@@ -120,6 +172,12 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 - [Pipeline Setup Guide](USER_GUIDE_PIPELINE_SETUP.md) — complete setup with Ollama, OpenSearch, and flow examples
 - [Flow Authoring Format](docs/guides/FLOW_AUTHORING_FORMAT.md) — declarative flow authoring
 - [Operator Reference](docs/reference/OPERATORS.md) — full parameter specs for all operators
+- [Global Configuration Reference](docs/reference/GLOBAL_CONFIG.md) — micro-batching, incremental processing, and Prefect settings
+- [REST API Server](docs/api/REST_API_SERVER.md) — endpoints, OAuth2/LDAP authentication, and ACL document retrieval
+- [Event Streaming Guide](docs/guides/EVENT_STREAMING_GUIDE.md) — Kafka event-driven execution and routing-key mappings
+- [Observability & Lineage](docs/guides/TELEMETRY_SETUP.md) — OpenTelemetry tracing, [OpenLineage](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md), and [CSV Job Reports](docs/guides/JOB_REPORT_GENERATION.md)
+- [Vault Integration](docs/guides/VAULT_INTEGRATION_GUIDE.md) — HashiCorp Vault `vault://` secret resolution
+- [Deployment Guides](docs/deployment/DOCKER_COMPOSE.md) — Docker Compose and [OpenShift](docs/deployment/OPENSHIFT.md) deployment
 - [Architecture](ARCHITECTURE.md) — system design and distributed execution patterns
 - [Troubleshooting](TROUBLESHOOTING.md) — common issues and solutions
 
@@ -131,8 +189,8 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 | **Extract** | Document Extractor (`extract_operator`), ACL Extraction (`acl_operator`) |
 | **Functional** | Chunking (`chunker`), Embeddings (`embeddings`), Branching Operator (`branching`), Merge Operator (`merge`), Document ID Hash (`doc_id_hash`), Entity Curation (`entity_curation`), No-op (`noop`) |
 | **Quality** | Language Annotator (`lang_detect`), Readability Operator (`readability`), PII and HAP Annotator (`pii_and_hap`), Document Classifier (`document_classifier`), Annotation Filter (`sql_filter`), Redaction (`redaction`), De-duplicator (`ededup`), ML Text Enrichment (`ml_enrichment`), Document Quality (`doc_quality`) |
-| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus |
-| **Storage** | Document Set (`document_set`) — DuckDB-backed document collections, Storage Output (`storage_output`) — write pipeline output to filesystem, S3, IBM COS, and more |
+| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, and Milvus Lite |
+| **Storage** | Document Set (`document_set`) — DuckDB/PostgreSQL-backed document collections, Storage Output (`storage_output`) — write pipeline output to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive |
 
 For per-operator configuration guides, see [Operator Configuration Guides](docs/reference/OPERATORS.md).
 

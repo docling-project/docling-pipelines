@@ -13,7 +13,9 @@ import {
   ErrorFilled,
   Misuse,
 } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
+import { messages } from './FlowRunsTable.messages';
 import styles from './FlowRunsTable.module.scss';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,32 +53,6 @@ export interface RunRow {
   /** Raw duration in seconds for accurate sorting. */
   duration_seconds?: number;
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const STATUS_OPTIONS = [
-  { id: 'all',             label: 'All'                   },
-  { id: 'run',             label: 'Completed'             },
-  { id: 'in_progress',     label: 'In progress'           },
-  { id: 'run_with_issues', label: 'Run with issues' },
-  { id: 'failed',          label: 'Failed'                },
-  { id: 'cancelled',       label: 'Canceled'              },
-];
-
-export const STATUS_LABELS: Record<RunStatus, string> = {
-  run:             'Completed',
-  in_progress:     'In progress',
-  run_with_issues: 'Run with issues',
-  failed:          'Failed',
-  cancelled:       'Canceled',
-};
-
-const TABLE_HEADERS = [
-  { key: 'start_time', header: 'Start time', isSortable: true },
-  { key: 'status',     header: 'Status'     },
-  { key: 'duration',   header: 'Duration',   isSortable: true },
-  { key: 'actions',    header: ''           },
-];
 
 // ─── StatusIcon ───────────────────────────────────────────────────────────────
 
@@ -133,6 +109,32 @@ export function FlowRunsTable({
   onCancelRun,
   onViewRun,
 }: FlowRunsTableProps): React.JSX.Element {
+  const intl = useIntl();
+
+  const STATUS_LABELS: Record<RunStatus, string> = {
+    run:             intl.formatMessage(messages.statusCompleted),
+    in_progress:     intl.formatMessage(messages.statusInProgress),
+    run_with_issues: intl.formatMessage(messages.statusRunWithIssues),
+    failed:          intl.formatMessage(messages.statusFailed),
+    cancelled:       intl.formatMessage(messages.statusCanceled),
+  };
+
+  const tableHeaders = [
+    { key: 'start_time', header: intl.formatMessage(messages.headerStartTime), isSortable: true },
+    { key: 'status',     header: intl.formatMessage(messages.headerStatus)     },
+    { key: 'duration',   header: intl.formatMessage(messages.headerDuration),  isSortable: true },
+    { key: 'actions',    header: ''                                            },
+  ];
+
+  const statusOptions = [
+    { id: 'all',             label: intl.formatMessage(messages.statusAll)            },
+    { id: 'run',             label: intl.formatMessage(messages.statusCompleted)      },
+    { id: 'in_progress',     label: intl.formatMessage(messages.statusInProgress)     },
+    { id: 'run_with_issues', label: intl.formatMessage(messages.statusRunWithIssues)  },
+    { id: 'failed',          label: intl.formatMessage(messages.statusFailed)         },
+    { id: 'cancelled',       label: intl.formatMessage(messages.statusCanceled)       },
+  ];
+
   const [statusFilter, setStatusFilter] = useState('all');
 
   const rowMap = useMemo(() => new Map(runs.map((r) => [r.run_id, r])), [runs]);
@@ -160,10 +162,10 @@ export function FlowRunsTable({
   return (
     <div className={styles.tableWrapper}>
       <SharedDataTable
-        headers={TABLE_HEADERS}
+        headers={tableHeaders}
         rows={filteredRows}
         searchable
-        searchPlaceholder="Search by start time"
+        searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
         loading={isLoading}
         size="lg"
         sortRow={(_cellA, _cellB, { key, sortDirection, rowIds: [idA, idB] }) => {
@@ -183,15 +185,15 @@ export function FlowRunsTable({
         }}
         renderToolbarLeft={() => (
           <div className={styles.toolbarLeft}>
-            <span className={styles.statusLabel}>Status</span>
+            <span className={styles.statusLabel}>{intl.formatMessage(messages.statusFilterLabel)}</span>
             <Dropdown
               id="run-status-filter"
-              label="All"
+              label={intl.formatMessage(messages.statusAll)}
               titleText=""
               hideLabel
-              items={STATUS_OPTIONS}
+              items={statusOptions}
               itemToString={(item) => item?.label ?? ''}
-              selectedItem={STATUS_OPTIONS.find((o) => o.id === statusFilter) ?? STATUS_OPTIONS[0]}
+              selectedItem={statusOptions.find((o) => o.id === statusFilter) ?? statusOptions[0]}
               onChange={({ selectedItem }) => { setStatusFilter(selectedItem?.id ?? 'all'); }}
               className={styles.statusDropdown}
             />
@@ -201,7 +203,7 @@ export function FlowRunsTable({
           <Button
             kind="ghost"
             renderIcon={Renew}
-            iconDescription="Refresh"
+            iconDescription={intl.formatMessage(messages.refreshDescription)}
             hasIconOnly
             tooltipPosition="bottom"
             disabled={isLoading}
@@ -233,33 +235,33 @@ export function FlowRunsTable({
               );
             case 'actions':
               return (
-                <OverflowMenu
-                  size="sm"
-                  flipped
-                  iconDescription="Row actions"
-                  selectorPrimaryFocus=".cds--overflow-menu-options__option"
-                >
-                  <OverflowMenuItem
-                    itemText="View run"
-                    onClick={() => { onViewRun(original.run_id); }}
-                  />
-                  {isInProgress ? (
-                    <OverflowMenuItem
-                      itemText="Cancel run"
-                      isDelete
-                      hasDivider
-                      onClick={() => { onCancelRun(original.run_id); }}
-                    />
-                  ) : (
-                    <OverflowMenuItem
-                      itemText="Delete"
-                      isDelete
-                      hasDivider
-                      onClick={() => { onDeleteRun(original); }}
-                    />
-                  )}
-                </OverflowMenu>
-              );
+                 <OverflowMenu
+                   size="sm"
+                   flipped
+                   iconDescription={intl.formatMessage(messages.rowActionsDescription)}
+                   selectorPrimaryFocus=".cds--overflow-menu-options__option"
+                 >
+                   <OverflowMenuItem
+                     itemText={intl.formatMessage(messages.actionViewRun)}
+                     onClick={() => { onViewRun(original.run_id); }}
+                   />
+                   {isInProgress ? (
+                     <OverflowMenuItem
+                       itemText={intl.formatMessage(messages.actionCancelRun)}
+                       isDelete
+                       hasDivider
+                       onClick={() => { onCancelRun(original.run_id); }}
+                     />
+                   ) : (
+                     <OverflowMenuItem
+                       itemText={intl.formatMessage(messages.actionDelete)}
+                       isDelete
+                       hasDivider
+                       onClick={() => { onDeleteRun(original); }}
+                     />
+                   )}
+                 </OverflowMenu>
+               );
             default:
               return undefined;
           }

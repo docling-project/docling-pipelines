@@ -3,13 +3,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CanvasConfig, ToolbarConfig } from '@elyra/canvas';
 import { IconButton, InlineLoading } from '@carbon/react';
-import { type CanvasController, CommonProperties } from '@elyra/canvas';
+import type { CanvasController } from '@elyra/canvas';
 import type { ClickActionSource } from '@elyra/canvas';
-import { IntlProvider } from 'react-intl';
+import { useIntl, type MessageDescriptor } from 'react-intl';
 import { useDateTimeFormatter } from '@/utils/dateTimeUtils';
 import { formatDateTime } from '@/utils/formatters';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
@@ -28,8 +27,7 @@ import type {
   EditActionHandler,
   ClickActionHandler,
 } from '@/types/canvas';
-import type { Flow, OperatorFeature } from '@/types';
-import { hasAnyRequiredParamMissing } from '@/utils/requiredParamValidation';
+import type { Flow } from '@/types';
 import type { FlowDefinition } from '@/types/flow';
 import type { PaletteData } from '@/types/palette';
 import {
@@ -47,7 +45,7 @@ import {
   type NotificationPanelState,
   type NotificationItem,
 } from '@/components/Canvas';
-import CommonPropertiesPanelWrapper from '@/components/PropertiesPanel/CommonPropertiesPanelWrapper';
+import { CommonPropertiesWrapper } from '@/components/PropertiesPanel';
 import { getParameterDef } from '@/services/parameterDefs';
 import { CANVAS_ACTIONS, JOB_ASSET_REF_TYPE } from '@/constants/canvasActions';
 import { NodeOperator, BRANCHING_OUTPORT_ID, MERGING_INPORT_ID } from '@/constants/operators';
@@ -77,6 +75,7 @@ import { LinkConditionTearsheet } from '@/components/ElyraCanvas/LinkConditionTe
 import type { LinkConditionValues } from '@/components/ElyraCanvas/LinkConditionTearsheet';
 import type { CriteriaJson } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
 import type { FeatureAttributes } from '@/types';
+import { messages } from './Canvas.messages';
 import styles from './Canvas.module.scss';
 
 const logger = log4js.getLogger('Canvas');
@@ -92,9 +91,10 @@ function asPromise(dispatchResult: unknown): Promise<unknown> {
  * inside CommonCanvas's tree), so useDateTimeFormatter() has intl context.
  */
 function LastSavedLabel({ date }: { date: Date | null }): React.JSX.Element {
+  const intl = useIntl();
   const { formatDate } = useDateTimeFormatter();
   const formatted = date ? formatDate(date, 'short', 'short') : '';
-  return <span className={styles.lastSaved}>{`Last saved ${formatted}`}</span>;
+  return <span className={styles.lastSaved}>{intl.formatMessage(messages.lastSaved, { date: formatted })}</span>;
 }
 
 /**
@@ -109,6 +109,7 @@ function LastSavedLabel({ date }: { date: Date | null }): React.JSX.Element {
  * - After save, runs async validation when "Validate flow" is enabled in flow run properties.
  */
 export function Canvas(): React.JSX.Element {
+  const intl = useIntl();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const { isDarkMode } = useTheme();
@@ -206,12 +207,6 @@ export function Canvas(): React.JSX.Element {
   const [linkInputFeatures, setLinkInputFeatures] = useState<Record<string, FeatureAttributes>>({});
   /** Auto-incrementing counter for default link names (Link_0, Link_1, …). */
   const linkNameCounterRef = useRef(0);
-  // Holds the Elyra propertiesController instance, obtained via the controllerHandler callback.
-  // Used to call applyPropertiesEditing(false) to auto-save before switching nodes.
-  const propertiesControllerRef = useRef<any>(null);
-  // Tracks the nodeId whose panel is currently open, so openNodePanel can auto-save before
-  // switching to a different node.
-  const openPanelNodeIdRef = useRef<string | null>(null);
   // Caches fetched paramDefs by operator name — all nodes of the same operator type share
   // the same static paramDef JSON, so one fetch serves every node of that type.
   const memoizedParamDefs = useRef<Record<string, any>>({});
@@ -336,7 +331,7 @@ export function Canvas(): React.JSX.Element {
           <IconButton
             kind="ghost"
             size="sm"
-            label="Flow run history"
+            label={intl.formatMessage(messages.flowRunHistory)}
             align="bottom-end"
             onClick={() => { setIsFlowRunHistoryOpen(true); }}
           >
@@ -345,7 +340,7 @@ export function Canvas(): React.JSX.Element {
           <IconButton
             kind="ghost"
             size="sm"
-            label="About flow"
+            label={intl.formatMessage(messages.aboutFlow)}
             align="bottom-end"
             onClick={() => { setIsAboutPanelOpen((prev) => !prev); }}
           >
@@ -355,7 +350,7 @@ export function Canvas(): React.JSX.Element {
       )
     );
     return () => { setActions(null); };
-  }, [isRunMode, setActions, setIsFlowRunHistoryOpen, setIsAboutPanelOpen]);
+  }, [isRunMode, setActions, setIsFlowRunHistoryOpen, setIsAboutPanelOpen, intl]);
 
   const handleSave = useCallback((): void => {
     // Read live values from refs — avoids stale closure and prevents toolbar churn
@@ -379,7 +374,7 @@ export function Canvas(): React.JSX.Element {
         if (typedAction.type === saveFlow.fulfilled.type) {
           setIsDirty(false);
           setLastSavedAt(new Date());
-          notify.success('Flow saved successfully.');
+          notify.success(intl.formatMessage(messages.saveSuccess));
 
           if (flowRunPropertiesRef.current.validateFlow) {
             // Post-save validation — runs when "Validate flow" is enabled
@@ -406,13 +401,13 @@ export function Canvas(): React.JSX.Element {
             setValidationData({ status: 'succeeded', message: null, errors: [], warnings: [] });
           }
         } else {
-          notify.error('Failed to save flow.');
+          notify.error(intl.formatMessage(messages.saveError));
         }
       })
       .finally(() => {
         setIsSaving(false);
       });
-  }, [dispatch, notify]);
+  }, [dispatch, notify, intl]);
 
   /**
    * Persists flow run properties into the pipeline definition's global_config and
@@ -852,10 +847,10 @@ export function Canvas(): React.JSX.Element {
       } catch (err: unknown) {
         dispatch(setRunning(false));
         logUtil.error({ logger, message: 'Failed to start job run', data: err });
-        notify.error('Failed to start run.');
+        notify.error(intl.formatMessage(messages.runStartError));
       }
     })();
-  }, [isDirty, dispatch, isRunning, currentJobRunId, startPoll, notify]);
+  }, [isDirty, dispatch, isRunning, currentJobRunId, startPoll, notify, intl]);
 
   // Canvas configuration
   const canvasConfig: CanvasConfig = useMemo(
@@ -895,15 +890,30 @@ export function Canvas(): React.JSX.Element {
     (source, defaultMenu): ReturnType<ContextMenuHandler> => {
       if (source.type === 'node') {
         return [
-          { action: CANVAS_ACTIONS.EDIT_NODE,       label: 'Edit',           enable: true, icon: <Edit size={32} />,     toolbarItem: true },
-          { action: CANVAS_ACTIONS.RECOMMEND_NODES, label: 'Recommend nodes', enable: true, icon: <Playlist size={32} />, toolbarItem: true },
-          { action: CANVAS_ACTIONS.DELETE,          label: 'Delete',         enable: true, icon: <TrashCan size={32} />, toolbarItem: true },
+          {
+            action: CANVAS_ACTIONS.EDIT_NODE, label: intl.formatMessage(messages.edit),
+            enable: true, icon: <Edit size={32} />, toolbarItem: true,
+          },
+          {
+            action: CANVAS_ACTIONS.RECOMMEND_NODES, label: intl.formatMessage(messages.recommendNodes),
+            enable: true, icon: <Playlist size={32} />, toolbarItem: true,
+          },
+          {
+            action: CANVAS_ACTIONS.DELETE, label: intl.formatMessage(messages.delete),
+            enable: true, icon: <TrashCan size={32} />, toolbarItem: true,
+          },
         ];
       }
       if (source.type === 'comment') {
         return [
-          { action: CANVAS_ACTIONS.EDIT_COMMENT, label: 'Edit', enable: true, icon: <Edit size={32} />, toolbarItem: true },
-          { action: CANVAS_ACTIONS.DELETE, label: 'Delete', enable: true, icon: <TrashCan size={32} />, toolbarItem: true },
+          {
+            action: CANVAS_ACTIONS.EDIT_COMMENT, label: intl.formatMessage(messages.edit),
+            enable: true, icon: <Edit size={32} />, toolbarItem: true,
+          },
+          {
+            action: CANVAS_ACTIONS.DELETE, label: intl.formatMessage(messages.delete),
+            enable: true, icon: <TrashCan size={32} />, toolbarItem: true,
+          },
         ];
       }
       // ── Link context menu ──────────────────────────────────────────────────
@@ -922,15 +932,15 @@ export function Canvas(): React.JSX.Element {
           return [
             {
               action: CANVAS_ACTIONS.DELETE_LINK,
-              label: 'Delete link',
+              label: intl.formatMessage(messages.deleteLink),
               enable: true,
               toolbarItem: true,
               icon: <TrashCan size={16} />,
               ...(hasCondition ? {
                 submenu: true,
                 menu: [
-                  { action: CANVAS_ACTIONS.DELETE_LINK, label: 'Delete link', enable: true },
-                  { action: CANVAS_ACTIONS.DELETE_CONDITION, label: 'Delete condition', enable: true },
+                  { action: CANVAS_ACTIONS.DELETE_LINK, label: intl.formatMessage(messages.deleteLink), enable: true },
+                  { action: CANVAS_ACTIONS.DELETE_CONDITION, label: intl.formatMessage(messages.deleteCondition), enable: true },
                 ],
               } : {}),
             },
@@ -938,21 +948,27 @@ export function Canvas(): React.JSX.Element {
               action: CANVAS_ACTIONS.ADD_CONDITION,
               enable: true,
               toolbarItem: true,
-              label: hasCondition ? 'Edit condition' : 'Add condition',
+              label: intl.formatMessage(hasCondition ? messages.editCondition : messages.addCondition),
               icon: hasCondition ? <Edit size={16} /> : <Add size={16} />,
             },
           ];
         }
         if (isMergingLink2) {
           return [
-            { action: CANVAS_ACTIONS.DELETE_LINK, label: 'Delete link', enable: true, toolbarItem: true, icon: <TrashCan size={16} /> },
-            { action: CANVAS_ACTIONS.ADD_CONDITION, enable: true, toolbarItem: true, label: 'Edit link name', icon: <Edit size={16} /> },
+            {
+              action: CANVAS_ACTIONS.DELETE_LINK, label: intl.formatMessage(messages.deleteLink),
+              enable: true, toolbarItem: true, icon: <TrashCan size={16} />,
+            },
+            {
+              action: CANVAS_ACTIONS.ADD_CONDITION, label: intl.formatMessage(messages.editLinkName),
+              enable: true, toolbarItem: true, icon: <Edit size={16} />,
+            },
           ];
         }
       }
       return defaultMenu;
     },
-    []
+    [intl]
   );
 
   /**
@@ -1031,16 +1047,9 @@ export function Canvas(): React.JSX.Element {
     const node = controller.getNode(nodeId);
     if (node?.type !== 'execution_node') { return; }
 
-    // Auto-save the currently open panel before switching nodes.
-    if (openPanelNodeIdRef.current && openPanelNodeIdRef.current !== nodeId) {
-
-      propertiesControllerRef.current?.applyPropertiesEditing?.(false);
-    }
-
     const operatorName = node.op;
     setSelectedNodeId(nodeId);
     setSelectedOperator(operatorName);
-    openPanelNodeIdRef.current = nodeId;
 
     const currentPipelineFlow = controller.getPipelineFlow();
 
@@ -1053,7 +1062,7 @@ export function Canvas(): React.JSX.Element {
         paramDefWithValues.current_parameters = node.parameters;
       }
 
-      const messages = controller.getNodeMessages(nodeId) ?? [];
+      const nodeMessages = controller.getNodeMessages(nodeId) ?? [];
 
       // Phase 1 — open immediately with featuresLoading:true so the flyout and
       // DataTableSkeleton appear right away while the API call is in-flight.
@@ -1067,7 +1076,7 @@ export function Canvas(): React.JSX.Element {
           nodeFeatureMap: {},
           featuresLoading: true,
         },
-        messages,
+        messages: nodeMessages,
         id: nodeId,
       });
       setIsPanelOpen(true);
@@ -1105,33 +1114,45 @@ export function Canvas(): React.JSX.Element {
   const hasNotifications = notifications.length > 0;
   // Button is enabled only when validation is on AND there are results to show
   const isTerminalEnabled = flowRunProperties.validateFlow && hasNotifications;
+  const validationToggleMessage = !flowRunProperties.validateFlow
+    ? messages.validationDisabled
+    : hasNotifications
+      ? messages.validationProblems
+      : messages.noValidationProblems;
 
   // Toolbar — recomputes when relevant state changes
   const toolbarConfig: ToolbarConfig = useMemo(() => {
+    const barItem = (action: string, label: MessageDescriptor, tooltip: MessageDescriptor): object => ({
+      action,
+      label: intl.formatMessage(label),
+      enable: true,
+      tooltip: intl.formatMessage(tooltip),
+    });
+
     const leftBar: object[] = [
-      { action: CANVAS_ACTIONS.PALETTE, label: 'Palette', enable: true, tooltip: 'Open palette to add operators' },
+      barItem(CANVAS_ACTIONS.PALETTE, messages.toolbarPalette, messages.toolbarPaletteTooltip),
       { divider: true },
-      { action: CANVAS_ACTIONS.UNDO,   label: 'Undo',    enable: true, tooltip: 'Undo last action' },
-      { action: CANVAS_ACTIONS.REDO,   label: 'Redo',    enable: true, tooltip: 'Redo last undone action' },
+      barItem(CANVAS_ACTIONS.UNDO, messages.toolbarUndo, messages.toolbarUndoTooltip),
+      barItem(CANVAS_ACTIONS.REDO, messages.toolbarRedo, messages.toolbarRedoTooltip),
       { divider: true },
-      { action: CANVAS_ACTIONS.CUT,    label: 'Cut',     enable: true, tooltip: 'Cut selected nodes' },
-      { action: CANVAS_ACTIONS.COPY,   label: 'Copy',    enable: true, tooltip: 'Copy selected nodes' },
-      { action: CANVAS_ACTIONS.PASTE,  label: 'Paste',   enable: true, tooltip: 'Paste copied nodes' },
-      { action: CANVAS_ACTIONS.DELETE, label: 'Delete',  enable: true, tooltip: 'Delete selected nodes' },
+      barItem(CANVAS_ACTIONS.CUT, messages.toolbarCut, messages.toolbarCutTooltip),
+      barItem(CANVAS_ACTIONS.COPY, messages.toolbarCopy, messages.toolbarCopyTooltip),
+      barItem(CANVAS_ACTIONS.PASTE, messages.toolbarPaste, messages.toolbarPasteTooltip),
+      barItem(CANVAS_ACTIONS.DELETE, messages.delete, messages.toolbarDeleteTooltip),
       { divider: true },
-      { action: CANVAS_ACTIONS.CREATE_COMMENT, label: 'Comment', enable: true, tooltip: 'Add comment' },
+      barItem(CANVAS_ACTIONS.CREATE_COMMENT, messages.toolbarComment, messages.toolbarCommentTooltip),
       { divider: true },
       {
         action: CANVAS_ACTIONS.FLOW_PROPERTIES,
-        label: 'Flow run properties',
+        label: intl.formatMessage(messages.toolbarFlowRunProperties),
         enable: true,
-        tooltip: 'Configure flow run properties',
+        tooltip: intl.formatMessage(messages.toolbarFlowRunPropertiesTooltip),
         iconEnabled: <SettingsAdjust size={32} />,
       },
       { divider: true },
-      { action: CANVAS_ACTIONS.ZOOM_IN,      label: 'Zoom In',      enable: true, tooltip: 'Zoom in' },
-      { action: CANVAS_ACTIONS.ZOOM_OUT,     label: 'Zoom Out',     enable: true, tooltip: 'Zoom out' },
-      { action: CANVAS_ACTIONS.ZOOM_TO_FIT,  label: 'Zoom To Fit',  enable: true, tooltip: 'Fit to window' },
+      barItem(CANVAS_ACTIONS.ZOOM_IN, messages.toolbarZoomIn, messages.toolbarZoomInTooltip),
+      barItem(CANVAS_ACTIONS.ZOOM_OUT, messages.toolbarZoomOut, messages.toolbarZoomOutTooltip),
+      barItem(CANVAS_ACTIONS.ZOOM_TO_FIT, messages.toolbarZoomToFit, messages.toolbarZoomToFitTooltip),
     ];
 
     const rightBar: object[] = [
@@ -1140,17 +1161,29 @@ export function Canvas(): React.JSX.Element {
         ? [{
             action: 'save-status',
             jsx: (_tabIndex: number) => {
-              if (isSaving) { return <div className={styles.saveStatus}><InlineLoading description="Saving" /></div>; }
-              if (isValidating) { return <div className={styles.saveStatus}><InlineLoading description="Validating" /></div>; }
+              if (isSaving) {
+                return (
+                  <div className={styles.saveStatus}>
+                    <InlineLoading description={intl.formatMessage(messages.saving)} />
+                  </div>
+                );
+              }
+              if (isValidating) {
+                return (
+                  <div className={styles.saveStatus}>
+                    <InlineLoading description={intl.formatMessage(messages.validating)} />
+                  </div>
+                );
+              }
               return <div className={styles.saveStatus}><LastSavedLabel date={lastSavedAt} /></div>;
             },
           }, { divider: true }]
         : []),
       {
         action: CANVAS_ACTIONS.SAVE,
-        label: 'Save',
+        label: intl.formatMessage(messages.toolbarSave),
         enable: isDirty && !isSaving,
-        tooltip: 'Save Flow',
+        tooltip: intl.formatMessage(messages.toolbarSaveTooltip),
         iconEnabled: <Save size={32} />,
         kind: 'ghost',
       },
@@ -1158,10 +1191,10 @@ export function Canvas(): React.JSX.Element {
       {
         action: CANVAS_ACTIONS.RUN,
         // "View run" while a run is in-progress; reverts to "Run flow" once complete.
-        label: isRunning && currentJobRunId ? 'View run' : 'Run flow',
+        label: intl.formatMessage(isRunning && currentJobRunId ? messages.viewRun : messages.runFlow),
         enable: !isSaving && !isValidating,
         kind: 'primary',
-        tooltip: isRunning && currentJobRunId ? 'Return to running job' : 'Run pipeline',
+        tooltip: intl.formatMessage(isRunning && currentJobRunId ? messages.viewRunTooltip : messages.runFlowTooltip),
         iconEnabled: <Play size={32} />,
         incLabelWithIcon: 'before',
       },
@@ -1172,16 +1205,8 @@ export function Canvas(): React.JSX.Element {
             type="button"
             className={`${styles.panelToggleButton} ${showBottomPanel ? styles.panelToggleButtonActive : ''}`}
             disabled={!isTerminalEnabled}
-            title={
-              !flowRunProperties.validateFlow ? 'Validation is disabled'
-              : hasNotifications ? 'Validation problems'
-              : 'No validation problems'
-            }
-            aria-label={
-              !flowRunProperties.validateFlow ? 'Validation is disabled'
-              : hasNotifications ? 'Validation problems'
-              : 'No validation problems'
-            }
+            title={intl.formatMessage(validationToggleMessage)}
+            aria-label={intl.formatMessage(validationToggleMessage)}
             onClick={() => {
               if (!isTerminalEnabled) { return; }
               window.dispatchEvent(new CustomEvent(showBottomPanel ? 'hideBottomPanel' : 'showBottomPanel'));
@@ -1195,8 +1220,7 @@ export function Canvas(): React.JSX.Element {
 
     return { leftBar, rightBar, overrideAutoEnableDisable: true };
 
-  // eslint-disable-next-line max-len
-  }, [isDirty, isSaving, isValidating, lastSavedAt, showBottomPanel, isTerminalEnabled, hasNotifications, flowRunProperties.validateFlow, isRunning, currentJobRunId]);
+  }, [isDirty, isSaving, isValidating, lastSavedAt, showBottomPanel, isTerminalEnabled, isRunning, currentJobRunId, intl, validationToggleMessage]);
 
   // Edit action handler — also tracks dirty state via canUndo()
   const editActionHandler: EditActionHandler = useCallback(
@@ -1355,34 +1379,11 @@ export function Canvas(): React.JSX.Element {
     }
   }, [openNodePanel, handleNodeSuggestionClose]);
 
-  const handleApplyPropertyChanges = useCallback(
-    (propertySet: Record<string, unknown>, appData?: Record<string, unknown>) => {
-      const nodeId = (appData as { nodeId?: string } | undefined)?.nodeId;
-      const controller = canvasControllerRef.current;
-
-      if (!nodeId || !controller) { return; }
-
-      // Use setNodeParameters (targeted parameter update) rather than the broader
-      // setNodeProperties(). The TS declaration is typed as array but the JS impl
-      // dispatches the value as-is; a plain object works here.
-      controller.setNodeParameters(nodeId, propertySet as unknown as Array<Record<string, unknown>>);
-
-      setIsDirty(true);
-    },
-    []
-  );
-
   const handleClosePropertiesDialog = useCallback(() => {
-    propertiesControllerRef.current = null;
-    openPanelNodeIdRef.current = null;
     setIsPanelOpen(false);
     setSelectedNodeId(null);
     setSelectedOperator(null);
     setPropertiesInfo(null);
-  }, []);
-
-  const handleControllerHandler = useCallback((propertiesController: any) => {
-    propertiesControllerRef.current = propertiesController;
   }, []);
 
   /**
@@ -1411,19 +1412,6 @@ export function Canvas(): React.JSX.Element {
     [openLinkConditionTearsheet]
   );
 
-  const handlePropertyListener = useCallback((_data: unknown): void => {
-    const controller = propertiesControllerRef.current;
-    if (!controller) { return; }
-
-    const propertyValues = (controller.getPropertyValues?.() ?? {}) as Record<string, unknown>;
-    const attrs: Record<string, OperatorFeature> =
-      selectedOperator ? (operatorMetadata[selectedOperator]?.attributes ?? {}) : {};
-
-    const shouldDisable = hasAnyRequiredParamMissing(attrs, propertyValues);
-
-    controller.setSaveButtonDisable?.(shouldDisable);
-  }, [operatorMetadata, selectedOperator]);
-
   // Stable callback so ElyraCanvas's onCanvasControllerReady useEffect
   // does not re-fire on every theme-driven re-render.
   const handleCanvasControllerReady = useCallback((controller: CanvasController) => {
@@ -1441,24 +1429,18 @@ export function Canvas(): React.JSX.Element {
       return undefined;
     }
     return (
-      <IntlProvider locale="en">
-        <CommonProperties
-          propertiesInfo={propertiesInfo as any}
-          propertiesConfig={{ containerType: 'Custom', rightFlyout: true, applyPropertiesWithoutEdit: true }}
-          customPanels={[CommonPropertiesPanelWrapper]}
-          callbacks={{
-            applyPropertyChanges: handleApplyPropertyChanges,
-            closePropertiesDialog: handleClosePropertiesDialog,
-            controllerHandler: handleControllerHandler,
-            propertyListener: handlePropertyListener,
-          }}
-        />
-      </IntlProvider>
+      <CommonPropertiesWrapper
+        propertiesInfo={propertiesInfo}
+        canvasController={canvasControllerRef.current}
+        selectedOperator={selectedOperator}
+        operatorMetadata={operatorMetadata}
+        setIsDirty={setIsDirty}
+        onClose={handleClosePropertiesDialog}
+      />
     );
   }, [
     isPanelOpen, selectedNodeId, selectedOperator, propertiesInfo,
-    handleApplyPropertyChanges, handleClosePropertiesDialog, handleControllerHandler,
-    handlePropertyListener,
+    operatorMetadata, setIsDirty, handleClosePropertiesDialog,
   ]);
 
   // ── ReadOnlyCanvas callbacks ──────────────────────────────────────────────
@@ -1513,7 +1495,7 @@ export function Canvas(): React.JSX.Element {
   if (isLoading) {
     return (
       <div className={styles.loadingContainer}>
-        <Loading description="Loading pipeline canvas..." />
+        <Loading description={intl.formatMessage(messages.loadingCanvas)} />
       </div>
     );
   }
@@ -1523,10 +1505,10 @@ export function Canvas(): React.JSX.Element {
       <div className={styles.errorContainer}>
         <ErrorEmptyState
           illustrationTheme={isDarkMode ? 'dark' : 'light'}
-          title="Failed to load flow"
+          title={intl.formatMessage(messages.flowLoadErrorTitle)}
           subtitle={flowError}
           action={{
-            text: 'Go to Projects',
+            text: intl.formatMessage(messages.goToProjects),
             onClick: () => { void navigate(projectId ? `/projects/${projectId}` : '/projects'); },
             renderIcon: ArrowLeft,
             kind: 'tertiary',
@@ -1541,10 +1523,10 @@ export function Canvas(): React.JSX.Element {
       <div className={styles.errorContainer}>
         <ErrorEmptyState
           illustrationTheme={isDarkMode ? 'dark' : 'light'}
-          title="Failed to load pipeline"
-          subtitle="The pipeline definition could not be read. Please refresh the page or go back to Projects."
+          title={intl.formatMessage(messages.pipelineLoadErrorTitle)}
+          subtitle={intl.formatMessage(messages.pipelineLoadErrorSubtitle)}
           action={{
-            text: 'Go to Projects',
+            text: intl.formatMessage(messages.goToProjects),
             onClick: () => { void navigate(projectId ? `/projects/${projectId}` : '/projects'); },
             renderIcon: ArrowLeft,
             kind: 'tertiary',
@@ -1560,7 +1542,7 @@ export function Canvas(): React.JSX.Element {
     <ErrorBoundary
       fallback={
         <div className={styles.errorContainer}>
-          <p>Failed to initialize canvas. Please refresh the page.</p>
+          <p>{intl.formatMessage(messages.canvasInitError)}</p>
         </div>
       }
     >
@@ -1604,7 +1586,7 @@ export function Canvas(): React.JSX.Element {
           {currentFlow && (
             <EditDetailsModal
               open={isEditOpen}
-              title="Edit flow details"
+              title={intl.formatMessage(messages.editModalTitle)}
               initialValues={{
                 name:        currentFlow.name ?? '',
                 description: currentFlow.description ?? '',
@@ -1621,7 +1603,9 @@ export function Canvas(): React.JSX.Element {
                     setIsEditOpen(false);
                   })
                   .catch(() => {
-                    notify.error('Failed to save flow details', { subtitle: 'Please try again.' });
+                    notify.error(intl.formatMessage(messages.saveDetailsError), {
+                      subtitle: intl.formatMessage(messages.saveDetailsErrorSubtitle),
+                    });
                   });
               }}
             />

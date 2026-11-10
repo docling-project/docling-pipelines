@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button, Tag } from '@carbon/react';
 import { Close, Edit } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
+import { messages } from './FlowInfoPanel.messages';
 import styles from './FlowInfoPanel.module.scss';
 
 /**
@@ -54,14 +56,15 @@ export function FlowInfoPanel({
   onViewProject,
   onEdit,
 }: FlowInfoPanelProps): React.JSX.Element {
+  const intl = useIntl();
   return (
     <div className={styles.sidePanel}>
       <div className={styles.sidePanelHeader}>
-        <h2 className={styles.sidePanelTitle}>About flow</h2>
+        <h2 className={styles.sidePanelTitle}>{intl.formatMessage(messages.panelTitle)}</h2>
         <button
           type="button"
           className={styles.sidePanelClose}
-          aria-label="Close panel"
+          aria-label={intl.formatMessage(messages.closePanel)}
           onClick={onClose}
         >
           <Close size={16} />
@@ -73,12 +76,12 @@ export function FlowInfoPanel({
         {/* Details section — bordered block */}
         <div className={styles.detailsBlock}>
           <div className={styles.sidePanelSectionHeader}>
-            <h3 className={styles.sidePanelSectionTitle}>Details</h3>
+            <h3 className={styles.sidePanelSectionTitle}>{intl.formatMessage(messages.detailsSection)}</h3>
             <Button
               kind="ghost"
               size="sm"
               renderIcon={Edit}
-              iconDescription="Edit flow details"
+              iconDescription={intl.formatMessage(messages.editDescription)}
               hasIconOnly
               tooltipPosition="left"
               onClick={onEdit}
@@ -86,17 +89,17 @@ export function FlowInfoPanel({
           </div>
 
           <div className={styles.detailItem}>
-            <span className={styles.detailLabel}>Flow name</span>
+            <span className={styles.detailLabel}>{intl.formatMessage(messages.flowNameLabel)}</span>
             <button type="button" className={styles.detailLink} onClick={onViewFlow}>
               {flow.name}
             </button>
           </div>
           <div className={styles.detailItem}>
-            <span className={styles.detailLabel}>Description</span>
+            <span className={styles.detailLabel}>{intl.formatMessage(messages.descriptionLabel)}</span>
             <span className={styles.detailValue}>{flow.description}</span>
           </div>
           <div className={styles.detailItem}>
-            <span className={styles.detailLabel}>Tags</span>
+            <span className={styles.detailLabel}>{intl.formatMessage(messages.tagsLabel)}</span>
             <div className={styles.tagsRow}>
               {flow.tags.map((tag) => (
                 <Tag key={tag} type="blue" size="sm">{tag}</Tag>
@@ -108,18 +111,18 @@ export function FlowInfoPanel({
         <hr className={styles.divider} />
 
         <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Created on</span>
+          <span className={styles.detailLabel}>{intl.formatMessage(messages.createdOnLabel)}</span>
           <span className={styles.detailValue}>{flow.created_on}</span>
         </div>
         <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Last modified</span>
+          <span className={styles.detailLabel}>{intl.formatMessage(messages.lastModifiedLabel)}</span>
           <span className={styles.detailValue}>{flow.modified_on}</span>
         </div>
 
         <hr className={styles.divider} />
 
         <div className={styles.detailItem}>
-          <span className={styles.detailLabel}>Project</span>
+          <span className={styles.detailLabel}>{intl.formatMessage(messages.projectLabel)}</span>
           <button type="button" className={styles.detailLink} onClick={onViewProject}>
             {flow.project_name}
           </button>

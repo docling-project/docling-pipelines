@@ -65,6 +65,7 @@ src/models/
 .bob/mcp.json
 .bob/*.bak
 .bob/
+.claude/
 
 
 # OS

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for VectorDB metadata fetcher.
 
 Covers:
@@ -987,6 +990,49 @@ class TestMilvusResourceMetadata:
         )
         assert result == []
 
+    def test_feature_mappings_source2_maps_binary_vector_field(self):
+        """An existing BINARY_VECTOR collection field maps to the binary vector feature."""
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
+
+        feats = {
+            OperatorConstants.Columns.ID: _feature(is_primary=True, available_for_vector_db=True),
+            "embeddings": _feature(type_=OperatorConstants.Types.TYPE_VECTOR_BINARY, available_for_vector_db=True),
+        }
+        schema = {
+            "pk": {"type": "VARCHAR", "is_primary": True},
+            "bin_vec": {"type": "DataType.BINARY_VECTOR"},
+        }
+        result = MilvusResourceMetadata._resolve_feature_mappings(
+            operator_config={},
+            available_features=feats,
+            selected_resource_schema=schema,
+            normalise_feature_mappings=VectorDBMetadataFetcher._normalise_feature_mappings,
+            default_feature_mappings_from_features=VectorDBMetadataFetcher._default_feature_mappings_from_features,
+        )
+        assert {"feature_name": "embeddings", "mapped_column_name": "bin_vec"} in result
+
+    def test_feature_mappings_source2_dense_and_binary_fields_map_separately(self):
+        """FLOAT_VECTOR maps to the dense feature and BINARY_VECTOR to the binary feature."""
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
+
+        feats = {
+            "dense_emb": _feature(type_=OperatorConstants.Types.TYPE_VECTOR, available_for_vector_db=True),
+            "binary_emb": _feature(type_=OperatorConstants.Types.TYPE_VECTOR_BINARY, available_for_vector_db=True),
+        }
+        schema = {
+            "dense_vec": {"type": "DataType.FLOAT_VECTOR"},
+            "bin_vec": {"type": "DataType.BINARY_VECTOR"},
+        }
+        result = MilvusResourceMetadata._resolve_feature_mappings(
+            operator_config={},
+            available_features=feats,
+            selected_resource_schema=schema,
+            normalise_feature_mappings=VectorDBMetadataFetcher._normalise_feature_mappings,
+            default_feature_mappings_from_features=VectorDBMetadataFetcher._default_feature_mappings_from_features,
+        )
+        assert {"feature_name": "dense_emb", "mapped_column_name": "dense_vec"} in result
+        assert {"feature_name": "binary_emb", "mapped_column_name": "bin_vec"} in result
+
 
 # ---------------------------------------------------------------------------
 # MilvusResourceMetadata._dtype_name — enum vs plain string
@@ -1159,3 +1205,12 @@ class TestMilvusApplyIndexInfo:
         MilvusResourceMetadata._apply_index_info(client=mock_client, collection_name="col", schema=schema)
         assert schema["vector"]["index_created"] is True
         assert schema["vector"]["index_info"]["metric_type"] == "IP"
+
+
+class TestComputeDefaultFeatureMappingsBinaryVector:
+    """Rule 4 also maps a packed-bit (vector_binary) feature to vector_embeddings."""
+
+    def test_vector_binary_feature_maps_to_vector_embeddings(self):
+        feats = {"embeddings": _feature(type_=OperatorConstants.Types.TYPE_VECTOR_BINARY)}
+        result = compute_default_feature_mappings(feats)
+        assert _lookup(result, "embeddings") == "vector_embeddings"

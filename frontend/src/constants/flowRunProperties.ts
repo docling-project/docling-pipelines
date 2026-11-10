@@ -21,28 +21,3 @@ export interface StorageOption {
   id: IntermediateDataStorageType;
   text: string;
 }
-
-export const STORAGE_OPTIONS: StorageOption[] = [
-  { id: 'container', text: 'Container file system' },
-  { id: 'memory', text: 'Memory' },
-];
-
-export const FLOW_RUN_PROPERTIES_LABELS = {
-  title: 'Flow run properties',
-  description: 'Configure the properties for running the flow.',
-  primaryAction: 'Save',
-  secondaryAction: 'Cancel',
-  toggles: {
-    incrementalProcessing: 'Enable incremental processing',
-    retainRecords: 'Retain records for deleted documents',
-    validateFlow: 'Validate flow',
-  },
-  dropdown: {
-    intermediateStorage: 'Intermediate data storage',
-    label: 'Select storage type',
-  },
-  toggleLabels: {
-    off: 'Off',
-    on: 'On',
-  },
-};

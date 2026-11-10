@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating text extraction adapters.
 
 This factory creates appropriate text extraction adapter instances based on the
@@ -219,7 +222,7 @@ class TextExtractionAdapterFactory:
             if accelerator and gpu_device is None:
                 gpu_device = TextExtractionAdapterFactory._auto_detect_device()
                 if gpu_device is not None:
-                    logger.info("No accelerator device specified — auto-detected: %s", gpu_device)
+                    logger.info("No accelerator device specified - auto-detected: %s", gpu_device)
                 else:
                     logger.warning(
                         "Accelerator block present but no GPU device found via torch. "
@@ -346,6 +349,12 @@ class TextExtractionAdapterFactory:
             gpu_device = adapter_config.get(OperatorConstants.Extraction.DEVICE)
 
             if use_vlm:
+                if gpu_device:
+                    TextExtractionAdapterFactory._validate_gpu_config(
+                        adapter_config=adapter_config,
+                        max_workers=max_workers,
+                        use_processes=use_processes,
+                    )
                 TextExtractionAdapterFactory._validate_vlm_config(adapter_config)
                 logger.info(
                     "Creating DoclingAdapter with VLM enabled (preset: %s) and %s workers",

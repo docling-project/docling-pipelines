@@ -8,15 +8,14 @@
  */
 import React, { useState, useEffect } from 'react';
 import { Toggle, Dropdown } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import { useAppDispatch, useAppSelector } from '@/hooks';
 import { setFlowRunProperties } from '@/slices/flowSlice';
 import type { FlowRunProperties } from '@/types';
 import { SharedTearsheet } from '@/components/common';
-import {
-  STORAGE_OPTIONS,
-  FLOW_RUN_PROPERTIES_LABELS,
-  FLOW_PROPERTY_KEYS,
-} from '@/constants/flowRunProperties';
+import { FLOW_PROPERTY_KEYS } from '@/constants/flowRunProperties';
+import type { StorageOption } from '@/constants/flowRunProperties';
+import { messages } from './FlowRunPropertiesTearsheet.messages';
 import styles from './FlowRunPropertiesTearsheet.module.scss';
 
 /**
@@ -44,6 +43,11 @@ export function FlowRunPropertiesTearsheet({
   onClose,
   onSave,
 }: FlowRunPropertiesTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
+  const storageOptions: StorageOption[] = [
+    { id: 'container', text: intl.formatMessage(messages.storageContainer) },
+    { id: 'memory',    text: intl.formatMessage(messages.storageMemory)    },
+  ];
   const dispatch = useAppDispatch();
   const reduxProperties = useAppSelector((state) => state.flow.flowRunProperties);
 
@@ -86,25 +90,25 @@ export function FlowRunPropertiesTearsheet({
     <SharedTearsheet
       open={open}
       onClose={onClose}
-      title={FLOW_RUN_PROPERTIES_LABELS.title}
+      title={intl.formatMessage(messages.title)}
       size="md"
-      primaryActionLabel={FLOW_RUN_PROPERTIES_LABELS.primaryAction}
-      secondaryActionLabel={FLOW_RUN_PROPERTIES_LABELS.secondaryAction}
+      primaryActionLabel={intl.formatMessage(messages.primaryAction)}
+      secondaryActionLabel={intl.formatMessage(messages.secondaryAction)}
       onPrimaryAction={handleSave}
       onSecondaryAction={handleCancel}
     >
       <div className={styles.propertiesContainer}>
         <p className={styles.description}>
-          {FLOW_RUN_PROPERTIES_LABELS.description}
+          {intl.formatMessage(messages.description)}
         </p>
 
         <div className={styles.propertySection}>
           <div className={styles.toggleWrapper}>
             <Toggle
               id="incremental-processing"
-              labelText={FLOW_RUN_PROPERTIES_LABELS.toggles.incrementalProcessing}
-              labelA={FLOW_RUN_PROPERTIES_LABELS.toggleLabels.off}
-              labelB={FLOW_RUN_PROPERTIES_LABELS.toggleLabels.on}
+              labelText={intl.formatMessage(messages.toggleIncrementalProcessing)}
+              labelA={intl.formatMessage(messages.toggleOff)}
+              labelB={intl.formatMessage(messages.toggleOn)}
               toggled={localProperties.enableIncrementalProcessing}
               onToggle={(checked) => {
                 updateLocalProperty(FLOW_PROPERTY_KEYS.ENABLE_INCREMENTAL_PROCESSING as keyof FlowRunProperties, checked);
@@ -116,9 +120,9 @@ export function FlowRunPropertiesTearsheet({
             <div className={styles.nestedProperty}>
               <Toggle
                 id="retain-records"
-                labelText={FLOW_RUN_PROPERTIES_LABELS.toggles.retainRecords}
-                labelA={FLOW_RUN_PROPERTIES_LABELS.toggleLabels.off}
-                labelB={FLOW_RUN_PROPERTIES_LABELS.toggleLabels.on}
+                labelText={intl.formatMessage(messages.toggleRetainRecords)}
+                labelA={intl.formatMessage(messages.toggleOff)}
+                labelB={intl.formatMessage(messages.toggleOn)}
                 toggled={localProperties.retainRecordsForDeletedDocuments}
                 onToggle={(checked) => {
                   updateLocalProperty(FLOW_PROPERTY_KEYS.RETAIN_RECORDS_FOR_DELETED_DOCUMENTS as keyof FlowRunProperties, checked);
@@ -132,9 +136,9 @@ export function FlowRunPropertiesTearsheet({
           <div className={styles.toggleWrapper}>
             <Toggle
               id="validate-flow"
-              labelText={FLOW_RUN_PROPERTIES_LABELS.toggles.validateFlow}
-              labelA={FLOW_RUN_PROPERTIES_LABELS.toggleLabels.off}
-              labelB={FLOW_RUN_PROPERTIES_LABELS.toggleLabels.on}
+              labelText={intl.formatMessage(messages.toggleValidateFlow)}
+              labelA={intl.formatMessage(messages.toggleOff)}
+              labelB={intl.formatMessage(messages.toggleOn)}
               toggled={localProperties.validateFlow}
               onToggle={(checked) => {
                 updateLocalProperty(FLOW_PROPERTY_KEYS.VALIDATE_FLOW as keyof FlowRunProperties, checked);
@@ -146,10 +150,10 @@ export function FlowRunPropertiesTearsheet({
         <div className={styles.dropdownSection}>
           <Dropdown
             id="intermediate-storage"
-            titleText={FLOW_RUN_PROPERTIES_LABELS.dropdown.intermediateStorage}
-            label={FLOW_RUN_PROPERTIES_LABELS.dropdown.label}
-            items={STORAGE_OPTIONS}
-            selectedItem={STORAGE_OPTIONS.find(
+            titleText={intl.formatMessage(messages.intermediateStorageTitle)}
+            label={intl.formatMessage(messages.intermediateStorageLabel)}
+            items={storageOptions}
+            selectedItem={storageOptions.find(
               (opt) => opt.id === localProperties.intermediateDataStorage
             )}
             itemToString={(item) => (item ? item.text : '')}

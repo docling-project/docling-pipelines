@@ -65,9 +65,12 @@ class ExampleCustomOperator(AbstractOperator):
 
 ### 1. Set Environment Variable
 
-Before running your flow, set the `DOCPIPE_CUSTOM_OPERATORS` environment variable:
+Custom operators are disabled by default. Before running your flow, enable them and set the `DOCPIPE_CUSTOM_OPERATORS` environment variable:
 
 ```bash
+# Required: custom operators are off unless enabled
+export DOCPIPE_ENABLE_CUSTOM_OPERATORS=true
+
 # Python package - must be importable (installed or in PYTHONPATH)
 export DOCPIPE_CUSTOM_OPERATORS="my_custom_operators"
 

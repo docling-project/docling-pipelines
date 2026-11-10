@@ -54,27 +54,3 @@ export const POLL_FINAL_DELAY_MS = 5_000;
 
 /** Maximum number of consecutive 404 retries before the poll gives up. */
 export const POLL_MAX_RETRIES = 6;
-
-// ── Display labels ────────────────────────────────────────────────────────────
-
-/**
- * Overrides for status strings whose display label differs from the raw API value.
- * All other statuses are already human-readable and fall back to the raw string.
- *
- * Use `getJobRunStatusLabel(status)` (below) rather than indexing this directly.
- */
-const JOB_RUN_STATUS_LABEL_OVERRIDES: Partial<Record<string, string>> = {
-  [JOB_RUN_STATUS.COMPLETED_WITH_ERRORS]:   'Completed with errors',
-  [JOB_RUN_STATUS.COMPLETED_WITH_WARNINGS]: 'Completed with warnings',
-};
-
-/**
- * Returns a human-readable display label for a backend job-run status string.
- *
- * For most statuses the raw value is already readable (`"Running"`, `"Failed"`,
- * etc.). Only `CompletedWithErrors` and `CompletedWithWarnings` need remapping.
- * Unknown statuses are returned as-is (forward-compatible with new backend values).
- */
-export function getJobRunStatusLabel(status: string): string {
-  return JOB_RUN_STATUS_LABEL_OVERRIDES[status] ?? status;
-}

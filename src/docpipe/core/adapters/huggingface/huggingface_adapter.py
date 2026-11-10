@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """HuggingFace adapter for LLM operations.
 
 This adapter provides embeddings using HuggingFace models with support for
@@ -67,6 +70,14 @@ class HuggingFaceAdapter(LLMEmbeddingPort):
         """
         return self.client.generate_embeddings_batch(texts)
 
+    def get_embedding_batch_size(self) -> int:
+        """Return the number of texts encoded per call.
+
+        Concurrency keeps the port default of 1: local inference is CPU/GPU bound and
+        the sentence-transformers model is not shared safely across threads.
+        """
+        return self.client.batch_size
+
     def get_embedding_dimension(self) -> int:
         """Get embedding dimension for this model.
 
@@ -100,6 +111,3 @@ class HuggingFaceAdapter(LLMEmbeddingPort):
                 LLMConstants.ValidationKeys.VALID: False,
                 LLMConstants.ValidationKeys.CONTEXT: LLMConstants.ValidationContexts.EMBEDDING,
             }
-
-
-# Made with Bob

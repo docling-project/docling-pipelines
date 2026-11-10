@@ -54,6 +54,20 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         self._service_cache: dict[str, tuple[Any, Any]] = {}
 
     @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set a Google Drive file ID as the single file to ingest.
+
+        ``file_reference`` is the Drive file ID the producer supplies for the
+        event; batch ingestion (``fetch_documents``) already accepts a file ID
+        via ``file_id`` and fetches/validates it against the Drive API, so this
+        only does basic input validation rather than duplicating that call here.
+        """
+        if not file_reference or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty Google Drive file ID")
+
+        provider_config["file_id"] = file_reference
+
+    @staticmethod
     def _credentials_cache_key(config: GoogleDriveSourceConfig) -> str:
         """Return a stable cache key for the given credentials configuration."""
         sa_json_str = ""
@@ -661,7 +675,7 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             return content
 
         except Exception as e:
-            logger.error("Error fetching binary content from Google Drive %s: %s", source_id, e, exc_info=True)
+            logger.exception("Error fetching binary content from Google Drive %s: %s", source_id, e)
             return None
 
     def build_config_from_operator_params(

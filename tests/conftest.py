@@ -318,6 +318,12 @@ def clear_singleton_caches():
     except (ImportError, AttributeError):
         pass
 
+    # Drop the process-wide Docling converter pool so pooled (often mocked)
+    # converters/extractors from one test are never reused by the next.
+    _pool_mod = sys.modules.get("docpipe.integrations.docling.converter_pool")
+    if _pool_mod is not None:
+        _pool_mod.reset_docling_pool()
+
 
 # ============================================================================
 # Pytest Hooks for Enhanced Output

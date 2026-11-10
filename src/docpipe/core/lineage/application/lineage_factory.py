@@ -63,5 +63,5 @@ def create_lineage_observer() -> ExecutionLifecycleObserverPort | None:
         return observer
 
     except Exception as exc:
-        logger.warning("Failed to create lineage observer — lineage will not be emitted: %s", exc)
+        logger.warning("Failed to create lineage observer - lineage will not be emitted: %s", exc)
         return None

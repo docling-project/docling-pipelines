@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { screen, act, waitFor, fireEvent } from '@testing-library/react';
+import { screen, act, waitFor } from '@testing-library/react';
 import { RunsCard } from '@/components/cards/RunsCard';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { server } from '../../../mocks/server';

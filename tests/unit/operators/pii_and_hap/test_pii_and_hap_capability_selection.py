@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2026
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """PIIAndHAPAnnotator tests for per-capability provider selection (issue #77).
 

@@ -38,13 +38,6 @@ export const CHUNKER_ATTRIBUTE = {
 export const CHUNK_TYPES = ['simple', 'semantic', 'hybrid'] as const;
 export type ChunkType = typeof CHUNK_TYPES[number];
 
-/** Maps backend chunk_type value → User-friendly dropdown label. */
-export const CHUNK_TYPE_LABELS: Record<ChunkType, string> = {
-  simple: 'Simple',
-  semantic: 'Semantic',
-  hybrid: 'Hybrid (Docling)',
-};
-
 // ── Breakpoint threshold types ────────────────────────────────────────────────
 
 export const BREAKPOINT_THRESHOLD_TYPES = [
@@ -54,14 +47,6 @@ export const BREAKPOINT_THRESHOLD_TYPES = [
   'gradient',
 ] as const;
 export type BreakpointThresholdType = typeof BREAKPOINT_THRESHOLD_TYPES[number];
-
-/** Maps backend breakpoint_threshold_type value → User-friendly dropdown label. */
-export const BREAKPOINT_THRESHOLD_TYPE_LABELS: Record<BreakpointThresholdType, string> = {
-  percentile: 'Percentile',
-  standard_deviation: 'Standard Deviation',
-  interquartile: 'Interquartile',
-  gradient: 'Gradient',
-};
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -74,26 +59,3 @@ export const CHUNKER_DEFAULTS = {
   DOCLING_TOKENIZER: 'sentence-transformers/all-MiniLM-L6-v2',
   RETAIN_ORIGINAL_CONTENT: false,
 } as const;
-
-// ── Human-readable labels ─────────────────────────────────────────────────────
-
-export const CHUNKER_LABELS = {
-  CHUNK_TYPE: 'Chunk type',
-  CHUNK_SIZE: 'Chunk size',
-  CHUNK_OVERLAP: 'Chunk overlap',
-  CHUNK_OVERLAP_PERCENTAGE: 'Chunk overlap percentage',
-  SEMANTIC_EMBEDDINGS_MODEL: 'Semantic embeddings model',
-  BREAKPOINT_THRESHOLD_TYPE: 'Breakpoint threshold type',
-  BREAKPOINT_THRESHOLD_AMOUNT: 'Breakpoint threshold amount',
-  DOCLING_TOKENIZER: 'Docling tokenizer',
-  RETAIN_ORIGINAL_CONTENT: 'Retain original content',
-  SUMMARIZATION: 'Enable summarization',
-  SUMMARIZATION_CONFIG: 'Summarization configuration (JSON)',
-  USE_DOCLING_SERVE: 'Use Docling Serve (remote)',
-  PROVIDER_CONFIG: 'Docling Serve configuration (JSON)',
-} as const;
-
-/** Description shown at the top of the Summarization accordion item. */
-export const SUMMARIZATION_DESCRIPTION =
-  'When enabled, an LLM generates a concise summary for each chunk after splitting. '
-  + 'Select a provider and configure its connection settings below.';

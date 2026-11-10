@@ -88,7 +88,35 @@ Every pipeline run produces a **flow job** in the lineage graph — a single job
 
 ### Dataset stitching
 
-Lineage graphs are built from dataset edges. The output dataset name of one node matches the input dataset name of the next downstream node, which is how the lineage backend draws edges between operator jobs. Ingest nodes receive a dataset name derived from the source provider and path (for example `filesystem://./my-docs` or `s3://my-bucket`) so the graph shows the actual data origin.
+Lineage graphs are built from dataset edges. The output dataset name of one node matches the input dataset name of the next downstream node, which is how the lineage backend draws edges between operator jobs. Ingest nodes receive a dataset name derived from the source provider and path (for example namespace `file` with name `./my-docs`, or namespace `s3://my-bucket`) so the graph shows the actual data origin.
+
+### Dataset naming
+
+Ingest sources and storage sinks (for example a vector database or a document set) are named by the same rules, so the same physical location gets the same dataset on either side of a flow. Names are derived from the operator's `provider_config`:
+
+| Provider | Namespace | Name |
+| --- | --- | --- |
+| `filesystem`, `local`, `file` | `file` | `root_path`, else the first entry of `paths`, else `path`, without a trailing `/` |
+| `s3` (also `ibm_cos`) | `s3://{bucket}` | `prefix` / `key_prefix` |
+| `box` (also `box_driver`) | `box://app.box.com:443/default` | `file_id`, else `folder_id` (default `0`) |
+| `sharepoint` | `mssharepoint://graph.microsoft.com:443/{drive}` | `file_path`, else `folder_path` |
+| `onedrive` | `onedrive://graph.microsoft.com:443/{drive}` | `file_path`, else `folder_path` |
+| `dropbox` | `dropbox://api.dropbox.com` | `file_path`, else `folder_path` |
+| `google_drive` | `googledrive://drive.google.com` (plus `/{drive_id}` when set) | `file_id`, `folder_id`, `folder_path`, or `root` |
+| `web` | `{scheme}://{host}[:{port}]` of the first URL | URL path |
+| `opensearch` | `opensearch://{host}:{port}` | `index_name` |
+| `milvus` | `milvus://{host}:{port}`, or `milvus://lite/{uri}` for Milvus Lite | `{database}.{collection}` |
+| `document_set` | `docpipe://document_set` | `document_set_name` |
+| Any other provider | `{type}://{host}[:{port}]` when a host is set, otherwise `{type}://source` or `{type}://destination` | With a host: `index_name`, else `collection_name`, else `unknown`. Without a host: the first of `paths` or `path`, else `source` / `output` |
+
+Between operators, datasets live in the `inmemory://` namespace with the name `{flow_name}/{node_name}/output`. A node whose output is stored by a sink and also feeds a downstream node emits both datasets, so the graph edge to the next node is kept.
+
+How values are resolved:
+
+- `${VAR}` placeholders are resolved the same way the adapters resolve them. If a variable is not set, the text is kept as written.
+- For `s3`, `sharepoint`, `onedrive`, `dropbox`, the Google Drive `folder_path` and the `web` path, a `?query` or `#fragment` is dropped from the name. Local `filesystem` paths are used as given.
+- `web` uses only the scheme, host, port and path of the first URL; user info in the URL is not used.
+- Milvus URIs that embed an API key contribute only their host and port.
 
 ### Credential safety
 
@@ -301,7 +329,7 @@ Before viewing lineage in Marquez, understand how its data model aligns with `do
 * **Namespaces**: Logical context boundaries for jobs and datasets (e.g. `docpipe://dev`, `docpipe://stage`, `docpipe://prod`).
 * **Jobs**: The transformation code that executed. In **flow mode**, this is the pipeline flow name (e.g. `customer_support_rag`). In **operator mode**, each DAG node also becomes a distinct child job (e.g. `extract_operator`, `chunker`, `embeddings`).
 * **Runs**: A single execution instance of a job identified by a UUID. Runs transition through lifecycle states: `START` &rarr; `RUNNING` &rarr; `COMPLETE` or `FAIL`.
-* **Datasets & Graph Stitching**: Data inputs and outputs identified by unique URIs (e.g. `filesystem://./docs`, `opensearch://knowledge_base`). Marquez automatically stitches DAG edges whenever Job A's output dataset matches Job B's input dataset.
+* **Datasets & Graph Stitching**: Data inputs and outputs identified by unique URIs (e.g. namespace `file` with name `./docs`, or namespace `opensearch://localhost:9200` with name `knowledge_base`). Marquez automatically stitches DAG edges whenever Job A's output dataset matches Job B's input dataset.
 * **Facets**: Metadata payloads attached to runs, jobs, and datasets, such as dynamic PyArrow schema definitions, execution times, document processing metrics (`docpipeStats`), and error stack traces.
 
 #### Architecture and data flow
@@ -400,7 +428,7 @@ When `DOCPIPE_LINEAGE_MODE=operator`, all five flow-level events above are still
 
 > [!TIP]
 > Ingest node input datasets are named from the source provider and path — for example
-> `filesystem://./my-docs` or `s3://my-bucket` — so the lineage graph shows the actual data origin
+> namespace `file` with name `./my-docs`, or namespace `s3://my-bucket` — so the lineage graph shows the actual data origin
 > rather than an opaque internal identifier.
 
 ---

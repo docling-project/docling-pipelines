@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useCallback, useId } from 'react';
 import { Close, ChevronDown, ChevronUp } from '@carbon/icons-react';
 import { Search, Button } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { PaletteData } from '@/types/palette';
+import { messages } from './NodeSuggestion.messages';
 import styles from './NodeSuggestion.module.scss';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@ const NodeSuggestion: React.FC<NodeSuggestionProps> = ({
   lineStart,
   lineEnd,
 }) => {
+  const intl = useIntl();
   const uid = useId();
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -182,15 +185,15 @@ const NodeSuggestion: React.FC<NodeSuggestionProps> = ({
         className={styles.card}
         style={{ left: `${position.x}px`, top: `${position.y}px` }}
         role="dialog"
-        aria-label="Recommended next nodes"
+        aria-label={intl.formatMessage(messages.ariaLabel)}
         aria-modal="false"
       >
         {/* ── Header ── */}
         <div className={styles.header}>
           <div className={styles.headerText}>
-            <span className={styles.title}>Recommended next nodes</span>
+            <span className={styles.title}>{intl.formatMessage(messages.title)}</span>
             <span className={styles.subtitle}>
-              Choose a recommended node to continue, or add other nodes from the palette.
+              {intl.formatMessage(messages.subtitle)}
             </span>
           </div>
           <Button
@@ -198,7 +201,7 @@ const NodeSuggestion: React.FC<NodeSuggestionProps> = ({
             size="xs"
             hasIconOnly
             renderIcon={Close}
-            iconDescription="Close"
+            iconDescription={intl.formatMessage(messages.closeDescription)}
             tooltipPosition="left"
             onClick={onClose}
             className={styles.closeButton}
@@ -210,7 +213,7 @@ const NodeSuggestion: React.FC<NodeSuggestionProps> = ({
           <Search
             id={`node-suggestion-search-${uid}`}
             labelText=""
-            placeholder="Find nodes"
+            placeholder={intl.formatMessage(messages.searchPlaceholder)}
             value={searchTerm}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setSearchTerm(e.target.value); }}
             size="sm"
@@ -222,7 +225,7 @@ const NodeSuggestion: React.FC<NodeSuggestionProps> = ({
         <div className={styles.categories}>
           {filteredSuggestions.length === 0 ? (
             <div className={styles.empty}>
-              {searchTerm ? 'No matching nodes' : 'No suggestions available'}
+              {searchTerm ? intl.formatMessage(messages.noMatchingNodes) : intl.formatMessage(messages.noSuggestionsAvailable)}
             </div>
           ) : (
             filteredSuggestions.map((category) => (

@@ -508,8 +508,8 @@ class TestDocumentClassifierDocFormat:
         )
 
         config = {**self._VALID_CONFIG, "doc_format": doc_format}
-        # Patch ClassificationService so __init__ doesn't attempt an LLM connection
-        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationService"):
+        # Patch ClassificationAdapterFactory so __init__ doesn't attempt an LLM connection
+        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"):
             return DocumentClassifierOperator(config)
 
     def test_doc_format_attribute_doclang(self):
@@ -523,7 +523,7 @@ class TestDocumentClassifierDocFormat:
             DocumentClassifierOperator,
         )
 
-        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationService"):
+        with patch("docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"):
             op = DocumentClassifierOperator(self._VALID_CONFIG)
         assert op.doc_format == MARKDOWN
 
@@ -558,6 +558,40 @@ class TestDocumentClassifierDocFormat:
         # Content must reach the classifier unchanged — DocLang XML preserved
         for text in classified_texts:
             assert text == DOCLANG_XML, f"Content was unexpectedly modified: {text!r}"
+
+    def test_classifier_side_extraction_uses_doclang_and_fills_reuse_column(self):
+        """With no content column, the adapter extracts doclang and reports it for Extract reuse."""
+        from unittest.mock import MagicMock
+
+        from docpipe.core.operators.quality.classification.adapters.outbound.standard_llm_adapter import (
+            StandardLLMClassificationAdapter,
+        )
+        from docpipe.core.operators.quality.classification.document_classifier import (
+            DocumentClassifierOperator,
+        )
+        from docpipe.core.operators.quality.classification.domain.models import ClassificationResponse
+
+        config = {**self._VALID_CONFIG, "doc_format": DOCLANG}
+        adapter_module = "docpipe.core.operators.quality.classification.adapters.outbound.standard_llm_adapter"
+        with patch(f"{adapter_module}._LLMClassificationService") as mock_service_cls:
+            mock_service_cls.return_value.classify_document.return_value = ClassificationResponse(
+                document_type="general", confidence=9, reasoning="", success=True
+            )
+            adapter = StandardLLMClassificationAdapter(llm_adapter=MagicMock(), config=config)
+        adapter._service = mock_service_cls.return_value
+        op = DocumentClassifierOperator(config, classification_adapter=adapter)
+
+        with patch(f"{adapter_module}.OperatorUtils") as mock_utils:
+            mock_utils.extract_content.return_value = {"success": True, "content": DOCLANG_XML, "metadata": {}}
+            result = op._classify_document(
+                content=None,
+                document_types={"general": "General document"},
+                binary_content=b"%PDF-fake",
+                doc_name="doc.pdf",
+            )
+
+        assert mock_utils.extract_content.call_args.kwargs["doc_format"] == DOCLANG
+        assert result["__extracted_content__"] == DOCLANG_XML
 
 
 # ---------------------------------------------------------------------------

@@ -1,22 +1,35 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import React from 'react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
+import { screen, fireEvent } from '@testing-library/react';
 import { ConditionBuilder } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
 import type { ConditionBuilderProps } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
 import type { Condition } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
+import type { FeatureAttributes } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const FEATURES = {
-  lang_score: { type: 'float', description: 'Language score' },
-  pii_score: { type: 'float', description: 'PII score' },
-  is_valid: { type: 'boolean', description: 'Boolean feature' },
-  doc_name: { type: 'string', description: 'Document name' },
-  timestamp: { type: 'datetime', description: 'Created at' },
-  metadata: { type: 'json', description: 'JSON metadata' },
-  count: { type: 'int32', description: 'Count' },
+const makeFeature = (name: string, type: string, description: string, overrides: Partial<FeatureAttributes> = {}): FeatureAttributes => ({
+  name,
+  type,
+  description,
+  available_for_filter: true,
+  available_for_vector_db: true,
+  mandatory_for_vector_db: false,
+  node_id: 'node-1',
+  tags: [],
+  ...overrides,
+});
+
+const FEATURES: Record<string, FeatureAttributes> = {
+  lang_score: makeFeature('lang_score', 'float', 'Language score'),
+  pii_score: makeFeature('pii_score', 'float', 'PII score'),
+  is_valid: makeFeature('is_valid', 'boolean', 'Boolean feature'),
+  doc_name: makeFeature('doc_name', 'string', 'Document name'),
+  timestamp: makeFeature('timestamp', 'datetime', 'Created at'),
+  metadata: makeFeature('metadata', 'json', 'JSON metadata'),
+  count: makeFeature('count', 'int32', 'Count'),
 };
 
 const makeCondition = (overrides: Partial<Condition> = {}): Condition => ({
@@ -31,7 +44,7 @@ function renderBuilder(props: Partial<ConditionBuilderProps> = {}) {
   const onChange = vi.fn();
   return {
     onChange,
-    ...render(
+    ...renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition()]}
         logicalOperator="AND"
@@ -52,7 +65,7 @@ describe('ConditionBuilder', () => {
   // ── Loading state ─────────────────────────────────────────────────────────
 
   it('renders loading spinner when isLoading=true', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[]}
         logicalOperator="AND"
@@ -67,7 +80,7 @@ describe('ConditionBuilder', () => {
   // ── Empty features state ──────────────────────────────────────────────────
 
   it('renders empty state when features is empty', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[]}
         logicalOperator="AND"
@@ -98,7 +111,6 @@ describe('ConditionBuilder', () => {
 
   it('renders the delete button for each condition', () => {
     renderBuilder();
-    const deleteBtn = document.querySelector('button[aria-label="Delete condition"]') as HTMLElement | null;
     // Delete should exist unless aria-label differs — check via icon description
     expect(document.body).toBeInTheDocument();
   });
@@ -125,7 +137,7 @@ describe('ConditionBuilder', () => {
 
   it('calls onChange with updated logicalOperator when OR radio is clicked', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[
           makeCondition({ id: 'c1' }),
@@ -151,7 +163,7 @@ describe('ConditionBuilder', () => {
 
   it('calls onChange with a new empty condition when "Add condition" is clicked', () => {
     const onChange2 = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition()]}
         logicalOperator="AND"
@@ -175,7 +187,7 @@ describe('ConditionBuilder', () => {
 
   it('calls onChange without the deleted condition when delete is clicked', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[
           makeCondition({ id: 'c1' }),
@@ -198,7 +210,7 @@ describe('ConditionBuilder', () => {
   // ── Value input — string type ─────────────────────────────────────────────
 
   it('renders a text input for string-type features', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: '==', value: 'report' })]}
         logicalOperator="AND"
@@ -212,7 +224,7 @@ describe('ConditionBuilder', () => {
 
   it('calls onChange with updated value when text input changes', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: '==', value: '' })]}
         logicalOperator="AND"
@@ -238,7 +250,7 @@ describe('ConditionBuilder', () => {
   // ── Value input — boolean type ────────────────────────────────────────────
 
   it('renders radio buttons for boolean-type features', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'is_valid', operator: '==', value: 'true' })]}
         logicalOperator="AND"
@@ -253,7 +265,7 @@ describe('ConditionBuilder', () => {
   // ── Value input — datetime type ───────────────────────────────────────────
 
   it('renders datetime text input with placeholder for datetime features', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'timestamp', operator: '>=', value: '' })]}
         logicalOperator="AND"
@@ -266,7 +278,7 @@ describe('ConditionBuilder', () => {
   });
 
   it('renders two datetime inputs for "between" operator', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'timestamp', operator: 'between', value: '' })]}
         logicalOperator="AND"
@@ -274,7 +286,6 @@ describe('ConditionBuilder', () => {
         onChange={vi.fn()}
       />
     );
-    const dtInputs = document.querySelectorAll('input[id^="dt-"]');
     // May render as dt-start / dt-end
     expect(document.body).toBeInTheDocument();
   });
@@ -282,7 +293,7 @@ describe('ConditionBuilder', () => {
   // ── Value input — numeric type ────────────────────────────────────────────
 
   it('renders NumberInput for float-type features', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: '>=', value: '0.5' })]}
         logicalOperator="AND"
@@ -295,22 +306,21 @@ describe('ConditionBuilder', () => {
   });
 
   it('renders two NumberInputs for numeric "between" operator', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'count', operator: 'between', value: '1,10' })]}
         logicalOperator="AND"
-        features={{ count: { type: 'int32', description: 'Count' } }}
+        features={FEATURES}
         onChange={vi.fn()}
       />
     );
-    const numInputs = document.querySelectorAll('input[id^="num-"]');
     expect(document.body).toBeInTheDocument();
   });
 
   // ── Value input — json type ───────────────────────────────────────────────
 
   it('renders TextArea for json-type features', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'metadata', operator: '==', value: '{}' })]}
         logicalOperator="AND"
@@ -325,7 +335,7 @@ describe('ConditionBuilder', () => {
   // ── Value input — null-check operators ────────────────────────────────────
 
   it('renders no value input for "is null" operator', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: 'is null', value: '' })]}
         logicalOperator="AND"
@@ -341,7 +351,7 @@ describe('ConditionBuilder', () => {
   });
 
   it('renders no value input for "is not null" operator', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: 'is not null', value: '' })]}
         logicalOperator="AND"
@@ -355,7 +365,7 @@ describe('ConditionBuilder', () => {
   // ── String between ────────────────────────────────────────────────────────
 
   it('renders two text inputs for string-type "between" operator', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: 'between', value: 'A,Z' })]}
         logicalOperator="AND"
@@ -371,7 +381,7 @@ describe('ConditionBuilder', () => {
   // ── Comma-separated placeholder for "in" operator ────────────────────────
 
   it('renders enter-value input for "in" operator', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: 'in', value: 'a,b,c' })]}
         logicalOperator="AND"
@@ -394,7 +404,7 @@ describe('ConditionBuilder', () => {
   // ── Validation on blur ────────────────────────────────────────────────────
 
   it('shows validation error for invalid datetime on blur', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'timestamp', operator: '>=', value: 'not-a-date' })]}
         logicalOperator="AND"
@@ -415,7 +425,7 @@ describe('ConditionBuilder', () => {
   });
 
   it('shows validation error for invalid JSON on blur', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'metadata', operator: '==', value: 'not-json{' })]}
         logicalOperator="AND"
@@ -438,7 +448,7 @@ describe('ConditionBuilder', () => {
   // ── renderValueInput — numeric between (lines 383-414) ───────────────────
 
   it('numeric between: renders two NumberInputs with ids num-start- and num-end-', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: 'between', value: '0.1,0.9' })]}
         logicalOperator="AND"
@@ -454,7 +464,7 @@ describe('ConditionBuilder', () => {
 
   it('numeric between: onChange on first NumberInput calls onChange with updated start value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: 'between', value: '0.1,0.9' })]}
         logicalOperator="AND"
@@ -479,7 +489,7 @@ describe('ConditionBuilder', () => {
 
   it('numeric between: onChange on second NumberInput calls onChange with updated end value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: 'between', value: '0.1,0.9' })]}
         logicalOperator="AND"
@@ -506,7 +516,7 @@ describe('ConditionBuilder', () => {
 
   it('single numeric NumberInput onChange calls onChange with new value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'lang_score', operator: '>=', value: '0.5' })]}
         logicalOperator="AND"
@@ -532,7 +542,7 @@ describe('ConditionBuilder', () => {
   // ── renderValueInput — datetime between (lines 435-468) ──────────────────
 
   it('datetime between: renders two text inputs with ids dt-start- and dt-end-', () => {
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'timestamp', operator: 'between', value: '2024-01-01 00:00:00|2024-12-31 23:59:59' })]}
         logicalOperator="AND"
@@ -547,7 +557,7 @@ describe('ConditionBuilder', () => {
 
   it('datetime between: onChange on first dt-start- input calls onChange', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'timestamp', operator: 'between', value: '2024-01-01 00:00:00|2024-12-31 23:59:59' })]}
         logicalOperator="AND"
@@ -572,7 +582,7 @@ describe('ConditionBuilder', () => {
 
   it('datetime between: onChange on dt-end- input calls onChange', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'timestamp', operator: 'between', value: '2024-01-01 00:00:00|2024-12-31 23:59:59' })]}
         logicalOperator="AND"
@@ -599,7 +609,7 @@ describe('ConditionBuilder', () => {
 
   it('JSON textarea onChange calls onChange with updated JSON value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'metadata', operator: '==', value: '{}' })]}
         logicalOperator="AND"
@@ -626,7 +636,7 @@ describe('ConditionBuilder', () => {
 
   it('string between: onChange on str-start- input calls onChange with updated value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: 'between', value: 'A,Z' })]}
         logicalOperator="AND"
@@ -651,7 +661,7 @@ describe('ConditionBuilder', () => {
 
   it('string between: onChange on str-end- input calls onChange with updated value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: 'between', value: 'A,Z' })]}
         logicalOperator="AND"
@@ -678,7 +688,7 @@ describe('ConditionBuilder', () => {
 
   it('"in" operator string: renders val- input and onChange calls onChange', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: 'in', value: 'a,b,c' })]}
         logicalOperator="AND"
@@ -705,7 +715,7 @@ describe('ConditionBuilder', () => {
 
   it('boolean radio: clicking "true" radio calls onChange with value "true"', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'is_valid', operator: '==', value: 'false' })]}
         logicalOperator="AND"
@@ -730,7 +740,7 @@ describe('ConditionBuilder', () => {
 
   it('boolean radio: clicking "false" radio calls onChange with value "false"', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'is_valid', operator: '==', value: 'true' })]}
         logicalOperator="AND"
@@ -757,7 +767,7 @@ describe('ConditionBuilder', () => {
 
   it('"not in" operator: renders val- input with comma-separated helper', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'doc_name', operator: 'not in', value: 'a,b' })]}
         logicalOperator="AND"
@@ -784,7 +794,7 @@ describe('ConditionBuilder', () => {
 
   it('int32 single NumberInput onChange calls onChange with new value', () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <ConditionBuilder
         conditions={[makeCondition({ variable: 'count', operator: '==', value: '5' })]}
         logicalOperator="AND"

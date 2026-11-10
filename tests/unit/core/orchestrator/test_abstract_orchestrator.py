@@ -449,3 +449,49 @@ class TestOrchestratorFactory:
 
         with pytest.raises(ValueError, match="must not be empty"):
             OrchestratorFactory.register_orchestrators(orchestrators={})
+
+
+@pytest.mark.unit
+class TestRecordSinkDataset:
+    """Sinks are shared across micro-batches on one orchestrator instance."""
+
+    NS = "opensearch://localhost:9200"
+
+    def test_starts_empty_without_hasattr_guard(self, orchestrator):
+        assert orchestrator.sink_datasets == {}
+
+    def test_same_sink_across_batches_is_one_entry_with_summed_rows(self, orchestrator):
+        for rows in (3, 4, 5):
+            orchestrator._record_sink_dataset(
+                namespace=self.NS, name="idx", tables=[pa.table({"id": [str(i) for i in range(rows)]})]
+            )
+        assert list(orchestrator.sink_datasets) == [(self.NS, "idx")]
+        assert orchestrator.sink_datasets[(self.NS, "idx")].summary.row_count == 12
+
+    def test_distinct_sinks_keep_their_own_schema(self, orchestrator):
+        orchestrator._record_sink_dataset(namespace=self.NS, name="a", tables=[pa.table({"id": ["1"]})])
+        orchestrator._record_sink_dataset(
+            namespace=self.NS, name="b", tables=[pa.table({"id": ["1", "2"], "extra": [1, 2]})]
+        )
+        assert [c for c, _ in orchestrator.sink_datasets[(self.NS, "a")].summary.schema_fields] == ["id"]
+        assert [c for c, _ in orchestrator.sink_datasets[(self.NS, "b")].summary.schema_fields] == ["id", "extra"]
+        assert orchestrator.sink_datasets[(self.NS, "b")].summary.row_count == 2
+
+    def test_no_table_records_nothing(self, orchestrator):
+        orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[])
+        orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[None])
+        assert orchestrator.sink_datasets == {}
+
+    def test_concurrent_batches_do_not_lose_rows(self, orchestrator):
+        import threading
+
+        def run_batch():
+            orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[pa.table({"id": ["1", "2"]})])
+
+        threads = [threading.Thread(target=run_batch) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(orchestrator.sink_datasets) == 1
+        assert orchestrator.sink_datasets[(self.NS, "idx")].summary.row_count == 40

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Programmatic DocpipeFlowManager for embedding docpipe in notebooks and applications.
 
@@ -76,7 +79,7 @@ class DocpipeFlowManager:
             job_id: Unique job identifier (priority: parameter > flow_def > UUID)
             job_run_id: Unique job run identifier (defaults to job_id if not provided)
             flow_id: Flow identifier (priority: parameter > flow_def > job_id)
-            enable_custom_operators: Whether to enable custom operators (default: from env or True)
+            enable_custom_operators: Whether to enable custom operators (default: from env, else disabled)
             enable_execution_reporter: Whether to enable user-friendly console output (default: True)
             configure_logging: When True (default), installs handlers and formatters on the
                                root docpipe logger. Set to False when the calling application
@@ -207,7 +210,7 @@ class DocpipeFlowManager:
             raise DocpipeException(message="All package names must be strings", status_code=400)
 
         self.custom_operator_packages.extend(package_names)
-        self.logger.info(f"Registered custom operator packages: {package_names}")
+        self.logger.info("Registered custom operator packages: %s", package_names)
 
     def _compile_flow_dict(self, *, flow_dict: dict[str, Any]) -> dict[str, Any]:
         """
@@ -221,7 +224,6 @@ class DocpipeFlowManager:
 
         Raises:
             FlowInvalidDataException: If authoring format validation fails
-            KeyError: If required authoring format fields are missing
         """
         self.logger.info("Loading authoring format flow definition")
 
@@ -232,11 +234,8 @@ class DocpipeFlowManager:
             # Parse and validate authoring format
             authoring_flow = AuthoringFlow.from_dict(data=flow_dict)
         except FlowInvalidDataException as e:
-            self.logger.error(f"Authoring format validation failed: {e}")
+            self.logger.error("Authoring format validation failed: %s", e)
             raise
-        except KeyError as e:
-            self.logger.error(f"Missing required field in authoring format: {e}")
-            raise DocpipeException(f"Missing required field in authoring format: {e}", status_code=400) from e
 
         # Compile to runtime DAG format
         self.logger.info("Compiling authoring format to runtime DAG format")
@@ -248,11 +247,9 @@ class DocpipeFlowManager:
 
     def _initialize_execution_environment(self) -> None:
         """Initialize orchestrator and session for execution."""
-        # Create orchestrator with custom operator settings
-        # Default to True if enable_custom_operators is None
-        enable_custom = self.enable_custom_operators if self.enable_custom_operators is not None else True
+        # Create orchestrator with custom operator settings; None resolves to env, else disabled
         self.orchestrator = OrchestratorFactory.create_orchestrator(
-            enable_custom_operators=enable_custom,
+            enable_custom_operators=self.enable_custom_operators,
             custom_operator_packages=self.custom_operator_packages if self.custom_operator_packages else None,
             execution_reporter=self.execution_reporter,
         )
@@ -298,11 +295,10 @@ class DocpipeFlowManager:
 
         try:
             # Create orchestrator with custom operator settings
-            enable_custom = self.enable_custom_operators if self.enable_custom_operators is not None else True
             custom_packages = self.custom_operator_packages if len(self.custom_operator_packages) > 0 else None
 
             temp_orchestrator = OrchestratorFactory.create_orchestrator(
-                enable_custom_operators=enable_custom,
+                enable_custom_operators=self.enable_custom_operators,
                 custom_operator_packages=custom_packages,
             )
 
@@ -345,7 +341,7 @@ class DocpipeFlowManager:
                 "warnings": warnings,
             }
         except Exception as e:
-            self.logger.error(f"Flow validation failed: {e}")
+            self.logger.error("Flow validation failed: %s", e)
             return {"valid": False, "errors": [str(e)], "warnings": []}
 
     def execute(self) -> Any:
@@ -379,7 +375,7 @@ class DocpipeFlowManager:
             # Delegate execution to FlowExecutor (logging moved to FlowExecutor.execute())
             return self.executor.execute(orchestrator=self.orchestrator, params=params)  # type: ignore
         except Exception as e:
-            self.logger.error(f"Flow execution failed: {e}")
+            self.logger.error("Flow execution failed: %s", e)
             raise
 
     def get_execution_metadata(self) -> dict[str, Any]:
@@ -431,30 +427,16 @@ class DocpipeFlowManager:
         if self.orchestrator is None:
             return []
 
-        # Get the job stats service from the orchestrator
-        job_stats_service = getattr(self.orchestrator, "job_stats_service", None)
-        if not job_stats_service:
-            return []
-
         try:
             # Get formatted job stats with logs included
-            job_stats_response = job_stats_service.get_formatted_job_stats(
+            job_stats_response = self.orchestrator.job_stats_service.get_formatted_job_stats(
                 job_run_id=self.job_run_id, include_logs=True
             )
 
-            # Extract logs from the response
-            # The response has dynamic attributes for each node_id containing log strings
-            logs = []
-            if hasattr(job_stats_response, "node_sequence"):
-                for node_id in job_stats_response.node_sequence:
-                    if hasattr(job_stats_response, node_id):
-                        node_log = getattr(job_stats_response, node_id)
-                        if node_log:
-                            logs.append(node_log)
-
-            return logs
+            # The response carries one log string per node as a dynamic attribute named after the node id
+            return [getattr(job_stats_response, node_id) for node_id in job_stats_response.node_sequence]
         except Exception as e:
-            self.logger.warning(f"Failed to retrieve execution logs: {e}")
+            self.logger.warning("Failed to retrieve execution logs: %s", e)
             return []
 
     @staticmethod

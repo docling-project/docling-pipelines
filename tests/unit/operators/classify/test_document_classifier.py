@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for document_classifier operator.
 Tests the operator with sample documents from the fixtures directory.
@@ -6,7 +9,7 @@ Tests the operator with sample documents from the fixtures directory.
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
@@ -14,6 +17,7 @@ import pytest
 from docpipe.core.constants import DocpipeConstants, ExecutionStatus, Metrics
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.operators.quality.classification.document_classifier import DocumentClassifierOperator
+from docpipe.core.operators.quality.classification.domain.models import ClassificationResponse
 
 
 @pytest.fixture
@@ -533,33 +537,30 @@ def test_document_classifier_file_extension_validation():
     config = {
         "provider": "litellm",
         "provider_config": {
+            "model_id": "openai/granite3.1-dense:8b",
             "api_base": "http://localhost:11434/v1",
             "api_key": "<ollama>",
         },
-        "model_id": "openai/granite3.1-dense:8b",
         "document_types": ["invoice", "contract", "receipt"],
         "confidence_threshold": 7.0,
         "doc_column": "content",
         "output_column": "document_type",
     }
 
-    # Mock the classification service to avoid actual LLM calls
-    with patch(
-        "docpipe.core.operators.quality.classification.document_classifier.ClassificationService"
-    ) as mock_service:
-        mock_instance = mock_service.return_value
-        mock_instance.classify_document.return_value = type(
-            "Response",
-            (),
-            {
-                "success": True,
-                "document_type": "invoice",
-                "confidence": 9,
-                "reasoning": "Test classification",
-            },
-        )()
+    # Mock the adapter factory to avoid actual LLM calls
+    from unittest.mock import MagicMock
 
+    mock_adapter = MagicMock()
+    mock_adapter.classify_document.return_value = ClassificationResponse(
+        document_type="invoice", confidence=9, reasoning="Test classification", success=True
+    )
+
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as mock_factory:
+        mock_factory.create_adapter.return_value = mock_adapter
         operator = DocumentClassifierOperator(config)
+        operator.adapter = mock_adapter
         output_tables, metadata = operator.transform(table)
 
         # Verify that unsupported files were skipped (not failed)
@@ -620,19 +621,25 @@ def test_document_classifier_all_files_skipped():
         }
     )
 
-    # Initialize operator
+    # Initialize operator — patch factory since all files are skipped before LLM is called
     config = {
         "provider": "litellm",
         "provider_config": {
+            "model_id": "openai/granite3.1-dense:8b",
             "api_base": "http://localhost:11434/v1",
             "api_key": "<ollama>",
         },
-        "model_id": "openai/granite3.1-dense:8b",
         "document_types": ["invoice", "contract"],
         "doc_column": "content",
     }
 
-    operator = DocumentClassifierOperator(config)
+    from unittest.mock import MagicMock
+
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as mock_factory:
+        mock_factory.create_adapter.return_value = MagicMock()
+        operator = DocumentClassifierOperator(config)
     output_tables, metadata = operator.transform(table)
 
     # Verify all files were skipped (not failed)
@@ -676,31 +683,28 @@ def test_document_classifier_supported_extensions_only():
     config = {
         "provider": "litellm",
         "provider_config": {
+            "model_id": "openai/granite3.1-dense:8b",
             "api_base": "http://localhost:11434/v1",
             "api_key": "<ollama>",
         },
-        "model_id": "openai/granite3.1-dense:8b",
         "document_types": ["document"],
         "doc_column": "content",
     }
 
-    # Mock the classification service
-    with patch(
-        "docpipe.core.operators.quality.classification.document_classifier.ClassificationService"
-    ) as mock_service:
-        mock_instance = mock_service.return_value
-        mock_instance.classify_document.return_value = type(
-            "Response",
-            (),
-            {
-                "success": True,
-                "document_type": "document",
-                "confidence": 9,
-                "reasoning": "Test",
-            },
-        )()
+    # Mock the adapter factory to avoid actual LLM calls
+    from unittest.mock import MagicMock
 
+    mock_adapter = MagicMock()
+    mock_adapter.classify_document.return_value = ClassificationResponse(
+        document_type="document", confidence=9, reasoning="Test", success=True
+    )
+
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as mock_factory:
+        mock_factory.create_adapter.return_value = mock_adapter
         operator = DocumentClassifierOperator(config)
+        operator.adapter = mock_adapter
         output_tables, metadata = operator.transform(table)
 
         # Verify no files were rejected
@@ -949,54 +953,112 @@ def test_temp_pages_processed_column_added():
 
     operator = DocumentClassifierOperator(config)
 
-    # Mock the content extraction and classification
-    with patch.object(operator, "_classify_document") as mock_classify:
-        mock_classify.return_value = {
-            "success": True,
-            "document_type": "invoice",
-            "confidence": 9,
-            "reasoning": "Test",
-            "is_confident": True,
-        }
+    # The adapter returns the text it extracted as a side product; the operator forwards it.
+    mock_adapter = MagicMock()
+    mock_adapter.classify_document.return_value = ClassificationResponse(
+        document_type="invoice",
+        confidence=9,
+        reasoning="Test",
+        success=True,
+        extracted_content="A" * 3000,  # 1 page worth of content
+        extraction_metadata={},
+    )
+    operator.adapter = mock_adapter
 
-        # Mock OperatorUtils.extract_content to return content
-        with patch("docpipe.core.operators.operator_utils.OperatorUtils.extract_content") as mock_extract:
-            mock_extract.return_value = {
-                "success": True,
-                "content": "A" * 3000,  # 1 page worth of content
-            }
+    with patch("docpipe.core.operators.operator_utils.OperatorUtils.prepare_document_content_fetch") as mock_prepare:
+        mock_prepare.return_value = [
+            {"idx": 0, "doc_id": "doc1", "doc_name": "test1.pdf", "binary_content": b"fake_binary"},
+            {"idx": 1, "doc_id": "doc2", "doc_name": "test2.pdf", "binary_content": b"fake_binary"},
+        ]
 
-            # Mock OperatorUtils.prepare_document_content_fetch
-            with patch(
-                "docpipe.core.operators.operator_utils.OperatorUtils.prepare_document_content_fetch"
-            ) as mock_prepare:
-                mock_prepare.return_value = [
-                    {
-                        "idx": 0,
-                        "doc_id": "doc1",
-                        "doc_name": "test1.pdf",
-                        "binary_content": b"fake_binary",
-                    },
-                    {
-                        "idx": 1,
-                        "doc_id": "doc2",
-                        "doc_name": "test2.pdf",
-                        "binary_content": b"fake_binary",
-                    },
-                ]
+        result_tables, _ = operator.transform(table)
+        result_table = result_tables[0]
 
-                result_tables, _ = operator.transform(table)
-                result_table = result_tables[0]
+    # The operator hands raw bytes (not text) to the adapter when there is no doc column
+    for call in mock_adapter.classify_document.call_args_list:
+        assert call.kwargs["binary_content"] == b"fake_binary"
+        assert call.kwargs["existing_text"] is None
 
-                # Verify _temp_content_for_extract column was added
-                assert DocpipeConstants.TEMP_CONTENT_COLUMN in result_table.column_names
+    # Verify _temp_content_for_extract column was added
+    assert DocpipeConstants.TEMP_CONTENT_COLUMN in result_table.column_names
+    assert result_table[DocpipeConstants.TEMP_CONTENT_COLUMN].to_pylist() == ["A" * 3000] * 2
 
-                # Verify _temp_pages_processed column was added
-                assert DocpipeConstants.TEMP_PAGES_PROCESSED_COLUMN in result_table.column_names
+    # Verify _temp_pages_processed column was added (both should be 1 page)
+    assert DocpipeConstants.TEMP_PAGES_PROCESSED_COLUMN in result_table.column_names
+    pages_column = result_table[DocpipeConstants.TEMP_PAGES_PROCESSED_COLUMN].to_pylist()
+    assert pages_column == [1, 1]
 
-                # Verify page counts are correct (both should be 1 page)
-                pages_column = result_table[DocpipeConstants.TEMP_PAGES_PROCESSED_COLUMN].to_pylist()
-                assert pages_column == [1, 1]
+
+@pytest.mark.unit
+def test_no_temp_columns_when_adapter_returns_no_extracted_content():
+    """Adapters that do not extract text (e.g. hybrid) must not cause temp columns to be written."""
+    table = pa.table({"id": ["doc1"], "name": ["test1.pdf"], "path": ["/path/to/test1.pdf"]})
+    config = {
+        "provider": "litellm",
+        "provider_config": {
+            "model_id": "openai/llama3",
+            "api_base": "http://localhost:11434/v1",
+            "api_key": "ollama",  # pragma: allowlist secret
+        },
+        "document_types": ["invoice"],
+    }
+    operator = DocumentClassifierOperator(config)
+    mock_adapter = MagicMock()
+    mock_adapter.classify_document.return_value = ClassificationResponse(
+        document_type="invoice", confidence=9, reasoning="Test", success=True
+    )
+    operator.adapter = mock_adapter
+
+    with (
+        patch("docpipe.core.operators.operator_utils.OperatorUtils.prepare_document_content_fetch") as mock_prepare,
+        patch("docpipe.core.operators.operator_utils.OperatorUtils.extract_content") as mock_extract,
+    ):
+        mock_prepare.return_value = [
+            {"idx": 0, "doc_id": "doc1", "doc_name": "test1.pdf", "binary_content": b"fake_binary"}
+        ]
+        result_tables, metadata = operator.transform(table)
+
+    mock_extract.assert_not_called()
+    result_table = result_tables[0]
+    assert DocpipeConstants.TEMP_CONTENT_COLUMN not in result_table.column_names
+    assert DocpipeConstants.TEMP_PAGES_PROCESSED_COLUMN not in result_table.column_names
+    assert metadata[Metrics.External.PROCESSED_DOCS] == 1
+
+
+@pytest.mark.unit
+def test_blank_extraction_is_recorded_as_skipped_not_failed():
+    """A blank-extraction failure signalled by the adapter is a skip, matching previous behaviour."""
+    table = pa.table({"id": ["doc1"], "name": ["test1.pdf"], "path": ["/path/to/test1.pdf"]})
+    config = {
+        "provider": "litellm",
+        "provider_config": {
+            "model_id": "openai/llama3",
+            "api_base": "http://localhost:11434/v1",
+            "api_key": "ollama",  # pragma: allowlist secret
+        },
+        "document_types": ["invoice"],
+    }
+    operator = DocumentClassifierOperator(config)
+    mock_adapter = MagicMock()
+    mock_adapter.classify_document.return_value = ClassificationResponse(
+        document_type="unknown",
+        confidence=0,
+        reasoning="",
+        success=False,
+        error="Empty content",
+        extracted_content="  ",
+        extraction_metadata={},
+    )
+    operator.adapter = mock_adapter
+
+    with patch("docpipe.core.operators.operator_utils.OperatorUtils.prepare_document_content_fetch") as mock_prepare:
+        mock_prepare.return_value = [
+            {"idx": 0, "doc_id": "doc1", "doc_name": "test1.pdf", "binary_content": b"fake_binary"}
+        ]
+        _, metadata = operator.transform(table)
+
+    assert metadata[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+    assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
 
 
 @pytest.mark.unit
@@ -1032,3 +1094,49 @@ def test_document_classifier_validate_unsupported_provider():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_new_document_formats_are_classifiable():
+    """Classifier accepts the added formats except plain-text variants."""
+    from docpipe.core.constants.operator_constants import OperatorConstants
+
+    extensions = set(OperatorConstants.FileExtensions.CLASSIFICATION_FILE_EXTENSIONS)
+    assert {
+        f".{ext}"
+        for ext in "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht pptm xlsm xltx xltm".split()
+    } <= extensions
+    assert not {".markdown", ".text", ".qmd", ".rmd"} & extensions
+
+
+def test_new_formats_classification_validation(basic_litellm_config):
+    names = [
+        f"sample.{ext}"
+        for ext in "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht pptm xlsm xltx xltm markdown".split()
+    ]
+    table = pa.table({"id": [str(i) for i in range(len(names))], "name": names, "content": ["example"] * len(names)})
+    adapter = MagicMock()
+    adapter.classify_document.return_value = ClassificationResponse(
+        document_type="invoice", confidence=9, reasoning="Test", success=True
+    )
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as factory:
+        factory.create_adapter.return_value = adapter
+        operator = DocumentClassifierOperator(basic_litellm_config)
+        _, metadata = operator.transform(table)
+    assert metadata["processed_docs"] == len(names) - 1
+    assert [doc["name"] for doc in metadata["skipped_docs"]] == ["sample.markdown"]
+
+
+def test_unreadable_office_variants_are_not_classified(basic_litellm_config):
+    names = [f"sample.{extension}" for extension in ("dotx", "docm", "dotm", "potx", "ppsx", "potm", "ppsm")]
+    table = pa.table({"id": [str(i) for i in range(len(names))], "name": names, "content": ["example"] * len(names)})
+    adapter = MagicMock()
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as factory:
+        factory.create_adapter.return_value = adapter
+        operator = DocumentClassifierOperator(basic_litellm_config)
+        _, metadata = operator.transform(table)
+    assert {doc["name"] for doc in metadata["skipped_docs"]} == set(names)
+    adapter.classify_document.assert_not_called()
