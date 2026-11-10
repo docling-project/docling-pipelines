@@ -359,8 +359,9 @@ class TestCustomOperatorRoutesRequireAuthentication:
     """Every custom operator route requires a valid bearer token (real JWT verification, no override)."""
 
     @pytest.fixture
-    def unauth_client(self, *, mock_service: MagicMock) -> TestClient:
-        """Client against an app that does not override get_current_user."""
+    def unauth_client(self, *, mock_service: MagicMock, auth_enabled: None) -> TestClient:
+        """Client against an app that does not override get_current_user, with authentication enabled."""
+        del auth_enabled
         return TestClient(_build_app(mock_service=mock_service), raise_server_exceptions=False)
 
     @pytest.mark.parametrize(("method", "path"), _ALL_ROUTES)
