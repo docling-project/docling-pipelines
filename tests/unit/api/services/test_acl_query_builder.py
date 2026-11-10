@@ -1,5 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for ACL query builder."""
 
+from docpipe.api.auth.dependencies import LOCAL_PRINCIPAL_USERNAME
 from docpipe.api.services.acl_query_builder import ACLQueryBuilder
 
 
@@ -216,3 +220,63 @@ class TestACLQueryBuilder:
         )
 
         assert result is False
+
+
+class TestLocalPrincipal:
+    """The reserved local principal is handled explicitly."""
+
+    def test_acl_filter_for_local_principal_matches_nothing(self):
+        """The reserved name must not match an allowed_users entry that happens to list it."""
+        filter_dict = ACLQueryBuilder.build_acl_filter(username=LOCAL_PRINCIPAL_USERNAME)
+
+        assert filter_dict == {"bool": {"must_not": [{"match_all": {}}]}}
+
+    def test_document_query_for_local_principal_matches_nothing(self):
+        query = ACLQueryBuilder.build_document_query(document_id="doc-1", username=LOCAL_PRINCIPAL_USERNAME)
+
+        assert {"term": {"allowed_users": LOCAL_PRINCIPAL_USERNAME}} not in query["query"]["bool"]["must"]
+        assert {"bool": {"must_not": [{"match_all": {}}]}} in query["query"]["bool"]["must"]
+
+    def test_exists_query_for_local_principal_matches_nothing(self):
+        query = ACLQueryBuilder.build_exists_query(username=LOCAL_PRINCIPAL_USERNAME)
+
+        assert query["query"] == {"bool": {"must_not": [{"match_all": {}}]}}
+
+    def test_user_has_access_denies_local_principal_even_when_listed(self):
+        assert (
+            ACLQueryBuilder.user_has_access(
+                username=LOCAL_PRINCIPAL_USERNAME,
+                allowed_users=[LOCAL_PRINCIPAL_USERNAME, "john.doe"],
+            )
+            is False
+        )
+
+    def test_bypass_acl_drops_the_allowed_users_filter_from_document_query(self):
+        query = ACLQueryBuilder.build_document_query(
+            document_id="doc-1", username=LOCAL_PRINCIPAL_USERNAME, bypass_acl=True
+        )
+
+        assert query["query"]["bool"]["must"] == [{"term": {"_id": "doc-1"}}]
+
+    def test_bypass_acl_search_without_criteria_matches_all(self):
+        query = ACLQueryBuilder.build_search_query(username=LOCAL_PRINCIPAL_USERNAME, bypass_acl=True)
+
+        assert query["query"]["bool"]["must"] == [{"match_all": {}}]
+
+    def test_bypass_acl_search_keeps_text_and_filters(self):
+        query = ACLQueryBuilder.build_search_query(
+            username=LOCAL_PRINCIPAL_USERNAME,
+            query_text="ml",
+            filters={"category": "tech"},
+            bypass_acl=True,
+        )
+
+        must = query["query"]["bool"]["must"]
+        assert not any("allowed_users" in str(clause) for clause in must)
+        assert {"term": {"category": "tech"}} in must
+        assert any("multi_match" in clause for clause in must)
+
+    def test_default_still_enforces_the_acl(self):
+        query = ACLQueryBuilder.build_search_query(username="john.doe")
+
+        assert query["query"]["bool"]["must"] == [{"term": {"allowed_users": "john.doe"}}]

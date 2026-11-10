@@ -290,6 +290,10 @@ class DocpipeConfigKeys:
     MAX_OVERFLOW = "max_overflow"
     POOL_TIMEOUT = "pool_timeout"
 
+    # API authentication configuration keys (auth.role_mapping.<role> in the config file)
+    AUTH = "auth"
+    ROLE_MAPPING = "role_mapping"
+
     # Incremental metadata configuration keys
     INCREMENTAL_METADATA = "incremental_metadata"
     STORAGE = "storage"
@@ -361,6 +365,20 @@ class EnvironmentVariables:
     KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
     KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
     SCHEMA_REGISTRY_URL = "SCHEMA_REGISTRY_URL"
+
+    # API authentication and authorization
+    DOCPIPE_AUTH_ENABLED = "DOCPIPE_AUTH_ENABLED"
+    DOCPIPE_AUTH_DEFAULT_ROLE = "DOCPIPE_AUTH_DEFAULT_ROLE"
+    DOCPIPE_AUTH_ROLE_MAPPING_VIEWER = "DOCPIPE_AUTH_ROLE_MAPPING_VIEWER"
+    DOCPIPE_AUTH_ROLE_MAPPING_EDITOR = "DOCPIPE_AUTH_ROLE_MAPPING_EDITOR"
+    DOCPIPE_AUTH_ROLE_MAPPING_ADMIN = "DOCPIPE_AUTH_ROLE_MAPPING_ADMIN"
+    DOCPIPE_AUTH_COOKIE_NAME = "DOCPIPE_AUTH_COOKIE_NAME"
+    DOCPIPE_AUTH_COOKIE_SECURE = "DOCPIPE_AUTH_COOKIE_SECURE"
+    DOCPIPE_TRUST_PROXY_HEADERS = "DOCPIPE_TRUST_PROXY_HEADERS"
+    DOCPIPE_AUTH_BOOTSTRAP_USERNAME = "DOCPIPE_AUTH_BOOTSTRAP_USERNAME"
+    DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH = (
+        "DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH"  # pragma: allowlist secret  # nosec B105
+    )
 
 
 class LineageConstants:

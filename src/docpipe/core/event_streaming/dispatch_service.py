@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Resolve events and submit mapped flow runs through the job-run API."""
 
 import json
@@ -13,6 +16,9 @@ from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
 
+SYSTEM_USERNAME = "docpipe-system"
+SYSTEM_TOKEN_MAX_MINUTES = 5
+
 
 class EventDispatchService:
     """Dispatch validated events to their mapped flows through REST."""
@@ -22,6 +28,32 @@ class EventDispatchService:
         self._api_base_url = os.environ.get(EnvironmentVariables.DOCPIPE_API_BASE_URL, "http://127.0.0.1:8080").rstrip(
             "/"
         )
+
+    @staticmethod
+    def _build_auth_headers() -> dict[str, str]:
+        """Return a ``Bearer`` header for the system caller when API auth is enabled.
+
+        The token carries the ``editor`` role and a fixed system username, and expires
+        within ``SYSTEM_TOKEN_MAX_MINUTES``. A fresh token is minted for every dispatch.
+        """
+        # Imported lazily: docpipe.api imports this module through its dependency wiring.
+        from docpipe.api.auth.config import get_auth_settings
+        from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_token
+        from docpipe.api.auth.roles import Role
+
+        if not get_auth_settings().enabled:
+            return {}
+        config = JWTConfig()
+        config = config.model_copy(
+            update={
+                "jwt_access_token_expire_minutes": min(config.jwt_access_token_expire_minutes, SYSTEM_TOKEN_MAX_MINUTES)
+            }
+        )
+        token = create_access_token(
+            {JWTClaims.USERNAME: SYSTEM_USERNAME, JWTClaims.ROLES: [Role.EDITOR.value]},
+            config,
+        )
+        return {"Authorization": f"Bearer {token}"}
 
     def dispatch(self, *, event: InputEvent) -> dict[str, Any]:
         """Resolve the event routing key and submit an asynchronous job run."""
@@ -47,7 +79,7 @@ class EventDispatchService:
         response = httpx.post(
             f"{self._api_base_url}/api/v1/job_runs",
             json=request_payload,
-            headers={"X-Global-Transaction-Id": event_metadata["event_id"]},
+            headers={"X-Global-Transaction-Id": event_metadata["event_id"], **self._build_auth_headers()},
             timeout=30.0,
         )
         response.raise_for_status()

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document retrieval API routes with ACL enforcement."""
 
 import logging
@@ -6,7 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from opensearchpy.exceptions import NotFoundError, RequestError
 
-from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.config import get_auth_settings
+from docpipe.api.auth.dependencies import LOCAL_PRINCIPAL_USERNAME, get_current_user
 from docpipe.api.auth.models import User
 from docpipe.api.dto.document_dto import (
     DocumentResponse,
@@ -23,6 +27,15 @@ from docpipe.api.services.opensearch_service import (
 logger = logging.getLogger(__name__)
 
 documents_router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+def _bypasses_acl(*, user: User) -> bool:
+    """Return True when the caller is the local principal and authentication is disabled.
+
+    No real user identity exists in that case, so the allowed_users filter is skipped.
+    With authentication enabled the reserved name is never granted access.
+    """
+    return user.username == LOCAL_PRINCIPAL_USERNAME and not get_auth_settings().enabled
 
 
 @documents_router.get(
@@ -108,6 +121,7 @@ async def get_document(
         query = ACLQueryBuilder.build_document_query(
             document_id=document_id,
             username=current_user.username,
+            bypass_acl=_bypasses_acl(user=current_user),
         )
 
         # Execute query
@@ -162,10 +176,9 @@ async def get_document(
         ) from e
     except Exception as e:
         # Unexpected error
-        logger.error(
+        logger.exception(
             "Unexpected error retrieving document: %s",
             e,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -256,6 +269,7 @@ async def search_documents(
             query_text=search_request.query,
             filters=search_request.filters,
             sort=search_request.sort,
+            bypass_acl=_bypasses_acl(user=current_user),
         )
 
         # Execute search
@@ -307,10 +321,9 @@ async def search_documents(
         ) from e
     except Exception as e:
         # Unexpected error
-        logger.error(
+        logger.exception(
             "Unexpected error searching documents: %s",
             e,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

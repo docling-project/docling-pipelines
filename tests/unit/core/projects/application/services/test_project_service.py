@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for ProjectService."""
 
 from unittest.mock import patch
@@ -516,7 +519,7 @@ class TestProjectServiceDelete:
 
         service.delete_project(project_id=sample_project.project_id)
 
-        mock_flow_service.bulk_delete_flows.assert_called_once_with(flow_ids=[flow_for_project.asset_id])
+        mock_flow_service.bulk_delete_flows.assert_called_once_with(flow_ids=[flow_for_project.asset_id], actor=None)
         mock_project_repository.delete.assert_called_once_with(project_id=sample_project.project_id)
 
     def test_delete_no_flows_skips_bulk_delete(

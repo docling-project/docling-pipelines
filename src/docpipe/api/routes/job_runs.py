@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Job run management API routes.
 
 This module provides REST API endpoints for job run operations including
@@ -9,6 +12,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 
+from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_job_management_service, get_job_stats_service
 from docpipe.api.dto.error_dto import ErrorResponse
 from docpipe.api.dto.field_definitions import (
@@ -33,6 +39,7 @@ from docpipe.api.dto.job_run_dto import (
 from docpipe.core.constants import ExecutionStatus
 from docpipe.core.job_management.application.services import JobManagementService
 from docpipe.core.job_management.domain.ports import JobStatsService
+from docpipe.core.models.actor_context import ActorContext
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -105,10 +112,12 @@ IncludeLogsQuery = Annotated[
 
 JobStatsServiceDep = Annotated[JobStatsService, Depends(get_job_stats_service)]
 JobManagementServiceDep = Annotated[JobManagementService, Depends(get_job_management_service)]
+ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
 
 
 @job_runs_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=JobRunCreateResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_job_run",
@@ -145,6 +154,7 @@ async def create_job_run(
     request: Request,
     body: JobsAPIExecuteModel,
     service: JobManagementServiceDep,
+    actor: ActorDep,
 ) -> JobRunCreateResponse:
     """Create and start a new job run.
 
@@ -152,6 +162,7 @@ async def create_job_run(
         request: FastAPI request object
         body: Job run creation request with job and configuration details
         service: Injected job management service
+        actor: Authenticated caller, or None when auth is disabled
 
     Returns:
         JobRunCreateResponse: Created job run details with unique ID
@@ -160,7 +171,7 @@ async def create_job_run(
         HTTPException: If creation fails (400, 404, 500)
     """
     logger.debug("Creating job run")
-    result = service.create_job_run_from_request(request_body=body)
+    result = service.create_job_run_from_request(request_body=body, actor=actor)
     job_run_id = result.get("job_run_id")
 
     logger.info("Successfully created job run: %s", job_run_id)
@@ -244,7 +255,7 @@ async def list_job_runs(
     Raises:
         HTTPException: If list operation fails (400, 500)
     """
-    logger.debug(f"Listing job runs: job_id={job_id}, status={job_status}")
+    logger.debug("Listing job runs: job_id=%s, status=%s", job_id, job_status)
 
     result = service.list_job_runs(
         job_id=job_id,
@@ -252,7 +263,7 @@ async def list_job_runs(
         limit=limit,
     )
 
-    logger.info(f"Listed {result['count']} job runs")
+    logger.info("Listed %s job runs", result["count"])
     return JobRunListResponse(**result)
 
 
@@ -365,13 +376,14 @@ async def get_job_run_status(
     Raises:
         HTTPException: If job run not found or retrieval fails (404, 500)
     """
-    logger.debug(f"Retrieving job run status: {job_run_id}, include_logs={include_logs}")
+    logger.debug("Retrieving job run status: %s, include_logs=%s", job_run_id, include_logs)
 
     return service.get_formatted_job_stats(job_run_id=job_run_id, include_logs=include_logs)
 
 
 @job_runs_router.post(
     "/{job_run_id}/cancel",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=JobRunCancelResponse,
     status_code=202,
     operation_id="cancel_job_run",
@@ -421,6 +433,7 @@ async def cancel_job_run(
     request: Request,
     job_run_id: JobRunIdPath,
     service: JobManagementServiceDep,
+    actor: ActorDep,
 ) -> JobRunCancelResponse:
     """Request cancellation of a running job.
 
@@ -428,6 +441,7 @@ async def cancel_job_run(
         request: FastAPI request object
         job_run_id: Job run identifier
         service: Injected job management service
+        actor: Authenticated caller, or None when auth is disabled
 
     Returns:
         JobRunCancelResponse: Cancellation confirmation
@@ -435,12 +449,12 @@ async def cancel_job_run(
     Raises:
         HTTPException: If job run not found or cancellation fails (404, 500)
     """
-    logger.debug(f"Requesting cancellation for job run: {job_run_id}")
+    logger.debug("Requesting cancellation for job run: %s", job_run_id)
 
     # Service raises JobRunNotFoundException if not found
-    service.cancel_job_run(job_run_id=job_run_id)
+    service.cancel_job_run(job_run_id=job_run_id, actor=actor)
 
-    logger.info(f"Successfully requested cancellation: {job_run_id}")
+    logger.info("Successfully requested cancellation: %s", job_run_id)
     return JobRunCancelResponse(
         job_run_id=job_run_id,
         status=ExecutionStatus.CANCELING.value,
@@ -450,6 +464,7 @@ async def cancel_job_run(
 
 @job_runs_router.delete(
     "/{job_run_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_job_run",
     summary="Delete a job run",
@@ -487,6 +502,7 @@ async def delete_job_run(
     request: Request,
     job_run_id: JobRunIdPath,
     service: JobManagementServiceDep,
+    actor: ActorDep,
 ):
     """Delete a job run and its associated data.
 
@@ -494,6 +510,7 @@ async def delete_job_run(
         request: FastAPI request object
         job_run_id: Job run identifier
         service: Injected job management service
+        actor: Authenticated caller, or None when auth is disabled
 
     Returns:
         None: 204 No Content on success
@@ -501,12 +518,12 @@ async def delete_job_run(
     Raises:
         HTTPException: If job run not found or deletion fails (404, 500)
     """
-    logger.debug(f"Deleting job run: {job_run_id}")
+    logger.debug("Deleting job run: %s", job_run_id)
 
     # Service raises JobRunNotFoundException if not found
-    service.delete_job_run(job_run_id=job_run_id)
+    service.delete_job_run(job_run_id=job_run_id, actor=actor)
 
-    logger.info(f"Successfully deleted job run: {job_run_id}")
+    logger.info("Successfully deleted job run: %s", job_run_id)
     return
 
 
@@ -595,7 +612,7 @@ async def download_job_report(
     """
     from docpipe.core.job_management.application.services.report_generator import JobReportGenerator
 
-    logger.debug(f"Downloading job report for job run: {job_run_id}")
+    logger.debug("Downloading job report for job run: %s", job_run_id)
 
     return JobReportGenerator.download_report(job_run_id=job_run_id, job_stats_service=job_stats_service)
 
@@ -667,10 +684,10 @@ async def get_flow_definition_snapshot(
     Raises:
         DocpipeException: If flow definition not found (404) or retrieval fails (500)
     """
-    logger.debug(f"Retrieving flow definition for job_run_id={job_run_id}")
+    logger.debug("Retrieving flow definition for job_run_id=%s", job_run_id)
 
     # Service raises JobRunNotFoundException if not found
     flow_definition = stats_service.get_flow_definition(job_run_id=job_run_id)
 
-    logger.info(f"Successfully retrieved flow definition for job_run_id={job_run_id}")
+    logger.info("Successfully retrieved flow definition for job_run_id=%s", job_run_id)
     return JSONResponse(content=flow_definition)

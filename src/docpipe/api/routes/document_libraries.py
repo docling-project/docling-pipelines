@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document Library management API routes.
 
 This module provides REST API endpoints for document library management operations including
@@ -20,6 +23,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import (
     get_document_library_service,
     get_document_set_service,
@@ -166,6 +171,7 @@ DocumentSetServiceDep = Annotated[DocumentSetService, Depends(get_document_set_s
 
 @document_libraries_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=DocumentLibraryResponse,
     status_code=201,
     summary="Create a new document library",
@@ -389,6 +395,7 @@ def list_libraries(
 
 @document_libraries_router.patch(
     "/{library_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=DocumentLibraryResponse,
     summary="Update a document library",
     description="""
@@ -489,6 +496,7 @@ def update_library(
 
 @document_libraries_router.delete(
     "/{library_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     summary="Delete a document library",
     description="""
@@ -553,6 +561,7 @@ def delete_library(
 
 @document_libraries_router.put(
     "/{library_id}/document-sets",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     summary="Add document sets to a library",
     description="""
@@ -635,6 +644,7 @@ def add_document_sets(
 
 @document_libraries_router.delete(
     "/{library_id}/document-sets",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     summary="Remove document sets from a library",
     description="""

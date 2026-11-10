@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project management API routes.
 
 Provides REST API endpoints for project CRUD operations:
@@ -18,6 +21,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
+from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_project_service
 from docpipe.api.dto.error_dto import ErrorResponse
 from docpipe.api.dto.field_definitions import (
@@ -43,6 +49,7 @@ from docpipe.api.dto.project_dto import (
     ProjectUpdateRequest,
 )
 from docpipe.api.dto.project_flow_dto import PaginatedProjectFlowResponse
+from docpipe.core.models.actor_context import ActorContext
 from docpipe.core.projects.application.services.project_service import ProjectService
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -122,6 +129,7 @@ _IsElyraQuery = Annotated[
 ]
 
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
+ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────
@@ -129,6 +137,7 @@ ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 
 @projects_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=ProjectResponse,
     status_code=201,
     operation_id="create_project",
@@ -143,19 +152,21 @@ ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 async def create_project(
     body: ProjectCreateRequest,
     service: ProjectServiceDep,
+    actor: ActorDep,
 ) -> ProjectResponse:
     """Create and persist a new project.
 
     Args:
         body: Validated project creation request.
         service: Injected ProjectService.
+        actor: Authenticated caller, or None when auth is disabled.
 
     Returns:
         The created project with flow_count=0.
     """
     logger.debug("Creating project: %s", body.name)
     domain = ProjectMapper.create_request_to_domain(body)
-    created = service.create_project(project=domain)
+    created = service.create_project(project=domain, actor=actor)
     logger.info("Created project %s", created.project_id)
     return ProjectMapper.domain_to_dto(created)
 
@@ -249,6 +260,7 @@ async def get_project(
 
 @projects_router.put(
     "/{project_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=ProjectResponse,
     operation_id="replace_project",
     summary="Fully replace a project",
@@ -263,6 +275,7 @@ async def replace_project(
     project_id: ProjectIdPath,
     body: ProjectUpdateRequest,
     service: ProjectServiceDep,
+    actor: ActorDep,
 ) -> ProjectResponse:
     """Fully replace a project's mutable fields.
 
@@ -273,6 +286,7 @@ async def replace_project(
         project_id: UUID of the project to update.
         body: Validated full-replace request body.
         service: Injected ProjectService.
+        actor: Authenticated caller, or None when auth is disabled.
 
     Returns:
         The updated project.
@@ -280,13 +294,14 @@ async def replace_project(
     logger.debug("Replacing project: %s", project_id)
     existing = service.get_project(project_id=project_id)
     domain = ProjectMapper.update_request_to_domain(project_id=project_id, existing=existing, dto=body)
-    updated = service.update_project(project=domain)
+    updated = service.update_project(project=domain, actor=actor)
     logger.info("Replaced project %s", project_id)
     return ProjectMapper.domain_to_dto(updated)
 
 
 @projects_router.patch(
     "/{project_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=ProjectResponse,
     operation_id="update_project",
     summary="Partially update a project",
@@ -301,6 +316,7 @@ async def update_project(
     project_id: ProjectIdPath,
     body: ProjectPatchRequest,
     service: ProjectServiceDep,
+    actor: ActorDep,
 ) -> ProjectResponse:
     """Partially update a project — only provided fields are changed.
 
@@ -308,18 +324,22 @@ async def update_project(
         project_id: UUID of the project to update.
         body: Validated partial-update request body.
         service: Injected ProjectService.
+        actor: Authenticated caller, or None when auth is disabled.
 
     Returns:
         The updated project.
     """
     logger.debug("Partially updating project: %s", project_id)
-    updated = service.partial_update_project(project_id=project_id, updates=body.model_dump(exclude_unset=True))
+    updated = service.partial_update_project(
+        project_id=project_id, updates=body.model_dump(exclude_unset=True), actor=actor
+    )
     logger.info("Partially updated project %s", project_id)
     return ProjectMapper.domain_to_dto(updated)
 
 
 @projects_router.delete(
     "/{project_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_project",
     summary="Delete a project",
@@ -333,6 +353,7 @@ async def update_project(
 async def delete_project(
     project_id: ProjectIdPath,
     service: ProjectServiceDep,
+    actor: ActorDep,
 ) -> None:
     """Delete a project and all flows linked to it via container_id.
 
@@ -343,12 +364,13 @@ async def delete_project(
     Args:
         project_id: UUID of the project to delete.
         service: Injected ProjectService.
+        actor: Authenticated caller, or None when auth is disabled.
 
     Returns:
         204 No Content on success.
     """
     logger.debug("Deleting project: %s", project_id)
-    service.delete_project(project_id=project_id)
+    service.delete_project(project_id=project_id, actor=actor)
     logger.info("Deleted project %s", project_id)
     return
 

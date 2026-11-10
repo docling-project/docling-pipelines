@@ -1,9 +1,11 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for authentication endpoints and JWT handling.
 
 This module tests authentication functionality including:
 - JWT token creation and verification
 - Login endpoint with mocked LDAP authentication
-- Protected endpoint access with valid/invalid tokens
 - User information retrieval
 """
 
@@ -14,6 +16,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.auth.jwt_handler import JWTConfig, create_access_token, verify_token
@@ -22,6 +25,10 @@ from docpipe.api.main import app
 
 # Must be ≥ 32 characters to pass the new length validator.
 _VALID_JWT_SECRET = "test-secret-key-for-unit-tests-long-enough"  # pragma: allowlist secret
+
+
+def _request() -> Request:
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
 
 
 @pytest.fixture
@@ -190,53 +197,6 @@ class TestLoginEndpoint:
         assert json_response["errors"][0]["code"] == "service_unavailable"
 
 
-class TestProtectedEndpoints:
-    """Test protected endpoint access with authentication."""
-
-    def test_protected_endpoint_with_valid_token_returns_200(self, *, jwt_config: JWTConfig, valid_token: str):
-        """Test accessing protected endpoint with valid token succeeds."""
-        client = TestClient(app)
-
-        # Override JWT config dependency
-        app.dependency_overrides[get_current_user] = lambda: User(
-            username="testuser",
-            email="testuser@example.com",
-            full_name="Test User",
-        )
-
-        response = client.get("/protected", headers={"Authorization": f"Bearer {valid_token}"})
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "message" in data
-        assert "testuser" in data["message"]
-
-    def test_protected_endpoint_without_token_returns_401(self):
-        """Test accessing protected endpoint without token returns 401."""
-        client = TestClient(app)
-
-        response = client.get("/protected")
-
-        assert response.status_code == 401
-        json_response = response.json()
-        assert "errors" in json_response
-        assert json_response["errors"][0]["code"] == "unauthorized"
-
-    def test_protected_endpoint_with_invalid_token_returns_401(self):
-        """Test accessing protected endpoint with invalid token returns 401.
-
-        When JWT_SECRET_KEY is not configured in the test environment, the
-        dependency raises 503.  Either way the endpoint must NOT return 200.
-        """
-        client = TestClient(app, raise_server_exceptions=False)
-
-        response = client.get("/protected", headers={"Authorization": "Bearer invalid.token.here"})
-
-        assert response.status_code in (401, 503)
-
-
 class TestUserInfoEndpoint:
     """Test user information retrieval endpoint."""
 
@@ -262,8 +222,10 @@ class TestUserInfoEndpoint:
         assert data["email"] == "testuser@example.com"
         assert data["full_name"] == "Test User"
 
-    def test_get_current_user_info_without_token_returns_401(self):
+    @pytest.mark.usefixtures("auth_enabled")
+    def test_get_current_user_info_without_token_returns_401(self, monkeypatch):
         """Test /auth/me endpoint without token returns 401."""
+        monkeypatch.setenv("JWT_SECRET_KEY", _VALID_JWT_SECRET)
         client = TestClient(app)
 
         response = client.get("/auth/me")
@@ -274,6 +236,7 @@ class TestUserInfoEndpoint:
         assert json_response["errors"][0]["code"] == "unauthorized"
 
 
+@pytest.mark.usefixtures("auth_enabled")
 class TestAuthenticationDependency:
     """Test get_current_user dependency function."""
 
@@ -286,7 +249,7 @@ class TestAuthenticationDependency:
         # This would normally be called by FastAPI, we're testing the logic
         from docpipe.api.auth.dependencies import get_current_user
 
-        user = get_current_user(credentials=credentials, jwt_config=jwt_config)
+        user = get_current_user(request=_request(), credentials=credentials, jwt_config=jwt_config)
 
         assert user.username == "testuser"
         assert user.email == "testuser@example.com"
@@ -300,7 +263,7 @@ class TestAuthenticationDependency:
         from docpipe.api.auth.dependencies import get_current_user
 
         with pytest.raises(HTTPException) as exc_info:
-            get_current_user(credentials=credentials, jwt_config=jwt_config)
+            get_current_user(request=_request(), credentials=credentials, jwt_config=jwt_config)
 
         assert exc_info.value.status_code == 401
         assert "Invalid authentication credentials" in exc_info.value.detail

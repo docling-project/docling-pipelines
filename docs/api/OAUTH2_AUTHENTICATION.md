@@ -36,7 +36,12 @@ The authentication system supports:
 - **JWT signature verification** using JWKS
 - **Token expiration validation**
 - **Issuer and audience validation**
-- **Secure token storage** (in-memory, can be extended to Redis)
+- **Session cookie**: the callback sets an `HttpOnly`, `SameSite=Lax` cookie; the token is never placed in a URL
+- **Browser-bound login**: a short-lived nonce cookie is tied to `state`, so a login cannot be completed in another browser
+- **Per-process state store** (in-memory; see [Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md))
+
+For roles, group mapping, redirect URIs per topology and startup validation, see the
+[Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
 
 ## Installation
 
@@ -65,8 +70,8 @@ OAUTH2_ENABLED=true
 OAUTH2_PROVIDER=google
 OAUTH2_CLIENT_ID=your-client-id.apps.googleusercontent.com
 OAUTH2_CLIENT_SECRET=your-client-secret
-OAUTH2_REDIRECT_URI=http://localhost:8000/auth/oauth2/callback
-JWT_SECRET_KEY=your-jwt-secret-key
+OAUTH2_REDIRECT_URI=http://localhost:8080/auth/oauth2/callback
+JWT_SECRET_KEY=<generated-secret-of-at-least-32-characters>
 ```
 
 **Setup Steps:**
@@ -74,7 +79,7 @@ JWT_SECRET_KEY=your-jwt-secret-key
 2. Create a new project or select existing
 3. Enable Google+ API
 4. Create OAuth 2.0 credentials
-5. Add authorized redirect URI: `http://localhost:8000/auth/oauth2/callback`
+5. Add authorized redirect URI: `http://localhost:8080/auth/oauth2/callback`
 6. Copy Client ID and Client Secret
 
 ### 3. Azure AD Setup
@@ -85,15 +90,15 @@ OAUTH2_PROVIDER=azure
 AZURE_TENANT_ID=your-tenant-id
 OAUTH2_CLIENT_ID=your-application-id
 OAUTH2_CLIENT_SECRET=your-client-secret
-OAUTH2_REDIRECT_URI=http://localhost:8000/auth/oauth2/callback
-JWT_SECRET_KEY=your-jwt-secret-key
+OAUTH2_REDIRECT_URI=http://localhost:8080/auth/oauth2/callback
+JWT_SECRET_KEY=<generated-secret-of-at-least-32-characters>
 ```
 
 **Setup Steps:**
 1. Go to [Azure Portal](https://portal.azure.com/)
 2. Navigate to Azure Active Directory > App registrations
 3. Create new registration
-4. Add redirect URI: `http://localhost:8000/auth/oauth2/callback`
+4. Add redirect URI: `http://localhost:8080/auth/oauth2/callback`
 5. Create client secret under Certificates & secrets
 6. Copy Application (client) ID, Directory (tenant) ID, and client secret
 
@@ -105,10 +110,10 @@ OAUTH2_PROVIDER=generic
 OAUTH2_DISCOVERY_URL=https://your-provider.com/.well-known/openid-configuration
 OAUTH2_CLIENT_ID=your-client-id
 OAUTH2_CLIENT_SECRET=your-client-secret
-OAUTH2_REDIRECT_URI=http://localhost:8000/auth/oauth2/callback
+OAUTH2_REDIRECT_URI=http://localhost:8080/auth/oauth2/callback
 OIDC_ISSUER=https://your-provider.com
 OIDC_AUDIENCE=your-client-id
-JWT_SECRET_KEY=your-jwt-secret-key
+JWT_SECRET_KEY=<generated-secret-of-at-least-32-characters>
 ```
 
 ## API Endpoints
@@ -125,7 +130,11 @@ Redirects to OAuth2 provider's authorization page.
 
 **Query Parameters:**
 - `provider` (optional): Provider name (google, azure, generic)
-- `redirect_after` (optional): URL to redirect after successful login
+- `return_to` (optional): relative path to open after a successful login. A path that does not start with `/ui` gets the
+  `/ui` prefix, and the default is `/ui/projects`. An absolute, protocol-relative or backslash value is ignored.
+- `redirect_after` (optional): deprecated alias of `return_to`
+
+The response also sets a short-lived `HttpOnly` nonce cookie (`docpipe_oauth2_nonce`) that the callback requires.
 
 #### 2. OAuth2 Callback
 
@@ -133,15 +142,11 @@ Redirects to OAuth2 provider's authorization page.
 GET /auth/oauth2/callback?code=xxx&state=xxx&provider=google
 ```
 
-Handles OAuth2 callback and exchanges code for token.
+Handles the OAuth2 callback, exchanges the code for a token and signs the user in.
 
-**Response:**
-```json
-{
-  "access_token": "ey...",
-  "token_type": "bearer"
-}
-```
+**Response:** a `302` redirect to the validated `return_to` path (default `/ui/projects`) with a `Set-Cookie` header for the
+session cookie (`docpipe_access_token`). The token is no longer returned in the URL fragment (`#access_token=`) or in the
+response body. A missing or mismatched nonce cookie, or an unknown or expired `state`, returns `400`.
 
 #### 3. List Available Providers
 
@@ -168,16 +173,11 @@ GET /auth/me
 Authorization: Bearer <token>
 ```
 
-Returns current authenticated user information.
+Returns the current authenticated user, including `roles`. A browser sends the session cookie instead of the header.
+Scripts can obtain a Bearer token from `POST /auth/login`.
 
-#### Protected Route Example
-
-```http
-GET /protected
-Authorization: Bearer <token>
-```
-
-Example protected endpoint requiring authentication.
+Any route under `/api/v1/` is a protected route when `DOCPIPE_AUTH_ENABLED=true`, for example
+`GET /api/v1/flows`.
 
 ## Usage Examples
 
@@ -187,18 +187,19 @@ Example protected endpoint requiring authentication.
 import httpx
 
 # Step 1: Redirect user to authorization URL
-auth_url = "http://localhost:8000/auth/oauth2/authorize?provider=google"
+auth_url = "http://localhost:8080/auth/oauth2/authorize?provider=google"
 
 # Step 2: User completes OAuth2 flow in browser
 # User is redirected to /auth/oauth2/callback with code and state
 
-# Step 3: Use the returned access token
+# Step 3: The callback sets the session cookie and redirects to /ui/projects.
+# Scripts cannot use this flow; they obtain a Bearer token from POST /auth/login instead.
 token = "eyJ..."
 
 # Step 4: Make authenticated requests
 async with httpx.AsyncClient() as client:
     response = await client.get(
-        "http://localhost:8000/auth/me",
+        "http://localhost:8080/auth/me",
         headers={"Authorization": f"Bearer {token}"}
     )
     user = response.json()
@@ -209,17 +210,18 @@ async with httpx.AsyncClient() as client:
 
 ```bash
 # Step 1: Get authorization URL (open in browser)
-curl http://localhost:8000/auth/oauth2/authorize?provider=google
+curl http://localhost:8080/auth/oauth2/authorize?provider=google
 
-# Step 2: After OAuth2 flow, you'll receive a token
+# Step 2: After the OAuth2 flow the browser holds the session cookie.
+# For scripts, obtain a Bearer token from POST /auth/login instead.
 TOKEN="your-access-token-here"
 
-# Step 3: Use token to access protected endpoints
+# Step 3: Use the token to access protected endpoints
 curl -H "Authorization: Bearer $TOKEN" \
-     http://localhost:8000/auth/me
+     http://localhost:8080/auth/me
 
 curl -H "Authorization: Bearer $TOKEN" \
-     http://localhost:8000/protected
+     http://localhost:8080/api/v1/flows
 ```
 
 ## Architecture
@@ -260,8 +262,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 6. Server → Validate ID token
 7. Server → Extract user info
 8. Server → Create JWT token
-9. Server → Return JWT to user
-10. User → Use JWT for API requests
+9. Server → Set session cookie and redirect (302) to return_to
+10. Browser → Send the cookie on API requests
 ```
 
 ## Security Considerations
@@ -278,7 +280,7 @@ curl -H "Authorization: Bearer $TOKEN" \
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
 
-3. **State Storage**: Use Redis or database for state storage in production
+3. **State Storage**: The state store is per process. Use sticky routing for `/auth/oauth2/` when running several workers or replicas
 
 4. **Token Expiration**: Configure appropriate token expiration
    ```env

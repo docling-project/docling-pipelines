@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Integration tests for document retrieval API endpoints."""
 
 from unittest.mock import MagicMock
@@ -6,7 +9,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
-from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.dependencies import LOCAL_PRINCIPAL_USERNAME, get_current_user
 from docpipe.api.auth.models import User
 from docpipe.api.main import app
 from docpipe.api.services.opensearch_service import get_opensearch_service
@@ -55,8 +58,9 @@ def authenticated_client(mock_user, mock_opensearch_service):
 
 
 @pytest.fixture
-def unauthenticated_client():
-    """Create a test client without authentication."""
+def unauthenticated_client(auth_enabled, monkeypatch):
+    """Create a test client without credentials, with authentication enabled."""
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-integration-tests")  # pragma: allowlist secret
     # Clear any existing overrides
     app.dependency_overrides.clear()
     return TestClient(app)
@@ -315,3 +319,45 @@ class TestSearchDocuments:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+class TestLocalPrincipal:
+    """Reserved local principal and the document ACL (no get_current_user override)."""
+
+    @pytest.fixture
+    def local_client(self, mock_opensearch_service):
+        service, mock_client = mock_opensearch_service
+        app.dependency_overrides.clear()
+        app.dependency_overrides[get_opensearch_service] = lambda: service
+        mock_client.search.return_value = {
+            "hits": {"hits": [{"_id": "doc-1", "_source": {"content": "x", "allowed_users": ["someone.else"]}}]}
+        }
+        yield TestClient(app), mock_client
+        app.dependency_overrides.clear()
+
+    def test_auth_disabled_sees_documents_listing_other_users(self, local_client):
+        client, mock_client = local_client
+
+        response = client.get("/api/v1/documents/doc-1")
+
+        assert response.status_code == status.HTTP_200_OK
+        body = mock_client.search.call_args.kwargs["body"]
+        assert body["query"]["bool"]["must"] == [{"term": {"_id": "doc-1"}}]
+
+    def test_auth_disabled_search_has_no_acl_filter(self, local_client):
+        client, mock_client = local_client
+
+        response = client.post("/api/v1/documents/search", json={"query": "x"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "allowed_users" not in str(mock_client.search.call_args.kwargs["body"])
+
+    def test_auth_enabled_reserved_name_matches_no_acl_entry(self, auth_enabled, local_client):
+        client, mock_client = local_client
+        app.dependency_overrides[get_current_user] = lambda: User(username=LOCAL_PRINCIPAL_USERNAME)
+
+        client.get("/api/v1/documents/doc-1")
+
+        body = mock_client.search.call_args.kwargs["body"]
+        assert {"term": {"allowed_users": LOCAL_PRINCIPAL_USERNAME}} not in body["query"]["bool"]["must"]
+        assert {"bool": {"must_not": [{"match_all": {}}]}} in body["query"]["bool"]["must"]
