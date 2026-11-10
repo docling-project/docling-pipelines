@@ -134,7 +134,7 @@ export function Login(): React.JSX.Element {
             <PasswordInput
               id="password"
               labelText={intl.formatMessage(messages.passwordLabel)}
-              placeholder={intl.formatMessage(messages.passwordPlaceholder)}
+              placeholder={intl.formatMessage(messages.hiddenFieldPlaceholder)}
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);

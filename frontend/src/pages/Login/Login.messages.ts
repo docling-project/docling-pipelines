@@ -21,9 +21,9 @@ export const messages = defineMessages({
     id: 'src.pages.Login.passwordLabel',
     defaultMessage: 'Password',
   },
-  passwordPlaceholder: {
-    id: 'src.pages.Login.passwordPlaceholder',
-    defaultMessage: 'Enter password',
+  hiddenFieldPlaceholder: {
+    id: 'src.pages.Login.hiddenFieldPlaceholder',
+    defaultMessage: 'Enter your sign-in code',
   },
   signInButton: {
     id: 'src.pages.Login.signInButton',
