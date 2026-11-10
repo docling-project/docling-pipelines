@@ -121,6 +121,7 @@ frontend/
 │   │   ├── ProjectDetail/
 │   │   ├── Canvas/
 │   │   ├── FlowDetail/
+│   │   ├── Login/       # Sign-in page (credential form and OIDC provider buttons)
 │   │   ├── RunDetails/
 │   │   ├── NotFound/
 │   │   └── Error/
@@ -154,13 +155,13 @@ This application uses a **Backend for Frontend (BFF)** pattern to separate conce
 
 ### Architecture Overview
 
-```
+```text
 React App (Port 3000)
-    ↓ Vite Proxy (/api/*)
-BFF Server (Port 3001)
-    ↓ HTTP Proxy
-Python Backend (Port 8000)
+    ├── Vite Proxy (/api/*)  →  BFF Server (Port 3001)  →  Python Backend (BACKEND_API_URL, default 8080)
+    └── Vite Proxy (/auth/*) →  Python Backend (BACKEND_API_URL, default 8080)
 ```
+
+`/api/*` goes through the BFF. `/auth/*` (sign-in, sign-out, session and OIDC endpoints) is served by the Python backend only and never goes through the BFF.
 
 ### Why BFF?
 
@@ -204,10 +205,16 @@ server: {
     '/api': {
       target: 'http://localhost:3001',  // BFF server
       changeOrigin: true,
+    },
+    '/auth': {
+      target: resolveBackendApiUrl(mode),  // BACKEND_API_URL from .env, default http://localhost:8080
+      changeOrigin: true,
     }
   }
 }
 ```
+
+The `/auth` proxy keeps the path unchanged and lets the browser talk to the Python backend through the Vite origin (`http://localhost:3000`), so the session cookie belongs to the same origin as the UI. Vite reads `BACKEND_API_URL` from `frontend/.env` for this proxy, the same variable the BFF uses.
 
 ### Request Flow
 
@@ -218,6 +225,37 @@ server: {
 5. **Python Backend** processes request and returns data
 6. **BFF** forwards response to React
 7. **React Component** receives data and updates UI
+
+Authentication calls skip the BFF: the axios client calls `/auth/config`, `/auth/login`, `/auth/logout` and `/auth/me`, and the Vite proxy forwards them directly to the Python backend.
+
+### Headers the BFF forwards
+
+The BFF relays only these browser request headers to the Python backend and drops everything else (notably `X-Forwarded-For` and `X-Forwarded-Proto`):
+
+| Header | Purpose |
+|--------|---------|
+| `Cookie` | Carries the `docpipe_access_token` session cookie |
+| `Authorization` | Bearer token for API clients |
+| `X-Requested-With` | Required by the backend on cookie-authenticated writes (POST, PUT, PATCH, DELETE); the axios client sets it on those methods |
+| `X-Transaction-ID` | Correlates a request across the UI, the BFF and the backend logs |
+
+The list lives in [`server/controllers/http-headers.ts`](server/controllers/http-headers.ts).
+
+### Authentication in the UI
+
+When the backend has authentication enabled, every route except `/login` and `/error` is wrapped in `ProtectedRoute`. On start, the app loads `/auth/config` and then `/auth/me` (see `bootstrapAuth` in [`src/slices/authSlice.ts`](src/slices/authSlice.ts)). The session is an HttpOnly cookie, so the UI never stores a token. When auth is disabled on the backend, the UI treats the user as an authenticated administrator.
+
+- Pages and components read the user and the permission flags through `useAuth()` in [`src/hooks/useAuth.ts`](src/hooks/useAuth.ts): `canEdit` (editor or admin), `canAdmin` (admin) and `canModifyAsset(createdBy)` (admin always, editor when the asset has no owner or is their own).
+- Gated actions are disabled, not hidden, and carry a tooltip that explains why. The backend enforces every permission; the UI gating is a convenience.
+- A 401 on any request other than the sign-in call or the initial `/auth/me` clears the auth state and redirects to `/ui/login?return_to=<current path>`. A 403 shows a Permission Denied notification. Both are handled in [`src/services/api/client.ts`](src/services/api/client.ts).
+
+For roles, login methods and the backend contract, see the [Authentication and Authorization Guide](../docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md). For the end-user view, see the [UI User Guide](../docs/guides/UI_USER_GUIDE.md).
+
+### OIDC callback in development
+
+With the Vite dev server, register `http://localhost:3000/auth/oauth2/callback` as the redirect URI at the identity provider. The browser returns to that address after the provider login, the `/auth` Vite proxy forwards the request to the REST API, and the REST API sets the session cookie and redirects back into the UI (`/ui/...`). Without the proxy entry the callback would never reach the backend.
+
+> **Warning:** A custom ingress must never route `/auth` to the BFF. `/auth/*` is served by the REST API only; route `/ui` and `/auth` to the REST API.
 
 ### Running the BFF
 
@@ -239,7 +277,12 @@ BFF configuration in `server/.env` (copy from `frontend/.env.example`):
 ```env
 BACKEND_API_URL=http://localhost:8080
 BFF_PORT=3001
+# BFF_HOST=127.0.0.1
 ```
+
+- `BACKEND_API_URL`: the Python backend. The BFF proxies `/api/*` to it, and the Vite dev server proxies `/auth/*` to it. Defaults to `http://localhost:8080` for the Vite proxy; the BFF refuses to start without it.
+- `BFF_PORT`: BFF listen port, default `3001`.
+- `BFF_HOST`: BFF bind address. It defaults to `127.0.0.1`, so a locally started BFF is not reachable from other hosts. The BFF container image sets `BFF_HOST=0.0.0.0` so Compose peers and Kubernetes probes can reach it. The BFF that the REST API starts itself in the wheel keeps the loopback default.
 
 ### Adding New BFF Endpoints
 
@@ -277,7 +320,7 @@ The routing system has been optimized with the following improvements:
    - Runs: Active on `/projects/:id/runs` and run details pages
    - Canvas: Active on `/canvas/:flowId`
    - Home: Active only on `/home`
-3. **Simplified Authentication**: Removed ProtectedRoute wrapper while keeping AuthContext for future implementation
+3. **Authentication**: Routes other than `/login` and `/error` are wrapped in `ProtectedRoute`; see [Authentication in the UI](#authentication-in-the-ui)
 4. **Removed Unused Components**: Cleaned up RouteTransition component (not in use)
 5. **Enhanced Breadcrumbs**: Dynamic breadcrumb labels with parameter support
 
@@ -286,6 +329,7 @@ The routing system has been optimized with the following improvements:
 The application features a clean navigation hierarchy:
 
 ```
+/login                          → Sign-in page (outside the app shell)
 /home                           → Home page
 /projects                       → Projects list
 /projects/:projectId/assets     → Project assets
@@ -307,6 +351,46 @@ The application features a clean navigation hierarchy:
 - `npm run lint` - Run ESLint to check code quality
 - `npm run lint:fix` - Run ESLint and automatically fix issues
 - `npm run extract:messages` - Extract all `defineMessages` descriptors from source and write to `src/i18n/messages_en.json`
+
+## Testing gated components
+
+Components that gate an action by role read `useAuth()`, which reads the `auth` slice of the Redux store. In a component test, set that slice with `authStateFixture` from [`tests/mocks/fixtures/store.fixture.ts`](tests/mocks/fixtures/store.fixture.ts) and pass it as `preloadedState` to `renderWithProviders` from [`tests/utils/renderWithProviders.tsx`](tests/utils/renderWithProviders.tsx):
+
+```typescript
+// tests/unit/components/MyGatedButton.test.tsx
+import { screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { renderWithProviders } from '../../utils/renderWithProviders';
+import { authStateFixture } from '../../mocks/fixtures/store.fixture';
+import { MyGatedButton } from '@/components/MyGatedButton';
+
+describe('MyGatedButton', () => {
+  it('is disabled for a viewer', () => {
+    renderWithProviders(<MyGatedButton createdBy="eve" />, {
+      preloadedState: { auth: authStateFixture({ role: 'viewer' }) },
+    });
+    expect(screen.getByRole('button', { name: /create/i })).toBeDisabled();
+  });
+
+  it('is disabled for an editor on another user\'s asset', () => {
+    renderWithProviders(<MyGatedButton createdBy="eve" />, {
+      preloadedState: { auth: authStateFixture({ role: 'editor', username: 'sam' }) },
+    });
+    expect(screen.getByRole('button', { name: /create/i })).toBeDisabled();
+  });
+
+  it('is enabled for the owner and for an admin', () => {
+    renderWithProviders(<MyGatedButton createdBy="eve" />, {
+      preloadedState: { auth: authStateFixture({ role: 'editor', username: 'eve' }) },
+    });
+    expect(screen.getByRole('button', { name: /create/i })).toBeEnabled();
+  });
+});
+```
+
+`authStateFixture({ role, username, overrides })` returns an authenticated, auth-enabled session for `username` (default `test-user`) holding `role` (`viewer`, `editor` or `admin`, default `admin`). Use `overrides` to change any other `AuthState` field, for example `status: 'unauthenticated'` to test a redirect.
+
+Without an `auth` entry in `preloadedState`, the default test store is authenticated with auth disabled, which acts as an administrator, so tests that do not care about roles keep working unchanged. Cover each gated action for a viewer, an editor on their own asset, an editor on another user's asset, an admin and an asset without an owner.
 
 ## Technology Stack
 
