@@ -1,24 +1,61 @@
 /**
- * Authentication hook stub.
+ * Authentication hook backed by the `auth` Redux slice.
  *
- * Currently returns a hard-coded authenticated state.
- * Replace with a real authentication check (e.g. JWT validation, session ping)
- * once the auth layer is wired.
+ * Exposes the current user and the permission flags used to gate UI actions.
+ * The gating is a convenience only: the backend enforces every permission.
  */
 
+import type { AuthUser } from '@/types';
+import { useAppSelector } from './useAppSelector';
+
 /** Return shape of {@link useAuth}. */
-interface UseAuthReturn {
-  /** `true` when the current user has a valid session. */
+export interface UseAuthReturn {
+  /** The signed-in user, or `null`. */
+  user: AuthUser | null;
+  /** `false` when the backend reports that authentication is disabled. */
+  authEnabled: boolean;
+  /** `true` when the current user has a valid session (or auth is disabled). */
   isAuthenticated: boolean;
-  /** `true` while the auth state is being resolved (e.g. verifying a stored token). */
+  /** `true` while the auth state is `idle` or `loading`. */
   isLoading: boolean;
+  /** `true` for `editor` or `admin`. */
+  canEdit: boolean;
+  /** `true` for `admin`. */
+  canAdmin: boolean;
+  /**
+   * `true` when the user may modify an asset created by `createdBy`:
+   * admins always, editors when `createdBy` is empty or their own username.
+   */
+  canModifyAsset: (createdBy?: string | null) => boolean;
 }
 
 /**
- * Returns the current authentication state.
+ * Returns the current authentication state and permission flags.
  *
- * Used by {@link ProtectedRoute} to gate access to authenticated pages.
+ * Used by {@link ProtectedRoute} and by components that gate actions by role.
  */
 export function useAuth(): UseAuthReturn {
-  return { isAuthenticated: true, isLoading: false };
+  const user = useAppSelector((state) => state.auth.user);
+  const authEnabled = useAppSelector((state) => state.auth.authEnabled);
+  const status = useAppSelector((state) => state.auth.status);
+
+  const roles = user?.roles ?? [];
+  const canAdmin = roles.includes('admin');
+  const canEdit = canAdmin || roles.includes('editor');
+
+  const canModifyAsset = (createdBy?: string | null): boolean => {
+    if (canAdmin) { return true; }
+    if (!canEdit) { return false; }
+    return !createdBy || createdBy === user?.username;
+  };
+
+  return {
+    user,
+    authEnabled,
+    isAuthenticated: status === 'authenticated',
+    isLoading: status === 'idle' || status === 'loading',
+    canEdit,
+    canAdmin,
+    canModifyAsset,
+  };
 }

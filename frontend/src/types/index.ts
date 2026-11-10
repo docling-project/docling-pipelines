@@ -34,3 +34,14 @@ export type {
   FlowRow,
   FlowRunStatus,
 } from './projects';
+export type {
+  AuthRole,
+  AuthUser,
+  AuthProvider,
+  AuthConfigResponse,
+  LoginRequest,
+  LoginResponse,
+  AuthStatus,
+  AuthErrorPayload,
+  AuthState,
+} from './auth';
