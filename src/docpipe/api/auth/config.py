@@ -160,8 +160,7 @@ class AuthSettings:
     def from_env(cls) -> "AuthSettings":
         """Build settings from the current environment."""
         return cls(
-            # Default is false in this phase; it flips to true in the final rollout phase.
-            enabled=_env_bool(name=EnvironmentVariables.DOCPIPE_AUTH_ENABLED, default=False),
+            enabled=_env_bool(name=EnvironmentVariables.DOCPIPE_AUTH_ENABLED, default=True),
             default_role=_read_default_role(),
             role_mapping=_read_role_mapping(),
             cookie_name=_env_str(name=EnvironmentVariables.DOCPIPE_AUTH_COOKIE_NAME) or DEFAULT_COOKIE_NAME,
