@@ -8,7 +8,8 @@ friends, and calls ``transform``. ``transform`` sends the table to the node's wo
 back. Nothing of the untrusted module is imported in this process.
 """
 
-from typing import Any, Final
+import json
+from typing import TYPE_CHECKING, Any, Final
 
 import pyarrow as pa
 
@@ -18,9 +19,14 @@ from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorC
 from docpipe.core.orchestration.operator_loader.isolation.worker_client import get_worker_pool
 from docpipe.core.orchestration.operator_loader.ports.operator_source import OperatorInfo
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
-from docpipe.integrations.secrets.secret_provider import has_vault_references
+from docpipe.integrations.secrets.registry import register_secret
+from docpipe.integrations.secrets.resolver import resolve_node_config
+from docpipe.integrations.secrets.secret_value import SecretValue
 from docpipe.types import TransformResult
 from docpipe.utils.infrastructure.logging import get_logger
+
+if TYPE_CHECKING:
+    from docpipe.core.operators.abstract_operator import AbstractOperator
 
 logger = get_logger(__name__)
 
@@ -34,10 +40,7 @@ _IDENTITY_KEYS: Final[tuple[str, ...]] = (
     DocpipeConstants.NODE_NAME,
 )
 
-REFERENCES_NOT_PERMITTED_MESSAGE: Final[str] = (
-    "not permitted: untrusted custom operator '%s' holds a vault:// reference; references are not delivered to "
-    "untrusted operators"
-)
+ConfigPath = tuple[str | int, ...]
 
 
 def extract_own_config(*, merged_config: dict[str, Any]) -> dict[str, Any]:
@@ -72,6 +75,40 @@ def build_isolated_config(*, merged_config: dict[str, Any]) -> dict[str, Any]:
     return {**delivered, **extract_own_config(merged_config=merged_config)}
 
 
+def detach_secrets(*, node: Any, path: ConfigPath = ()) -> tuple[Any, dict[ConfigPath, SecretValue]]:
+    """Split resolved secrets out of a configuration.
+
+    Returns a copy of ``node`` in which every :class:`SecretValue` is replaced by ``None``, and the detached values
+    keyed by their path. The copy is safe to serialize and to keep on the proxy.
+    """
+    if isinstance(node, SecretValue):
+        return None, {path: node}
+    detached: dict[ConfigPath, SecretValue] = {}
+    if isinstance(node, dict):
+        copy_dict: dict[Any, Any] = {}
+        for key, child in node.items():
+            copy_dict[key], found = detach_secrets(node=child, path=(*path, str(key)))
+            detached.update(found)
+        return copy_dict, detached
+    if isinstance(node, list):
+        copy_list: list[Any] = []
+        for index, child in enumerate(node):
+            item, found = detach_secrets(node=child, path=(*path, index))
+            copy_list.append(item)
+            detached.update(found)
+        return copy_list, detached
+    return node, detached
+
+
+def encode_secrets(*, secrets: dict[ConfigPath, SecretValue]) -> dict[str, Any]:
+    """Return the hand-off payload: ``{JSON-encoded field path: revealed value}`` (design D12).
+
+    This is the one place a resolved value is revealed for an isolated operator. The payload is sent to the node's
+    worker over the private pipe and nowhere else.
+    """
+    return {json.dumps(list(path)): value.reveal() for path, value in secrets.items()}
+
+
 def run_id_of(*, merged_config: dict[str, Any]) -> str:
     """Return the key under which a run's workers are held and released."""
     run_id = merged_config.get(DocpipeConstants.JOB_RUN_ID)
@@ -85,27 +122,50 @@ class IsolatedOperatorProxy(AbstractOperator):
     short_name: str = "isolated_operator_proxy"
     category: OperatorCategory = OperatorCategory.Functional
 
-    def __init__(self, config: dict[str, Any], *, operator_info: OperatorInfo, run_id: str) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        operator_info: OperatorInfo,
+        run_id: str,
+        secrets: dict[ConfigPath, SecretValue] | None = None,
+    ) -> None:
         super().__init__(config)
         self.short_name = operator_info.short_name
         self.category = OperatorCategory(operator_info.category)
         self._operator_info: OperatorInfo = operator_info
         self._run_id = run_id
+        self._secrets: dict[ConfigPath, SecretValue] = secrets or {}
         self._worker_config = {key: value for key, value in config.items() if key != DocpipeConstants.JOB_RUN_ID}
 
     @classmethod
-    def for_node(cls, *, operator_info: OperatorInfo, merged_config: dict[str, Any]) -> "IsolatedOperatorProxy":
+    def for_node(
+        cls,
+        *,
+        operator_class: "type[AbstractOperator]",
+        operator_info: OperatorInfo,
+        merged_config: dict[str, Any],
+    ) -> "IsolatedOperatorProxy":
         """Build the proxy for a node from the executor's merged configuration.
 
+        Only the node's own configuration and the allowlisted ``global_config`` keys are considered. A reference in a
+        field the operator declares secret-capable is resolved here, in the parent, and only when it matches
+        ``secrets.vault.custom_operator_allowed_paths``; the policy runs before any provider call. Resolved values are
+        registered with the scrubber and held as :class:`SecretValue` until they are sent to the worker.
+
         Raises:
-            DocpipeException: The node's own configuration holds a ``vault://`` reference (403, ``not permitted``).
+            SecretResolutionError: A reference is undeclared, outside the custom-operator policy (``not permitted``,
+                the default), or cannot be read. Vault is not contacted for a denied reference.
         """
         scoped = build_isolated_config(merged_config=merged_config)
-        if has_vault_references(scoped):
-            raise DocpipeException(REFERENCES_NOT_PERMITTED_MESSAGE % operator_info.short_name, status_code=403)
+        node_name = str(merged_config.get(OperatorConstants.Columns.NAME) or "")
+        resolved = resolve_node_config(node_name=node_name, operator_class=operator_class, config=scoped)
         run_id = run_id_of(merged_config=merged_config)
-        parent_config = {**scoped, DocpipeConstants.JOB_RUN_ID: merged_config.get(DocpipeConstants.JOB_RUN_ID)}
-        return cls(parent_config, operator_info=operator_info, run_id=run_id)
+        safe_config, secrets = detach_secrets(node=resolved)
+        for value in secrets.values():
+            register_secret(value=value.reveal(), run_id=run_id or None)
+        parent_config = {**safe_config, DocpipeConstants.JOB_RUN_ID: merged_config.get(DocpipeConstants.JOB_RUN_ID)}
+        return cls(parent_config, operator_info=operator_info, run_id=run_id, secrets=secrets)
 
     def transform(self, table: pa.Table, tables: dict[str, pa.Table] | None = None) -> TransformResult:
         """Send ``table`` to the node's worker and return its output tables and metadata."""
@@ -128,7 +188,9 @@ class IsolatedOperatorProxy(AbstractOperator):
                 "source_file": info.source_file,
             },
         )
-        out_tables, metadata, _ = worker.run(config=self._worker_config, table=table)
+        out_tables, metadata, _ = worker.run(
+            config=self._worker_config, table=table, secrets=encode_secrets(secrets=self._secrets)
+        )
         return out_tables, metadata
 
     def cleanup(self) -> None:

@@ -99,6 +99,10 @@ secrets:
   vault:
     enabled: false          # Set to true to enable HashiCorp Vault integration
     provider: hashicorp     # Provider name used in vault:// URIs
+    # Vault paths an untrusted custom operator (uploaded through the API or fetched from an object store) may
+    # reference in a field it declares secret-capable. Same entry format as allowed_paths. Unset or empty: none.
+    # custom_operator_allowed_paths:
+    #   - hashicorp:custom-ops/team-a/*
 
 # Audit records (docpipe.audit logger) are always written to stdout as JSON lines.
 # Set retention_days to also write a daily-rotating file that keeps that many days.
