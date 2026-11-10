@@ -72,6 +72,14 @@ spec:
               value: "opensearch"
             - name: OPENSEARCH_PORT
               value: "9200"
+            # Authentication is on by default. Provide the signing secret (at least 32
+            # random characters) from a Secret created by the operator, for example:
+            #   kubectl create secret generic docpipe-auth --from-literal=JWT_SECRET_KEY=<value>
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: docpipe-auth
+                  key: JWT_SECRET_KEY
           volumeMounts:
             # FastAPI writes DuckDB files (job_stats.duckdb, document_sets.duckdb)
             # and job stats here at runtime. Backed by the docpipe-data PVC so data
