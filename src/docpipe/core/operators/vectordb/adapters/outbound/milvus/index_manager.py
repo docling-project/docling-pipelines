@@ -295,11 +295,12 @@ class MilvusIndexManager:
 
     @staticmethod
     def _validate_dense_field_config(
-        *, index_type: str, metric_type: str, index_parameters: dict[str, Any] | None
+        *, index_type: str, metric_type: str, index_parameters: dict[str, Any] | None, is_lite: bool
     ) -> None:
         """Validate the index settings applied to a dense field in a hybrid (sparse + dense) collection.
 
         The dense field may use a CPU dense index or a GPU index, with the metrics valid for that family.
+        Milvus Lite only supports ``FLAT`` for dense vectors, so GPU and other CPU index types are rejected there.
         """
         if index_type not in MilvusIndexTypes.ALL_DENSE_TYPES + MilvusIndexTypes.ALL_GPU_TYPES:
             raise DocpipeException(
@@ -311,13 +312,9 @@ class MilvusIndexManager:
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
-        MilvusIndexManager._validate_metric_type(
-            vector_mode=(
-                MilvusVectorModes.GPU if index_type in MilvusIndexTypes.ALL_GPU_TYPES else MilvusVectorModes.DENSE
-            ),
-            index_type=index_type,
-            metric_type=metric_type,
-        )
+        field_mode = MilvusVectorModes.GPU if index_type in MilvusIndexTypes.ALL_GPU_TYPES else MilvusVectorModes.DENSE
+        MilvusIndexManager._validate_index_type(vector_mode=field_mode, index_type=index_type, is_lite=is_lite)
+        MilvusIndexManager._validate_metric_type(vector_mode=field_mode, index_type=index_type, metric_type=metric_type)
         MilvusIndexManager._validate_gpu_config(
             vector_mode=MilvusVectorModes.GPU, index_type=index_type, index_parameters=index_parameters
         )
@@ -490,6 +487,7 @@ class MilvusIndexManager:
                     index_type=self.index_type,
                     metric_type=self.metric_type,
                     index_parameters=self.index_parameters,
+                    is_lite=self.is_lite,
                 )
             return
         if self._is_gpu:

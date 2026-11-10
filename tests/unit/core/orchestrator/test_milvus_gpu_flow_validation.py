@@ -154,3 +154,19 @@ def test_add_sparse_vector_conflicting_with_vector_mode_fails_validation() -> No
 
     assert result["status"] == "FAILED"
     assert "conflicts with vector_mode" in json.dumps(result.get("errors"))
+
+
+def test_hybrid_gpu_index_on_milvus_lite_fails_validation() -> None:
+    """vector_mode sparse with a GPU index on Lite must not slip through the early return for sparse mode."""
+    flow_definition = copy.deepcopy(_load_flow())
+    node = next(node for node in flow_definition["flow"] if node["type"] == "vectordb")
+    node["config"]["add_sparse_vector"] = True
+    provider_config = node["config"]["provider_config"]
+    provider_config.pop("vector_mode")
+    provider_config["auth_type"] = "lite"
+    provider_config["uri"] = "./data/milvus/gpu.db"
+
+    result = _validate(flow_definition=flow_definition)
+
+    assert result["status"] == "FAILED"
+    assert "not supported by Milvus Lite" in json.dumps(result.get("errors"))

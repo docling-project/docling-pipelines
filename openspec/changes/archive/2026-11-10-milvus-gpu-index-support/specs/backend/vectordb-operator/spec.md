@@ -94,6 +94,10 @@ GPU indexes SHALL apply only to dense `FLOAT_VECTOR` fields. Each vector field S
 - **WHEN** `vector_mode="sparse"`, a dense vector feature is present and `index_type="GPU_CAGRA"` is configured with `metric_type="COSINE"` (or `index_type` is not a dense or GPU index type)
 - **THEN** flow validation fails with a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`)
 
+#### Scenario: Hybrid collection on Milvus Lite
+- **WHEN** `vector_mode="sparse"`, a dense vector feature is present, `auth_type="lite"` and `index_type` is a GPU type or a CPU dense type other than `FLAT`
+- **THEN** flow validation fails with a `DocpipeException` (status 400) stating that the index type is not supported by Milvus Lite
+
 #### Scenario: Collection already exists
 - **WHEN** the target collection already exists
 - **THEN** the collection is not recreated and `vector_mode` and `index_type` are not applied to or compared with its existing indexes; only vector dimensions are validated

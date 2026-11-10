@@ -34,8 +34,7 @@
 
 - [x] 6.1 [backend] Run `pytest tests/unit/operators/vectordb/ tests/unit/core/orchestrator/ -v`.
 - [x] 6.2 [backend] Run `pre-commit run --from-ref origin/main --to-ref HEAD` after committing.
-- [ ] 6.3 [backend] Verify on a Linux host with an NVIDIA GPU and a `-gpu` Milvus image (see Open Questions in `design.md`).
 
-## Workflow follow-up
+## Follow-up
 
-- After the PR is approved, run `openspec archive milvus-gpu-index-support`.
+- Not part of this change: verify on a Linux host with an NVIDIA GPU and a `-gpu` Milvus image. Tracked in Open Questions in `design.md` and in the Acceptance Criteria of issue #558.

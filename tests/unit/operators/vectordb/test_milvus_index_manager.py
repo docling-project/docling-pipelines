@@ -1654,6 +1654,21 @@ class TestHybridDenseFieldValidation:
         with pytest.raises(DocpipeException, match="does not support metric 'COSINE'"):
             manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
 
+    def test_hybrid_gpu_index_on_lite_raises(self, mock_client):
+        """Sparse mode returns early in _validate_index_type, so the dense field is checked for Lite here."""
+        manager = self._hybrid(mock_client, index_type="GPU_CAGRA", metric_type="L2", is_lite=True)
+        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_cpu_index_other_than_flat_on_lite_raises(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="HNSW", metric_type="L2", is_lite=True)
+        with pytest.raises(DocpipeException, match="not supported by Milvus Lite"):
+            manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
+    def test_hybrid_flat_index_on_lite_passes(self, mock_client):
+        manager = self._hybrid(mock_client, index_type="FLAT", metric_type="L2", is_lite=True)
+        manager.validate_vector_feature_types(feature_types={"embeddings": "vector"})
+
     def test_hybrid_unknown_index_type_raises(self, mock_client):
         manager = self._hybrid(mock_client, index_type="NOT_AN_INDEX")
         with pytest.raises(DocpipeException, match="cannot be used for the dense vector field"):

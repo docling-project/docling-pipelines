@@ -48,7 +48,7 @@ GPU indexes apply only to dense `FLOAT_VECTOR` fields. Fields are indexed by the
 - **Binary only**: binary fields use `BIN_*`. `vector_mode=gpu` with only binary features is rejected by `validate_vector_feature_types`, because a GPU index would never be used.
 - **Mixed dense + binary**: dense fields use the configured index, binary fields use `BIN_FLAT`/`HAMMING` (a warning is logged when the configured dense settings are overridden for a binary field).
 - **Sparse only**: `vector_mode=sparse` without a dense vector feature skips the GPU, binary and dense index checks. The sparse field uses `SPARSE_INVERTED_INDEX`/`BM25`.
-- **Hybrid (dense + sparse)**: the sparse field keeps `SPARSE_INVERTED_INDEX`/`BM25`. When a dense vector feature exists, `validate_vector_feature_types` checks the configured `index_type` against the CPU dense and GPU index types, the metric against that family, and the `GPU_CAGRA` parameters.
+- **Hybrid (dense + sparse)**: the sparse field keeps `SPARSE_INVERTED_INDEX`/`BM25`. When a dense vector feature exists, `validate_vector_feature_types` checks the configured `index_type` against the CPU dense and GPU index types, the metric against that family, the `GPU_CAGRA` parameters, and Milvus Lite (only `FLAT` is accepted for the dense field).
 
 ### 5. Cleanup after index failure
 
