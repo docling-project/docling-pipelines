@@ -468,6 +468,15 @@ class SecretResolver:
         ``docpipe.audit`` record here; nothing is emitted yet, so adding it does
         not change any signature in this module.
         """
+        from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
+
+        emit_resolution_audit_record(
+            node_name=node_name,
+            config_key=config_key,
+            provider=provider,
+            outcome=outcome,
+            correlation_id=correlation_id,
+        )
 
     @staticmethod
     def _fail(
