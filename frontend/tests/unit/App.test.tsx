@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, waitFor, render } from '@testing-library/react';
-import React from 'react';
 import { Provider } from 'react-redux';
 import { IntlProvider } from 'react-intl';
 import { ThemeProvider } from '@/contexts/ThemeProvider';

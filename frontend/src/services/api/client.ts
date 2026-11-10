@@ -24,6 +24,7 @@ const logger = log4js.getLogger('api.client');
  */
 export const apiClient: AxiosInstance = axios.create({
   timeout: 10000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -39,6 +40,12 @@ apiClient.interceptors.request.use(
       message: 'Outgoing request',
       data: { method: config.method, url: config.url, baseURL: config.baseURL },
     });
+
+    const method = config.method?.toUpperCase();
+    if (method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      config.headers.set('X-Requested-With', 'XMLHttpRequest');
+    }
+
     return config;
   },
   (error: AxiosError) => {
@@ -51,6 +58,8 @@ apiClient.interceptors.request.use(
   }
 );
 
+let isRedirecting = false;
+
 /**
  * Response Interceptor - Logs responses and handles errors
  */
@@ -61,13 +70,61 @@ apiClient.interceptors.response.use(
       message: 'Response received',
       data: { method: response.config.method, url: response.config.url, status: response.status, statusText: response.statusText },
     });
+
+    // Reset redirect latch on successful auth/login/me calls
+    const url = response.config.url ?? '';
+    if (url.endsWith('/auth/login') || url.endsWith('/auth/me')) {
+      isRedirecting = false;
+    }
+
     return response;
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     if (axios.isCancel(error)) {
       // Deliberately aborted request - not an error worth logging.
       return Promise.reject(error);
     }
+
+    const status = error.response?.status;
+    const url = error.config?.url ?? '';
+
+    if (status === 401) {
+      const isLogin = url.endsWith('/auth/login');
+
+      // Resolve dependencies dynamically to avoid circular references during store creation
+      const { store } = await import('@/store');
+      const { logoutUser } = await import('@/slices/authSlice');
+
+      const authState = store.getState().auth;
+      const isInitialMe = url.endsWith('/auth/me') && (authState.status === 'loading' || authState.status === 'idle');
+
+      if (!isLogin && !isInitialMe) {
+        if (!isRedirecting) {
+          isRedirecting = true;
+
+          // Clear auth state
+          void store.dispatch(logoutUser());
+
+          // Navigate to login page outside of React
+          const currentPath = window.location.pathname;
+          const pathWithoutBasename = currentPath.startsWith('/ui') ? currentPath.slice(3) : currentPath;
+          const returnTo = encodeURIComponent(pathWithoutBasename + window.location.search);
+          window.location.assign(`/ui/login?return_to=${returnTo}`);
+        }
+      }
+    } else if (status === 403) {
+      const { store } = await import('@/store');
+      const { addNotification } = await import('@/slices/notificationsSlice');
+
+      store.dispatch(
+        addNotification({
+          kind: 'error',
+          title: 'Permission Denied',
+          subtitle: 'You do not have permission to perform this action',
+        })
+      );
+    }
+
     if (error.response) {
       logUtil.error({
         logger,
