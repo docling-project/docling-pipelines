@@ -184,7 +184,7 @@ The Docker Compose files SHALL NOT contain a default bootstrap password hash. Th
 - **THEN** the response is 200 and the cookie is expired in the response
 
 ### Requirement: Current user and auth discovery
-`GET /auth/me` SHALL return the authenticated user's id, username, email and roles. The public `GET /auth/config` SHALL return whether auth is enabled, whether credential login is available, and the configured OIDC providers.
+`GET /auth/me` SHALL return the authenticated user's username, email, full name and roles. The public `GET /auth/config` SHALL return whether auth is enabled, whether credential login is available, and the configured OIDC providers.
 
 #### Scenario: Me returns roles
 - **WHEN** an authenticated user calls `GET /auth/me`
