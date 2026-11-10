@@ -29,4 +29,12 @@ export const messages = defineMessages({
     id: 'src.components.layout.AppHeader.switchToDark',
     defaultMessage: 'Switch to dark mode',
   },
+  userMenuLabel: {
+    id: 'src.components.layout.AppHeader.userMenuLabel',
+    defaultMessage: 'User menu',
+  },
+  signOut: {
+    id: 'src.components.layout.AppHeader.signOut',
+    defaultMessage: 'Sign out',
+  },
 });

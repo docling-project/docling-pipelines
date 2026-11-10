@@ -23,15 +23,15 @@ export function Login(): React.JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const rawReturnTo = searchParams.get('return_to');
-  const returnTo = sanitizeReturnTo(rawReturnTo) || '/projects';
+  const returnTo = sanitizeReturnTo(rawReturnTo) ?? '/projects';
 
   useEffect(() => {
     if (status === 'authenticated') {
-      navigate(returnTo, { replace: true });
+      void navigate(returnTo, { replace: true });
     }
   }, [status, navigate, returnTo]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
 
     let hasError = false;
@@ -54,15 +54,19 @@ export function Login(): React.JSX.Element {
     }
 
     setIsSubmitting(true);
-    try {
-      await dispatch(loginUser({ username, password }));
-    } finally {
-      setIsSubmitting(false);
-    }
+    void (async () => {
+      try {
+        await dispatch(loginUser({ username, password }));
+      } finally {
+        setIsSubmitting(false);
+      }
+    })();
   };
 
-  const renderNotification = () => {
-    if (!error) return null;
+  const renderNotification = (): React.JSX.Element | null => {
+    if (!error) {
+      return null;
+    }
 
     let displayMessage = error;
     if (errorStatus === 429) {
@@ -81,7 +85,7 @@ export function Login(): React.JSX.Element {
     );
   };
 
-  const getProviderUrl = (authorizeUrl: string) => {
+  const getProviderUrl = (authorizeUrl: string): string => {
     const separator = authorizeUrl.includes('?') ? '&' : '?';
     return `${authorizeUrl}${separator}return_to=${encodeURIComponent(returnTo)}`;
   };
@@ -119,7 +123,9 @@ export function Login(): React.JSX.Element {
               value={username}
               onChange={(e) => {
                 setUsername(e.target.value);
-                if (usernameError) setUsernameError('');
+                if (usernameError) {
+                  setUsernameError('');
+                }
               }}
               invalid={Boolean(usernameError)}
               invalidText={usernameError}
@@ -132,7 +138,9 @@ export function Login(): React.JSX.Element {
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                if (passwordError) setPasswordError('');
+                if (passwordError) {
+                  setPasswordError('');
+                }
               }}
               invalid={Boolean(passwordError)}
               invalidText={passwordError}
