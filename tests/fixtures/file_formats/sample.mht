@@ -1,0 +1,9 @@
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="fixture-boundary"
+
+--fixture-boundary
+Content-Type: text/html; charset=utf-8
+Content-Location: file:///fixture.html
+
+<html><body><p>Synthetic fixture text.</p></body></html>
+--fixture-boundary--

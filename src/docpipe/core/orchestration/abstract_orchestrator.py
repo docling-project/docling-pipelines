@@ -31,6 +31,7 @@ from docpipe.core.orchestration.abstract_operator_executor import AbstractOperat
 from docpipe.core.orchestration.batch_manager import BatchInfo, BatchManager
 from docpipe.core.orchestration.flow_execution_event_handler import FlowExecutionEventHandler
 from docpipe.core.orchestration.models.execution_event_context import NodeTableSummary, SinkDatasetInfo
+from docpipe.core.orchestration.operator_factory import OperatorFactory
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults, FlowEnginePort
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.core.datetime import get_current_timestamp
@@ -61,7 +62,7 @@ class AbstractOrchestrator(ABC):
         *,
         job_stats_service: JobStatsService | None = None,
         job_run_manager: JobRunManager | None = None,
-        enable_custom_operators: bool = True,
+        enable_custom_operators: bool | None = None,
         custom_operator_packages: list[str] | None = None,
         execution_reporter=None,
         observer: ExecutionLifecycleObserverPort | None = None,
@@ -72,12 +73,14 @@ class AbstractOrchestrator(ABC):
         Args:
             job_stats_service: Optional job statistics service for tracking job execution
             job_run_manager: Optional framework job run manager for external status updates
-            enable_custom_operators: Whether to enable custom operators (passed to operator factory)
+            enable_custom_operators: Whether to enable custom operators (default: from env, else disabled)
             custom_operator_packages: List of custom operator packages (passed to operator factory)
             execution_reporter: Optional output formatter for user-friendly console output
             observer: Optional lifecycle observer for lineage emission
         """
-        self.enable_custom_operators = enable_custom_operators
+        self.enable_custom_operators = OperatorFactory.resolve_enable_custom_operators(
+            enable_custom_operators=enable_custom_operators
+        )
         self.custom_operator_packages = custom_operator_packages
         self.job_status = ExecutionStatus.RUNNING
         self.job_run_id: str | None = None

@@ -129,7 +129,7 @@ class DocpipeConstants:
 
     # Custom Operator Control
     ENABLE_CUSTOM_OPERATORS = "enable_custom_operators"
-    ENABLE_CUSTOM_OPERATORS_DEFAULT = True
+    ENABLE_CUSTOM_OPERATORS_DEFAULT = False
 
     # Operator Ownership Tiers
     OWNER_DOCPIPE = "docpipe"
@@ -457,6 +457,9 @@ class ServiceConstants:
     # a per-instance limit of 8 req/s, so concurrency stays opt-in).
     DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
     DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
+    # watsonx.ai request timeout (seconds) applied by every watsonx path (inference, embeddings,
+    # text detection).
+    DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
 
 
 class ProviderConstants:
