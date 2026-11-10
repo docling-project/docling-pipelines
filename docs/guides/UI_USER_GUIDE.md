@@ -22,6 +22,66 @@ The application header contains four primary navigation items:
 
 ---
 
+## Signing in and roles
+
+When authentication is enabled on the backend, the UI asks you to sign in before it shows any page. Administrators configure the login methods, the roles and the group mapping; see the [Authentication and Authorization Guide](AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
+When authentication is disabled on the backend, the UI skips the sign-in page, treats you as an administrator and does not show the user menu in the header.
+
+### Signing in
+
+Open the UI at `/ui`. If you have no session, the UI redirects you to the **Sign in** page at `/ui/login`. The page shows the methods that the backend offers:
+
+- **Credential form**: enter your username and password and click **Sign in**. Both fields are required. The form is shown only when the backend accepts username and password login.
+- **Provider buttons**: one **Sign in with `<provider>`** button for each configured OIDC identity provider. The button leaves the UI, signs you in at the provider and returns you to the UI. When the page offers both methods, they are separated by **or**.
+- If the backend has no login method configured, the page shows **No sign-in method is currently configured.** Contact your administrator.
+- If you fail too many times in a row, the page shows **Too many failed attempts. Please retry later.** Wait and try again.
+
+The session lives in an HttpOnly cookie that the browser sends automatically. The UI never stores your password or a token in the page, in browser storage or in the address bar.
+
+#### Returning to the page you wanted
+
+If you open a deep link while signed out, for example `/ui/projects/123`, the UI sends you to `/ui/login?return_to=%2Fprojects%2F123`. After a successful sign-in, with either method, you land on that page. Without a `return_to` value you land on **Projects**. The UI and the backend accept only paths inside the application as a return target; anything else is ignored.
+
+### Signing out
+
+When authentication is enabled, the header shows your name (or username if no full name is set). Open that menu and choose **Sign out**. The session ends and the **Sign in** page opens.
+
+### When your session expires
+
+If the backend rejects a request because your session ended (an HTTP 401 response), the UI clears your signed-in state and redirects you to `/ui/login?return_to=<current page>`. Sign in again to return to the page you were on. Unsaved changes on that page are lost, so save the flow before a long break.
+
+### Roles
+
+Your administrator assigns you one of three roles. The highest role you hold applies.
+
+| Role | What you can do |
+|------|-----------------|
+| **Viewer** | Read only. Browse projects, flows, run history, run metrics, logs and the canvas. You cannot create, edit, delete or run anything. |
+| **Editor** | Everything a viewer can do, plus create projects and flows, edit and delete your own projects, flows and runs, and run any flow. |
+| **Admin** | Everything. Admins can modify any project, flow or run regardless of who created it. |
+
+Editors work on their own assets. A project, flow or run records who created it. An editor can edit or delete an asset only if they created it. An asset without a recorded owner, such as one created before authentication was enabled or through the CLI, can be changed by any editor. Running a saved flow needs only the editor role, not ownership, so an editor can run a flow that someone else created.
+
+| Action | Viewer | Editor (own asset or no owner) | Editor (asset of another user) | Admin |
+|--------|--------|--------------------------------|--------------------------------|-------|
+| Browse pages, run history, metrics and logs | Yes | Yes | Yes | Yes |
+| Create a project or a flow | No | Yes | Yes | Yes |
+| Edit or delete a project or a flow | No | Yes | No | Yes |
+| Save changes on the canvas, edit flow details | No | Yes | No | Yes |
+| Run a flow, **Run Again** | No | Yes | Yes | Yes |
+| Stop a run, cancel a run, delete a run | No | Yes | No | Yes |
+
+### Disabled buttons and tooltips
+
+The UI disables an action you are not allowed to perform instead of hiding it. Hover over or focus the disabled button to see a tooltip that explains why: either your role is too low (you need the editor role) or the asset belongs to another user (only the owner or an administrator can change it). The Home page create-project and sample project actions, the create, edit and delete actions on **Projects**, **Project detail** and **Flow detail**, the cancel and delete actions on job runs, the edit-details button in **About flow**, the editing controls and **Save** on the canvas, and **Stop** and **Run Again** on a run all follow this pattern. Reading stays available everywhere: you can still open any flow, inspect nodes, view run history, metrics and logs.
+
+If you ask the backend to do something your role does not allow, for example because your role changed during the session, the backend answers with HTTP 403 and the UI shows a **Permission Denied** notification with the text **You do not have permission to perform this action**. The UI gating is a convenience; the backend enforces every permission.
+
+If a button you expect to use is disabled and you believe that is wrong, ask an administrator to check your role mapping.
+
+---
+
 ## Pages
 
 ### Home
@@ -230,4 +290,8 @@ The backend started the job but an operator cannot reach an external service. Ch
 
 **Page loads but all API calls return 401 Unauthorized**
 
-Authentication is not yet enforced in the UI. If you are seeing 401 responses, the backend JWT configuration may be misconfigured. Check `JWT_SECRET_KEY` in your `.env` file.
+Your session is missing or expired. The UI normally redirects you to the sign-in page (see [When your session expires](#when-your-session-expires)). If you are stuck in a redirect loop between `/ui/login` and a page, the browser is not sending the session cookie (`docpipe_access_token` by default). Check that you open the UI on the same origin that served the sign-in, that cookies are not blocked, and that a custom ingress routes `/auth` to the REST API. See the [Authentication and Authorization Guide](AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md) for the session and cookie settings.
+
+**Sign-in with a provider fails or returns to the sign-in page**
+
+The provider must redirect to the callback address of your deployment, for example `http://localhost:3000/auth/oauth2/callback` for the Vite development server. See "Redirect URI per topology" in the [Authentication and Authorization Guide](AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).

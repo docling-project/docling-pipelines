@@ -6,6 +6,7 @@ import {
   HeaderMenuItem,
   HeaderGlobalBar,
   HeaderGlobalAction,
+  HeaderMenu,
   Tag,
   Theme,
 } from '@carbon/react';
@@ -13,7 +14,9 @@ import { Asleep, Light, Notification } from '@carbon/icons-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useIntl } from 'react-intl';
 import { go } from '@/utils';
-import { useTheme } from '@/hooks';
+import { useTheme, useAppDispatch } from '@/hooks';
+import { useAuth } from '@/hooks/useAuth';
+import { logoutUser } from '@/slices/authSlice';
 import { useAppSelector } from '@/hooks/useAppSelector';
 import { selectNotificationUnreadCount } from '@/selectors';
 import { ROUTES, APP_INFO } from '@/config';
@@ -36,6 +39,8 @@ export function AppHeader(): React.JSX.Element {
   const { isDarkMode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useAppDispatch();
+  const { user, authEnabled } = useAuth();
 
   const unreadCount = useAppSelector(selectNotificationUnreadCount);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -43,6 +48,14 @@ export function AppHeader(): React.JSX.Element {
   const handleLogoClick = useCallback((): void => { go(navigate, ROUTES.HOME); }, [navigate]);
   const handleNavHome = useCallback((): void => { go(navigate, ROUTES.HOME); }, [navigate]);
   const handleNavProjects = useCallback((): void => { go(navigate, ROUTES.PROJECTS); }, [navigate]);
+
+  const handleSignOut = useCallback((): void => {
+    void (async () => {
+      await dispatch(logoutUser());
+      void navigate(ROUTES.LOGIN);
+    })();
+  }, [dispatch, navigate]);
+
   return (
     <>
       {/* Always render the header in g100 so it stays dark in both light and dark modes,
@@ -72,6 +85,16 @@ export function AppHeader(): React.JSX.Element {
           >
             {intl.formatMessage(messages.navProjects)}
           </HeaderMenuItem>
+          {authEnabled && user && (
+            <HeaderMenu
+              menuLinkName={user.full_name || user.username}
+              aria-label={intl.formatMessage(messages.userMenuLabel)}
+            >
+              <HeaderMenuItem onClick={handleSignOut}>
+                {intl.formatMessage(messages.signOut)}
+              </HeaderMenuItem>
+            </HeaderMenu>
+          )}
         </HeaderNavigation>
         <HeaderGlobalBar className={styles.globalActions}>
           <div className={styles.globalActionSeparator} />

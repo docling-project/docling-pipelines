@@ -73,6 +73,7 @@ export function fromResponse(flow: Flow): FlowRow {
     tags:        flow.tags ?? [],
     created_on:  flow.created_on  ?? '',
     modified_on: flow.modified_on ?? '',
+    created_by:  flow.created_by ?? null,
   };
 }
 

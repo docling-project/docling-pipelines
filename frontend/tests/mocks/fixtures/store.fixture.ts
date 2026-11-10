@@ -5,6 +5,8 @@ import jobRunReducer from '@/slices/jobRunSlice';
 import assetsReducer from '@/slices/assetsSlice';
 import projectsReducer from '@/slices/projectsSlice';
 import notificationsReducer from '@/slices/notificationsSlice';
+import authReducer, { LOCAL_ADMIN_USER } from '@/slices/authSlice';
+import type { AuthRole, AuthState } from '@/types';
 import type { RootState } from '@/store';
 import { flowFixture, flowRowFixture } from './flow.fixture';
 import { projectDomainFixture } from './project.fixture';
@@ -16,7 +18,46 @@ export const rootReducer = combineReducers({
   assets: assetsReducer,
   projects: projectsReducer,
   notifications: notificationsReducer,
+  auth: authReducer,
 });
+
+/**
+ * Auth state for tests that render as a specific role.
+ * Produces an authenticated, auth-enabled session for `username` holding `role`.
+ */
+export function authStateFixture({
+  role = 'admin',
+  username = 'test-user',
+  overrides,
+}: {
+  role?: AuthRole;
+  username?: string;
+  overrides?: Partial<AuthState>;
+} = {}): AuthState {
+  return {
+    user: { username, email: `${username}@example.com`, full_name: username, roles: [role] },
+    authEnabled: true,
+    providers: [],
+    credentialLogin: true,
+    status: 'authenticated',
+    error: null,
+    errorStatus: null,
+    retryAfter: null,
+    ...overrides,
+  };
+}
+
+/** Default auth state: authenticated with auth disabled (admin-equivalent), so existing tests are unaffected. */
+const authDisabledState: AuthState = {
+  user: LOCAL_ADMIN_USER,
+  authEnabled: false,
+  providers: [],
+  credentialLogin: false,
+  status: 'authenticated',
+  error: null,
+  errorStatus: null,
+  retryAfter: null,
+};
 
 /**
  * Creates a pre-configured store with optional preloaded state.
@@ -78,6 +119,7 @@ export function buildPreloadedState(
       preferences: { autoDismiss: true, dismissDelay: 5000 },
       unreadCount: 0,
     },
+    auth: authDisabledState,
   };
 
   return { ...defaults, ...overrides };

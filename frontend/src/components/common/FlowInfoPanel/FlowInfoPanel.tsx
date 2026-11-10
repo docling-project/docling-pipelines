@@ -2,6 +2,8 @@ import React from 'react';
 import { Button, Tag } from '@carbon/react';
 import { Close, Edit } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
+import { useAppSelector } from '@/hooks/useAppSelector';
+import { PermissionTooltip, usePermissionReason } from '../PermissionTooltip';
 import { messages } from './FlowInfoPanel.messages';
 import styles from './FlowInfoPanel.module.scss';
 
@@ -25,6 +27,11 @@ export interface FlowPanelData {
   modified_on: string;
   /** Project name slug used to navigate back to the project detail page. */
   project_name: string;
+  /**
+   * Username of the flow creator. Optional: when omitted, the panel resolves the
+   * owner from the flow in the Redux store (`flow.items` or `flow.currentFlow`).
+   */
+  created_by?: string | null;
 }
 
 interface FlowInfoPanelProps {
@@ -43,8 +50,9 @@ interface FlowInfoPanelProps {
 /**
  * "About flow" side panel that slides in from the right of the FlowDetail page.
  *
- * Pure display component — receives {@link FlowPanelData} and callbacks from
- * {@link FlowDetail}. Has no internal state, makes no API calls.
+ * Display component — receives {@link FlowPanelData} and callbacks from
+ * {@link FlowDetail}. Has no internal state, makes no API calls. It reads the
+ * auth state itself to disable the edit button when the caller cannot modify the flow.
  *
  * Rendered when the ⓘ button in the breadcrumb bar is clicked. Closes via
  * `onClose`, which also causes the ⓘ button to re-appear.
@@ -57,6 +65,12 @@ export function FlowInfoPanel({
   onEdit,
 }: FlowInfoPanelProps): React.JSX.Element {
   const intl = useIntl();
+  const { getModifyReason } = usePermissionReason();
+  const storedOwner = useAppSelector((state) =>
+    state.flow.items[flow.flow_id]?.created_by
+    ?? (state.flow.currentFlow?.flow_id === flow.flow_id ? state.flow.currentFlow.created_by : null)
+  );
+  const editReason = getModifyReason(flow.created_by !== undefined ? flow.created_by : storedOwner);
   return (
     <div className={styles.sidePanel}>
       <div className={styles.sidePanelHeader}>
@@ -77,15 +91,18 @@ export function FlowInfoPanel({
         <div className={styles.detailsBlock}>
           <div className={styles.sidePanelSectionHeader}>
             <h3 className={styles.sidePanelSectionTitle}>{intl.formatMessage(messages.detailsSection)}</h3>
-            <Button
-              kind="ghost"
-              size="sm"
-              renderIcon={Edit}
-              iconDescription={intl.formatMessage(messages.editDescription)}
-              hasIconOnly
-              tooltipPosition="left"
-              onClick={onEdit}
-            />
+            <PermissionTooltip reason={editReason} align="left">
+              <Button
+                kind="ghost"
+                size="sm"
+                renderIcon={Edit}
+                iconDescription={intl.formatMessage(messages.editDescription)}
+                hasIconOnly
+                tooltipPosition="left"
+                disabled={editReason !== null}
+                onClick={onEdit}
+              />
+            </PermissionTooltip>
           </div>
 
           <div className={styles.detailItem}>

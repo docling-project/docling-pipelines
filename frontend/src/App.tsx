@@ -1,12 +1,13 @@
-import React, { lazy, Suspense, useState, useMemo, useCallback } from 'react';
+import React, { lazy, Suspense, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Theme } from '@carbon/react';
-import { useTheme } from '@/hooks';
+import { useTheme, useAppDispatch } from '@/hooks';
 import { AppHeader, ErrorBoundary, Breadcrumb } from '@/components';
-import { ToastContainer } from '@/components/common';
+import { ToastContainer, ProtectedRoute } from '@/components/common';
 import { BreadcrumbActionsContext, ThemeElementContext } from '@/contexts';
 import { ROUTES, routeConfig } from '@/config';
 import type { RouteConfig } from '@/config';
+import { bootstrapAuth } from '@/slices/authSlice';
 import styles from './App.module.scss';
 
 /**
@@ -49,13 +50,31 @@ function buildRoutes(routes: RouteConfig[]): React.ReactNode {
 }
 
 // Evaluated once at module load — the resulting JSX tree is permanently stable.
-const appRoutes = buildRoutes(routeConfig);
+const shellRouteConfig = routeConfig.filter((route) => route.path !== '/login' && route.path !== '/error');
+const appShellRoutes = buildRoutes(shellRouteConfig);
+
+const loginPage = lazyPage(() =>
+  import('@/pages/Login').then((m) => ({ default: m.Login }))
+);
+const errorPage = lazyPage(() =>
+  import('@/pages/Error').then((m) => ({ default: m.Error }))
+);
 const notFoundPage = lazyPage(() =>
   import('@/pages/NotFound').then((m) => ({ default: m.NotFound }))
 );
 
 function App(): React.JSX.Element {
   const { theme } = useTheme();
+  const dispatch = useAppDispatch();
+  const bootstrappedRef = useRef(false);
+
+  useEffect(() => {
+    if (!bootstrappedRef.current) {
+      bootstrappedRef.current = true;
+      void dispatch(bootstrapAuth());
+    }
+  }, [dispatch]);
+
   // Callback ref stored in state: firing setThemeElement once after mount gives
   // ThemeElementContext a non-null value and triggers the single re-render needed
   // to propagate it to all consumers.  useRef alone won't work here because
@@ -86,26 +105,39 @@ function App(): React.JSX.Element {
         <Theme theme={theme}>
           <ThemeElementContext.Provider value={themeElement}>
           <BreadcrumbActionsContext.Provider value={breadcrumbContextValue}>
-            <div ref={themeRefCallback} className={styles.appContainer}>
-              <AppHeader />
-              {/* Breadcrumb sits in normal flow, offset below the fixed header */}
-              <div className={styles.breadcrumbRow}>
-                <Breadcrumb />
-              </div>
-              {/* Only this div scrolls — height fills remaining space */}
-              <div className={styles.pageContent}>
-                <Routes>
-                  {/* Root redirect */}
-                  <Route path="/" element={<Navigate to={ROUTES.HOME} replace />} />
+            <Routes>
+              {/* Public pages outside the shell */}
+              <Route path="/login" element={loginPage} />
+              <Route path="/error" element={errorPage} />
 
-                  {/* Data-driven routes — stable tree built once at module load */}
-                  {appRoutes}
+              {/* Root redirect */}
+              <Route path="/" element={<Navigate to={ROUTES.HOME} replace />} />
 
-                  {/* 404 catch-all — not data-driven, always last */}
-                  <Route path="*" element={notFoundPage} />
-                </Routes>
-              </div>
-            </div>
+              {/* Protected shell routes */}
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <div ref={themeRefCallback} className={styles.appContainer}>
+                      <AppHeader />
+                      {/* Breadcrumb sits in normal flow, offset below the fixed header */}
+                      <div className={styles.breadcrumbRow}>
+                        <Breadcrumb />
+                      </div>
+                      {/* Only this div scrolls — height fills remaining space */}
+                      <div className={styles.pageContent}>
+                        <Outlet />
+                      </div>
+                    </div>
+                  </ProtectedRoute>
+                }
+              >
+                {/* Data-driven shell routes */}
+                {appShellRoutes}
+
+                {/* 404 catch-all inside shell */}
+                <Route path="*" element={notFoundPage} />
+              </Route>
+            </Routes>
           </BreadcrumbActionsContext.Provider>
           </ThemeElementContext.Provider>
           {/* Global toast container — mounted once, reads from Redux notifications slice */}

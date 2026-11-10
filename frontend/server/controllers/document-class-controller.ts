@@ -1,5 +1,7 @@
 import axios from 'axios';
+import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
+import { NO_BODY_HEADERS, buildForwardHeaders } from './http-headers';
 
 const logger = log4js.getLogger('document-class.controller');
 
@@ -7,15 +9,13 @@ const logger = log4js.getLogger('document-class.controller');
  * Fetch document classes from backend API
  * BFF controller that proxies requests to the Python FastAPI backend
  */
-const fetchDocumentClasses = async (req, res) => {
+const fetchDocumentClasses = async (req: Request, res: Response) => {
   try {
     const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/document_classes`;
     logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
 
     const response = await axios.get(requestUrl, {
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: buildForwardHeaders(req, NO_BODY_HEADERS),
     });
 
     res.json(response.data);
@@ -33,6 +33,6 @@ const fetchDocumentClasses = async (req, res) => {
 /**
  * Export routes function that registers all document class endpoints
  */
-export const routes = (router) => {
+export const routes = (router: Router) => {
   router.get('/documentClasses', fetchDocumentClasses);
 };

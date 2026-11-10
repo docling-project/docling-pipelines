@@ -30,39 +30,39 @@
 
 ## 4. BFF forwarding and Vite proxy
 
-- [ ] 4.1 Add `buildForwardHeaders(req, base)` in `frontend/server/controllers/http-headers.ts` forwarding `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` only, and use it in all six controllers, including `downloadJobRunReport` (`Accept: text/csv`), `operator-controller.ts` and `document-class-controller.ts` (inline `Accept` headers); verify BFF unit tests assert the four headers reach the upstream call and that `X-Forwarded-For` does not
-- [ ] 4.2 Make `downloadJobRunReport` answer an upstream 401 or 403 with the upstream status and a JSON body, falling back to `{ error: 'Failed to download job run report' }` when the body is a stream; verify a unit test that stubs a 403 stream response and asserts status 403 and a JSON body
-- [ ] 4.3 Bind the BFF to `127.0.0.1` by default with a `BFF_HOST` override read in `server.ts`, and set `ENV BFF_HOST=0.0.0.0` in `docker/bff.Dockerfile`; verify a test or startup log assertion for default and override, and `docker compose config` plus the Kubernetes probes against the image
-- [ ] 4.4 Add an `/auth` entry to the Vite proxy in `frontend/vite.config.ts` using `loadEnv(mode, __dirname, '')` for `BACKEND_API_URL` with a `http://localhost:8080` fallback, and update the topology comment in `services/api/client.ts`; verify the default and configured targets
-- [ ] 4.5 Run `npm run lint` and the BFF tests in `frontend/`; verify no errors
+- [x] 4.1 Add `buildForwardHeaders(req, base)` in `frontend/server/controllers/http-headers.ts` forwarding `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` only, and use it in all six controllers, including `downloadJobRunReport` (`Accept: text/csv`), `operator-controller.ts` and `document-class-controller.ts` (inline `Accept` headers); verify BFF unit tests assert the four headers reach the upstream call and that `X-Forwarded-For` does not
+- [x] 4.2 Make `downloadJobRunReport` answer an upstream 401 or 403 with the upstream status and a JSON body, falling back to `{ error: 'Failed to download job run report' }` when the body is a stream; verify a unit test that stubs a 403 stream response and asserts status 403 and a JSON body
+- [x] 4.3 Bind the BFF to `127.0.0.1` by default with a `BFF_HOST` override read in `server.ts`, and set `ENV BFF_HOST=0.0.0.0` in `docker/bff.Dockerfile`; verify a test or startup log assertion for default and override, and `docker compose config` plus the Kubernetes probes against the image
+- [x] 4.4 Add an `/auth` entry to the Vite proxy in `frontend/vite.config.ts` using `loadEnv(mode, __dirname, '')` for `BACKEND_API_URL` with a `http://localhost:8080` fallback, and update the topology comment in `services/api/client.ts`; verify the default and configured targets
+- [x] 4.5 Run `npm run lint` and the BFF tests in `frontend/`; verify no errors
 
 ## 5. Frontend state and hook
 
-- [ ] 5.1 Add `types/` for user and auth config and `services/api/actions/auth-actions.ts` (config, me, login, logout) calling `/auth/*` and sending `X-Requested-With` on login and logout; verify action tests mock the client and assert paths and headers
-- [ ] 5.2 Add `slices/authSlice.ts` with the state shape (storing `user` only, never `access_token`), bootstrap, login and logout thunks, and register it in `store/index.ts`; verify slice tests for initial state, restored session, no session, auth disabled, login success and failure, and logout
-- [ ] 5.3 Replace the stub in `hooks/useAuth.ts` with slice-backed `user`, `authEnabled`, `isAuthenticated`, `isLoading`, `canEdit`, `canAdmin` and `canModifyAsset(createdBy)`; verify hook tests for viewer, editor (own, foreign, ownerless) and admin and for the loading status
-- [ ] 5.4 Run the bootstrap once at app start; verify an integration test that the first render shows the loading indicator and then resolves
+- [x] 5.1 Add `types/` for user and auth config and `services/api/actions/auth-actions.ts` (config, me, login, logout) calling `/auth/*` and sending `X-Requested-With` on login and logout; verify action tests mock the client and assert paths and headers
+- [x] 5.2 Add `slices/authSlice.ts` with the state shape (storing `user` only, never `access_token`), bootstrap, login and logout thunks, and register it in `store/index.ts`; verify slice tests for initial state, restored session, no session, auth disabled, login success and failure, and logout
+- [x] 5.3 Replace the stub in `hooks/useAuth.ts` with slice-backed `user`, `authEnabled`, `isAuthenticated`, `isLoading`, `canEdit`, `canAdmin` and `canModifyAsset(createdBy)`; verify hook tests for viewer, editor (own, foreign, ownerless) and admin and for the loading status
+- [x] 5.4 Run the bootstrap once at app start; verify an integration test that the first render shows the loading indicator and then resolves
 
 ## 6. Frontend routing, login page, client
 
-- [ ] 6.1 Add `LOGIN` to `config/routes.config.ts` and a `pages/Login/` page using Carbon `Form`, `TextInput`, `PasswordInput`, `Button`, `InlineNotification` with an SCSS Module and Carbon tokens, credential form, provider buttons that navigate to each provider's `authorize_url` with `return_to` appended, validation, loading state and 429 message; verify component tests for each login-page scenario and an accessibility check for the alert role
-- [ ] 6.2 Add a shared `return_to` sanitizer used by the login page and `ProtectedRoute`; verify tests that accept `/flows/x?a=1` and reject `https://x`, `//x` and `\\x`
-- [ ] 6.3 Restructure `App.tsx` so `/login` renders outside the `AppHeader`/`Breadcrumb` shell chrome, update `ProtectedRoute` to redirect to `/login?return_to=<encoded path+query>` and wrap every shell route except login and error; add the header user menu with sign-out hidden when auth is disabled; verify the deep-link, shell-less login and menu scenarios in navigation tests
-- [ ] 6.4 Update `services/api/client.ts` with `withCredentials`, a single-redirect 401 latch that skips login and the initial `/auth/me` probe, and a 403 toast via `notificationsSlice`; verify tests with three concurrent 401s producing one navigation and a 403 keeping the session
-- [ ] 6.5 Add i18n strings for the new UI text following `frontend/i18n`; verify no hard-coded strings remain in new components via `npm run lint`
+- [x] 6.1 Add `LOGIN` to `config/routes.config.ts` and a `pages/Login/` page using Carbon `Form`, `TextInput`, `PasswordInput`, `Button`, `InlineNotification` with an SCSS Module and Carbon tokens, credential form, provider buttons that navigate to each provider's `authorize_url` with `return_to` appended, validation, loading state and 429 message; verify component tests for each login-page scenario and an accessibility check for the alert role
+- [x] 6.2 Add a shared `return_to` sanitizer used by the login page and `ProtectedRoute`; verify tests that accept `/flows/x?a=1` and reject `https://x`, `//x` and `\\x`
+- [x] 6.3 Restructure `App.tsx` so `/login` renders outside the `AppHeader`/`Breadcrumb` shell chrome, update `ProtectedRoute` to redirect to `/login?return_to=<encoded path+query>` and wrap every shell route except login and error; add the header user menu with sign-out hidden when auth is disabled; verify the deep-link, shell-less login and menu scenarios in navigation tests
+- [x] 6.4 Update `services/api/client.ts` with `withCredentials`, a single-redirect 401 latch that skips login and the initial `/auth/me` probe, and a 403 toast via `notificationsSlice`; verify tests with three concurrent 401s producing one navigation and a 403 keeping the session
+- [x] 6.5 Add i18n strings for the new UI text following `frontend/i18n`; verify no hard-coded strings remain in new components via `npm run lint`
 
 ## 7. Frontend gated actions
 
 Each group below can merge on its own. The UI gating is a convenience, and every hidden action needs a matching backend 403 test (task 8.3).
 
-- [ ] 7.1 Disable the sample project quick-start button on `Home` and the create-project actions on `ProjectsCard` with Carbon tooltips when `!canEdit`; verify component tests for viewer and editor
-- [ ] 7.2 Preserve `createdBy` on `ProjectRow` (`Projects.tsx::toProjectRow`) and disable create, edit and delete on the projects page with Carbon tooltips using `canEdit` and `canModifyAsset`; verify component tests for viewer, editor own, editor foreign, admin and ownerless
-- [ ] 7.3 Preserve `created_by` on `FlowRow` (`flow-mapper.ts::fromResponse` and `types/projects.ts`) and apply the same gating on the project detail page for flow create, edit and delete; verify the corresponding tests
-- [ ] 7.4 Preserve `user_id` on `RunRow` (`FlowDetail.tsx::fetchRuns`) and gate cancel run and delete run on `canModifyAsset(run.user_id)` on the flow detail page while keeping run viewing available; verify tests for viewer, non-owner editor, run owner editor and admin
-- [ ] 7.5 Gate edit flow details (`FlowInfoPanel`) on `canModifyAsset(flowRow.created_by)`; verify tests for viewer, non-owner editor, owner and admin
-- [ ] 7.6 Gate the `Canvas` editing toolbar, palette, node save, properties save and Save on flow modify permission, and Run flow on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
-- [ ] 7.7 Gate `ReadOnlyCanvas` / `RunDetails` controls: `Stop` in `RunStatusTopPanel` on `canModifyAsset(jobStats.user_id)` and `Run Again` on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
-- [ ] 7.8 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings
+- [x] 7.1 Disable the sample project quick-start button on `Home` and the create-project actions on `ProjectsCard` with Carbon tooltips when `!canEdit`; verify component tests for viewer and editor
+- [x] 7.2 Preserve `createdBy` on `ProjectRow` (`Projects.tsx::toProjectRow`) and disable create, edit and delete on the projects page with Carbon tooltips using `canEdit` and `canModifyAsset`; verify component tests for viewer, editor own, editor foreign, admin and ownerless
+- [x] 7.3 Preserve `created_by` on `FlowRow` (`flow-mapper.ts::fromResponse` and `types/projects.ts`) and apply the same gating on the project detail page for flow create, edit and delete; verify the corresponding tests
+- [x] 7.4 Preserve `user_id` on `RunRow` (`FlowDetail.tsx::fetchRuns`) and gate cancel run and delete run on `canModifyAsset(run.user_id)` on the flow detail page while keeping run viewing available; verify tests for viewer, non-owner editor, run owner editor and admin
+- [x] 7.5 Gate edit flow details (`FlowInfoPanel`) on `canModifyAsset(flowRow.created_by)`; verify tests for viewer, non-owner editor, owner and admin
+- [x] 7.6 Gate the `Canvas` editing toolbar, palette, node save, properties save and Save on flow modify permission, and Run flow on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
+- [x] 7.7 Gate `ReadOnlyCanvas` / `RunDetails` controls: `Stop` in `RunStatusTopPanel` on `canModifyAsset(jobStats.user_id)` and `Run Again` on `canEdit`; verify component tests for viewer, non-owner editor, owner editor and admin
+- [x] 7.8 Run `npm run lint`, `npx tsc --noEmit` and the frontend test suite; verify no new errors or warnings
 
 ## 8. Enable by default and finalize
 

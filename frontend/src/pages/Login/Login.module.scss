@@ -1,0 +1,92 @@
+@use '@carbon/react/scss/spacing' as *;
+@use '@carbon/react/scss/type' as *;
+@use '@carbon/react/scss/theme' as *;
+@use '@carbon/react/scss/breakpoint' as *;
+
+.loginContainer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-color: $background;
+  padding: $spacing-05;
+}
+
+.loginCard {
+  width: 100%;
+  max-width: 400px;
+  background-color: $layer-01;
+  padding: $spacing-07;
+  border: 1px solid $border-subtle-01;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+
+  @include breakpoint-down('sm') {
+    padding: $spacing-05;
+  }
+}
+
+.header {
+  margin-bottom: $spacing-07;
+}
+
+.appName {
+  @include type-style('heading-05');
+  color: $text-primary;
+  margin-bottom: $spacing-02;
+}
+
+.title {
+  @include type-style('heading-03');
+  color: $text-secondary;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+}
+
+.submitBtn {
+  margin-top: $spacing-05;
+  width: 100%;
+}
+
+.notification {
+  margin-bottom: $spacing-06;
+}
+
+.providerSection {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-04;
+  margin-top: $spacing-06;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: $text-secondary;
+  margin-block: $spacing-06;
+  @include type-style('label-01');
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid $border-subtle-01;
+  }
+
+  &::before {
+    margin-right: $spacing-04;
+  }
+
+  &::after {
+    margin-left: $spacing-04;
+  }
+}
+
+.providerBtn {
+  width: 100%;
+}

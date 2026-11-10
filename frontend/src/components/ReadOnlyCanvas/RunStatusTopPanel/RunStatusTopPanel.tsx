@@ -4,10 +4,11 @@
  */
 
 import React, { useMemo } from 'react';
-import { Button } from '@carbon/react';
+import { Button, Tooltip } from '@carbon/react';
 import { CheckmarkFilled, ErrorFilled, WarningAltFilled, Close, Maximize, Minimize } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import type { JobStats } from '@/types';
+import { useAuth } from '@/hooks';
 import { JOB_RUN_STATUS, COMPLETED_STATUSES } from '@/constants/jobRunStatus';
 import { WARNING_NODE_STATUSES } from '@/constants/canvasActions';
 import { formatElapsedTime } from '@/utils/dateTimeUtils';
@@ -83,9 +84,26 @@ export function RunStatusTopPanel({
   onRunAgain,
 }: RunStatusTopPanelProps): React.JSX.Element {
   const intl = useIntl();
+  const { canEdit, canModifyAsset } = useAuth();
+  const canModifyRun = canModifyAsset(jobStats.user_id);
+
   const nodeCounts = useMemo(() => computeNodeCounts(jobStats), [jobStats]);
   const elapsedTimeStr = useMemo(() => formatElapsedTime(jobStats.duration), [jobStats.duration]);
   const progressFillClass = useMemo(() => getProgressFillClass(jobStats.status), [jobStats.status]);
+
+  const isStopActionDisabled = isStopDisabled || !canModifyRun;
+  const isRunAgainActionDisabled = !canEdit;
+
+  let actionTooltip: string | null = null;
+  if (isRunning) {
+    if (!canModifyRun) {
+      actionTooltip = !canEdit
+        ? intl.formatMessage(messages.stopDisabledPermission)
+        : intl.formatMessage(messages.stopDisabledOwnership);
+    }
+  } else if (!canEdit) {
+    actionTooltip = intl.formatMessage(messages.runAgainDisabledPermission);
+  }
 
   return (
     <div className={styles.topPanelContent}>
@@ -187,14 +205,29 @@ export function RunStatusTopPanel({
                 {/* Single button — isRunning drives the label and click handler.
                     isStopDisabled only controls the disabled attribute.
                     "Run Again" appears once isRunning=false (after the final confirmation poll). */}
-                <Button
-                  kind="secondary"
-                  size="sm"
-                  disabled={isRunning ? isStopDisabled : false}
-                  onClick={isRunning ? onStop : onRunAgain}
-                >
-                  {isRunning ? intl.formatMessage(messages.stop) : intl.formatMessage(messages.runAgain)}
-                </Button>
+                {actionTooltip ? (
+                  <Tooltip align="bottom" label={actionTooltip}>
+                    <span>
+                      <Button
+                        kind="secondary"
+                        size="sm"
+                        disabled={isRunning ? isStopActionDisabled : isRunAgainActionDisabled}
+                        onClick={isRunning ? onStop : onRunAgain}
+                      >
+                        {isRunning ? intl.formatMessage(messages.stop) : intl.formatMessage(messages.runAgain)}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    kind="secondary"
+                    size="sm"
+                    disabled={isRunning ? isStopActionDisabled : isRunAgainActionDisabled}
+                    onClick={isRunning ? onStop : onRunAgain}
+                  >
+                    {isRunning ? intl.formatMessage(messages.stop) : intl.formatMessage(messages.runAgain)}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

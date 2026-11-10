@@ -29,6 +29,7 @@ export interface CommonPropertiesWrapperProps {
   operatorMetadata: Record<string, OperatorMetadata>;
   setIsDirty: (dirty: boolean) => void;
   onClose: () => void;
+  readOnly?: boolean;
 }
 
 export function CommonPropertiesWrapper({
@@ -38,18 +39,25 @@ export function CommonPropertiesWrapper({
   operatorMetadata,
   setIsDirty,
   onClose,
+  readOnly = false,
 }: CommonPropertiesWrapperProps): React.JSX.Element {
   const controllerRef = useRef<PropertiesController | null>(null);
 
   const handleControllerHandler = useCallback(
     (propertiesController: CommonPropertiesController) => {
       controllerRef.current = propertiesController;
+      if (readOnly) {
+        propertiesController.setSaveButtonDisable?.(true);
+      }
     },
-    []
+    [readOnly]
   );
 
   const handleApplyPropertyChanges = useCallback(
     (propertySet: Record<string, unknown>, appData?: Record<string, unknown>) => {
+      if (readOnly) {
+        return;
+      }
       const nodeId = (appData as { nodeId?: string } | undefined)?.nodeId;
       if (!nodeId || !canvasController) {
         return;
@@ -65,7 +73,7 @@ export function CommonPropertiesWrapper({
 
       setIsDirty(true);
     },
-    [canvasController, setIsDirty]
+    [canvasController, setIsDirty, readOnly]
   );
 
   const handleClosePropertiesDialog = useCallback(() => {
@@ -80,6 +88,11 @@ export function CommonPropertiesWrapper({
         return;
       }
 
+      if (readOnly) {
+        controller.setSaveButtonDisable?.(true);
+        return;
+      }
+
       const propertyValues = (controller.getPropertyValues?.() ?? {}) as Record<string, unknown>;
       const attrs: Record<string, OperatorFeature> =
         selectedOperator ? (operatorMetadata[selectedOperator]?.attributes ?? {}) : {};
@@ -88,7 +101,7 @@ export function CommonPropertiesWrapper({
 
       controller.setSaveButtonDisable?.(shouldDisable);
     },
-    [operatorMetadata, selectedOperator]
+    [operatorMetadata, selectedOperator, readOnly]
   );
 
   return (

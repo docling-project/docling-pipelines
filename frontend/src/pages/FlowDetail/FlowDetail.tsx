@@ -48,6 +48,7 @@ function toRunRow(item: JobRunListItem): RunRow {
     status:           toRunStatus(item.status),
     duration:         formatElapsedTime(item.duration),
     duration_seconds: item.duration,
+    user_id:          item.user_id,
   };
 }
 
@@ -332,6 +333,7 @@ export function FlowDetail(): React.JSX.Element | null {
     created_on:   flowRow.created_on ? new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(flowRow.created_on)) : '',
     modified_on:  flowRow.modified_on ? new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(flowRow.modified_on)) : '',
     project_name: projectName,
+    created_by:   flowRow.created_by,
   };
 
   // ── Render ───────────────────────────────────────────────────────────────

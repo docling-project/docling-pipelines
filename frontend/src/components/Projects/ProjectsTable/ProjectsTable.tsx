@@ -3,7 +3,7 @@ import type { ProjectRow } from '@/types';
 import { Button, OverflowMenu, OverflowMenuItem, Tag } from '@carbon/react';
 import { Add, Renew } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
-import { SharedDataTable, EditDetailsModal, DeleteModal } from '@/components/common';
+import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip, usePermissionReason } from '@/components/common';
 import { messages } from './ProjectsTable.messages';
 import styles from './ProjectsTable.module.scss';
 
@@ -97,6 +97,7 @@ export function ProjectsTable({
   onEditProject,
 }: ProjectsTableProps): React.JSX.Element {
   const intl = useIntl();
+  const { createReason, getModifyReason } = usePermissionReason();
   /** Column definitions for Carbon `DataTable`. The `actions` column has no header text. */
   const tableHeaders = [
     { key: 'name',         header: intl.formatMessage(messages.headerName)         },
@@ -180,20 +181,24 @@ export function ProjectsTable({
               className={styles.refreshButton}
               tooltipPosition="bottom"
             />
-            <Button
-              kind="primary"
-              size="lg"
-              renderIcon={Add}
-              onClick={onNewProject}
-              className={styles.newProjectButton}
-            >
-              {intl.formatMessage(messages.newProject)}
-            </Button>
+            <PermissionTooltip reason={createReason} align="bottom-end">
+              <Button
+                kind="primary"
+                size="lg"
+                renderIcon={Add}
+                onClick={onNewProject}
+                disabled={createReason !== null}
+                className={styles.newProjectButton}
+              >
+                {intl.formatMessage(messages.newProject)}
+              </Button>
+            </PermissionTooltip>
           </>
         )}
         renderCell={(cell, row) => {
           const original = rowMap.get(row.id);
           if (!original) { return undefined; }
+          const modifyReason = getModifyReason(original.createdBy);
           switch (cell.info.header) {
             case 'name':
               return (
@@ -217,6 +222,9 @@ export function ProjectsTable({
                 >
                   <OverflowMenuItem
                     itemText={intl.formatMessage(messages.actionEditProject)}
+                    disabled={modifyReason !== null}
+                    requireTitle={modifyReason !== null}
+                    title={modifyReason ?? undefined}
                     onClick={() => { setEditTarget(original); }}
                   />
                   <OverflowMenuItem
@@ -225,6 +233,9 @@ export function ProjectsTable({
                   />
                   <OverflowMenuItem
                     itemText={intl.formatMessage(messages.actionDelete)}
+                    disabled={modifyReason !== null}
+                    requireTitle={modifyReason !== null}
+                    title={modifyReason ?? undefined}
                     isDelete
                     hasDivider
                     onClick={() => { handleDeleteClick(original); }}

@@ -25,8 +25,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { Canvas } from '@/pages/Canvas/Canvas';
-import { buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
+import { authStateFixture, buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
 import { flowFixture, flowDefinitionFixture } from '../../../mocks/fixtures/flow.fixture';
+import { CommonCanvas } from '@elyra/canvas';
+import { CANVAS_ACTIONS } from '@/constants/canvasActions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level mocks
@@ -849,6 +851,251 @@ describe('Canvas — G7: UI Tearsheets, Panels & Error Navigation', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// G8 — RBAC & Permission Gating (Task 7.6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Canvas — G8: RBAC & Permission Gating (Task 7.6)', () => {
+  it('Viewer: Save, Run flow and canvas editing actions are disabled with permission tooltips', async () => {
+    const viewerFlow = {
+      ...flowFixture,
+      created_by: 'creator-user',
+    };
+
+    renderWithProviders(<Canvas />, {
+      preloadedState: buildPreloadedState({
+        auth: authStateFixture({ role: 'viewer', username: 'viewer-user' }),
+        flow: {
+          items: {},
+          currentFlow: viewerFlow,
+          flowRunProperties: {
+            validateFlow: true,
+            enableIncrementalProcessing: false,
+            retainRecordsForDeletedDocuments: false,
+            enableNodeOutputPreview: false,
+            intermediateDataStorage: 'container' as const,
+          },
+          loading: false,
+          error: null,
+        },
+      }),
+      initialEntries: INITIAL_ENTRIES,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('elyra-common-canvas')).toBeInTheDocument();
+    });
+
+    const mockCalls = vi.mocked(CommonCanvas).mock.calls;
+    const lastCallProps = mockCalls[mockCalls.length - 1]?.[0] as Record<string, any>;
+    expect(lastCallProps).toBeDefined();
+
+    // Canvas config: editing actions disabled, palette hidden
+    expect(lastCallProps.config.enableEditingActions).toBe(false);
+    expect(lastCallProps.config.enablePaletteLayout).toBe('None');
+    expect(lastCallProps.config.paletteInitialState).toBe(false);
+
+    // Left toolbar: editing items are disabled with permission tooltip
+    const leftBar = lastCallProps.toolbarConfig.leftBar as Array<{ action: string; enable?: boolean; tooltip?: string }>;
+    const paletteItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.PALETTE);
+    const undoItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.UNDO);
+    const cutItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.CUT);
+    const pasteItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.PASTE);
+    const deleteItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.DELETE);
+    const commentItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.CREATE_COMMENT);
+
+    expect(paletteItem?.enable).toBe(false);
+    expect(paletteItem?.tooltip).toBe('You do not have permission to edit this flow');
+    expect(undoItem?.enable).toBe(false);
+    expect(undoItem?.tooltip).toBe('You do not have permission to edit this flow');
+    expect(cutItem?.enable).toBe(false);
+    expect(pasteItem?.enable).toBe(false);
+    expect(deleteItem?.enable).toBe(false);
+    expect(commentItem?.enable).toBe(false);
+
+    // Right toolbar: Save disabled with permission tooltip, Run flow disabled with permission tooltip
+    const rightBar = lastCallProps.toolbarConfig.rightBar as Array<{ action: string; enable?: boolean; tooltip?: string }>;
+    const saveItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.SAVE);
+    const runItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.RUN);
+
+    expect(saveItem?.enable).toBe(false);
+    expect(saveItem?.tooltip).toBe('You do not have permission to modify this flow');
+    expect(runItem?.enable).toBe(false);
+    expect(runItem?.tooltip).toBe('You do not have permission to run flows');
+
+    // Context menu: node has Edit but not Recommend/Delete
+    const nodeMenu = (lastCallProps.contextMenuHandler as any)({ type: 'node' }, []);
+    expect(nodeMenu.some((item: { action: string }) => item.action === CANVAS_ACTIONS.EDIT_NODE)).toBe(true);
+    expect(nodeMenu.some((item: { action: string }) => item.action === CANVAS_ACTIONS.DELETE)).toBe(false);
+    expect(nodeMenu.some((item: { action: string }) => item.action === CANVAS_ACTIONS.RECOMMEND_NODES)).toBe(false);
+
+    // Comment and link menus return empty for viewer
+    expect((lastCallProps.contextMenuHandler as any)({ type: 'comment' }, [])).toEqual([]);
+    expect((lastCallProps.contextMenuHandler as any)({ type: 'link' }, [])).toEqual([]);
+  });
+
+  it('Non-owner editor: Save and editing disabled with ownership tooltips, Run flow enabled', async () => {
+    const foreignFlow = {
+      ...flowFixture,
+      created_by: 'original-owner',
+    };
+
+    renderWithProviders(<Canvas />, {
+      preloadedState: buildPreloadedState({
+        auth: authStateFixture({ role: 'editor', username: 'another-editor' }),
+        flow: {
+          items: {},
+          currentFlow: foreignFlow,
+          flowRunProperties: {
+            validateFlow: true,
+            enableIncrementalProcessing: false,
+            retainRecordsForDeletedDocuments: false,
+            enableNodeOutputPreview: false,
+            intermediateDataStorage: 'container' as const,
+          },
+          loading: false,
+          error: null,
+        },
+      }),
+      initialEntries: INITIAL_ENTRIES,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('elyra-common-canvas')).toBeInTheDocument();
+    });
+
+    const mockCalls = vi.mocked(CommonCanvas).mock.calls;
+    const lastCallProps = mockCalls[mockCalls.length - 1]?.[0] as Record<string, any>;
+
+    // Editing config is disabled
+    expect(lastCallProps.config.enableEditingActions).toBe(false);
+    expect(lastCallProps.config.enablePaletteLayout).toBe('None');
+
+    // Left toolbar editing items disabled with ownership tooltip
+    const leftBar = lastCallProps.toolbarConfig.leftBar as Array<{ action: string; enable?: boolean; tooltip?: string }>;
+    const paletteItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.PALETTE);
+    expect(paletteItem?.enable).toBe(false);
+    expect(paletteItem?.tooltip).toBe('Only the flow creator or an administrator can edit this flow');
+
+    // Right toolbar: Save is disabled with ownership tooltip
+    const rightBar = lastCallProps.toolbarConfig.rightBar as Array<{ action: string; enable?: boolean; tooltip?: string }>;
+    const saveItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.SAVE);
+    expect(saveItem?.enable).toBe(false);
+    expect(saveItem?.tooltip).toBe('Only the flow creator or an administrator can modify this flow');
+
+    // Run flow is enabled for non-owner editor
+    const runItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.RUN);
+    expect(runItem?.enable).toBe(true);
+    expect(runItem?.tooltip).toBe('Run pipeline');
+  });
+
+  it('Flow owner editor: Save, Run flow and all editing actions are enabled', async () => {
+    // flowFixture has created_by: 'test-user', so username: 'test-user' is the flow owner
+    renderWithProviders(<Canvas />, {
+      preloadedState: buildPreloadedState({
+        auth: authStateFixture({ role: 'editor', username: 'test-user' }),
+      }),
+      initialEntries: INITIAL_ENTRIES,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('elyra-common-canvas')).toBeInTheDocument();
+    });
+
+    const mockCalls = vi.mocked(CommonCanvas).mock.calls;
+    const lastCallProps = mockCalls[mockCalls.length - 1]?.[0] as Record<string, any>;
+
+    // Editing config is enabled
+    expect(lastCallProps.config.enableEditingActions).toBe(true);
+    expect(lastCallProps.config.enablePaletteLayout).toBe('Flyout');
+    expect(lastCallProps.config.paletteInitialState).toBe(true);
+
+    // Left toolbar editing items are enabled
+    const leftBar = lastCallProps.toolbarConfig.leftBar as Array<{ action: string; enable?: boolean; tooltip?: string }>;
+    const paletteItem = leftBar.find((i) => i.action === CANVAS_ACTIONS.PALETTE);
+    expect(paletteItem?.enable).toBe(true);
+    expect(paletteItem?.tooltip).toBe('Open palette to add operators');
+
+    // Right toolbar: Run flow is enabled
+    const rightBar = lastCallProps.toolbarConfig.rightBar as Array<{ action: string; enable?: boolean; tooltip?: string }>;
+    const runItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.RUN);
+    expect(runItem?.enable).toBe(true);
+
+    // Node context menu has Recommend and Delete
+    const nodeMenu = (lastCallProps.contextMenuHandler as any)({ type: 'node' }, []);
+    expect(nodeMenu.some((item: { action: string }) => item.action === CANVAS_ACTIONS.RECOMMEND_NODES)).toBe(true);
+    expect(nodeMenu.some((item: { action: string }) => item.action === CANVAS_ACTIONS.DELETE)).toBe(true);
+  });
+
+  it('Admin: Save, Run flow and all editing actions are enabled on foreign flow', async () => {
+    const foreignFlow = {
+      ...flowFixture,
+      created_by: 'other-user',
+    };
+
+    renderWithProviders(<Canvas />, {
+      preloadedState: buildPreloadedState({
+        auth: authStateFixture({ role: 'admin', username: 'admin-user' }),
+        flow: {
+          items: {},
+          currentFlow: foreignFlow,
+          flowRunProperties: {
+            validateFlow: true,
+            enableIncrementalProcessing: false,
+            retainRecordsForDeletedDocuments: false,
+            enableNodeOutputPreview: false,
+            intermediateDataStorage: 'container' as const,
+          },
+          loading: false,
+          error: null,
+        },
+      }),
+      initialEntries: INITIAL_ENTRIES,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('elyra-common-canvas')).toBeInTheDocument();
+    });
+
+    const mockCalls = vi.mocked(CommonCanvas).mock.calls;
+    const lastCallProps = mockCalls[mockCalls.length - 1]?.[0] as Record<string, any>;
+
+    expect(lastCallProps.config.enableEditingActions).toBe(true);
+    expect(lastCallProps.config.enablePaletteLayout).toBe('Flyout');
+
+    const rightBar = lastCallProps.toolbarConfig.rightBar as Array<{ action: string; enable?: boolean }>;
+    const runItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.RUN);
+    expect(runItem?.enable).toBe(true);
+  });
+
+  it('Viewer: View run is enabled when a job run is active', async () => {
+    const { store } = renderWithProviders(<Canvas />, {
+      preloadedState: buildPreloadedState({
+        auth: authStateFixture({ role: 'viewer', username: 'viewer-user' }),
+      }),
+      initialEntries: INITIAL_ENTRIES,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('elyra-common-canvas')).toBeInTheDocument();
+    });
+
+    // Simulate active run state (e.g. after job run started or polled)
+    const { setRunning, setCurrentRun } = await import('@/slices/jobRunSlice');
+    store.dispatch(setCurrentRun({ jobId: 'flow-1', jobRunId: 'run-active' }));
+    store.dispatch(setRunning(true));
+
+    await waitFor(() => {
+      const mockCalls = vi.mocked(CommonCanvas).mock.calls;
+      const lastCallProps = mockCalls[mockCalls.length - 1]?.[0] as Record<string, any>;
+      const rightBar = lastCallProps.toolbarConfig.rightBar as Array<{ action: string; label?: string; enable?: boolean }>;
+      const runItem = rightBar.find((i) => i.action === CANVAS_ACTIONS.RUN);
+      expect(runItem?.label).toBe('View run');
+      expect(runItem?.enable).toBe(true);
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // G8 — Fetch & MSW integration
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -935,9 +1182,6 @@ describe('Canvas — G8: Fetch & MSW integration', () => {
 // We capture the last call's props via vi.mocked(CommonCanvas) and invoke
 // the handlers directly to drive coverage of the handler code paths.
 // ─────────────────────────────────────────────────────────────────────────────
-
-import { CommonCanvas } from '@elyra/canvas';
-import { CANVAS_ACTIONS } from '@/constants/canvasActions';
 
 describe('Canvas — G9: Handler invocation via CommonCanvas mock', () => {
   /**

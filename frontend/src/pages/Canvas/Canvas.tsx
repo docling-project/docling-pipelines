@@ -66,6 +66,7 @@ import {
   useNodeSuggestion,
   useJobRunPoller,
   useTheme,
+  useAuth,
 } from '@/hooks';
 import { selectCurrentFlow, selectFlowError, selectFlowRunProperties } from '@/selectors';
 import { selectCurrentJobRunId, selectCurrentJobId, selectIsRunning } from '@/selectors/jobRunSelectors';
@@ -126,6 +127,9 @@ export function Canvas(): React.JSX.Element {
   const currentFlow = useAppSelector(selectCurrentFlow);
   const flowError = useAppSelector(selectFlowError);
   const flowRunProperties = useAppSelector(selectFlowRunProperties);
+
+  const { canEdit, canModifyAsset } = useAuth();
+  const canEditFlow = canModifyAsset(currentFlow?.created_by);
 
   // project is used to gate the fetch — skip if already in the store.
   const project = useAppSelector(makeSelectProject(projectId));
@@ -856,21 +860,21 @@ export function Canvas(): React.JSX.Element {
   const canvasConfig: CanvasConfig = useMemo(
     () => ({
       enableInternalObjectModel: true,
-      enablePaletteLayout: 'Flyout',
+      enablePaletteLayout: canEditFlow ? 'Flyout' : 'None',
       enableNodeFormatType: 'Horizontal',
       enableToolbarLayout: 'Top',
       enableSnapToGridType: 'After',
-      paletteInitialState: true,
+      paletteInitialState: canEditFlow,
       enableLinkType: 'Curve',
       enableLinkDirection: 'LeftRight',
       // 'None' means links are not independently selectable.
       enableLinkSelection: 'None',
-      enableLinkReplaceOnNewConnection: true,
-      enableDropZoneOnExternalDrag: true,
+      enableLinkReplaceOnNewConnection: canEditFlow,
+      enableDropZoneOnExternalDrag: canEditFlow,
       enableContextToolbar: true,
-      enableHighlightNodeOnNewLinkDrag: true,
+      enableHighlightNodeOnNewLinkDrag: canEditFlow,
       enableSaveZoom: 'None',
-      enableEditingActions: true,
+      enableEditingActions: canEditFlow,
       enableMarkdownInComments: false,
       // linkGap + linkContextToolbar positions for the canvas layout.
       // dataLinkArrowHead exists at runtime but is absent from the bundled .d.ts.
@@ -881,10 +885,9 @@ export function Canvas(): React.JSX.Element {
         linkContextToolbarPosY: -8,
       } as CanvasConfig['enableCanvasLayout'],
     }),
-    []
+    [canEditFlow]
   );
 
-  // Toolbar — recomputes when isDirty / isSaving / lastSavedAt change
   // Context menu handler
   const contextMenuHandler: ContextMenuHandler = useCallback(
     (source, defaultMenu): ReturnType<ContextMenuHandler> => {
@@ -894,17 +897,20 @@ export function Canvas(): React.JSX.Element {
             action: CANVAS_ACTIONS.EDIT_NODE, label: intl.formatMessage(messages.edit),
             enable: true, icon: <Edit size={32} />, toolbarItem: true,
           },
-          {
-            action: CANVAS_ACTIONS.RECOMMEND_NODES, label: intl.formatMessage(messages.recommendNodes),
-            enable: true, icon: <Playlist size={32} />, toolbarItem: true,
-          },
-          {
-            action: CANVAS_ACTIONS.DELETE, label: intl.formatMessage(messages.delete),
-            enable: true, icon: <TrashCan size={32} />, toolbarItem: true,
-          },
+          ...(canEditFlow ? [
+            {
+              action: CANVAS_ACTIONS.RECOMMEND_NODES, label: intl.formatMessage(messages.recommendNodes),
+              enable: true, icon: <Playlist size={32} />, toolbarItem: true,
+            },
+            {
+              action: CANVAS_ACTIONS.DELETE, label: intl.formatMessage(messages.delete),
+              enable: true, icon: <TrashCan size={32} />, toolbarItem: true,
+            },
+          ] : []),
         ];
       }
       if (source.type === 'comment') {
+        if (!canEditFlow) { return []; }
         return [
           {
             action: CANVAS_ACTIONS.EDIT_COMMENT, label: intl.formatMessage(messages.edit),
@@ -918,6 +924,7 @@ export function Canvas(): React.JSX.Element {
       }
       // ── Link context menu ──────────────────────────────────────────────────
       if (source.type === 'link') {
+        if (!canEditFlow) { return []; }
         const linkId = (source as any).id as string;
         const srcPortId = (source.targetObject as any)?.srcNodePortId as string | undefined;
         const trgPortId = (source.targetObject as any)?.trgNodePortId as string | undefined;
@@ -968,7 +975,7 @@ export function Canvas(): React.JSX.Element {
       }
       return defaultMenu;
     },
-    [intl]
+    [intl, canEditFlow]
   );
 
   /**
@@ -1075,6 +1082,7 @@ export function Canvas(): React.JSX.Element {
           canvasController: controller,
           nodeFeatureMap: {},
           featuresLoading: true,
+          readOnly: !canEditFlow,
         },
         messages: nodeMessages,
         id: nodeId,
@@ -1109,7 +1117,7 @@ export function Canvas(): React.JSX.Element {
       memoizedParamDefs.current[operatorName] = paramDef;
       openWithParamDef(paramDef);
     });
-  }, [operatorMetadata]);
+  }, [operatorMetadata, canEditFlow]);
 
   const hasNotifications = notifications.length > 0;
   // Button is enabled only when validation is on AND there are results to show
@@ -1122,25 +1130,77 @@ export function Canvas(): React.JSX.Element {
 
   // Toolbar — recomputes when relevant state changes
   const toolbarConfig: ToolbarConfig = useMemo(() => {
-    const barItem = (action: string, label: MessageDescriptor, tooltip: MessageDescriptor): object => ({
+    const editGatedTooltip = !canEdit
+      ? messages.editingDisabledPermission
+      : messages.editingDisabledOwnership;
+
+    const barItem = (
+      action: string,
+      label: MessageDescriptor,
+      tooltip: MessageDescriptor,
+      enable = true,
+      customTooltip?: string
+    ): object => ({
       action,
       label: intl.formatMessage(label),
-      enable: true,
-      tooltip: intl.formatMessage(tooltip),
+      enable,
+      tooltip: customTooltip ?? intl.formatMessage(tooltip),
     });
 
     const leftBar: object[] = [
-      barItem(CANVAS_ACTIONS.PALETTE, messages.toolbarPalette, messages.toolbarPaletteTooltip),
+      barItem(
+        CANVAS_ACTIONS.PALETTE,
+        messages.toolbarPalette,
+        messages.toolbarPaletteTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
       { divider: true },
-      barItem(CANVAS_ACTIONS.UNDO, messages.toolbarUndo, messages.toolbarUndoTooltip),
-      barItem(CANVAS_ACTIONS.REDO, messages.toolbarRedo, messages.toolbarRedoTooltip),
+      barItem(
+        CANVAS_ACTIONS.UNDO,
+        messages.toolbarUndo,
+        messages.toolbarUndoTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
+      barItem(
+        CANVAS_ACTIONS.REDO,
+        messages.toolbarRedo,
+        messages.toolbarRedoTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
       { divider: true },
-      barItem(CANVAS_ACTIONS.CUT, messages.toolbarCut, messages.toolbarCutTooltip),
-      barItem(CANVAS_ACTIONS.COPY, messages.toolbarCopy, messages.toolbarCopyTooltip),
-      barItem(CANVAS_ACTIONS.PASTE, messages.toolbarPaste, messages.toolbarPasteTooltip),
-      barItem(CANVAS_ACTIONS.DELETE, messages.delete, messages.toolbarDeleteTooltip),
+      barItem(
+        CANVAS_ACTIONS.CUT,
+        messages.toolbarCut,
+        messages.toolbarCutTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
+      barItem(CANVAS_ACTIONS.COPY, messages.toolbarCopy, messages.toolbarCopyTooltip, true),
+      barItem(
+        CANVAS_ACTIONS.PASTE,
+        messages.toolbarPaste,
+        messages.toolbarPasteTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
+      barItem(
+        CANVAS_ACTIONS.DELETE,
+        messages.delete,
+        messages.toolbarDeleteTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
       { divider: true },
-      barItem(CANVAS_ACTIONS.CREATE_COMMENT, messages.toolbarComment, messages.toolbarCommentTooltip),
+      barItem(
+        CANVAS_ACTIONS.CREATE_COMMENT,
+        messages.toolbarComment,
+        messages.toolbarCommentTooltip,
+        canEditFlow,
+        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
+      ),
       { divider: true },
       {
         action: CANVAS_ACTIONS.FLOW_PROPERTIES,
@@ -1154,6 +1214,16 @@ export function Canvas(): React.JSX.Element {
       barItem(CANVAS_ACTIONS.ZOOM_OUT, messages.toolbarZoomOut, messages.toolbarZoomOutTooltip),
       barItem(CANVAS_ACTIONS.ZOOM_TO_FIT, messages.toolbarZoomToFit, messages.toolbarZoomToFitTooltip),
     ];
+
+    const saveTooltip = !canEditFlow
+      ? intl.formatMessage(!canEdit ? messages.saveDisabledPermission : messages.saveDisabledOwnership)
+      : intl.formatMessage(messages.toolbarSaveTooltip);
+
+    const isViewRun = isRunning && currentJobRunId;
+    const runFlowEnabled = isViewRun ? (!isSaving && !isValidating) : (canEdit && !isSaving && !isValidating);
+    const runFlowTooltip = isViewRun
+      ? intl.formatMessage(messages.viewRunTooltip)
+      : (!canEdit ? intl.formatMessage(messages.runDisabledPermission) : intl.formatMessage(messages.runFlowTooltip));
 
     const rightBar: object[] = [
       // Save/validate status indicator — shown only when relevant
@@ -1182,8 +1252,8 @@ export function Canvas(): React.JSX.Element {
       {
         action: CANVAS_ACTIONS.SAVE,
         label: intl.formatMessage(messages.toolbarSave),
-        enable: isDirty && !isSaving,
-        tooltip: intl.formatMessage(messages.toolbarSaveTooltip),
+        enable: canEditFlow && isDirty && !isSaving,
+        tooltip: saveTooltip,
         iconEnabled: <Save size={32} />,
         kind: 'ghost',
       },
@@ -1191,10 +1261,10 @@ export function Canvas(): React.JSX.Element {
       {
         action: CANVAS_ACTIONS.RUN,
         // "View run" while a run is in-progress; reverts to "Run flow" once complete.
-        label: intl.formatMessage(isRunning && currentJobRunId ? messages.viewRun : messages.runFlow),
-        enable: !isSaving && !isValidating,
+        label: intl.formatMessage(isViewRun ? messages.viewRun : messages.runFlow),
+        enable: runFlowEnabled,
         kind: 'primary',
-        tooltip: intl.formatMessage(isRunning && currentJobRunId ? messages.viewRunTooltip : messages.runFlowTooltip),
+        tooltip: runFlowTooltip,
         iconEnabled: <Play size={32} />,
         incLabelWithIcon: 'before',
       },
@@ -1220,18 +1290,43 @@ export function Canvas(): React.JSX.Element {
 
     return { leftBar, rightBar, overrideAutoEnableDisable: true };
 
-  }, [isDirty, isSaving, isValidating, lastSavedAt, showBottomPanel, isTerminalEnabled, isRunning, currentJobRunId, intl, validationToggleMessage]);
+  }, [
+    isDirty,
+    isSaving,
+    isValidating,
+    lastSavedAt,
+    showBottomPanel,
+    isTerminalEnabled,
+    isRunning,
+    currentJobRunId,
+    canEdit,
+    canEditFlow,
+    intl,
+    validationToggleMessage,
+  ]);
 
   // Edit action handler — also tracks dirty state via canUndo()
   const editActionHandler: EditActionHandler = useCallback(
     (data) => {
-      if (data.editType === CANVAS_ACTIONS.SAVE)            { handleSave(); return; }
-      if (data.editType === CANVAS_ACTIONS.RUN)             { handleRun();  return; }
+      if (data.editType === CANVAS_ACTIONS.SAVE) {
+        if (!canEditFlow) { return; }
+        handleSave();
+        return;
+      }
+      if (data.editType === CANVAS_ACTIONS.RUN) {
+        if (!canEdit && !(isRunning && currentJobRunId)) { return; }
+        handleRun();
+        return;
+      }
       if (data.editType === CANVAS_ACTIONS.FLOW_PROPERTIES) { setIsFlowRunPropertiesOpen(true); return; }
       if (data.editType === 'flow-run-history')             { setIsFlowRunHistoryOpen(true); return; }
 
       if (data.editType === CANVAS_ACTIONS.EDIT_NODE && data.targetObject) {
         openNodePanel((data.targetObject as { id: string }).id);
+        return;
+      }
+
+      if (!canEditFlow) {
         return;
       }
 
@@ -1395,7 +1490,7 @@ export function Canvas(): React.JSX.Element {
   const handleDecorationAction = useCallback(
     (_object: unknown, decorationId: string, _pipelineId: string): void => {
       // Decoration clicks in read-only mode should not open the tearsheet.
-      if (!decorationId) { return; }
+      if (!decorationId || !canEditFlow) { return; }
 
       // Pill decoration: "${linkId}-pill"
       // Add-condition decoration: "${linkId}-${CANVAS_ACTIONS.ADD_CONDITION}"
@@ -1409,7 +1504,7 @@ export function Canvas(): React.JSX.Element {
       }
       if (linkId) { openLinkConditionTearsheet(linkId); }
     },
-    [openLinkConditionTearsheet]
+    [openLinkConditionTearsheet, canEditFlow]
   );
 
   // Stable callback so ElyraCanvas's onCanvasControllerReady useEffect
@@ -1436,11 +1531,12 @@ export function Canvas(): React.JSX.Element {
         operatorMetadata={operatorMetadata}
         setIsDirty={setIsDirty}
         onClose={handleClosePropertiesDialog}
+        readOnly={!canEditFlow}
       />
     );
   }, [
     isPanelOpen, selectedNodeId, selectedOperator, propertiesInfo,
-    operatorMetadata, setIsDirty, handleClosePropertiesDialog,
+    operatorMetadata, setIsDirty, handleClosePropertiesDialog, canEditFlow,
   ]);
 
   // ── ReadOnlyCanvas callbacks ──────────────────────────────────────────────
@@ -1559,7 +1655,7 @@ export function Canvas(): React.JSX.Element {
           />
           <ElyraCanvas
             pipelineFlow={pipelineFlow}
-            palette={palette}
+            palette={canEditFlow ? palette : undefined}
             canvasConfig={canvasConfig}
             toolbarConfig={toolbarConfig}
             contextMenuHandler={contextMenuHandler}
@@ -1614,6 +1710,7 @@ export function Canvas(): React.JSX.Element {
             open={isFlowRunPropertiesOpen}
             onClose={() => { setIsFlowRunPropertiesOpen(false); }}
             onSave={handleSaveFlowRunProperties}
+            readOnly={!canEditFlow}
           />
           <FlowRunHistoryTearsheet
             open={isFlowRunHistoryOpen}
