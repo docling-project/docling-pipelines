@@ -7,9 +7,16 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios';
+import { createIntl, createIntlCache } from 'react-intl';
 import { log4js, logUtil } from '@/utils/logger';
+import { DEFAULT_LOCALE } from '@/i18n';
+import { messages } from './client.messages';
 
 const logger = log4js.getLogger('api.client');
+
+// The client runs outside React, so it cannot use useIntl. Only the default locale is
+// supported today; the message ids still live in messages_en.json for translation.
+const intl = createIntl({ locale: DEFAULT_LOCALE, defaultLocale: DEFAULT_LOCALE }, createIntlCache());
 
 /**
  * Create configured axios instance.
@@ -119,8 +126,8 @@ apiClient.interceptors.response.use(
       store.dispatch(
         addNotification({
           kind: 'error',
-          title: 'Permission Denied',
-          subtitle: 'You do not have permission to perform this action',
+          title: intl.formatMessage(messages.permissionDeniedTitle),
+          subtitle: intl.formatMessage(messages.permissionDeniedSubtitle),
         })
       );
     }
