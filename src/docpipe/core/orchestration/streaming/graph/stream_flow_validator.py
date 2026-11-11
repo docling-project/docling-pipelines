@@ -102,6 +102,7 @@ class StreamFlowValidator:
         StreamFlowValidator._validate_branch_definitions(flow_graph=flow_graph)
         StreamFlowValidator._validate_branch_mappings(flow_graph=flow_graph)
         StreamFlowValidator._validate_merge_input_counts(flow_graph=flow_graph)
+        StreamFlowValidator._validate_merge_input_names(flow_graph=flow_graph)
         StreamFlowValidator._validate_merge_mappings(flow_graph=flow_graph)
 
     @staticmethod
@@ -144,10 +145,12 @@ class StreamFlowValidator:
                 raise ValueError(f"Branching node '{node.name}' requires at least two configured branches.")
 
             configured_ids: set[str] = set()
-            for branch in branches:
+            for index, branch in enumerate(branches):
                 branch_id = branch.get(OperatorConstants.Misc.LINK_ID) if isinstance(branch, dict) else None
                 if not isinstance(branch_id, str) or not branch_id:
-                    raise ValueError(f"Each configured branch in branching node '{node.name}' requires a link_id.")
+                    raise ValueError(
+                        f"Configured branch at index {index} in branching node '{node.name}' requires a link_id."
+                    )
                 if branch_id in configured_ids:
                     raise ValueError(f"Branching node '{node.name}' has duplicate configured branch ID '{branch_id}'.")
                 configured_ids.add(branch_id)
@@ -168,8 +171,14 @@ class StreamFlowValidator:
                 raise ValueError(
                     f"Branching node '{node.name}' must connect each branch ID to exactly one output edge."
                 )
-            if configured_ids != set(outgoing_ids):
-                raise ValueError(f"Branching node '{node.name}' configured branch IDs do not match outgoing edges.")
+            outgoing_id_set = set(outgoing_ids)
+            if configured_ids != outgoing_id_set:
+                missing = sorted(configured_ids - outgoing_id_set)
+                unexpected = sorted(outgoing_id_set - configured_ids, key=str)
+                raise ValueError(
+                    f"Branching node '{node.name}' configured branch IDs do not match outgoing edges. "
+                    f"Missing branch IDs: {missing}; unexpected branch IDs: {unexpected}."
+                )
             if len({edge.target_id for edge in output_edges}) != len(output_edges):
                 raise ValueError(
                     f"Branching node '{node.name}' must connect each branch to a distinct downstream node."
@@ -183,23 +192,50 @@ class StreamFlowValidator:
                 raise ValueError(f"Merge node '{node.name}' requires at least two incoming edges.")
 
     @staticmethod
-    def _validate_merge_mappings(*, flow_graph: FlowGraph) -> None:
-        """Match configured merge source identities to incoming graph edges."""
+    def _validate_merge_input_names(*, flow_graph: FlowGraph) -> None:
+        """Require nonempty, unique merge input names so named table inputs cannot overwrite each other."""
         for node in flow_graph.nodes.values():
             if node.operator_name != OperatorConstants.Operators.MERGE:
                 continue
             input_links = node.operator_config.get(OperatorConstants.Merge.INPUT_LINKS, [])
             if not isinstance(input_links, list):
                 raise ValueError(f"Merge node '{node.name}' requires an input_links list.")
+            input_names: set[str] = set()
+            for index, link in enumerate(input_links):
+                input_name = link.get(DocpipeConstants.LINK_NAME) if isinstance(link, dict) else None
+                if not isinstance(input_name, str) or not input_name.strip():
+                    raise ValueError(
+                        f"Merge node '{node.name}' input_links entry {index} requires a nonempty string link_name."
+                    )
+                if input_name in input_names:
+                    raise ValueError(
+                        f"Merge node '{node.name}' has duplicate input name '{input_name}' at entry {index}."
+                    )
+                input_names.add(input_name)
+
+    @staticmethod
+    def _validate_merge_mappings(*, flow_graph: FlowGraph) -> None:
+        """Match configured merge source identities to incoming graph edges."""
+        for node in flow_graph.nodes.values():
+            if node.operator_name != OperatorConstants.Operators.MERGE:
+                continue
+            input_links = node.operator_config.get(OperatorConstants.Merge.INPUT_LINKS, [])
             configured_source_ids: set[UUID] = set()
-            for link in input_links:
-                reference = link.get(DocpipeConstants.NODE_ID_REF) if isinstance(link, dict) else None
+            for index, link in enumerate(input_links):
+                reference = link.get(DocpipeConstants.NODE_ID_REF)
                 try:
                     if not isinstance(reference, str):
                         raise ValueError("Source reference must be a string.")
                     configured_source_ids.add(UUID(reference))
                 except ValueError as exc:
-                    raise ValueError(f"Merge node '{node.name}' has an invalid input_links source reference.") from exc
+                    raise ValueError(
+                        f"Merge node '{node.name}' input_links entry {index} has an invalid source reference: {reference!r}."
+                    ) from exc
             incoming_source_ids = {edge.source_id for edge in flow_graph.get_input_edges(node.id)}
             if incoming_source_ids != configured_source_ids:
-                raise ValueError(f"Merge node '{node.name}' input_links do not match incoming edges.")
+                missing = sorted(str(source_id) for source_id in incoming_source_ids - configured_source_ids)
+                unexpected = sorted(str(source_id) for source_id in configured_source_ids - incoming_source_ids)
+                raise ValueError(
+                    f"Merge node '{node.name}' input_links do not match incoming edges. "
+                    f"Missing source IDs: {missing}; unexpected source IDs: {unexpected}."
+                )

@@ -16,6 +16,8 @@ from docpipe.core.operators.functional.branching_operator import BranchingOperat
 from docpipe.core.operators.functional.chunker import ChunkerOperator
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
 from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExecutionEngine
+from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph, Node
+from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOutput
 from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
 
 INGEST_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -281,3 +283,175 @@ def test_execution_engine_clears_buffer_on_failure(mocker):
         engine.execute()
 
     assert len(engine.output_buffer.data_buffer) == 0
+
+
+@pytest.mark.parametrize(
+    "result_index, table_count",
+    [
+        (-1, 2),
+        (2, 2),
+        ("0", 2),
+        (None, 2),
+        (0.5, 2),
+        (True, 2),
+        (False, 2),
+        (0, 0),
+    ],
+)
+def test_execution_engine_invalid_branch_result_index(*, result_index, table_count):
+    """Reject malformed branch indices instead of selecting an unrelated output or raising a bare index error."""
+    graph = FlowGraph()
+    graph.add_node(Node(id=NEXT_ID, name="branch_by_format", operator_name="branching", operator_config={}))
+    engine = GraphExecutionEngine(flow_graph=graph, ordered_operator_ids=[])
+    engine.output_buffer.put_output(
+        node_id=NEXT_ID,
+        output=OperatorOutput(
+            tables=[pa.table({"value": [index]}) for index in range(table_count)],
+            metadata={"branches": {"branch_1": {"result_index": result_index}}},
+        ),
+    )
+
+    message = (
+        f"Invalid result index {result_index!r} for branch 'branch_1' in branching node "
+        f"'branch_by_format': expected an integer in [0, {table_count})."
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        engine._get_input_table(source_id=NEXT_ID, branch_id="branch_1")
+
+
+@pytest.mark.parametrize("result_index", [0, 1])
+def test_execution_engine_valid_branch_result_index(result_index):
+    """Both ends of the valid index range select the original output table."""
+    graph = FlowGraph()
+    graph.add_node(Node(id=NEXT_ID, name="branch_by_format", operator_name="branching", operator_config={}))
+    engine = GraphExecutionEngine(flow_graph=graph, ordered_operator_ids=[])
+    tables = [pa.table({"value": [index]}) for index in range(2)]
+    engine.output_buffer.put_output(
+        node_id=NEXT_ID,
+        output=OperatorOutput(
+            tables=tables,
+            metadata={"branches": {"branch_1": {"result_index": result_index}}},
+        ),
+    )
+
+    assert engine._get_input_table(source_id=NEXT_ID, branch_id="branch_1") is tables[result_index]
+
+
+def test_execution_engine_missing_branch_metadata_raises_value_error(mocker):
+    """When a branching operator's metadata does not contain the target branch, ValueError is raised."""
+    second_sink_id = UUID("00000000-0000-0000-0000-000000000004")
+    flow = {
+        "name": "missing-branch-metadata-flow",
+        "dag": [
+            _node(
+                INGEST_ID,
+                "ingest_source_filesystem",
+                "ingest_source",
+                INGEST_CONFIG,
+                [],
+                [{"node_id_ref": str(NEXT_ID)}],
+            ),
+            _node(
+                NEXT_ID,
+                "branch_by_format",
+                "branching",
+                {"branches": [{"link_id": "branch_1"}, {"link_id": "branch_2"}]},
+                [{"node_id_ref": str(INGEST_ID)}],
+                [
+                    {"node_id_ref": str(LAST_ID), "link_name": "branch_1"},
+                    {"node_id_ref": str(second_sink_id), "link_name": "branch_2"},
+                ],
+            ),
+            _node(
+                LAST_ID,
+                "simple_chunker",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(NEXT_ID), "link_name": "branch_1"}],
+                [],
+            ),
+            _node(
+                second_sink_id,
+                "simple_chunker_2",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(NEXT_ID), "link_name": "branch_2"}],
+                [],
+            ),
+        ],
+    }
+
+    def _sample_ingest(self, table, *args, **kwargs):
+        doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
+        return [pa.Table.from_pylist([doc])], {}
+
+    def _branching_missing_branch(self, table, *args, **kwargs):
+        doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
+        return [pa.Table.from_pylist([doc])], {OperatorConstants.Misc.BRANCHES: {}}
+
+    mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
+    mocker.patch.object(BranchingOperator, "transform", autospec=True, side_effect=_branching_missing_branch)
+
+    with pytest.raises(ValueError, match=r"Branch 'branch_1' not found in branching node 'branch_by_format'\."):
+        StreamingOrchestrator().execute(flow=flow, params={})
+
+
+def test_execution_engine_missing_result_index_raises_value_error(mocker):
+    """When branching metadata for a branch is missing result_index, ValueError is raised."""
+    second_sink_id = UUID("00000000-0000-0000-0000-000000000004")
+    flow = {
+        "name": "missing-result-index-flow",
+        "dag": [
+            _node(
+                INGEST_ID,
+                "ingest_source_filesystem",
+                "ingest_source",
+                INGEST_CONFIG,
+                [],
+                [{"node_id_ref": str(NEXT_ID)}],
+            ),
+            _node(
+                NEXT_ID,
+                "branch_by_format",
+                "branching",
+                {"branches": [{"link_id": "branch_1"}, {"link_id": "branch_2"}]},
+                [{"node_id_ref": str(INGEST_ID)}],
+                [
+                    {"node_id_ref": str(LAST_ID), "link_name": "branch_1"},
+                    {"node_id_ref": str(second_sink_id), "link_name": "branch_2"},
+                ],
+            ),
+            _node(
+                LAST_ID,
+                "simple_chunker",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(NEXT_ID), "link_name": "branch_1"}],
+                [],
+            ),
+            _node(
+                second_sink_id,
+                "simple_chunker_2",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(NEXT_ID), "link_name": "branch_2"}],
+                [],
+            ),
+        ],
+    }
+
+    def _sample_ingest(self, table, *args, **kwargs):
+        doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
+        return [pa.Table.from_pylist([doc])], {}
+
+    def _branching_missing_index(self, table, *args, **kwargs):
+        doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
+        return [pa.Table.from_pylist([doc])], {OperatorConstants.Misc.BRANCHES: {"branch_1": {}}}
+
+    mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
+    mocker.patch.object(BranchingOperator, "transform", autospec=True, side_effect=_branching_missing_index)
+
+    with pytest.raises(
+        ValueError, match=r"Result index missing for branch 'branch_1' in branching node 'branch_by_format'\."
+    ):
+        StreamingOrchestrator().execute(flow=flow, params={})

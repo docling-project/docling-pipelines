@@ -67,8 +67,19 @@ class GraphExecutionEngine:
         result_index = 0
         if source_node.operator_name == OperatorConstants.Operators.BRANCHING:
             branches = output.metadata.get(OperatorConstants.Misc.BRANCHES, {})
-            assert branch_id in branches, f"Branch '{branch_id}' not found in branching node '{source_node.name}'"
-            result_index = branches[branch_id][OperatorConstants.Misc.RESULT_INDEX]
+            if branch_id not in branches:
+                raise ValueError(f"Branch '{branch_id}' not found in branching node '{source_node.name}'.")
+            branch_info = branches[branch_id]
+            if not isinstance(branch_info, dict) or OperatorConstants.Misc.RESULT_INDEX not in branch_info:
+                raise ValueError(
+                    f"Result index missing for branch '{branch_id}' in branching node '{source_node.name}'."
+                )
+            result_index = branch_info[OperatorConstants.Misc.RESULT_INDEX]
+            if type(result_index) is not int or not 0 <= result_index < len(output.tables):
+                raise ValueError(
+                    f"Invalid result index {result_index!r} for branch '{branch_id}' in branching node "
+                    f"'{source_node.name}': expected an integer in [0, {len(output.tables)})."
+                )
         else:
             assert len(output.tables) == 1, (
                 f"Expected single table from non-branching node '{source_node.name}', got {len(output.tables)}"

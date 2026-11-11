@@ -41,6 +41,26 @@ def _exact(message: str) -> str:
     return f"^{re.escape(message)}$"
 
 
+def _merge_graph(*, input_links) -> FlowGraph:
+    """Provide a structurally valid graph for merge configuration checks."""
+    return _graph(
+        nodes=[
+            (NODE_IDS[0], "source", "ingest_source"),
+            (NODE_IDS[1], "branch", "branching", BRANCH_CONFIG),
+            (NODE_IDS[2], "left", "noop"),
+            (NODE_IDS[3], "right", "noop"),
+            (NODE_IDS[4], "merge", "merge", {"input_links": input_links}),
+        ],
+        edges=[
+            Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1]),
+            Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2], branch_id="branch_1"),
+            Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[3], branch_id="branch_2"),
+            Edge(source_id=NODE_IDS[2], target_id=NODE_IDS[4]),
+            Edge(source_id=NODE_IDS[3], target_id=NODE_IDS[4]),
+        ],
+    )
+
+
 @pytest.fixture
 def runtime_flow():
     """Provide a compiled runtime definition with all fields needed for graph construction."""
@@ -253,7 +273,10 @@ class TestStreamFlowValidatorGraph:
 
         with pytest.raises(
             ValueError,
-            match=_exact("Branching node 'branch_by_format' configured branch IDs do not match outgoing edges."),
+            match=_exact(
+                "Branching node 'branch_by_format' configured branch IDs do not match outgoing edges. "
+                "Missing branch IDs: ['branch_2']; unexpected branch IDs: [None]."
+            ),
         ):
             StreamFlowValidator.validate_graph(flow_graph=graph)
 
@@ -285,13 +308,37 @@ class TestStreamFlowValidatorGraph:
         with pytest.raises(ValueError, match=r"branch_by_format.*(configured branches|link_id)"):
             StreamFlowValidator.validate_graph(flow_graph=graph)
 
+    def test_invalid_branch_identifies_entry(self):
+        """A malformed branch identifies its position within the branching node."""
+        graph = _merge_graph(input_links=[])
+        graph.nodes[NODE_IDS[1]].operator_config = {"branches": [{"link_id": "branch_1"}, {}]}
+        with pytest.raises(
+            ValueError, match=_exact("Configured branch at index 1 in branching node 'branch' requires a link_id.")
+        ):
+            StreamFlowValidator.validate_graph(flow_graph=graph)
+
     @pytest.mark.parametrize(
         "configured_ids, routes, error",
         [
             (["branch_1", "branch_1"], [("branch_1", 2)], "has duplicate configured branch ID 'branch_1'."),
-            (["branch_1", "branch_2"], [("unknown", 2)], "configured branch IDs do not match outgoing edges."),
-            (["branch_1", "branch_2"], [("branch_1", 2)], "configured branch IDs do not match outgoing edges."),
-            (["branch_1", "branch_2"], [], "configured branch IDs do not match outgoing edges."),
+            (
+                ["branch_1", "branch_2"],
+                [("unknown", 2)],
+                "configured branch IDs do not match outgoing edges. "
+                "Missing branch IDs: ['branch_1', 'branch_2']; unexpected branch IDs: ['unknown'].",
+            ),
+            (
+                ["branch_1", "branch_2"],
+                [("branch_1", 2)],
+                "configured branch IDs do not match outgoing edges. "
+                "Missing branch IDs: ['branch_2']; unexpected branch IDs: [].",
+            ),
+            (
+                ["branch_1", "branch_2"],
+                [],
+                "configured branch IDs do not match outgoing edges. "
+                "Missing branch IDs: ['branch_1', 'branch_2']; unexpected branch IDs: [].",
+            ),
             (
                 ["branch_1", "branch_2"],
                 [("branch_1", 2), ("branch_1", 3)],
@@ -389,8 +436,58 @@ class TestStreamFlowValidatorGraph:
             ],
         )
         with pytest.raises(
-            ValueError, match=_exact("Merge node 'merge_branches' input_links do not match incoming edges.")
+            ValueError,
+            match=_exact(
+                "Merge node 'merge_branches' input_links do not match incoming edges. "
+                f"Missing source IDs: ['{NODE_IDS[3]}']; unexpected source IDs: ['{NODE_IDS[5]}']."
+            ),
         ):
+            StreamFlowValidator.validate_graph(flow_graph=graph)
+
+    @pytest.mark.parametrize("name", [None, "", " ", 1, [], {}])
+    def test_invalid_merge_input_name_fails(self, name):
+        """Missing or malformed names fail before named input assembly."""
+        graph = _merge_graph(
+            input_links=[
+                {"node_id_ref": str(NODE_IDS[2]), "link_name": name},
+                {"node_id_ref": str(NODE_IDS[3]), "link_name": "right"},
+            ]
+        )
+        with pytest.raises(
+            ValueError, match=_exact("Merge node 'merge' input_links entry 0 requires a nonempty string link_name.")
+        ):
+            StreamFlowValidator.validate_graph(flow_graph=graph)
+
+    def test_duplicate_merge_input_names_fail(self):
+        """Distinct source nodes cannot overwrite each other under one input name."""
+        graph = _merge_graph(
+            input_links=[
+                {"node_id_ref": str(NODE_IDS[2]), "link_name": "same"},
+                {"node_id_ref": str(NODE_IDS[3]), "link_name": "same"},
+            ]
+        )
+        with pytest.raises(ValueError, match=_exact("Merge node 'merge' has duplicate input name 'same' at entry 1.")):
+            StreamFlowValidator.validate_graph(flow_graph=graph)
+
+    @pytest.mark.parametrize("reference", [None, 1, "invalid"])
+    def test_invalid_merge_source_identifies_entry(self, reference):
+        """Invalid merge references identify the node, entry, and offending value."""
+        graph = _merge_graph(
+            input_links=[
+                {"node_id_ref": str(NODE_IDS[2]), "link_name": "left"},
+                {"node_id_ref": reference, "link_name": "right"},
+            ]
+        )
+        with pytest.raises(
+            ValueError,
+            match=_exact(f"Merge node 'merge' input_links entry 1 has an invalid source reference: {reference!r}."),
+        ):
+            StreamFlowValidator.validate_graph(flow_graph=graph)
+
+    @pytest.mark.parametrize("input_links", [None, {}, 1])
+    def test_merge_input_links_must_be_a_list(self, input_links):
+        graph = _merge_graph(input_links=input_links)
+        with pytest.raises(ValueError, match=_exact("Merge node 'merge' requires an input_links list.")):
             StreamFlowValidator.validate_graph(flow_graph=graph)
 
     def test_merge_and_non_merge_input_counts_fail(self):
