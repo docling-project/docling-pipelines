@@ -38,6 +38,16 @@ class StreamFlowValidator:
             if edge.source_id not in flow_graph.nodes or edge.target_id not in flow_graph.nodes:
                 raise ValueError(f"Connection references an unknown node: '{edge.source_id}' -> '{edge.target_id}'.")
 
+        # Ensure the flow has exactly one root node and it is an ingest operator.
+        root_nodes = [node for node in flow_graph.nodes.values() if not flow_graph.get_input_edges(node.id)]
+        if len(root_nodes) != 1:
+            raise ValueError(f"A flow must have exactly one root node, found {len(root_nodes)}.")
+        root_node = root_nodes[0]
+        if root_node.operator_name != OperatorConstants.Operators.INGEST_SOURCE:
+            raise ValueError(
+                f"Root node '{root_node.name}' must be an ingest operator, found '{root_node.operator_name}'."
+            )
+
         # Ensure every output edge from a branching operator has a branch ID.
         for node in flow_graph.nodes.values():
             if node.operator_name == OperatorConstants.Operators.BRANCHING:

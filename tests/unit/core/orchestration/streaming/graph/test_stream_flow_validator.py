@@ -11,7 +11,7 @@ import pytest
 from docpipe.core.orchestration.streaming.graph.flow_model import Edge, FlowGraph, Node
 from docpipe.core.orchestration.streaming.graph.stream_flow_validator import StreamFlowValidator
 
-NODE_IDS = [UUID(f"00000000-0000-0000-0000-{index:012d}") for index in range(1, 6)]
+NODE_IDS = [UUID(f"00000000-0000-0000-0000-{index:012d}") for index in range(1, 10)]
 
 
 def _graph(
@@ -83,13 +83,15 @@ class TestStreamFlowValidator:
         """Every output edge of a branching node carries a branch ID."""
         graph = _graph(
             nodes=[
-                (NODE_IDS[0], "branch_by_format", "branching"),
-                (NODE_IDS[1], "simple_chunker_1", "chunker"),
-                (NODE_IDS[2], "simple_chunker_2", "chunker"),
+                (NODE_IDS[0], "ingest_source_filesystem", "ingest_source"),
+                (NODE_IDS[1], "branch_by_format", "branching"),
+                (NODE_IDS[2], "simple_chunker_1", "chunker"),
+                (NODE_IDS[3], "simple_chunker_2", "chunker"),
             ],
             edges=[
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1], branch_id="branch_1"),
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[2], branch_id="branch_2"),
+                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1]),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2], branch_id="branch_1"),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[3], branch_id="branch_2"),
             ],
         )
 
@@ -99,13 +101,15 @@ class TestStreamFlowValidator:
         """An output edge of a branching node without a branch ID is rejected."""
         graph = _graph(
             nodes=[
-                (NODE_IDS[0], "branch_by_format", "branching"),
-                (NODE_IDS[1], "simple_chunker_1", "chunker"),
-                (NODE_IDS[2], "simple_chunker_2", "chunker"),
+                (NODE_IDS[0], "ingest_source_filesystem", "ingest_source"),
+                (NODE_IDS[1], "branch_by_format", "branching"),
+                (NODE_IDS[2], "simple_chunker_1", "chunker"),
+                (NODE_IDS[3], "simple_chunker_2", "chunker"),
             ],
             edges=[
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1], branch_id="branch_1"),
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[2]),
+                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1]),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2], branch_id="branch_1"),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[3]),
             ],
         )
 
@@ -118,21 +122,26 @@ class TestStreamFlowValidator:
         """A merge node takes two inputs matching its input_links while every other node takes at most one."""
         merge_config = {
             "input_links": [
-                {"node_id_ref": str(NODE_IDS[0]), "link_name": "ollama_embeddings_1"},
-                {"node_id_ref": str(NODE_IDS[1]), "link_name": "ollama_embeddings_2"},
+                {"node_id_ref": str(NODE_IDS[2]), "link_name": "ollama_embeddings_1"},
+                {"node_id_ref": str(NODE_IDS[3]), "link_name": "ollama_embeddings_2"},
             ]
         }
         graph = _graph(
             nodes=[
-                (NODE_IDS[0], "ollama_embeddings_1", "embeddings"),
-                (NODE_IDS[1], "ollama_embeddings_2", "embeddings"),
-                (NODE_IDS[2], "merge_branches", "merge", merge_config),
-                (NODE_IDS[3], "opensearch_vector_store", "vectordb"),
+                (NODE_IDS[0], "ingest_source_filesystem", "ingest_source"),
+                (NODE_IDS[1], "branch_by_format", "branching"),
+                (NODE_IDS[2], "ollama_embeddings_1", "embeddings"),
+                (NODE_IDS[3], "ollama_embeddings_2", "embeddings"),
+                (NODE_IDS[4], "merge_branches", "merge", merge_config),
+                (NODE_IDS[5], "opensearch_vector_store", "vectordb"),
             ],
             edges=[
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[2]),
-                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2]),
-                Edge(source_id=NODE_IDS[2], target_id=NODE_IDS[3]),
+                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1]),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2], branch_id="branch_1"),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[3], branch_id="branch_2"),
+                Edge(source_id=NODE_IDS[2], target_id=NODE_IDS[4]),
+                Edge(source_id=NODE_IDS[3], target_id=NODE_IDS[4]),
+                Edge(source_id=NODE_IDS[4], target_id=NODE_IDS[5]),
             ],
         )
 
@@ -142,19 +151,24 @@ class TestStreamFlowValidator:
         """A merge node whose input_links do not match its incoming edges is rejected."""
         mismatched_merge_config = {
             "input_links": [
-                {"node_id_ref": str(NODE_IDS[0]), "link_name": "ollama_embeddings_1"},
-                {"node_id_ref": str(NODE_IDS[3]), "link_name": "unknown_source"},
+                {"node_id_ref": str(NODE_IDS[2]), "link_name": "ollama_embeddings_1"},
+                {"node_id_ref": str(NODE_IDS[5]), "link_name": "unknown_source"},
             ]
         }
         graph = _graph(
             nodes=[
-                (NODE_IDS[0], "ollama_embeddings_1", "embeddings"),
-                (NODE_IDS[1], "ollama_embeddings_2", "embeddings"),
-                (NODE_IDS[2], "merge_branches", "merge", mismatched_merge_config),
+                (NODE_IDS[0], "ingest_source_filesystem", "ingest_source"),
+                (NODE_IDS[1], "branch_by_format", "branching"),
+                (NODE_IDS[2], "ollama_embeddings_1", "embeddings"),
+                (NODE_IDS[3], "ollama_embeddings_2", "embeddings"),
+                (NODE_IDS[4], "merge_branches", "merge", mismatched_merge_config),
             ],
             edges=[
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[2]),
-                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2]),
+                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1]),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2], branch_id="branch_1"),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[3], branch_id="branch_2"),
+                Edge(source_id=NODE_IDS[2], target_id=NODE_IDS[4]),
+                Edge(source_id=NODE_IDS[3], target_id=NODE_IDS[4]),
             ],
         )
         with pytest.raises(
@@ -166,7 +180,7 @@ class TestStreamFlowValidator:
         """A merge node with one input and a non-merge node with two inputs are both rejected."""
         single_input_merge = _graph(
             nodes=[
-                (NODE_IDS[0], "ollama_embeddings_1", "embeddings"),
+                (NODE_IDS[0], "ingest_source_filesystem", "ingest_source"),
                 (NODE_IDS[1], "merge_branches", "merge"),
             ],
             edges=[Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1])],
@@ -178,13 +192,18 @@ class TestStreamFlowValidator:
 
         multi_input_non_merge = _graph(
             nodes=[
-                (NODE_IDS[0], "ollama_embeddings_1", "embeddings"),
-                (NODE_IDS[1], "ollama_embeddings_2", "embeddings"),
-                (NODE_IDS[2], "opensearch_vector_store", "vectordb"),
+                (NODE_IDS[0], "ingest_source_filesystem", "ingest_source"),
+                (NODE_IDS[1], "branch_by_format", "branching"),
+                (NODE_IDS[2], "ollama_embeddings_1", "embeddings"),
+                (NODE_IDS[3], "ollama_embeddings_2", "embeddings"),
+                (NODE_IDS[4], "opensearch_vector_store", "vectordb"),
             ],
             edges=[
-                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[2]),
-                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2]),
+                Edge(source_id=NODE_IDS[0], target_id=NODE_IDS[1]),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[2], branch_id="branch_1"),
+                Edge(source_id=NODE_IDS[1], target_id=NODE_IDS[3], branch_id="branch_2"),
+                Edge(source_id=NODE_IDS[2], target_id=NODE_IDS[4]),
+                Edge(source_id=NODE_IDS[3], target_id=NODE_IDS[4]),
             ],
         )
         with pytest.raises(
@@ -193,18 +212,43 @@ class TestStreamFlowValidator:
         ):
             StreamFlowValidator.validate(flow_graph=multi_input_non_merge)
 
+    def test_multiple_roots_fail(self):
+        # A flow with more than one root node is rejected.
+        graph = _graph(
+            nodes=[
+                (NODE_IDS[0], "ingest_1", "ingest_source"),
+                (NODE_IDS[1], "ingest_2", "ingest_source"),
+            ],
+            edges=[],
+        )
+        with pytest.raises(ValueError, match=_exact("A flow must have exactly one root node, found 2.")):
+            StreamFlowValidator.validate(flow_graph=graph)
+
+    def test_non_ingest_root_fails(self):
+        # A flow whose root node is not an ingest operator is rejected.
+        graph = _graph(
+            nodes=[
+                (NODE_IDS[0], "simple_chunker", "chunker"),
+            ],
+            edges=[],
+        )
+        with pytest.raises(
+            ValueError, match=_exact("Root node 'simple_chunker' must be an ingest operator, found 'chunker'.")
+        ):
+            StreamFlowValidator.validate(flow_graph=graph)
+
     def test_duplicate_node_ids_in_flow_fail(self):
         # A flow containing duplicate node IDs is rejected.
         graph = _graph(
             nodes=[
-                (NODE_IDS[0], "node_1", "chunker"),
+                (NODE_IDS[0], "node_1", "ingest_source"),
             ],
             edges=[],
         )
         flow = {
             "dag": [
-                {"id": str(NODE_IDS[0]), "name": "node_1"},
-                {"id": str(NODE_IDS[0]), "name": "node_2"},
+                {"id": str(NODE_IDS[0]), "name": "node_1", "operator": "ingest_source"},
+                {"id": str(NODE_IDS[0]), "name": "node_2", "operator": "ingest_source"},
             ]
         }
         with pytest.raises(ValueError, match=_exact(f"Duplicate node id: '{NODE_IDS[0]}'.")):
