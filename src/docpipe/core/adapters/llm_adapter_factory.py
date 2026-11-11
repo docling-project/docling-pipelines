@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unified adapter factory for LLM operations across all providers.
 
 This module provides a centralized factory for creating adapters for:
@@ -5,9 +8,10 @@ This module provides a centralized factory for creating adapters for:
 - Embedding generation
 - Text detection (PII/HAP)
 
-Supports two providers:
-- WatsonX: IBM watsonx.ai models
+Supports three providers:
+- WatsonX: IBM watsonx.ai models (inference, embeddings, PII/HAP text detection)
 - LiteLLM: Unified interface for 100+ LLM providers including Ollama, HuggingFace, OpenAI, etc.
+- HuggingFace: local models (embeddings, and HAP text detection with a sequence classifier)
 """
 
 from typing import Any, ClassVar
@@ -15,7 +19,7 @@ from typing import Any, ClassVar
 from docpipe.core.adapters.huggingface import HuggingFaceAdapter
 from docpipe.core.adapters.litellm import LiteLLMAdapter
 from docpipe.core.adapters.watsonx import WatsonXAdapter
-from docpipe.core.constants.constants import ServiceConstants
+from docpipe.core.constants.constants import ProviderConstants, ServiceConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
@@ -34,7 +38,8 @@ class LLMAdapterFactory:
       * Ollama (via OpenAI-compatible API with model prefix 'openai/')
       * HuggingFace API (via API with model prefix 'huggingface/')
       * OpenAI, Anthropic, Cohere, AWS Bedrock, Google Vertex AI, and 90+ more
-    - HuggingFace: Direct HuggingFace support with local model inference or API
+    - HuggingFace: Direct HuggingFace support with local model inference or API, and local
+      HAP text detection with a sequence-classification model
 
     Each provider has a single consolidated adapter that provides all capabilities.
     """
@@ -46,7 +51,7 @@ class LLMAdapterFactory:
     EMBEDDING_PROVIDERS: ClassVar[set[str]] = {"watsonx", "litellm", "huggingface"}
 
     # Supported providers for text detection
-    TEXT_DETECTION_PROVIDERS: ClassVar[set[str]] = {"watsonx"}
+    TEXT_DETECTION_PROVIDERS: ClassVar[set[str]] = {ProviderConstants.WATSONX, ProviderConstants.HUGGINGFACE}
 
     @staticmethod
     def _positive_int_option(*, provider_config: dict[str, Any], key: str, default: int) -> int:
@@ -269,9 +274,11 @@ class LLMAdapterFactory:
         """Create a text detection adapter for the specified provider.
 
         Args:
-            provider: Provider name (currently only 'watsonx' is supported)
+            provider: Provider name ('watsonx' or 'huggingface')
             model_id: Model identifier for the provider
-            provider_config: Provider-specific configuration dictionary
+            provider_config: Provider-specific configuration dictionary.  For 'huggingface'
+                it must contain ``toxic_labels``; the other keys are optional.  Callers
+                resolve HAP defaults (the pii_and_hap operator does it in its config model).
 
         Returns:
             Adapter instance with TextDetectionPort interface (detect methods)
@@ -292,6 +299,16 @@ class LLMAdapterFactory:
                     "temperature": 0.0
                 }
             )
+
+            # Hugging Face local HAP detection with a sequence classifier
+            adapter = LLMAdapterFactory.create_text_detection_adapter(
+                provider="huggingface",
+                model_id="unitary/unbiased-toxic-roberta",
+                provider_config={
+                    "toxic_labels": ["toxicity", "severe_toxicity", "insult"],
+                    "activation": "sigmoid",
+                }
+            )
         """
         provider = provider.lower()
 
@@ -301,13 +318,18 @@ class LLMAdapterFactory:
                 f"Supported providers: {LLMAdapterFactory.TEXT_DETECTION_PROVIDERS}"
             )
 
+        if provider == ProviderConstants.HUGGINGFACE:
+            return LLMAdapterFactory._create_huggingface_text_detection_adapter(
+                model_id=model_id, provider_config=provider_config or {}
+            )
+
         if not model_id:
             raise ValueError("model_id cannot be empty")
 
         if not provider_config:
             raise ValueError("provider_config cannot be empty")
 
-        if provider == "watsonx":
+        if provider == ProviderConstants.WATSONX:
             return WatsonXAdapter(
                 model_name=model_id,
                 api_key=provider_config.get("api_key"),
@@ -317,6 +339,46 @@ class LLMAdapterFactory:
                 timeout=provider_config.get("timeout", 120),
             )
         raise ValueError(f"Provider '{provider}' not yet implemented for text detection")
+
+    @staticmethod
+    def _create_huggingface_text_detection_adapter(
+        *, model_id: str, provider_config: dict[str, Any]
+    ) -> TextDetectionPort:
+        """Build a detection-configured ``HuggingFaceAdapter`` from explicit values.
+
+        Holds no HAP defaults: callers pass the model and its toxic labels (the
+        pii_and_hap operator resolves them in ``HuggingFaceHAPConfig``).
+
+        Raises:
+            ValueError: If ``model_id`` is empty or ``toxic_labels`` is missing.
+        """
+        config = OperatorConstants.Config
+        if not model_id:
+            raise ValueError("model_id cannot be empty")
+        toxic_labels = provider_config.get(config.TOXIC_LABELS)
+        if not toxic_labels:
+            raise ValueError(
+                f"'{config.TOXIC_LABELS}' is required for model '{model_id}'. "
+                f"{ServiceConstants.HUGGINGFACE_HAP_TOXIC_LABELS_HINT}"
+            )
+        return HuggingFaceAdapter(
+            model_name=model_id,
+            revision=provider_config.get(config.REVISION),
+            toxic_labels=tuple(toxic_labels),
+            activation=provider_config.get(config.ACTIVATION) or ServiceConstants.HUGGINGFACE_ACTIVATION_AUTO,
+            max_length=LLMAdapterFactory._positive_int_option(
+                provider_config=provider_config,
+                key=config.MAX_LENGTH,
+                default=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_MAX_LENGTH,
+            ),
+            batch_size=LLMAdapterFactory._positive_int_option(
+                provider_config=provider_config,
+                key=config.BATCH_SIZE,
+                default=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_BATCH_SIZE,
+            ),
+            device=provider_config.get(config.DEVICE),
+            local_files_only=bool(provider_config.get(config.LOCAL_FILES_ONLY, False)),
+        )
 
     @staticmethod
     def get_supported_providers(*, capability: str = "inference") -> set[str]:

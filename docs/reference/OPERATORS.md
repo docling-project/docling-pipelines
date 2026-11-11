@@ -1295,7 +1295,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 
 #### PIIAndHAPAnnotator
 
-**Purpose:** Detect Personally Identifiable Information (PII) and Hate, Abuse, and Profanity (HAP) content, with optional redaction. PII and HAP can use different providers: `litellm` and `watsonx` support both, `presidio` supports PII only.
+**Purpose:** Detect Personally Identifiable Information (PII) and Hate, Abuse, and Profanity (HAP) content, with optional redaction. PII and HAP can use different providers: `litellm` and `watsonx` support both, `presidio` supports PII only, `huggingface` supports HAP only (local classifier).
 
 **Category:** Quality
 
@@ -1305,11 +1305,11 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 
 | Parameter | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `provider` | string | No | `litellm` | Provider for every expected redaction without its own `pii_provider` / `hap_provider`: `litellm`, `watsonx`, `presidio` (PII only) |
+| `provider` | string | No | `litellm` | Provider for every expected redaction without its own `pii_provider` / `hap_provider`: `litellm`, `watsonx`, `presidio` (PII only), `huggingface` (HAP only) |
 | `provider_config` | object | No | `{}` | Provider-specific configuration (see below); shared with `pii_provider` / `hap_provider` when they name the same provider or `provider` is unset |
 | `pii_provider` | string | No | — | Provider for PII only: `litellm`, `watsonx`, `presidio` |
 | `pii_provider_config` | object | No | `{}` | Configuration for `pii_provider` (falls back to `provider_config` as above) |
-| `hap_provider` | string | No | — | Provider for HAP only: `litellm`, `watsonx` |
+| `hap_provider` | string | No | — | Provider for HAP only: `litellm`, `watsonx`, `huggingface` |
 | `hap_provider_config` | object | No | `{}` | Configuration for `hap_provider` (falls back to `provider_config` as above) |
 | `doc_column` | string | No | `content` | Input text column |
 | `expected_redactions` | list | No | `["pii","hap"]` | Detection types to run: any subset of `["pii","hap"]` |
@@ -1349,7 +1349,24 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 | `spacy_model` | string | No | spaCy NER model (default: `en_core_web_lg`) |
 | `entity_mapping` | object | No | Presidio entity type to PII type overrides (e.g. `{"DATE_TIME": "DateOfBirth"}`) |
 
-A provider selected for a capability it does not support (e.g. `hap_provider: "presidio"`) fails validation before any document is processed.
+**`hap_provider_config` — Hugging Face (HAP only; local sequence classifier, no extra install):**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `model_id` | string | No | Classifier on the Hugging Face Hub (default: `ibm-granite/granite-guardian-hap-38m`) |
+| `revision` | string | No | Model commit, tag or branch (default: a pinned commit for the default model; the Hub default branch otherwise) |
+| `toxic_labels` | list | Required for a non-default `model_id` | Labels whose highest probability is a sentence's HAP score (default model: `["LABEL_1"]`) |
+| `activation` | string | No | `softmax`, `sigmoid` or `auto` (default: `auto`) |
+| `max_length` | integer | No | Maximum model tokens per scored window (default: `512`) |
+| `batch_size` | integer | No | Sentence windows per forward pass (default: `32`) |
+| `device` | string | No | `auto`, `cpu`, `cuda` or `mps` (default: auto) |
+| `local_files_only` | boolean | No | Load only from the local Hugging Face cache (default: `false`) |
+
+Unknown `huggingface` keys are rejected by flow validation. Detections are sentence spans with exact offsets; see the
+[PII and HAP documentation](../operators/quality/pii_and_hap_readme.md#hugging-face-provider_config) for choosing
+`toxic_labels`.
+
+A provider selected for a capability it does not support (e.g. `hap_provider: "presidio"` or `pii_provider: "huggingface"`) fails validation before any document is processed.
 
 **Output Schema:**
 
