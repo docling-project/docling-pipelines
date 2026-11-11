@@ -209,3 +209,17 @@ class TestGraphFlowValidator:
         }
         with pytest.raises(ValueError, match=_exact(f"Duplicate node id: '{NODE_IDS[0]}'.")):
             FlowValidator.validate(flow_graph=graph, flow=flow)
+
+
+def test_flow_graph_internal_fields_not_in_init():
+    # Internal adjacency indexes are not exposed in FlowGraph init or repr.
+    import inspect
+
+    sig = inspect.signature(FlowGraph)
+    assert "_in_edges" not in sig.parameters
+    assert "_out_edges" not in sig.parameters
+
+    graph = FlowGraph()
+    repr_str = repr(graph)
+    assert "_in_edges" not in repr_str
+    assert "_out_edges" not in repr_str

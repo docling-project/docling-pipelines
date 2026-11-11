@@ -33,8 +33,8 @@ class FlowGraph:
 
     nodes: dict[UUID, Node] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
-    _in_edges: dict[UUID, list[Edge]] = field(default_factory=dict)
-    _out_edges: dict[UUID, list[Edge]] = field(default_factory=dict)
+    _in_edges: dict[UUID, list[Edge]] = field(default_factory=dict, init=False, repr=False)
+    _out_edges: dict[UUID, list[Edge]] = field(default_factory=dict, init=False, repr=False)
 
     def add_node(self, node: Node) -> None:
         """Register a node and initialize its adjacency lists."""
