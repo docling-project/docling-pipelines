@@ -193,7 +193,7 @@ class TestOneDriveSourceAdapter:
         assert docs[0].name == "file1.txt"
         assert docs[0].size == 1024
         assert docs[0].metadata["item_id"] == "1"
-        assert docs[0].metadata["client_id"] == "client"
+        assert not {"client_id", "client_secret", "tenant_id"} & set(docs[0].metadata)
         assert docs[1].id == "2"
 
     def test_fetch_documents_filters_extension_and_size(self):

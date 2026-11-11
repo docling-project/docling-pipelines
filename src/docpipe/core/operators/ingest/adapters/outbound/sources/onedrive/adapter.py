@@ -195,9 +195,6 @@ class OneDriveSourceAdapter(DocumentSourcePort):
             "mime_type": item.get("file", {}).get("mimeType"),
             "created_time": item.get("createdDateTime"),
             "web_url": source_url,
-            "client_id": config.client_id,
-            "client_secret": config.client_secret,
-            "tenant_id": config.tenant_id,
         }
         if not is_single_file:
             metadata["source_id"] = doc_id  # Required by binary_content_fetcher
