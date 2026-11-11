@@ -63,7 +63,9 @@ class GraphExecutionEngine:
         output = self.output_buffer.get_output(source_id)
         result_index = 0
         if source_node.operator_name == OperatorConstants.Operators.BRANCHING:
-            result_index = output.metadata[OperatorConstants.Misc.BRANCHES][branch_id]["result_index"]
+            branches = output.metadata.get(OperatorConstants.Misc.BRANCHES, {})
+            assert branch_id in branches, f"Branch '{branch_id}' not found in branching node '{source_node.name}'"
+            result_index = branches[branch_id][OperatorConstants.Misc.RESULT_INDEX]
         return output.tables[result_index]
 
     def _get_merge_tables(self, node: Node) -> dict[str, pa.Table]:
@@ -78,7 +80,10 @@ class GraphExecutionEngine:
     def _execute_branching_node(self, *, node: Node, input_table: pa.Table) -> OperatorOutput:
         """Run a branching node or resolve its empty input into empty branch outputs."""
         if input_table is not None and input_table.num_rows == 0:
-            branches = {edge.branch_id: {"result_index": 0} for edge in self.flow_graph.get_output_edges(node.id)}
+            branches = {
+                edge.branch_id: {OperatorConstants.Misc.RESULT_INDEX: 0}
+                for edge in self.flow_graph.get_output_edges(node.id)
+            }
             return OperatorOutput(tables=[input_table], metadata={OperatorConstants.Misc.BRANCHES: branches})
         return self._execute_node(node=node, input_table=input_table)
 
