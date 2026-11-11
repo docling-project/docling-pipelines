@@ -11,8 +11,8 @@ from langchain_core.documents import Document
 
 from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
-from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
 from docpipe.core.orchestration.application.services.resumption_service import ResumptionService
+from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
 
 JOB_ID = "job-ingest"
 NODE_ID = "node-4"
@@ -32,12 +32,12 @@ def _document(source: str, last_modified: int) -> Document:
 
 @pytest.fixture
 def store(tmp_path):
-    return FilesystemResumptionStore(root=str(tmp_path))
+    return KeyValueFileSystemStorage(base_dir=str(tmp_path))
 
 
 @pytest.fixture
 def service(store):
-    return ResumptionService(store=store, max_retry_attempts=MAX_RETRIES)
+    return ResumptionService(record_storage=store, max_retry_attempts=MAX_RETRIES)
 
 
 @pytest.fixture

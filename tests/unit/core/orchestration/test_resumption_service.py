@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for node-level failure resumption (ResumptionService, store and node output reader)."""
+"""Unit tests for node-level failure resumption (ResumptionService on key-value and table storages)."""
 
-from pathlib import Path
+import hashlib
 from typing import ClassVar
 
 import pyarrow as pa
@@ -11,8 +11,6 @@ import pyarrow.parquet as pq
 import pytest
 
 from docpipe.core.constants.constants import DocpipeConstants
-from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
-from docpipe.core.orchestration.adapters.local_node_output_reader import LocalNodeOutputReader
 from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
 from docpipe.core.orchestration.application.services.resumption_service import (
     RETRIES_EXHAUSTED_PREFIX,
@@ -21,6 +19,8 @@ from docpipe.core.orchestration.application.services.resumption_service import (
     resumption_batch_key,
 )
 from docpipe.core.orchestration.models.resumption_plan import FailedNode, ResumptionRecord
+from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
+from docpipe.storage.file_system.table_file_system_storage import TableFileSystemStorage
 
 JOB_ID = "job-1"
 RUN_ID = "run-1"
@@ -39,14 +39,34 @@ def _input_table(*doc_ids: str, modified_time: int = 100) -> pa.Table:
     )
 
 
+COLLECTION = f"{JOB_ID}/resumption"
+
+
 @pytest.fixture
 def store(tmp_path):
-    return FilesystemResumptionStore(root=str(tmp_path))
+    return KeyValueFileSystemStorage(base_dir=str(tmp_path))
 
 
 @pytest.fixture
 def service(store):
-    return ResumptionService(store=store, max_retry_attempts=MAX_RETRIES)
+    return ResumptionService(record_storage=store, max_retry_attempts=MAX_RETRIES)
+
+
+def _stored(store, doc_id: str) -> ResumptionRecord | None:
+    """Read the record of a document straight from the key-value storage."""
+    data = store.get_record(collection=COLLECTION, key=hashlib.sha256(doc_id.encode()).hexdigest())
+    return ResumptionRecord.model_validate(data) if data is not None else None
+
+
+def _existing(store, doc_id: str) -> ResumptionRecord:
+    """Like ``_stored`` but fails the test when the record is absent."""
+    record = _stored(store, doc_id)
+    assert record is not None
+    return record
+
+
+def _stored_ids(store) -> set[str]:
+    return {data["doc_id"] for data in store.list_records(collection=COLLECTION)}
 
 
 def _fail(
@@ -71,27 +91,25 @@ def _fail(
     )
 
 
-class TestFilesystemResumptionStore:
+class TestRecordStorage:
     @pytest.mark.parametrize("job_id", ["../escape", "a/b", "", ".."])
-    def test_invalid_job_id_is_rejected(self, store, job_id):
+    def test_invalid_job_id_is_rejected(self, service, job_id):
         with pytest.raises(ValueError, match="Invalid job_id"):
-            store.get_all_records(job_id=job_id)
+            service.discard_all(job_id=job_id)
 
-    def test_unreadable_record_is_ignored(self, store, tmp_path):
-        service = ResumptionService(store=store, max_retry_attempts=MAX_RETRIES)
+    def test_unreadable_record_is_ignored(self, service, tmp_path):
         _fail(service)
-        record_file = next((tmp_path / JOB_ID / "resumption" / "records").glob("*.json"))
+        record_file = next((tmp_path / COLLECTION).glob("*.json"))
         record_file.write_text("not json")
 
-        assert store.get_all_records(job_id=JOB_ID) == {}
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert service.classify(job_id=JOB_ID, doc_id="d1", modified_time=100)[0] == ResumptionDecision.FRESH
 
     def test_only_records_are_persisted(self, service, tmp_path):
         _fail(service)
 
-        files = [p for p in (tmp_path / JOB_ID / "resumption").rglob("*") if p.is_file()]
+        files = [p for p in (tmp_path / JOB_ID).rglob("*") if p.is_file()]
 
-        assert [p.parent.name for p in files] == ["records"]
+        assert [p.parent.name for p in files] == ["resumption"]
         assert all(p.suffix == ".json" for p in files)
 
 
@@ -166,7 +184,7 @@ class TestFailureCounting:
         assert "original failure text" in reason
 
     def test_zero_retries_exhausts_on_first_failure(self, store):
-        service = ResumptionService(store=store, max_retry_attempts=0)
+        service = ResumptionService(record_storage=store, max_retry_attempts=0)
 
         assert _fail(service).exhausted is True
 
@@ -191,7 +209,7 @@ class TestMultipleFailedNodes:
         _fail(service, node_id="branch-a", node_name="chunker_a", reason="err a")
         _fail(service, node_id="branch-b", node_name="chunker_b", job_run_id="run-2", reason="err b")
 
-        record = store.get_record(job_id=JOB_ID, doc_id="d1")
+        record = _existing(store, "d1")
 
         assert {n.node_id for n in record.failed_nodes} == {"branch-a", "branch-b"}
         assert record.failed_node(node_id="branch-a").error_message == "err a"
@@ -236,7 +254,7 @@ class TestMultipleFailedNodes:
 
         service.clear_node_success(job_id=JOB_ID, node_id="branch-a", node_name="name-a", doc_ids=["d1"])
 
-        record = store.get_record(job_id=JOB_ID, doc_id="d1")
+        record = _existing(store, "d1")
         assert [n.node_id for n in record.failed_nodes] == ["branch-b"]
 
     def test_success_at_last_failed_node_deletes_record(self, service, store):
@@ -244,7 +262,7 @@ class TestMultipleFailedNodes:
 
         service.clear_node_success(job_id=JOB_ID, node_id="branch-a", node_name="name-a", doc_ids=["d1"])
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert _stored(store, "d1") is None
 
     def test_exhausted_entry_survives_success_sweep(self, service, store):
         for _ in range(4):
@@ -252,21 +270,21 @@ class TestMultipleFailedNodes:
 
         service.clear_node_success(job_id=JOB_ID, node_id=NODE_ID, doc_ids=["d1"])
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is not None
+        assert _stored(store, "d1") is not None
 
     def test_success_is_matched_by_name_when_node_id_changed(self, service, store):
         _fail(service, node_id="old-id", node_name="chunker")
 
         service.clear_node_success(job_id=JOB_ID, node_id="new-id", node_name="chunker", doc_ids=["d1"])
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert _stored(store, "d1") is None
 
     def test_success_at_unrelated_node_changes_nothing(self, service, store):
         _fail(service)
 
         service.clear_node_success(job_id=JOB_ID, node_id="elsewhere", doc_ids=["d1", "unknown"])
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is not None
+        assert _stored(store, "d1") is not None
 
 
 class TestClassify:
@@ -289,7 +307,7 @@ class TestClassify:
         decision, stored = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=101)
 
         assert (decision, stored) == (ResumptionDecision.FRESH, None)
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert _stored(store, "d1") is None
 
     def test_older_source_does_not_invalidate(self, service):
         _fail(service, modified_time=100)
@@ -307,12 +325,12 @@ class TestClassify:
         assert decision == ResumptionDecision.FRESH
 
     def test_record_without_failed_nodes_is_fresh(self, service, store):
-        store.save_record(job_id=JOB_ID, record=ResumptionRecord(doc_id="d1"))
+        service._save_record(job_id=JOB_ID, record=ResumptionRecord(doc_id="d1"))
 
         decision, _ = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=None)
 
         assert decision == ResumptionDecision.FRESH
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert _stored(store, "d1") is None
 
 
 def _node(node_id: str, *, parents: list[str] | None = None, operator: str = "noop", **extra) -> dict:
@@ -497,7 +515,8 @@ class TestPlanning:
         assert resumption_batch_key(batch_id="abc") == "abc"
 
 
-def _write_node_output(base: Path, run_id: str, folder: str, table: pa.Table, *, batch: str | None = None) -> None:
+def _write_node_output(base, run_id: str, folder: str, table: pa.Table, *, batch: str | None = None) -> None:
+    """Write a node output the way the executors save it: <base>/<job>/<run>/data/<node>_<idx>[/<batch>]."""
     target = base / JOB_ID / run_id / "data" / folder
     if batch:
         target = target / batch
@@ -505,69 +524,8 @@ def _write_node_output(base: Path, run_id: str, folder: str, table: pa.Table, *,
     pq.write_table(table, target / "output.parquet")
 
 
-@pytest.fixture
-def data_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "docpipe.core.data_access.data_access_utils.get_data_path",
-        lambda: str(tmp_path),
-        raising=False,
-    )
-    return tmp_path
-
-
-class TestNodeOutputReader:
-    @staticmethod
-    def _reader() -> LocalNodeOutputReader:
-        return LocalNodeOutputReader(config={DocpipeConstants.JOB_ID: JOB_ID, DocpipeConstants.JOB_RUN_ID: "current"})
-
-    def test_reads_requested_rows_of_a_previous_run(self, data_root):
-        _write_node_output(data_root, "run-1", "extract_0", _input_table("d1", "d2", "d3"))
-
-        rows = self._reader().read_rows(job_run_id="run-1", node_name="extract", output_index=0, doc_ids=["d2"])
-
-        assert rows.column("id").to_pylist() == ["d2"]
-
-    def test_reads_rows_spread_over_batch_subfolders(self, data_root):
-        _write_node_output(data_root, "run-1", "extract_0", _input_table("d1"), batch="0")
-        _write_node_output(data_root, "run-1", "extract_0", _input_table("d2"), batch="1")
-
-        rows = self._reader().read_rows(job_run_id="run-1", node_name="extract", output_index=0, doc_ids=["d1", "d2"])
-
-        assert sorted(rows.column("id").to_pylist()) == ["d1", "d2"]
-
-    def test_node_name_is_sanitized_like_the_writer(self, data_root):
-        _write_node_output(data_root, "run-1", "my_node_1", _input_table("d1"))
-
-        rows = self._reader().read_rows(job_run_id="run-1", node_name="my node", output_index=1, doc_ids=["d1"])
-
-        assert rows.column("id").to_pylist() == ["d1"]
-
-    def test_missing_output_returns_none(self, data_root):
-        assert self._reader().read_rows(job_run_id="run-9", node_name="x", output_index=0, doc_ids=["d1"]) is None
-
-    def test_unknown_document_returns_none(self, data_root):
-        _write_node_output(data_root, "run-1", "extract_0", _input_table("d1"))
-
-        assert self._reader().read_rows(job_run_id="run-1", node_name="extract", output_index=0, doc_ids=["zz"]) is None
-
-    @pytest.mark.parametrize("run_id", ["../x", "a/b", "..", ""])
-    def test_unsafe_job_run_id_is_rejected(self, data_root, run_id):
-        assert self._reader().read_rows(job_run_id=run_id, node_name="x", output_index=0, doc_ids=["d1"]) is None
-
-
-class _FakeReader:
-    def __init__(self, tables: dict[tuple[str, str, int], pa.Table]) -> None:
-        self._tables = tables
-        self.calls: list[tuple[str, str, int]] = []
-
-    def read_rows(self, *, job_run_id, node_name, output_index, doc_ids):
-        key = (job_run_id, node_name, output_index)
-        self.calls.append(key)
-        table = self._tables.get(key)
-        if table is None:
-            return None
-        mask = pa.array([i in doc_ids for i in table.column("id").to_pylist()])
-        return table.filter(mask)
+def _table_name(*, job_run_id: str, node_name: str, output_index: int) -> str:
+    return f"{JOB_ID}/{job_run_id}/data/{node_name}_{output_index}"
 
 
 class TestInjection:
@@ -576,31 +534,47 @@ class TestInjection:
         return {"doc_id": doc_id, "job_run_id": run, "source_node_name": node, "source_output_index": index}
 
     @staticmethod
-    def _service(store, reader) -> ResumptionService:
-        return ResumptionService(store=store, max_retry_attempts=MAX_RETRIES, output_reader=reader)
+    def _service(tmp_path, *, with_tables: bool = True) -> ResumptionService:
+        return ResumptionService(
+            record_storage=KeyValueFileSystemStorage(base_dir=str(tmp_path)),
+            max_retry_attempts=MAX_RETRIES,
+            table_storage=TableFileSystemStorage(base_dir=str(tmp_path)) if with_tables else None,
+            output_table_name=_table_name if with_tables else None,
+        )
 
-    def test_saved_rows_are_appended_to_input(self, store):
-        reader = _FakeReader({(RUN_ID, "chunker", 0): _input_table("d1", "d2")})
+    def test_saved_rows_are_appended_to_input(self, tmp_path):
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d1", "d2"))
 
-        merged, injected, unavailable = self._service(store, reader).inject_saved_rows(
+        merged, injected, unavailable = self._service(tmp_path).inject_saved_rows(
             table=_input_table("fresh"), entries=[self._entry("d1")]
         )
 
         assert merged.column("id").to_pylist() == ["fresh", "d1"]
         assert (injected, unavailable) == (["d1"], [])
 
-    def test_injection_into_empty_input(self, store):
-        reader = _FakeReader({(RUN_ID, "chunker", 0): _input_table("d1")})
+    def test_injection_into_empty_input(self, tmp_path):
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d1"))
 
-        merged, injected, _ = self._service(store, reader).inject_saved_rows(table=None, entries=[self._entry("d1")])
+        merged, injected, _ = self._service(tmp_path).inject_saved_rows(table=None, entries=[self._entry("d1")])
 
         assert merged.column("id").to_pylist() == ["d1"]
         assert injected == ["d1"]
 
-    def test_missing_output_is_reported_unavailable(self, store):
+    def test_rows_spread_over_batch_subfolders_are_found(self, tmp_path):
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d1"), batch="0")
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d2"), batch="1")
+
+        merged, injected, unavailable = self._service(tmp_path).inject_saved_rows(
+            table=None, entries=[self._entry("d1"), self._entry("d2")]
+        )
+
+        assert sorted(merged.column("id").to_pylist()) == ["d1", "d2"]
+        assert (sorted(injected), unavailable) == (["d1", "d2"], [])
+
+    def test_missing_output_is_reported_unavailable(self, tmp_path):
         base = _input_table("fresh")
 
-        merged, injected, unavailable = self._service(store, _FakeReader({})).inject_saved_rows(
+        merged, injected, unavailable = self._service(tmp_path).inject_saved_rows(
             table=base, entries=[self._entry("d1")]
         )
 
@@ -608,34 +582,48 @@ class TestInjection:
         assert injected == []
         assert [e["doc_id"] for e in unavailable] == ["d1"]
 
-    def test_without_reader_everything_is_unavailable(self, store):
+    def test_unknown_document_is_reported_unavailable(self, tmp_path):
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d1"))
+
+        _, injected, unavailable = self._service(tmp_path).inject_saved_rows(table=None, entries=[self._entry("zz")])
+
+        assert injected == []
+        assert [e["doc_id"] for e in unavailable] == ["zz"]
+
+    def test_without_table_storage_everything_is_unavailable(self, tmp_path):
         entries = [self._entry("d1")]
 
-        _, injected, unavailable = self._service(store, None).inject_saved_rows(table=None, entries=entries)
+        _, injected, unavailable = self._service(tmp_path, with_tables=False).inject_saved_rows(
+            table=None, entries=entries
+        )
 
         assert (injected, unavailable) == ([], entries)
 
-    def test_entries_are_read_per_job_run_and_output(self, store):
-        reader = _FakeReader(
-            {
-                ("run-1", "chunker", 0): _input_table("d1"),
-                ("run-2", "split", 1): _input_table("d2"),
-            }
-        )
+    @pytest.mark.parametrize("run_id", ["../x", "a/b", "..", ""])
+    def test_unsafe_job_run_id_is_unavailable(self, tmp_path, run_id):
+        entries = [self._entry("d1", run=run_id)]
+
+        _, injected, unavailable = self._service(tmp_path).inject_saved_rows(table=None, entries=entries)
+
+        assert (injected, unavailable) == ([], entries)
+
+    def test_entries_are_read_per_job_run_and_output(self, tmp_path):
+        _write_node_output(tmp_path, "run-1", "chunker_0", _input_table("d1"))
+        _write_node_output(tmp_path, "run-2", "split_1", _input_table("d2"))
         entries = [self._entry("d1", run="run-1"), self._entry("d2", run="run-2", node="split", index=1)]
 
-        merged, injected, unavailable = self._service(store, reader).inject_saved_rows(table=None, entries=entries)
+        merged, injected, unavailable = self._service(tmp_path).inject_saved_rows(table=None, entries=entries)
 
         assert sorted(merged.column("id").to_pylist()) == ["d1", "d2"]
         assert sorted(injected) == ["d1", "d2"]
         assert unavailable == []
-        assert sorted(reader.calls) == [("run-1", "chunker", 0), ("run-2", "split", 1)]
 
-    def test_document_failed_at_two_nodes_is_injected_for_each_entry(self, store):
-        reader = _FakeReader({(RUN_ID, "split", 0): _input_table("d1"), (RUN_ID, "split", 1): _input_table("d1")})
+    def test_document_failed_at_two_nodes_is_injected_for_each_entry(self, tmp_path):
+        _write_node_output(tmp_path, RUN_ID, "split_0", _input_table("d1"))
+        _write_node_output(tmp_path, RUN_ID, "split_1", _input_table("d1"))
         entries = [self._entry("d1", node="split", index=0), self._entry("d1", node="split", index=1)]
 
-        merged, injected, unavailable = self._service(store, reader).inject_saved_rows(table=None, entries=entries)
+        merged, injected, unavailable = self._service(tmp_path).inject_saved_rows(table=None, entries=entries)
 
         assert merged.num_rows == 2
         assert injected == ["d1", "d1"]
@@ -649,7 +637,7 @@ class TestDiscard:
 
         service.discard_all(job_id=JOB_ID)
 
-        assert store.get_all_records(job_id=JOB_ID) == {}
+        assert _stored_ids(store) == set()
 
     def test_discard_all_for_ids_only_removes_listed_documents(self, service, store):
         _fail(service, "d1")
@@ -657,7 +645,7 @@ class TestDiscard:
 
         service.discard_all_for_ids(job_id=JOB_ID, doc_ids=["d1", "never-failed"])
 
-        assert set(store.get_all_records(job_id=JOB_ID)) == {"d2"}
+        assert _stored_ids(store) == {"d2"}
 
 
 class TestFactory:

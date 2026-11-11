@@ -3,16 +3,20 @@
 
 """Unit tests for resumption handling in AbstractOperatorExecutor (injection, deferred accounting, failure capture)."""
 
+import hashlib
 from unittest.mock import Mock
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.abstract_operator_executor import AbstractOperatorExecutor
-from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
 from docpipe.core.orchestration.application.services.resumption_service import ResumptionService
+from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
+from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
+from docpipe.storage.file_system.table_file_system_storage import TableFileSystemStorage
 
 JOB_ID = "job-exec"
 RUN_ID = "run-1"
@@ -28,17 +32,20 @@ class _Executor(AbstractOperatorExecutor):
         return Mock()
 
 
-class _FakeReader:
-    """Serves saved node outputs keyed by (job_run_id, node_name, output_index)."""
+class _SavedOutputs:
+    """Writes node outputs where the executors save them: <base>/<job>/<run>/data/<node>_<idx>."""
 
-    def __init__(self) -> None:
-        self.tables: dict[tuple[str, str, int], pa.Table] = {}
+    def __init__(self, base_dir) -> None:
+        self.base_dir = base_dir
 
-    def read_rows(self, *, job_run_id, node_name, output_index, doc_ids):
-        table = self.tables.get((job_run_id, node_name, output_index))
-        if table is None:
-            return None
-        return table.filter(pa.array([i in doc_ids for i in table.column("id").to_pylist()]))
+    def save(self, *, job_run_id: str, node_name: str, output_index: int, table: pa.Table) -> None:
+        target = self.base_dir / JOB_ID / job_run_id / "data" / f"{node_name}_{output_index}"
+        target.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, target / "output.parquet")
+
+    @staticmethod
+    def table_name(*, job_run_id: str, node_name: str, output_index: int) -> str:
+        return f"{JOB_ID}/{job_run_id}/data/{node_name}_{output_index}"
 
 
 def _table(*doc_ids: str) -> pa.Table:
@@ -52,18 +59,37 @@ def _table(*doc_ids: str) -> pa.Table:
 
 
 @pytest.fixture
-def reader():
-    return _FakeReader()
+def reader(tmp_path):
+    return _SavedOutputs(tmp_path)
 
 
 @pytest.fixture
 def store(tmp_path, monkeypatch, reader):
-    fs_store = FilesystemResumptionStore(root=str(tmp_path))
+    record_storage = KeyValueFileSystemStorage(base_dir=str(tmp_path))
+    table_storage = TableFileSystemStorage(base_dir=str(tmp_path))
     monkeypatch.setattr(
         "docpipe.core.orchestration.abstract_operator_executor.create_resumption_service",
-        lambda *, config: ResumptionService(store=fs_store, max_retry_attempts=3, output_reader=reader),
+        lambda *, config: ResumptionService(
+            record_storage=record_storage,
+            max_retry_attempts=3,
+            table_storage=table_storage,
+            output_table_name=reader.table_name,
+        ),
     )
-    return fs_store
+    return record_storage
+
+
+def _stored(store, doc_id: str) -> ResumptionRecord | None:
+    """Read the record of a document straight from the key-value storage."""
+    data = store.get_record(collection=f"{JOB_ID}/resumption", key=hashlib.sha256(doc_id.encode()).hexdigest())
+    return ResumptionRecord.model_validate(data) if data is not None else None
+
+
+def _existing(store, doc_id: str) -> ResumptionRecord:
+    """Like ``_stored`` but fails the test when the record is absent."""
+    record = _stored(store, doc_id)
+    assert record is not None
+    return record
 
 
 def _executor(*, node_id: str = NODE_ID, plan: dict | None = None, job_stats=None, name: str = "chunker") -> _Executor:
@@ -104,7 +130,7 @@ def _plan(*entries: dict) -> dict:
 
 class TestInjection:
     def test_target_node_receives_saved_rows(self, store, reader):
-        reader.tables[(RUN_ID, SOURCE_NODE, 0)] = _table("d1")
+        reader.save(job_run_id=RUN_ID, node_name=SOURCE_NODE, output_index=0, table=_table("d1"))
         executor = _executor(plan=_plan())
 
         merged = executor._inject_resumed_documents(tables=_table("fresh"))
@@ -113,7 +139,7 @@ class TestInjection:
         assert executor.resumption_injection_pending() is True
 
     def test_target_node_with_empty_input_still_gets_documents(self, store, reader):
-        reader.tables[(RUN_ID, SOURCE_NODE, 0)] = _table("d1")
+        reader.save(job_run_id=RUN_ID, node_name=SOURCE_NODE, output_index=0, table=_table("d1"))
         executor = _executor(plan=_plan())
 
         merged = executor._inject_resumed_documents(tables=_table())
@@ -152,7 +178,7 @@ class TestInjection:
         assert [e["doc_id"] for e in executor._unavailable_resumed_entries] == ["d1"]
 
     def test_document_failed_in_two_branches_is_injected_at_each_target(self, store, reader):
-        reader.tables[(RUN_ID, SOURCE_NODE, 0)] = _table("d1")
+        reader.save(job_run_id=RUN_ID, node_name=SOURCE_NODE, output_index=0, table=_table("d1"))
         plan = _plan(_entry(target="branch-a", pending=()), _entry(target="branch-b", pending=()))
 
         node_a = _executor(node_id="branch-a", plan=plan)
@@ -181,7 +207,7 @@ class TestDeferredAccounting:
         assert executor._total_docs_in_scope(tables=_table("f1")) == ["f1", "d1"]
 
     def test_target_node_has_no_deferred_documents(self, store, reader):
-        reader.tables[(RUN_ID, SOURCE_NODE, 0)] = _table("d1")
+        reader.save(job_run_id=RUN_ID, node_name=SOURCE_NODE, output_index=0, table=_table("d1"))
         executor = _executor(plan=_plan())
         executor._inject_resumed_documents(tables=_table("f1"))
         metadata = {Metrics.External.TOTAL_DOCS: 2}
@@ -231,14 +257,14 @@ class TestDeferredAccounting:
 
 class TestResumedSuccess:
     def _resumed(self, store, reader) -> _Executor:
-        reader.tables[(RUN_ID, SOURCE_NODE, 0)] = _table("d1")
+        reader.save(job_run_id=RUN_ID, node_name=SOURCE_NODE, output_index=0, table=_table("d1"))
         executor = _executor(plan=_plan())
         executor._inject_resumed_documents(tables=_table("f1"))
         return executor
 
     @staticmethod
     def _record_failures(store, *node_ids: str) -> None:
-        service = ResumptionService(store=store, max_retry_attempts=3)
+        service = ResumptionService(record_storage=store, max_retry_attempts=3)
         for node_id in node_ids:
             service.record_failure(
                 job_id=JOB_ID,
@@ -257,7 +283,7 @@ class TestResumedSuccess:
 
         executor._apply_resumption_to_metadata(metadata={Metrics.External.TOTAL_DOCS: 2})
 
-        record = store.get_record(job_id=JOB_ID, doc_id="d1")
+        record = _existing(store, "d1")
         assert [n.node_id for n in record.failed_nodes] == ["other-branch"]
 
     def test_success_at_only_failed_node_deletes_record(self, store, reader):
@@ -266,7 +292,7 @@ class TestResumedSuccess:
 
         executor._apply_resumption_to_metadata(metadata={Metrics.External.TOTAL_DOCS: 2})
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert _stored(store, "d1") is None
 
     def test_repeated_failure_is_counted_not_cleared(self, store, reader):
         self._record_failures(store, NODE_ID)
@@ -279,7 +305,7 @@ class TestResumedSuccess:
 
         executor._apply_resumption_to_metadata(metadata=metadata)
 
-        node = store.get_record(job_id=JOB_ID, doc_id="d1").failed_node(node_id=NODE_ID)
+        node = _existing(store, "d1").failed_node(node_id=NODE_ID)
         assert node.failure_count == 2
         assert node.job_run_id == RUN_ID
         assert node.error_message == "again"
@@ -298,11 +324,11 @@ class TestFailureCapture:
 
         executor._record_failures_from_metadata(metadata=metadata)
 
-        node = store.get_record(job_id=JOB_ID, doc_id="d1").failed_node(node_id=NODE_ID)
+        node = _existing(store, "d1").failed_node(node_id=NODE_ID)
         assert node.failure_count == 1
         assert node.job_run_id == "run-2"
         assert node.error_message == "oops"
-        assert store.get_record(job_id=JOB_ID, doc_id="d2") is None
+        assert _stored(store, "d2") is None
 
     def test_non_recoverable_documents_are_not_recorded(self, store):
         executor = self._executor_with_input(store, "d1")
@@ -313,7 +339,7 @@ class TestFailureCapture:
 
         executor._record_failures_from_metadata(metadata=metadata)
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+        assert _stored(store, "d1") is None
 
     def test_exhausted_reason_contains_original_error_and_is_persisted_non_recoverable(self, store, monkeypatch):
         saved = Mock()
@@ -332,16 +358,16 @@ class TestFailureCapture:
         assert saved.call_count == 1
         persisted = saved.call_args.kwargs["tables"][0]
         assert persisted.column("id").to_pylist() == ["d1"]
-        assert store.get_record(job_id=JOB_ID, doc_id="d1").exhausted is True
+        assert _existing(store, "d1").exhausted is True
 
     def test_node_exception_records_every_input_document(self, store):
         executor = self._executor_with_input(store, "d1", "d2")
 
         executor._record_node_failure(exc=RuntimeError("node down"))
 
-        node = store.get_record(job_id=JOB_ID, doc_id="d1").failed_node(node_id=NODE_ID)
+        node = _existing(store, "d1").failed_node(node_id=NODE_ID)
         assert node.error_message.startswith("RuntimeError")
-        assert store.get_record(job_id=JOB_ID, doc_id="d2") is not None
+        assert _stored(store, "d2") is not None
 
     def test_failures_at_two_nodes_are_both_kept(self, store):
         first = self._executor_with_input(store, "d1")
@@ -351,7 +377,7 @@ class TestFailureCapture:
         first._record_failures_from_metadata(metadata={Metrics.External.FAILED_DOCS: [{"id": "d1", "reason": "a"}]})
         second._record_failures_from_metadata(metadata={Metrics.External.FAILED_DOCS: [{"id": "d1", "reason": "b"}]})
 
-        record = store.get_record(job_id=JOB_ID, doc_id="d1")
+        record = _existing(store, "d1")
         assert {n.node_id: n.error_message for n in record.failed_nodes} == {NODE_ID: "a", "node-9": "b"}
 
     def test_failure_capture_is_inactive_without_resumption(self, tmp_path, monkeypatch):

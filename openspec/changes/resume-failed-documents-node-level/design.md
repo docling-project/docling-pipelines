@@ -47,13 +47,13 @@ graph TD
     subgraph Storage Adapters
         DK[DuckDBJobStatsStore]
         PG[PostgresJobStatsStore]
-        NR2[LocalNodeOutputReader]
-        FS[FilesystemResumptionStore]
+        KV[KeyValueFileSystemStorage]
+        TB[TableFileSystemStorage]
     end
 
     RS --> JS
-    RS --> FS
-    RS --> NR2
+    RS --> KV
+    RS --> TB
     FE --> RS
     AO --> RS
     OE --> RS
@@ -63,12 +63,12 @@ graph TD
 
 ### 1. Domain Layer (`src/docpipe/core/job_management/domain/` & `src/docpipe/core/orchestration/{models,ports}/`)
 - `NodeStats`: Updated to include `deferred_execution_docs: list[str] = Field(default_factory=list)`.
-- `ResumptionRecord`: per-document failure state, stored by the `ResumptionStore` port:
+- `ResumptionRecord`: per-document failure state, stored through the existing `KeyValueStoragePort` (adapter `KeyValueFileSystemStorage`, collection `<job_id>/resumption`):
   - `doc_id`, `doc_name`, `modified_time`
   - `failed_nodes: list[FailedNode]`, one entry per node where the document failed (a document processed by several branches can fail at several nodes). Each `FailedNode` holds `node_id`, `node_name`, `job_run_id` (the run in which it failed), `failure_count`, `error_message` (the original error) and `exhausted`.
   - No checkpoint data and no data path are stored; the path is derived from `job_id` and `job_run_id`.
 - `DeferredRecord`: a document scheduled for resumption at one node of the current run (`target_node_id`, `job_run_id`, `error_message`, plus the source node and output index resolved by the planner).
-- `NodeOutputReader` port: `read_rows(job_run_id, node_name, output_index, doc_ids)` returns the saved rows of a node output.
+- The saved node output is read through the existing `TableStoragePort`. `TableFileSystemStorage` (new, `src/docpipe/storage/file_system/`) is a generic filesystem implementation of that port: a table is a directory and its rows are all Parquet files below it, so the per-node, per-batch folders written by the executors can be read as tables and queried with `execute_query`.
 - `Metrics.External`: Added `DEFERRED_EXECUTION_DOCS = "deferred_execution_docs"` and `DEFERRED_EXECUTION_DOCS_COUNT = "deferred_execution_docs_count"`.
 
 ### 2. Application Layer (`src/docpipe/core/orchestration/application/` & `job_management/application/`)
@@ -76,7 +76,7 @@ graph TD
   - `record_failure` stores the failed node, the `job_run_id`, the failure count and the original error message. Failures at other nodes of the same document are kept.
   - Compares consecutive failure counts against `max_retry_attempts` (allows `max_retry_attempts + 1` total tries: 1 initial attempt plus `max_retry_attempts` retries). A document is exhausted when any of its failed nodes is.
   - `build_plan` resolves each deferred entry through `target_node_id` (the node is always part of the flow; a lookup by node name is used only as a fallback for authoring-format flows, whose node ids change on every compile) to its predecessor node, the output index (branching-aware) and the pending ancestors. All entries of one document go to the same micro-batch. Entries whose target is the ingest node, missing, or has several inputs are returned as unresolved.
-  - `inject_saved_rows` reads the rows through the `NodeOutputReader`, grouped by job run, source node and output index.
+  - `inject_saved_rows` reads the rows with `TableStoragePort.execute_query` (document ids are bound parameters), grouped by job run, source node and output index.
   - `clear_node_success` removes the failure entry of a node once a resumed document passes it; the record is deleted when no failed node remains.
   - Flags documents that exceeded `max_retry_attempts` retries for non-recoverable incremental metadata persistence; the failure reason includes the original error of every exhausted node.
 - `JobReportGenerator` / `ReportGenerator`:

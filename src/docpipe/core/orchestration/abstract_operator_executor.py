@@ -62,9 +62,13 @@ class AbstractOperatorExecutor:
         self._params = params | {OperatorConstants.Columns.NAME: name}
         self._job_stats_service = job_stats_service
         # Node-level failure resumption state, populated per execution
+        # Ids of deferred documents passed through this node untouched (their retries are exhausted)
         self._carried_deferred_ids: list[str] = []
+        # Ids of documents injected into this node's input from a previous run's saved predecessor output
         self._injected_resumed_ids: list[str] = []
+        # Resumed entries whose saved predecessor output could not be loaded; they are failed or deferred again
         self._unavailable_resumed_entries: list[dict[str, Any]] = []
+        # Input table of the current execution, kept so failures can be recorded against it
         self._resumption_input: pa.Table | None = None
         job_id: str = str(self._params.get(DocpipeConstants.JOB_ID))
         job_run_id: str = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
@@ -429,6 +433,7 @@ class AbstractOperatorExecutor:
             non_recoverable_ids = set(non_recoverable[OperatorConstants.Misc.ID].to_pylist())
 
         job_id = self._resumption_job_id()
+        job_run_id = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
         node_id = self._params[OperatorConstants.Columns.ID]
         exhausted: list[ResumptionRecord] = []
         for doc in metadata.get(Metrics.External.FAILED_DOCS, []) or []:
@@ -437,7 +442,7 @@ class AbstractOperatorExecutor:
                 continue
             record = service.record_failure(
                 job_id=job_id,
-                job_run_id=str(self._params.get(DocpipeConstants.JOB_RUN_ID)),
+                job_run_id=job_run_id,
                 node_id=node_id,
                 node_name=self._name,
                 input_table=self._resumption_input,
@@ -459,13 +464,14 @@ class AbstractOperatorExecutor:
             if service is None:
                 return
             job_id = self._resumption_job_id()
+            job_run_id = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
             node_id = self._params[OperatorConstants.Columns.ID]
             reason = f"{type(exc).__name__}: {exc}"[:500]
             exhausted: list[ResumptionRecord] = []
             for doc_id in OperatorUtils.get_unique_ids(tables=self._resumption_input):
                 record = service.record_failure(
                     job_id=job_id,
-                    job_run_id=str(self._params.get(DocpipeConstants.JOB_RUN_ID)),
+                    job_run_id=job_run_id,
                     node_id=node_id,
                     node_name=self._name,
                     input_table=self._resumption_input,

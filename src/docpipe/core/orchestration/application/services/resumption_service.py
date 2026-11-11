@@ -11,9 +11,11 @@ the intermediate output that node K-1 saved in the failed run (available when ``
 resumed at each of them.
 """
 
+import hashlib
+import re
 from collections import defaultdict
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -21,8 +23,8 @@ import pyarrow.compute as pc
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.models.resumption_plan import DeferredRecord, FailedNode, ResumptionRecord
-from docpipe.core.orchestration.ports.node_output_reader import NodeOutputReader
-from docpipe.core.orchestration.ports.resumption_store import ResumptionStore
+from docpipe.storage.interfaces.key_value_storage_port import KeyValueStoragePort
+from docpipe.storage.interfaces.table_storage_port import TableStoragePort
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -30,6 +32,15 @@ logger = get_logger()
 RETRIES_EXHAUSTED_PREFIX = "Maximum retries exhausted"
 SINGLE_BATCH_KEY = "__single__"
 _BRANCH_CRITERIA = "branch_criteria"
+_RECORDS_COLLECTION = "resumption"
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+class NodeOutputTableName(Protocol):
+    """Resolves the table holding the saved output of a node in an earlier job run."""
+
+    def __call__(self, *, job_run_id: str, node_name: str, output_index: int) -> str:
+        """Return the name of the table in the table storage."""
 
 
 class ResumptionDecision(StrEnum):
@@ -46,17 +57,24 @@ def resumption_batch_key(*, batch_id: str | None) -> str:
 
 
 class ResumptionService:
-    """Decides, records and applies node-level resumption of failed documents."""
+    """Decides, records and applies node-level resumption of failed documents.
+
+    Failure records are kept in a key-value storage, one record per document under the collection
+    ``<job_id>/resumption``. The rows a document is resumed from are read from a table storage that holds the
+    intermediate node outputs of the flow; no copy of the data is made.
+    """
 
     def __init__(
         self,
         *,
-        store: ResumptionStore,
+        record_storage: KeyValueStoragePort,
         max_retry_attempts: int,
-        output_reader: NodeOutputReader | None = None,
+        table_storage: TableStoragePort | None = None,
+        output_table_name: NodeOutputTableName | None = None,
     ) -> None:
-        self._store = store
-        self._output_reader = output_reader
+        self._record_storage = record_storage
+        self._table_storage = table_storage
+        self._output_table_name = output_table_name
         # Total attempts per document = 1 initial execution + max_retry_attempts retries
         self._max_retry_attempts = max(0, max_retry_attempts)
 
@@ -64,6 +82,53 @@ class ResumptionService:
     def max_retry_attempts(self) -> int:
         """Configured number of retries after the initial attempt."""
         return self._max_retry_attempts
+
+    # ------------------------------------------------------------------ record storage
+
+    @staticmethod
+    def _collection(*, job_id: str) -> str:
+        """Return the collection of the records of a job; the job id must be a plain name."""
+        if not job_id or not _SAFE_ID.match(job_id) or job_id in {".", ".."}:
+            msg = "Invalid job_id for resumption records"
+            raise ValueError(msg)
+        return f"{job_id}/{_RECORDS_COLLECTION}"
+
+    @staticmethod
+    def _key(*, doc_id: str) -> str:
+        """Return the record key of a document; a digest, so document ids never influence the path."""
+        return hashlib.sha256(doc_id.encode()).hexdigest()
+
+    def _get_record(self, *, job_id: str, doc_id: str) -> ResumptionRecord | None:
+        """Return the record of one document, or None when absent or unreadable."""
+        collection = self._collection(job_id=job_id)
+        try:
+            data = self._record_storage.get_record(collection=collection, key=self._key(doc_id=doc_id))
+            return ResumptionRecord.model_validate(data) if data is not None else None
+        except Exception as exc:
+            logger.warning("Ignoring unreadable resumption record: %s", type(exc).__name__)
+            return None
+
+    def _get_all_records(self, *, job_id: str) -> list[ResumptionRecord]:
+        """Return all readable records of a job."""
+        records = []
+        for data in self._record_storage.list_records(collection=self._collection(job_id=job_id)):
+            try:
+                records.append(ResumptionRecord.model_validate(data))
+            except Exception as exc:
+                logger.warning("Ignoring unreadable resumption record: %s", type(exc).__name__)
+        return records
+
+    def _save_record(self, *, job_id: str, record: ResumptionRecord) -> None:
+        """Create or replace the record of a document."""
+        self._record_storage.save_record(
+            collection=self._collection(job_id=job_id),
+            key=self._key(doc_id=record.doc_id),
+            data=record.model_dump(mode="json"),
+        )
+
+    def _delete_record(self, *, job_id: str, doc_id: str) -> None:
+        """Delete the record of a document; nothing happens when it does not exist."""
+        self._record_storage.delete_record(collection=self._collection(job_id=job_id), key=self._key(doc_id=doc_id))
 
     # ------------------------------------------------------------------ ingest side
 
@@ -81,7 +146,7 @@ class ResumptionService:
         * retries exhausted at any failed node        -> EXHAUSTED (not scheduled automatically)
         * otherwise                                   -> DEFER (resume at every failed node)
         """
-        record = self._store.get_record(job_id=job_id, doc_id=doc_id)
+        record = self._get_record(job_id=job_id, doc_id=doc_id)
         if record is None:
             return ResumptionDecision.FRESH, None
 
@@ -101,17 +166,17 @@ class ResumptionService:
 
     def discard(self, *, job_id: str, record: ResumptionRecord) -> None:
         """Delete a record."""
-        self._store.delete_record(job_id=job_id, doc_id=record.doc_id)
+        self._delete_record(job_id=job_id, doc_id=record.doc_id)
 
     def discard_all(self, *, job_id: str) -> None:
         """Delete every record of a job."""
-        for record in self._store.get_all_records(job_id=job_id).values():
+        for record in self._get_all_records(job_id=job_id):
             self.discard(job_id=job_id, record=record)
 
     def discard_all_for_ids(self, *, job_id: str, doc_ids: list[str]) -> None:
         """Delete records for the given documents (used by force ingest and unusable resumption entries)."""
         for doc_id in doc_ids:
-            record = self._store.get_record(job_id=job_id, doc_id=doc_id)
+            record = self._get_record(job_id=job_id, doc_id=doc_id)
             if record is not None:
                 self.discard(job_id=job_id, record=record)
 
@@ -267,7 +332,7 @@ class ResumptionService:
             ``(table, injected_ids, unavailable_entries)``. Entries whose saved output cannot be read or merged are
             returned in ``unavailable_entries`` so the caller can report them as failed.
         """
-        if self._output_reader is None:
+        if self._table_storage is None or self._output_table_name is None:
             return table, [], list(entries)
 
         groups: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
@@ -279,7 +344,7 @@ class ResumptionService:
         unavailable: list[dict[str, Any]] = []
         parts: list[pa.Table] = []
         for (job_run_id, node_name, output_index), group in groups.items():
-            rows = self._output_reader.read_rows(
+            rows = self._read_saved_rows(
                 job_run_id=job_run_id,
                 node_name=node_name,
                 output_index=output_index,
@@ -304,6 +369,33 @@ class ResumptionService:
             logger.warning("Failed to merge saved node output into node input: %s", type(exc).__name__)
             return table, [], list(entries)
         return merged, injected_ids, unavailable
+
+    def _read_saved_rows(
+        self,
+        *,
+        job_run_id: str,
+        node_name: str,
+        output_index: int,
+        doc_ids: list[str],
+    ) -> pa.Table | None:
+        """Read the rows of ``doc_ids`` from the saved output of a node; None when missing or unreadable."""
+        if self._table_storage is None or self._output_table_name is None:
+            return None
+        if not doc_ids or not _SAFE_ID.match(job_run_id) or job_run_id in {".", ".."}:
+            return None
+        table_name = self._output_table_name(job_run_id=job_run_id, node_name=node_name, output_index=output_index)
+        if '"' in table_name:
+            return None
+        placeholders = ", ".join("?" for _ in doc_ids)
+        query = f'SELECT * FROM "{table_name}" WHERE {OperatorConstants.Misc.ID} IN ({placeholders})'  # nosec B608 - the table name holds no quote; ids are bound parameters
+        try:
+            if not self._table_storage.table_exists(table_name=table_name):
+                return None
+            rows = self._table_storage.execute_query(query=query, params=list(doc_ids))
+        except Exception as exc:
+            logger.warning("Failed to read saved node output for resumption: %s", type(exc).__name__)
+            return None
+        return rows if rows.num_rows > 0 else None
 
     def record_failure(
         self,
@@ -335,7 +427,7 @@ class ResumptionService:
 
         if not doc_name and OperatorConstants.Misc.NAME in rows.column_names:
             doc_name = str(rows[OperatorConstants.Misc.NAME][0].as_py() or "")
-        existing = self._store.get_record(job_id=job_id, doc_id=doc_id)
+        existing = self._get_record(job_id=job_id, doc_id=doc_id)
         previous = existing.failed_node(node_id=node_id, node_name=node_name) if existing else None
         failure_count = previous.failure_count + 1 if previous else 1
         failed_node = FailedNode(
@@ -353,7 +445,7 @@ class ResumptionService:
             modified_time=self._modified_time(rows=rows),
             failed_nodes=[*others, failed_node],
         )
-        self._store.save_record(job_id=job_id, record=record)
+        self._save_record(job_id=job_id, record=record)
         logger.info(
             "Recorded failure %d for a document at node %s (exhausted=%s)",
             failure_count,
@@ -368,7 +460,7 @@ class ResumptionService:
         A record without any failed node left is deleted.
         """
         for doc_id in doc_ids:
-            record = self._store.get_record(job_id=job_id, doc_id=doc_id)
+            record = self._get_record(job_id=job_id, doc_id=doc_id)
             if record is None:
                 continue
             node = record.failed_node(node_id=node_id, node_name=node_name)
@@ -376,9 +468,9 @@ class ResumptionService:
                 continue
             remaining = [n for n in record.failed_nodes if n is not node]
             if remaining:
-                self._store.save_record(job_id=job_id, record=record.model_copy(update={"failed_nodes": remaining}))
+                self._save_record(job_id=job_id, record=record.model_copy(update={"failed_nodes": remaining}))
             else:
-                self._store.delete_record(job_id=job_id, doc_id=doc_id)
+                self._delete_record(job_id=job_id, doc_id=doc_id)
 
     @staticmethod
     def to_deferred_records(*, record: ResumptionRecord) -> list[DeferredRecord]:

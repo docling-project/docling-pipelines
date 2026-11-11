@@ -24,6 +24,17 @@ _FAILING_NODE_NAME = "failing_node"
 _FAILING_MARKER = 2
 
 
+def _records(*, job_id: str) -> dict:
+    """Return the resumption records of a job keyed by document id, read from the key-value storage."""
+    from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
+    from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
+    from docpipe.utils.infrastructure.filesystem import get_data_path
+
+    storage = KeyValueFileSystemStorage(base_dir=get_data_path())
+    records = (ResumptionRecord.model_validate(d) for d in storage.list_records(collection=f"{job_id}/resumption"))
+    return {record.doc_id: record for record in records}
+
+
 def _make_flow(*, docs_path: str, job_id: str, max_retry_attempts: int) -> dict:
     return {
         "flow_name": "integration-node-level-resumption",
@@ -91,8 +102,6 @@ class TestNodeLevelResumption:
         ).execute()
 
     def test_failed_documents_resume_at_failed_node(self, monkeypatch):
-        from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
-
         job_id = str(uuid.uuid4())
         fail = {"enabled": True}
         self._patch_noop(monkeypatch=monkeypatch, fail=fail)
@@ -102,7 +111,7 @@ class TestNodeLevelResumption:
         with pytest.raises(Exception):  # noqa: B017
             self._run(flow_def=flow_def, job_id=job_id)
 
-        records = FilesystemResumptionStore().get_all_records(job_id=job_id)
+        records = _records(job_id=job_id)
         assert records, "failed documents must have resumption records after run 1"
         failed_nodes = [node for record in records.values() for node in record.failed_nodes]
         assert all(len(record.failed_nodes) == 1 for record in records.values())
@@ -114,28 +123,25 @@ class TestNodeLevelResumption:
         fail["enabled"] = False
         self._run(flow_def=flow_def, job_id=job_id)
 
-        remaining = FilesystemResumptionStore().get_all_records(job_id=job_id)
+        remaining = _records(job_id=job_id)
         assert not remaining, "resumption state must be cleared after documents complete"
 
     def test_documents_are_exhausted_after_max_retries(self, monkeypatch):
-        from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
-
         job_id = str(uuid.uuid4())
         self._patch_noop(monkeypatch=monkeypatch, fail={"enabled": True})
         # max_retry_attempts=1 -> 1 initial attempt + 1 retry = 2 attempts.
         flow_def = _make_flow(docs_path=str(_FIXTURES_DIR), job_id=job_id, max_retry_attempts=1)
-        store = FilesystemResumptionStore()
 
         with pytest.raises(Exception):  # noqa: B017
             self._run(flow_def=flow_def, job_id=job_id)
-        first_run_ids = set(store.get_all_records(job_id=job_id))
+        first_run_ids = set(_records(job_id=job_id))
         assert first_run_ids
 
         # Run 2 resumes the same documents at the failing node (max_files only caps fresh documents).
         with pytest.raises(Exception):  # noqa: B017
             self._run(flow_def=flow_def, job_id=job_id)
 
-        records = store.get_all_records(job_id=job_id)
+        records = _records(job_id=job_id)
         for doc_id in first_run_ids:
             assert records[doc_id].exhausted
             (node,) = records[doc_id].failed_nodes
