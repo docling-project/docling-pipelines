@@ -31,16 +31,22 @@ class FlowBuilder:
         flow[global_config] < operator[config] < runtime params.
         """
         StreamFlowValidator.validate_json(flow=self.flow)
-        enriched_flow = self._flow_enrich()
-        flow_dag: list[dict] = enriched_flow[DocpipeConstants.DAG]
+        flow_dag: list[dict] = self.flow[DocpipeConstants.DAG]
 
         flow_graph: FlowGraph = FlowGraph()
         for operator in flow_dag:
+            config = {
+                **(self.flow.get(OperatorConstants.Config.GLOBAL_CONFIG) or {}),
+                **(operator.get(OperatorConstants.Config.CONFIG) or {}),
+                **self.params,
+                DocpipeConstants.NODE_ID: operator[OperatorConstants.Misc.ID],
+                DocpipeConstants.NODE_NAME: operator[OperatorConstants.Misc.NAME],
+            }
             node: Node = Node(
                 id=UUID(operator[OperatorConstants.Misc.ID]),
                 name=operator[OperatorConstants.Misc.NAME],
                 operator_name=operator[OperatorConstants.Misc.OPERATOR],
-                operator_config=operator[OperatorConstants.Config.CONFIG],
+                operator_config=config,
             )
             flow_graph.add_node(node=node)
 
@@ -54,6 +60,13 @@ class FlowBuilder:
                 flow_graph.add_edge(edge=edge)
 
         StreamFlowValidator.validate_graph(flow_graph=flow_graph)
+        FlowBuilder.sort_graph(flow_graph=flow_graph)
+
+        enriched_flow = self._flow_enrich()
+        for operator in enriched_flow[DocpipeConstants.DAG]:
+            node_id = UUID(operator[OperatorConstants.Misc.ID])
+            flow_graph.nodes[node_id].operator_config = operator[OperatorConstants.Config.CONFIG]
+
         return flow_graph
 
     def _flow_enrich(self) -> dict:
