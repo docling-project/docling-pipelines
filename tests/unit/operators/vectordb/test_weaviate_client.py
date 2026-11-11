@@ -348,6 +348,26 @@ class TestChainedExceptionsDoNotLeakSecrets:
         assert exc_info.value.__cause__ is None
         assert exc_info.value.__suppress_context__ is True
 
+    def test_invalid_index_parameters_traceback_has_no_secret(self) -> None:
+        """Pydantic echoes rejected input values, so the validation error must not stay on the chain."""
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import WeaviateIndexManager
+
+        client = MagicMock()
+        client.collections.exists.return_value = False
+        manager = WeaviateIndexManager(
+            client=client,
+            collection_name="TestDocs",
+            index_type="hnsw",
+            index_parameters={"ef_construction": self.SECRET},
+            secrets=[self.SECRET],
+        )
+        with pytest.raises(DocpipeException, match="Invalid index_parameters") as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 8})
+        assert exc_info.value.status_code == 400
+        rendered = "".join(traceback.format_exception(exc_info.value))
+        assert self.SECRET not in rendered
+        assert exc_info.value.__cause__ is None
+
     def test_logger_exception_has_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         from docpipe.core.operators.vectordb.adapters.outbound.weaviate.batch_processor import WeaviateBatchProcessor
 

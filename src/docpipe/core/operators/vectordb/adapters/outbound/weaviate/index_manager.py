@@ -395,7 +395,7 @@ class WeaviateIndexManager:
                         message=f"Invalid index_parameters for index_type '{self.index_type}': {self._redact(str(exc))}",
                         status_code=400,
                         error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-                    ) from exc
+                    ) from None
 
                 vector_config.append(
                     Configure.Vectors.self_provided(
