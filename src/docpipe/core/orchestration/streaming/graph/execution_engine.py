@@ -66,6 +66,10 @@ class GraphExecutionEngine:
             branches = output.metadata.get(OperatorConstants.Misc.BRANCHES, {})
             assert branch_id in branches, f"Branch '{branch_id}' not found in branching node '{source_node.name}'"
             result_index = branches[branch_id][OperatorConstants.Misc.RESULT_INDEX]
+        else:
+            assert len(output.tables) == 1, (
+                f"Expected single table from non-branching node '{source_node.name}', got {len(output.tables)}"
+            )
         return output.tables[result_index]
 
     def _get_merge_tables(self, node: Node) -> dict[str, pa.Table]:
