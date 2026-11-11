@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Registry-based factory that resolves a provider string to a ClassificationPort adapter.
 
 Design
@@ -19,6 +22,7 @@ selected directly by their ``ADAPTER_NAME``.
 from typing import Any, ClassVar
 
 from docpipe.core.operators.quality.classification.ports.outbound.classification_port import ClassificationPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -116,6 +120,7 @@ class ClassificationAdapterFactory:
             ValueError: When *provider* is deprecated, unrecognised, or when
                 the adapter's ``from_config`` raises.
         """
+        config = reveal_value(config)
         normalised = provider.lower()
         logger.debug("ClassificationAdapterFactory: resolving provider=%s", normalised)
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 OpenSearch Client
 Handles connection setup, authentication, and lifecycle management for OpenSearch.
@@ -12,6 +15,7 @@ from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 
 from docpipe.exceptions.docpipe_exceptions import TROUBLESHOOTING_DOCS_URL, DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.registry import register_secret
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -155,9 +159,11 @@ class OpenSearchClient:
                 connection_params["http_auth"] = ("Bearer", self.jwt_token)
             elif self.username and self.password:
                 connection_params["http_auth"] = (self.username, self.password)
+                # The Basic header is the base64 of this string, which the registry derives.
+                register_secret(value=f"{self.username}:{self.password}")
 
             self._client = OpenSearch(**connection_params)
-            logger.info(f"Connected to OpenSearch at {self.host}:{self.port}")
+            logger.info("Connected to OpenSearch at %s:%s", self.host, self.port)
 
             return self._client
         except Exception as exc:
@@ -196,10 +202,10 @@ class OpenSearchClient:
             parts: list[str] = version_string.split(".")
             version_tuple: tuple[int, int, int] = tuple(int(p) for p in parts[:3])  # type: ignore
             self._version = version_tuple
-            logger.info(f"OpenSearch version: {'.'.join(map(str, version_tuple))}")
+            logger.info("OpenSearch version: %s", ".".join(map(str, version_tuple)))
             return version_tuple
         except Exception as e:
-            logger.warning(f"Could not retrieve OpenSearch version: {e}")
+            logger.warning("Could not retrieve OpenSearch version: %s", e)
             self._version = (0, 0, 0)
             return (0, 0, 0)
 
@@ -215,7 +221,7 @@ class OpenSearchClient:
             client.info()
             return True
         except Exception as e:
-            logger.error(f"Connection test failed: {e}")
+            logger.error("Connection test failed: %s", e)
             return False
 
     def close(self) -> None:
@@ -225,7 +231,7 @@ class OpenSearchClient:
                 self._client.close()
                 logger.info("OpenSearch client connection closed")
             except Exception as e:
-                logger.warning(f"Error closing OpenSearch client: {e}")
+                logger.warning("Error closing OpenSearch client: %s", e)
             finally:
                 self._client = None
                 self._version = None

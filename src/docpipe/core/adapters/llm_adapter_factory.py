@@ -24,6 +24,7 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
 from docpipe.core.ports.text_detection_port import TextDetectionPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -116,6 +117,7 @@ class LLMAdapterFactory:
                 }
             )
         """
+        provider_config = reveal_value(provider_config)
         provider = provider.lower()
 
         if provider not in LLMAdapterFactory.INFERENCE_PROVIDERS:
@@ -205,6 +207,7 @@ class LLMAdapterFactory:
                 }
             )
         """
+        provider_config = reveal_value(provider_config)
         provider = provider.lower()
 
         if provider not in LLMAdapterFactory.EMBEDDING_PROVIDERS:

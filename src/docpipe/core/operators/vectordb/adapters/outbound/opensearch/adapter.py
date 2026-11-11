@@ -21,6 +21,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.opensearch.index_manager 
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -86,6 +87,7 @@ class OpenSearchAdapter(VectorStorePort):
                 - aws_region: AWS region for authentication
                 - jwt_token: JWT token for authentication
         """
+        adapter_config = reveal_value(adapter_config)
         # Extract operator-level parameters (added by VectorDBOperator)
         self.index_name = adapter_config.get(OperatorConstants.VectorDB.INDEX_NAME)
         if not self.index_name:
