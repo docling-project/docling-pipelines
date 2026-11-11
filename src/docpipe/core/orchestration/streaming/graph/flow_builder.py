@@ -55,7 +55,7 @@ class FlowBuilder:
                 )
                 flow_graph.add_edge(edge=edge)
 
-        FlowValidator.validate(flow_graph=flow_graph)
+        FlowValidator.validate(flow_graph=flow_graph, flow=self.flow)
         return flow_graph
 
     @staticmethod
