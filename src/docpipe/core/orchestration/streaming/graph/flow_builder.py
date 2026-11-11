@@ -4,6 +4,7 @@
 """Parser converting a compiled runtime flow into a FlowGraph."""
 
 from graphlib import TopologicalSorter
+from typing import Any
 from uuid import UUID
 
 from docpipe.core.constants.constants import DocpipeConstants
@@ -14,9 +15,9 @@ from docpipe.core.orchestration.streaming.graph.flow_validator import FlowValida
 class FlowBuilder:
     """Build a FlowGraph from a compiled runtime flow and runtime parameters."""
 
-    def __init__(self, flow: dict, params: dict):
-        self.flow: dict = flow
-        self.params: dict = params
+    def __init__(self, *, flow: dict[str, Any], params: dict[str, Any]) -> None:
+        self.flow: dict[str, Any] = flow
+        self.params: dict[str, Any] = params
 
     def build_graph(self) -> FlowGraph:
         """Parse runtime operators and connections, then validate the graph."""
