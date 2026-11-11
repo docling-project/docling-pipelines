@@ -357,9 +357,10 @@ def test_streaming_orchestrator_cycle_detection_fails():
         StreamingOrchestrator().execute(flow=flow, params={})
 
 
-def test_execution_engine_clears_buffer_on_failure(mocker):
-    # Output buffer is cleared when operator execution raises an exception.
-    from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExecutionEngine
+@pytest.mark.parametrize("execution_fails", [False, True], ids=["execution-success", "execution-failure"])
+@pytest.mark.parametrize("cleanup_fails", [False, True], ids=["cleanup-success", "cleanup-failure"])
+def test_execution_engine_cleans_all_operators(*, mocker, execution_fails: bool, cleanup_fails: bool) -> None:
+    """Cleanup preserves the outcome, continues after hook errors, and clears attempt-owned references."""
     from docpipe.core.orchestration.streaming.graph.flow_builder import FlowBuilder
 
     flow = {
@@ -381,18 +382,39 @@ def test_execution_engine_clears_buffer_on_failure(mocker):
         doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
         return [pa.Table.from_pylist([doc])], {}
 
-    mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
-    mocker.patch.object(ChunkerOperator, "transform", autospec=True, side_effect=RuntimeError("Operator boom"))
+    ingest_transform = mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
+    execution_error = RuntimeError("Operator boom")
+    chunker_transform = mocker.patch.object(ChunkerOperator, "transform", autospec=True)
+    chunker_transform.return_value = ([pa.table({"content": ["processed document"]})], {})
+    if execution_fails:
+        chunker_transform.side_effect = execution_error
+    ingest_cleanup = mocker.patch.object(IngestSourceOperator, "cleanup", autospec=True)
+    if cleanup_fails:
+        ingest_cleanup.side_effect = RuntimeError("Cleanup boom")
+    chunker_cleanup = mocker.patch.object(ChunkerOperator, "cleanup", autospec=True)
 
     builder = FlowBuilder(flow=flow, params={})
     flow_graph = builder.build_graph()
     ordered_ids = FlowBuilder.sort_graph(flow_graph=flow_graph)
     engine = GraphExecutionEngine(flow_graph=flow_graph, ordered_operator_ids=ordered_ids)
+    cleanup_warning = mocker.patch("docpipe.core.orchestration.streaming.graph.execution_engine.logger").warning
 
-    with pytest.raises(FlowExecutionFailedException, match="Operator boom"):
-        engine.execute()
+    if execution_fails:
+        with pytest.raises(FlowExecutionFailedException, match="Operator boom") as error:
+            engine.execute()
+        assert error.value.__cause__ is execution_error
+    else:
+        outputs = engine.execute()
+        assert outputs[NEXT_ID].tables[0].to_pydict() == {"content": ["processed document"]}
 
-    assert len(engine.output_buffer.data_buffer) == 0
+    ingest_cleanup.assert_called_once_with(ingest_transform.call_args.args[0])
+    chunker_cleanup.assert_called_once_with(chunker_transform.call_args.args[0])
+    assert engine._operators == []
+    assert engine.output_buffer.data_buffer == {}
+    if cleanup_fails:
+        cleanup_warning.assert_called_once_with("Operator cleanup failed for %s", "ingest_source", exc_info=True)
+    else:
+        cleanup_warning.assert_not_called()
 
 
 @pytest.mark.parametrize(
