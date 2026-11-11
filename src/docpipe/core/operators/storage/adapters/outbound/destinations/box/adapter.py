@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Box destination adapter — writes documents via the box-sdk-gen library."""
 
 from io import BytesIO
@@ -192,7 +195,7 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
 
         except Exception as e:
             msg = f"Unexpected error writing to Box '{destination_path}': {e}"
-            logger.error(msg, exc_info=True)
+            logger.exception("Unexpected error writing to Box '%s': %s", destination_path, e)
             return WriteResult(doc_id="", doc_name=destination_path, success=False, error_message=msg)
 
     def ensure_directory(self, *, path: str) -> None:
@@ -220,18 +223,31 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
     ) -> BoxDestinationConfig:
         """Build BoxDestinationConfig from operator flow params.
 
+        Accepts both "credentials_path" (primary, matching BoxDestinationConfig
+        and frontend UI) and the legacy "credentials_json_path" key inside
+        credentials or provider_config for backward compatibility with stored flows.
+
         Expected flow config shape::
 
             provider_config:
                 folder_id: "123456789"   # target Box folder ID; "0" = root
                 create_dirs: true
+                credentials_path: "${BOX_CONFIG_PATH}"
 
             credentials:
+                credentials_path: "${BOX_CONFIG_PATH}"
+                # or legacy:
                 credentials_json_path: "${BOX_CONFIG_PATH}"
         """
-        credentials_path = resolve_env_var(credentials.get("credentials_json_path"))
+        raw_path = (
+            credentials.get("credentials_path")
+            or credentials.get("credentials_json_path")
+            or provider_config.get("credentials_path")
+            or provider_config.get("credentials_json_path")
+        )
+        credentials_path = resolve_env_var(raw_path)
         if not credentials_path:
-            raise ValueError("Missing required Box credential: 'credentials_json_path'")
+            raise ValueError("Missing required Box credential: 'credentials_path'")
 
         folder_id = resolve_env_var(provider_config.get("folder_id")) or "0"
 
