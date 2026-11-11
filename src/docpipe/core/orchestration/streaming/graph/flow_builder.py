@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from docpipe.core.constants.constants import DocpipeConstants
+from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.streaming.graph.flow_model import Edge, FlowGraph, Node
 from docpipe.core.orchestration.streaming.graph.flow_validator import FlowValidator
 
@@ -20,32 +21,36 @@ class FlowBuilder:
         self.params: dict[str, Any] = params
 
     def build_graph(self) -> FlowGraph:
-        """Parse runtime operators and connections, then validate the graph."""
+        """Parse runtime operators and connections, then validate the graph.
+
+        Configuration is merged with precedence:
+        flow[global_config] < operator[config] < runtime params.
+        """
         flow_dag: list[dict] = self.flow[DocpipeConstants.DAG]
 
         flow_graph: FlowGraph = FlowGraph()
         for operator in flow_dag:
             config: dict = {
-                **(self.flow.get("global_config") or {}),
-                **(operator.get("config") or {}),
+                **(self.flow.get(OperatorConstants.Config.GLOBAL_CONFIG) or {}),
+                **(operator.get(OperatorConstants.Config.CONFIG) or {}),
                 **self.params,
-                DocpipeConstants.NODE_ID: operator["id"],
-                DocpipeConstants.NODE_NAME: operator["name"],
+                DocpipeConstants.NODE_ID: operator[OperatorConstants.Misc.ID],
+                DocpipeConstants.NODE_NAME: operator[OperatorConstants.Misc.NAME],
             }
 
             node: Node = Node(
-                id=UUID(operator["id"]),
-                name=operator["name"],
-                operator_name=operator["operator"],
+                id=UUID(operator[OperatorConstants.Misc.ID]),
+                name=operator[OperatorConstants.Misc.NAME],
+                operator_name=operator[OperatorConstants.Misc.OPERATOR],
                 operator_config=config,
             )
             flow_graph.add_node(node=node)
 
         for operator in flow_dag:
-            for output_edge in operator["output_edges"]:
+            for output_edge in operator[DocpipeConstants.OUTPUT_EDGES]:
                 edge = Edge(
-                    source_id=UUID(operator["id"]),
-                    target_id=UUID(output_edge["node_id_ref"]),
+                    source_id=UUID(operator[OperatorConstants.Misc.ID]),
+                    target_id=UUID(output_edge[DocpipeConstants.NODE_ID_REF]),
                     branch_id=output_edge.get(DocpipeConstants.LINK_NAME, None),
                 )
                 flow_graph.add_edge(edge=edge)

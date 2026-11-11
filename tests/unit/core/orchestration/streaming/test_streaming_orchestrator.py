@@ -495,3 +495,40 @@ def test_streaming_orchestrator_branching_and_merging(mocker, monkeypatch):
             "embeddings": [[0.13, 0.5, 0.25], [0.27, 0.5, 0.25], [0.21, 0.5, 0.25]],
         },
     ]
+
+
+def test_flow_builder_config_precedence():
+    """Verify configuration precedence: global_config < operator config < runtime params."""
+    from docpipe.core.orchestration.streaming.graph.flow_builder import FlowBuilder
+
+    node_id = UUID("00000000-0000-0000-0000-000000000001")
+    flow = {
+        "name": "precedence-flow",
+        "global_config": {
+            "setting_a": "from_global",
+            "setting_b": "from_global",
+            "setting_c": "from_global",
+        },
+        "dag": [
+            {
+                "id": str(node_id),
+                "name": "test_chunker",
+                "operator": "chunker",
+                "config": {
+                    "setting_b": "from_operator",
+                    "setting_c": "from_operator",
+                },
+                "input_edges": [],
+                "output_edges": [],
+            }
+        ],
+    }
+    params = {"setting_c": "from_params"}
+
+    builder = FlowBuilder(flow=flow, params=params)
+    graph = builder.build_graph()
+
+    operator_config = graph.nodes[node_id].operator_config
+    assert operator_config["setting_a"] == "from_global"
+    assert operator_config["setting_b"] == "from_operator"
+    assert operator_config["setting_c"] == "from_params"
