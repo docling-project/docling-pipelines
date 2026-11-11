@@ -76,6 +76,7 @@ def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
 
 def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
     """A branching node that receives an empty table is skipped and every branch gets the empty table."""
+    second_sink_id = UUID("00000000-0000-0000-0000-000000000004")
     flow = {
         "name": "empty-branching-flow",
         "dag": [
@@ -91,9 +92,12 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
                 NEXT_ID,
                 "branch_by_format",
                 "branching",
-                {"branches": {"branch_1": {"link_name": "pdf_documents"}}},
+                {"branches": [{"link_id": "branch_1"}, {"link_id": "branch_2"}]},
                 [{"node_id_ref": str(INGEST_ID)}],
-                [{"node_id_ref": str(LAST_ID), "link_name": "branch_1"}],
+                [
+                    {"node_id_ref": str(LAST_ID), "link_name": "branch_1"},
+                    {"node_id_ref": str(second_sink_id), "link_name": "branch_2"},
+                ],
             ),
             _node(
                 LAST_ID,
@@ -101,6 +105,14 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
                 "chunker",
                 CHUNKER_CONFIG,
                 [{"node_id_ref": str(NEXT_ID), "link_name": "branch_1"}],
+                [],
+            ),
+            _node(
+                second_sink_id,
+                "simple_chunker_2",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(NEXT_ID), "link_name": "branch_2"}],
                 [],
             ),
         ],
@@ -124,13 +136,43 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
         Metrics.External.SKIPPED_DOCS_COUNT: 0,
         Metrics.External.SKIPPED_DOCS: [],
         Metrics.External.NODE_STATUS: ExecutionStatus.COMPLETED.value,
-        OperatorConstants.Misc.BRANCHES: {"branch_1": {OperatorConstants.Misc.RESULT_INDEX: 0}},
+        OperatorConstants.Misc.BRANCHES: {
+            "branch_1": {OperatorConstants.Misc.RESULT_INDEX: 0},
+            "branch_2": {OperatorConstants.Misc.RESULT_INDEX: 0},
+        },
     }
     assert len(branch_output.tables) == 1
     assert branch_output.tables[0].num_rows == 0
-    assert list(outputs) == [LAST_ID]
+    assert list(outputs) == [LAST_ID, second_sink_id]
     (table,) = outputs[LAST_ID].tables
     assert table.num_rows == 0
+
+
+def test_streaming_orchestrator_rejects_unknown_branch_before_execution(mocker):
+    """A mismatched branch route fails graph validation before any transform runs."""
+    flow = {
+        "name": "invalid-branch-route",
+        "dag": [
+            _node(INGEST_ID, "source", "ingest_source", INGEST_CONFIG, [], [{"node_id_ref": str(NEXT_ID)}]),
+            _node(
+                NEXT_ID,
+                "branch_by_format",
+                "branching",
+                {"branches": [{"link_id": "configured"}, {"link_id": "other"}]},
+                [{"node_id_ref": str(INGEST_ID)}],
+                [{"node_id_ref": str(LAST_ID), "link_name": "unknown"}],
+            ),
+            _node(LAST_ID, "sink", "chunker", CHUNKER_CONFIG, [{"node_id_ref": str(NEXT_ID)}], []),
+        ],
+    }
+    ingest_transform = mocker.patch.object(IngestSourceOperator, "transform", autospec=True)
+    branching_transform = mocker.patch.object(BranchingOperator, "transform", autospec=True)
+
+    with pytest.raises(ValueError, match=r"branch_by_format.*configured branch IDs do not match outgoing edges"):
+        StreamingOrchestrator().execute(flow=flow, params={})
+
+    ingest_transform.assert_not_called()
+    branching_transform.assert_not_called()
 
 
 def test_streaming_orchestrator_unknown_operator_fails(mocker):

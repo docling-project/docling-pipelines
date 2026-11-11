@@ -21,11 +21,12 @@ class FlowBuilder:
         self.params: dict[str, Any] = params
 
     def build_graph(self) -> FlowGraph:
-        """Parse runtime operators and connections, then validate the graph.
+        """Validate the runtime definition, construct its graph, and validate graph relationships.
 
         Configuration is merged with precedence:
         flow[global_config] < operator[config] < runtime params.
         """
+        StreamFlowValidator.validate_json(flow=self.flow)
         flow_dag: list[dict] = self.flow[DocpipeConstants.DAG]
 
         flow_graph: FlowGraph = FlowGraph()
@@ -55,7 +56,7 @@ class FlowBuilder:
                 )
                 flow_graph.add_edge(edge=edge)
 
-        StreamFlowValidator.validate(flow_graph=flow_graph, flow=self.flow)
+        StreamFlowValidator.validate_graph(flow_graph=flow_graph)
         return flow_graph
 
     @staticmethod

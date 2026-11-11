@@ -260,7 +260,8 @@ def _branching_transform(self, table, *args, **kwargs):
     """Mimic ``BranchingOperator``: one filtered table per branch, in the order the branches are configured."""
     tables = []
     branches = {}
-    for index, (branch_id, branch) in enumerate(self.branch_criteria.items()):
+    for index, branch in enumerate(self.branch_criteria):
+        branch_id = branch["link_id"]
         criteria = branch["criteria_json"]
         # PyArrow exposes generated compute kernels at runtime, but Mypy does not see them in its module stub.
         rows = table.filter(pc.equal(table[criteria["variable"]], criteria["value"]))  # type: ignore[attr-defined]
@@ -317,16 +318,18 @@ def test_streaming_orchestrator_branching_and_merging(mocker, monkeypatch):
                 "name": "branch_by_format",
                 "operator": "branching",
                 "config": {
-                    "branches": {
-                        "branch_1": {
+                    "branches": [
+                        {
+                            "link_id": "branch_1",
                             "link_name": "pdf_documents",
                             "criteria_json": {"variable": "document_format", "operator": "=", "value": ".pdf"},
                         },
-                        "branch_2": {
+                        {
+                            "link_id": "branch_2",
                             "link_name": "text_documents",
                             "criteria_json": {"variable": "document_format", "operator": "=", "value": ".txt"},
                         },
-                    },
+                    ],
                 },
                 "input_edges": [{"node_id_ref": str(extract_id)}],
                 "output_edges": [
