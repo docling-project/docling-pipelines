@@ -16,6 +16,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_fa
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -297,6 +298,7 @@ class BoxSourceAdapter(DocumentSourcePort):
         Accepts both "credentials_path" and the legacy "credentials_json_path" key
         inside provider_config for backward compatibility with stored configs.
         """
+        provider_config = reveal_value(provider_config)
         credentials_json = provider_config.get("credentials_json")
         credentials_path = provider_config.get("credentials_json_path") or provider_config.get("credentials_path")
 
@@ -337,6 +339,7 @@ class BoxSourceAdapter(DocumentSourcePort):
         Returns:
             bytes | None: Binary content of the Box file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             # Extract file ID from URL if needed
             # Box URLs are in format: https://app.box.com/file/{file_id}

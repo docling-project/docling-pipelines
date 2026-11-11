@@ -14,11 +14,10 @@ from docpipe.integrations.secrets.node_config import (
     ResolvedNodeConfig,
     prepare_operator_config,
     resolve_operator_config,
-    reveal_secret_values,
 )
 from docpipe.integrations.secrets.resolver import SecretResolutionError
 from docpipe.integrations.secrets.secret_provider import clear_providers, register_provider
-from docpipe.integrations.secrets.secret_value import SecretValue
+from docpipe.integrations.secrets.secret_value import SecretValue, reveal_value
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from tests.unit.integrations.secrets.test_resolver import RecordingProvider
 
@@ -119,14 +118,16 @@ class TestResolveOperatorConfig:
 
 
 class TestPrepareOperatorConfig:
-    def test_returns_plain_values_marked_as_resolved(self, provider: RecordingProvider) -> None:
+    def test_returns_opaque_values_marked_as_resolved(self, provider: RecordingProvider) -> None:
         _allow_all()
 
         prepared = prepare_operator_config(operator_class=IngestSourceOperator, config=_ingest_config())
 
         assert isinstance(prepared, ResolvedNodeConfig)
-        assert prepared["provider_config"]["secret_key"] == CANARY
-        assert type(prepared["provider_config"]["secret_key"]) is str
+        secret_key = prepared["provider_config"]["secret_key"]
+        assert isinstance(secret_key, SecretValue)
+        assert secret_key.reveal() == CANARY
+        assert CANARY not in repr(prepared)
 
     def test_second_pass_makes_no_provider_call(self, provider: RecordingProvider) -> None:
         _allow_all()
@@ -146,7 +147,9 @@ class TestPrepareOperatorConfig:
         prepared = prepare_operator_config(operator_class=IngestSourceOperator, config=_ingest_config())
         prepare_operator_config(operator_class=IngestSourceOperator, config=prepared)
 
-        assert prepared["provider_config"]["secret_key"] == "vault://other/path#key"  # pragma: allowlist secret
+        assert (
+            prepared["provider_config"]["secret_key"].reveal() == "vault://other/path#key"
+        )  # pragma: allowlist secret
         assert len(fake.calls) == 1
 
     def test_does_not_change_the_callers_config(self, provider: RecordingProvider) -> None:
@@ -163,23 +166,26 @@ class TestPrepareOperatorConfig:
         assert prepare_operator_config(operator_class=NOOPOperator, config=config) is config
 
 
-class TestRevealSecretValues:
+class TestRevealValue:
     def test_reveals_nested_values_in_a_copy(self) -> None:
-        config = {"a": SecretValue(value="one"), "b": {"c": [SecretValue(value="two"), "three"]}}
+        config = {
+            "a": SecretValue(value="one"),
+            "b": {"c": [SecretValue(value="two"), "three"]},
+            "d": (SecretValue(value="four"),),
+        }
 
-        revealed = reveal_secret_values(config=config)
+        revealed = reveal_value(config)
 
-        assert revealed == {"a": "one", "b": {"c": ["two", "three"]}}
+        assert revealed == {"a": "one", "b": {"c": ["two", "three"]}, "d": ("four",)}
         assert isinstance(config["a"], SecretValue)
 
-    def test_config_without_secret_values_is_returned_as_is(self) -> None:
-        config = {"a": "x"}
-
-        assert reveal_secret_values(config=config) is config
+    def test_plain_values_pass_through(self) -> None:
+        assert reveal_value("x") == "x"
+        assert reveal_value(None) is None
 
 
 class TestDirectConstruction:
-    def test_direct_construction_receives_resolved_plain_values(self, provider: RecordingProvider) -> None:
+    def test_direct_construction_receives_resolved_opaque_values(self, provider: RecordingProvider) -> None:
         _allow_all()
         seen: dict[str, Any] = {}
 
@@ -196,8 +202,8 @@ class TestDirectConstruction:
 
         Recording(config={"name": "noop_a", "token": REFERENCE})
 
-        assert seen["token"] == CANARY
-        assert type(seen["token"]) is str
+        assert isinstance(seen["token"], SecretValue)
+        assert seen["token"].reveal() == CANARY
         assert len(provider.calls) == 1
 
     def test_direct_construction_is_denied_by_default(self, provider: RecordingProvider) -> None:

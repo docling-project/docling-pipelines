@@ -18,6 +18,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.milvus.client import Milv
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import MilvusConfig
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import MilvusIndexManager
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -81,6 +82,7 @@ class MilvusAdapter(VectorStorePort):
                 - metric_type: Similarity metric (L2, IP, COSINE)
                 - index_parameters: Index-specific parameters
         """
+        adapter_config = reveal_value(adapter_config)
         # collection_name is now part of provider_config — read it from config
         self.collection_name = adapter_config.get(OperatorConstants.VectorDB.COLLECTION_NAME)
         if not self.collection_name:

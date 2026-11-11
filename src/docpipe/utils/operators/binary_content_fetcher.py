@@ -82,12 +82,12 @@ def _resolve_ingest_provider_config(
     values that did not.
 
     Returns:
-        The plain provider configuration and the digest that identifies it in the caches.
+        The provider configuration (resolved values stay opaque; the adapter reveals them
+        when it builds its client) and the digest that identifies it in the caches.
     """
     from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
     from docpipe.core.operators.operator_utils import resolve_env_var
-    from docpipe.integrations.secrets.node_config import resolve_operator_config, reveal_secret_values
-    from docpipe.integrations.secrets.secret_value import SecretValue
+    from docpipe.integrations.secrets.node_config import resolve_operator_config
 
     node_config = _find_ingest_node_config(global_config=global_config, ingest_source=ingest_source)
     if node_config is not None:
@@ -115,11 +115,8 @@ def _resolve_ingest_provider_config(
         },
     )[OperatorConstants.Config.PROVIDER_CONFIG]
     expanded = {key: resolve_env_var(value) if isinstance(value, str) else value for key, value in resolved.items()}
-    plain: dict[str, Any] = reveal_secret_values(config=expanded)
-    if any(isinstance(value, SecretValue) for value in plain.values()):  # pragma: no cover - defensive
-        raise RuntimeError("provider configuration still holds an unrevealed secret")
-    _provider_config_cache[digest] = plain
-    return plain, digest
+    _provider_config_cache[digest] = expanded
+    return expanded, digest
 
 
 def get_binary_content(

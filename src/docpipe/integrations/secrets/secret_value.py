@@ -72,6 +72,12 @@ class SecretValue:
     def __deepcopy__(self, memo: Any) -> "SecretValue":
         return self
 
+    def __bool__(self) -> bool:
+        # The resolver rejects an empty value, so a SecretValue is always set.
+        # Defining this keeps ``if not secret_key`` working instead of falling
+        # back to ``__len__``, which raises by design.
+        return True
+
     def __iter__(self) -> NoReturn:
         msg = "SecretValue is not iterable"
         raise TypeError(msg)
@@ -85,6 +91,24 @@ class SecretValue:
 
     def __hash__(self) -> int:
         return id(self)
+
+
+def reveal_value(value: Any) -> Any:
+    """Return ``value`` with every ``SecretValue`` in it replaced by its underlying secret.
+
+    Walks dicts, lists and tuples; any other value is returned as is. Like
+    :meth:`SecretValue.reveal`, call this only at a client-construction point inside an
+    adapter module. The pre-commit hook ``check-secret-reveal`` enforces that.
+    """
+    if isinstance(value, SecretValue):
+        return value.reveal()
+    if isinstance(value, dict):
+        return {key: reveal_value(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [reveal_value(child) for child in value]
+    if isinstance(value, tuple):
+        return tuple(reveal_value(child) for child in value)
+    return value
 
 
 def secret_json_default(obj: Any) -> str:

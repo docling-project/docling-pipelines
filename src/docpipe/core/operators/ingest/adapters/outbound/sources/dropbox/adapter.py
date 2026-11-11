@@ -19,6 +19,7 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -266,6 +267,7 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
         max_files: int | None = None,
     ) -> DropboxSourceConfig:
         """Build the Dropbox configuration from operator parameters."""
+        provider_config = reveal_value(provider_config)
         params = provider_config
 
         config_dict: dict[str, Any] = {
@@ -311,6 +313,7 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
         Raises:
             ValueError: If source_id is empty
         """
+        provider_config = reveal_value(provider_config)
         if not source_id:
             raise ValueError("Missing source_id for Dropbox binary content fetch")
 

@@ -16,6 +16,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.filesystem.co
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -118,6 +119,8 @@ class FilesystemDestinationAdapter(DestinationAdapterPort[FilesystemDestinationC
         credentials: dict[str, Any],
     ) -> FilesystemDestinationConfig:
         """Build config from operator params."""
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
         return FilesystemDestinationConfig(
             root_path=provider_config["root_path"],
             create_dirs=provider_config.get("create_dirs", True),
