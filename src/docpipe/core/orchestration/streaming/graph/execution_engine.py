@@ -19,7 +19,7 @@ from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOut
 class GraphExecutionEngine:
     """Executes a dependency-ordered operator graph and returns terminal outputs."""
 
-    def __init__(self, flow_graph: FlowGraph, ordered_operator_ids: list[UUID]):
+    def __init__(self, *, flow_graph: FlowGraph, ordered_operator_ids: list[UUID]) -> None:
         self.flow_graph = flow_graph
         self.ordered_operator_ids = ordered_operator_ids
         self.operator_factory: OperatorFactory = OperatorFactoryProvider.get_operator_factory(
@@ -57,7 +57,7 @@ class GraphExecutionEngine:
         finally:
             self.output_buffer.clear()
 
-    def _get_input_table(self, source_id: UUID, branch_id: str | None = None) -> pa.Table:
+    def _get_input_table(self, *, source_id: UUID, branch_id: str | None = None) -> pa.Table:
         """Read a source output, selecting the connected branch when applicable."""
         source_node = self.flow_graph.nodes[source_id]
         output = self.output_buffer.get_output(source_id)
@@ -75,26 +75,26 @@ class GraphExecutionEngine:
             input_tables[input_name] = self._get_input_table(source_id=source_id, branch_id=input_name)
         return input_tables
 
-    def _execute_branching_node(self, node: Node, input_table: pa.Table) -> OperatorOutput:
+    def _execute_branching_node(self, *, node: Node, input_table: pa.Table) -> OperatorOutput:
         """Run a branching node or resolve its empty input into empty branch outputs."""
         if input_table is not None and input_table.num_rows == 0:
             branches = {edge.branch_id: {"result_index": 0} for edge in self.flow_graph.get_output_edges(node.id)}
             return OperatorOutput(tables=[input_table], metadata={OperatorConstants.Misc.BRANCHES: branches})
         return self._execute_node(node=node, input_table=input_table)
 
-    def _execute_merging_node(self, node: Node, input_tables: dict[str, pa.Table]) -> OperatorOutput:
+    def _execute_merging_node(self, *, node: Node, input_tables: dict[str, pa.Table]) -> OperatorOutput:
         """Run the merge operator with its resolved input tables."""
         operator = MergeOperator(config=node.operator_config)
         output_tables, metadata = operator.transform(table=pa.table({}), tables=input_tables)
         return OperatorOutput(tables=output_tables, metadata=metadata)
 
-    def _execute_simple_node(self, node: Node, input_table: pa.Table) -> OperatorOutput:
+    def _execute_simple_node(self, *, node: Node, input_table: pa.Table) -> OperatorOutput:
         """Run a linear node or pass its empty input through."""
         if input_table is not None and input_table.num_rows == 0:
             return OperatorOutput(tables=[input_table], metadata={})
         return self._execute_node(node=node, input_table=input_table)
 
-    def _execute_node(self, node: Node, input_table: pa.Table | None) -> OperatorOutput:
+    def _execute_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run one operator and return its first output table with execution metadata."""
         operator_class: type[AbstractOperator] | None = self.operator_factory.get_operator(
             operator_name=node.operator_name
