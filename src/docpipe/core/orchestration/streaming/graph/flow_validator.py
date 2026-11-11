@@ -3,6 +3,9 @@
 
 """Validation for flow graphs."""
 
+from uuid import UUID
+
+from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph
 
@@ -31,9 +34,21 @@ class FlowValidator:
 
         # Merge nodes require multiple inputs; other nodes accept at most one.
         for node in flow_graph.nodes.values():
-            input_count = len(flow_graph.get_input_edges(node.id))
+            input_edges = flow_graph.get_input_edges(node.id)
+            input_count = len(input_edges)
             if node.operator_name == OperatorConstants.Operators.MERGE:
                 if input_count < 2:
                     raise ValueError(f"Merge node '{node.name}' requires at least two incoming edges.")
+
+                # Ensure merge input links in operator config exactly match the incoming graph edges.
+                input_links = node.operator_config.get(OperatorConstants.Merge.INPUT_LINKS, [])
+                incoming_source_ids = {edge.source_id for edge in input_edges}
+                configured_source_ids = {
+                    UUID(link[DocpipeConstants.NODE_ID_REF])
+                    for link in input_links
+                    if DocpipeConstants.NODE_ID_REF in link
+                }
+                if incoming_source_ids != configured_source_ids:
+                    raise ValueError(f"Merge node '{node.name}' input_links do not match incoming edges.")
             elif input_count > 1:
                 raise ValueError(f"Non-merge node '{node.name}' cannot have multiple incoming edges.")
