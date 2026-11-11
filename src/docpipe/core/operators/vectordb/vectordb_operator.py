@@ -174,9 +174,20 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             # validate() reads only the config schema); no server sees the stand-in.
             if not self._holds_validation_sentinel(config=config):
                 self.adapter = VectorStoreFactory.create(self.provider, **adapter_config)
-        except DocpipeException:
-            # Already a docpipe exception with its own status/error code and message: do not wrap it again.
-            raise
+        except DocpipeException as e:
+            # Keep the adapter's own status/error code and do not wrap it again. A client library's text can
+            # sit in its message (a connection failure quotes the URI), so it is sanitized; an exception whose
+            # message is already safe is re-raised as it is.
+            safe_message = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            if safe_message == str(e):
+                raise
+            raise DocpipeException(
+                message=safe_message,
+                status_code=e.status_code,
+                error_code=e.error_code,
+                message_code=e.message_code,
+                more_info=e.more_info,
+            ) from e
         except Exception as e:
             safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
             raise DocpipeException(
