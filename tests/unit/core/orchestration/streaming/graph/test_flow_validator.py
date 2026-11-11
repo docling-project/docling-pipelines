@@ -192,3 +192,20 @@ class TestGraphFlowValidator:
             match=_exact("Non-merge node 'opensearch_vector_store' cannot have multiple incoming edges."),
         ):
             FlowValidator.validate(flow_graph=multi_input_non_merge)
+
+    def test_duplicate_node_ids_in_flow_fail(self):
+        # A flow containing duplicate node IDs is rejected.
+        graph = _graph(
+            nodes=[
+                (NODE_IDS[0], "node_1", "chunker"),
+            ],
+            edges=[],
+        )
+        flow = {
+            "dag": [
+                {"id": str(NODE_IDS[0]), "name": "node_1"},
+                {"id": str(NODE_IDS[0]), "name": "node_2"},
+            ]
+        }
+        with pytest.raises(ValueError, match=_exact(f"Duplicate node id: '{NODE_IDS[0]}'.")):
+            FlowValidator.validate(flow_graph=graph, flow=flow)

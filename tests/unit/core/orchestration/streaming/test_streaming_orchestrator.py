@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pytest
 
 from docpipe.core.operators.extract.extract_operator import ExtractOperator
 from docpipe.core.operators.functional.branching_operator import BranchingOperator
@@ -532,3 +533,30 @@ def test_flow_builder_config_precedence():
     assert operator_config["setting_a"] == "from_global"
     assert operator_config["setting_b"] == "from_operator"
     assert operator_config["setting_c"] == "from_params"
+
+
+def test_flow_builder_duplicate_node_ids_fail():
+    # Verify FlowBuilder rejects flow DAGs containing duplicate node IDs.
+    from docpipe.core.orchestration.streaming.graph.flow_builder import FlowBuilder
+
+    node_id = UUID("00000000-0000-0000-0000-000000000001")
+    flow = {
+        "name": "duplicate-node-flow",
+        "dag": [
+            {
+                "id": str(node_id),
+                "name": "node_1",
+                "operator": "chunker",
+                "output_edges": [],
+            },
+            {
+                "id": str(node_id),
+                "name": "node_2",
+                "operator": "chunker",
+                "output_edges": [],
+            },
+        ],
+    }
+    builder = FlowBuilder(flow=flow, params={})
+    with pytest.raises(ValueError, match=f"^Duplicate node id: '{node_id}'.$"):
+        builder.build_graph()

@@ -3,6 +3,7 @@
 
 """Validation for flow graphs."""
 
+from typing import Any
 from uuid import UUID
 
 from docpipe.core.constants.constants import DocpipeConstants
@@ -14,8 +15,20 @@ class FlowValidator:
     """Validate graph structure."""
 
     @staticmethod
-    def validate(*, flow_graph: FlowGraph) -> None:
+    def validate(*, flow_graph: FlowGraph, flow: dict[str, Any] | None = None) -> None:
         """Validate the completed graph's nodes and edge endpoints."""
+
+        # Ensure flow definition contains no duplicate node IDs.
+        if flow is not None:
+            flow_dag: list[dict[str, Any]] = flow.get(DocpipeConstants.DAG, [])
+            if len(flow_dag) != len(flow_graph.nodes):
+                seen_ids: set[str] = set()
+                for operator in flow_dag:
+                    node_id = str(operator.get(OperatorConstants.Misc.ID))
+                    if node_id in seen_ids:
+                        raise ValueError(f"Duplicate node id: '{node_id}'.")
+                    seen_ids.add(node_id)
+
         # Ensure the parsed graph contains at least one node.
         if not flow_graph.nodes:
             raise ValueError("A flow must contain at least one node.")
