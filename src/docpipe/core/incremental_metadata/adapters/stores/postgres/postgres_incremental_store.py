@@ -247,6 +247,8 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
 
     def unmark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str] | None = None) -> None:
         """Unmark soft-deleted documents, setting deleted flag back to False."""
+        if doc_ids is not None and not doc_ids:
+            return
         try:
             with self._session_factory() as session:
                 query = select(IncrementalMetadataPostgresModel).where(

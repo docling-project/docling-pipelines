@@ -253,7 +253,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                 new_doc_ids = {r.doc_id for r in records}
 
                 # Filter out existing records that will be updated
-                mask = pc.invert(pc.is_in(existing_table["id"], pa.array(list(new_doc_ids))))  # type: ignore[attr-defined]
+                mask = pc.invert(pc.is_in(existing_table["id"], pa.array(list(new_doc_ids), type=pa.string())))  # type: ignore[attr-defined]
                 filtered_existing = existing_table.filter(mask)
 
                 # Concatenate filtered existing with new records
@@ -304,7 +304,9 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
 
                 # Find documents not in current list and not already deleted
                 mask_not_deleted = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
-                mask_not_in_current = pc.invert(pc.is_in(table["id"], pa.array(list(current_doc_ids))))  # type: ignore[attr-defined]
+                mask_not_in_current = pc.invert(
+                    pc.is_in(table["id"], pa.array(list(current_doc_ids), type=pa.string()))
+                )  # type: ignore[attr-defined]
                 mask_to_delete = pc.and_(mask_not_deleted, mask_not_in_current)  # type: ignore[attr-defined]
 
                 # Get doc_ids to mark as deleted
@@ -338,7 +340,9 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                     return
 
                 if doc_ids is not None:
-                    mask_in_target = pc.is_in(table["id"], pa.array(doc_ids))  # type: ignore[attr-defined]
+                    if not doc_ids:
+                        return
+                    mask_in_target = pc.is_in(table["id"], pa.array(doc_ids, type=pa.string()))  # type: ignore[attr-defined]
                     mask_unmark = pc.and_(table["deleted"], mask_in_target)  # type: ignore[attr-defined]
                 else:
                     mask_unmark = pc.equal(table["deleted"], True)  # type: ignore[attr-defined]
@@ -401,7 +405,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
                     return
 
                 # Filter out documents to delete
-                mask = pc.invert(pc.is_in(table["id"], pa.array(doc_ids)))  # type: ignore[attr-defined]
+                mask = pc.invert(pc.is_in(table["id"], pa.array(doc_ids, type=pa.string())))  # type: ignore[attr-defined]
                 filtered_table = table.filter(mask)
 
                 if filtered_table.num_rows == 0:

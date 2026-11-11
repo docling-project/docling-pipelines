@@ -673,8 +673,17 @@ class AbstractOrchestrator(ABC):
         if executor.get_operator().category != OperatorCategory.Ingest:
             # Special case to delete the data from vector store when input documents are deleted,
             # and no new documents are added for this flow execution
-            if executor.get_operator().category == OperatorCategory.VectorDB and deleted_docs_count > 0:
-                return False
+            if executor.get_operator().category == OperatorCategory.VectorDB:
+                if deleted_docs_count > 0:
+                    return False
+                if self.job_id:
+                    try:
+                        from docpipe.core.incremental_metadata import get_incremental_update_service
+
+                        if get_incremental_update_service().get_soft_deleted_doc_ids(job_id=self.job_id):
+                            return False
+                    except Exception as e:
+                        self.logger.debug("Failed to retrieve soft-deleted doc IDs during skip evaluation: %s", e)
             if all_tables_are_empty():
                 return True
         return False
@@ -1333,14 +1342,17 @@ class AbstractOrchestrator(ABC):
         # Populate global_config with ingest_source params for lazy binary loading
         self._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
 
-        deleted_docs_count = ingest_results.internal_metadata.get(Metrics.Internal.DELETED_FROM_LAST_RUN, 0)
+        incremental_service = get_incremental_update_service()
+        doc_ids = ingest_results.internal_metadata.get(Metrics.Internal.ALL_DOC_IDS, [])
+        deleted_doc_ids = (
+            incremental_service.process_ingested_docs(config=global_config, job_id=self.job_id, doc_ids=doc_ids)
+            or set()
+        )
+        deleted_docs_count = len(deleted_doc_ids)
+        ingest_results.internal_metadata[Metrics.Internal.DELETED_FROM_LAST_RUN] = deleted_docs_count
         self.message = self._get_ingest_summary_message(
             output_table=ingest_results.tables[0], deleted_docs_count=deleted_docs_count, operator=ingest_operator
         )
-
-        incremental_service = get_incremental_update_service()
-        doc_ids = ingest_results.internal_metadata.get(Metrics.Internal.ALL_DOC_IDS, [])
-        incremental_service.process_ingested_docs(config=global_config, job_id=self.job_id, doc_ids=doc_ids)
 
         # Get the ingested table
         ingested_table = ingest_results.tables[0]

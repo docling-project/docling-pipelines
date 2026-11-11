@@ -297,7 +297,7 @@ class IncrementalUpdateService:
             return []
         return list(set(previously_processed_docs_dict.keys()) - set(doc_ids))
 
-    def process_ingested_docs(self, *, config: dict[str, Any], job_id: str, doc_ids: list[str]) -> None:
+    def process_ingested_docs(self, *, config: dict[str, Any], job_id: str, doc_ids: list[str]) -> set[str]:
         """
         Update incremental processing metadata based on configuration.
 
@@ -307,17 +307,20 @@ class IncrementalUpdateService:
             config: Configuration dictionary with force_ingest and retain_deleted_docs flags
             job_id: Job identifier
             doc_ids: List of document IDs identified by ingest operator
+
+        Returns:
+            Set of document IDs marked as soft-deleted.
         """
         if config.get(DocpipeConstants.FORCE_INGEST):
             # Force ingest: clear all previously saved metadata
             self.clear_incremental_table(job_id=job_id)
-            return
+            return set()
 
         if bool(config.get(DocpipeConstants.RETAIN_DELETED_DOCS, DocpipeConstants.RETAIN_DELETED_DOCS_DEFAULT)):
             # Retain deleted documents: no changes needed
-            return
+            return set()
 
-        self.mark_soft_deleted_docs(job_id=job_id, doc_ids=doc_ids)
+        return self.mark_soft_deleted_docs(job_id=job_id, doc_ids=doc_ids)
 
     def mark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str]) -> set[str]:
         """
