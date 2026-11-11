@@ -442,6 +442,8 @@ class OperatorConstants:
 
         # Weaviate-specific Configuration
         CONNECTION_TYPE: Final[str] = "connection_type"
+        CONNECTION_TYPE_ON_PREM: Final[str] = "on-prem"
+        CONNECTION_TYPE_CLOUD: Final[str] = "cloud"
         GRPC_HOST: Final[str] = "grpc_host"
         GRPC_PORT: Final[str] = "grpc_port"
         GRPC_SECURE: Final[str] = "grpc_secure"

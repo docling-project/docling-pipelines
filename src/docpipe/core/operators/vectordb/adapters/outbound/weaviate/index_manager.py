@@ -4,6 +4,7 @@
 """Weaviate Index Manager for collection creation, schema validation, and lifecycle management."""
 
 import re
+from http import HTTPStatus
 from typing import Any
 
 import weaviate
@@ -52,12 +53,13 @@ RESERVED_SUFFIXES: tuple[str, ...] = (
     "_nullState",
 )
 
+_PK = OperatorConstants.VectorDB.DEFAULT_PRIMARY_KEY_FIELD
+_SPARSE_FEATURE = OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT
 PROPERTY_NAME_REGEX = re.compile(r"^[a-zA-Z][_0-9a-zA-Z]*$")
 
-HTTP_UNPROCESSABLE: int = 422
 CONTENT_NAMES: tuple[str, ...] = ("content", "text")
 
-# Content property declared when no feature is mapped to document text (design D7).
+# Content property declared when no feature is mapped to document text.
 DEFAULT_CONTENT_PROPERTY: str = "text"
 
 DISTANCE_METRIC_MAP: dict[str, VectorDistances] = {
@@ -84,12 +86,13 @@ def map_feature_type(feature_type: str | None) -> DataType:
 
 
 def tokenization_for(
+    *,
     feature_name: str,
     column_name: str,
     feature_type: str | None,
 ) -> Tokenization:
     """Determine Weaviate Tokenization for a property based on identity vs content semantics."""
-    if column_name == "pk":
+    if column_name == _PK:
         return Tokenization.FIELD
     if feature_name in ("id", "doc_id", "name", "doc_name") or column_name in ("id", "name"):
         return Tokenization.FIELD
@@ -182,14 +185,14 @@ def validate_primary_key_mapping(
         if not feat_name or not col_name:
             continue
 
-        if feat_name == primary_feature and col_name != "pk":
+        if feat_name == primary_feature and col_name != _PK:
             raise DocpipeException(
                 message=f"Primary feature '{primary_feature}' must be mapped to column 'pk', got '{col_name}'",
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        if feat_name != primary_feature and col_name == "pk":
+        if feat_name != primary_feature and col_name == _PK:
             raise DocpipeException(
                 message=f"Only the primary feature '{primary_feature}' can be mapped to column 'pk', but feature '{feat_name}' is mapped to 'pk'",
                 status_code=400,
@@ -274,20 +277,11 @@ class WeaviateIndexManager:
                 secrets=self._secrets,
             ) from None
 
-    def drop_collection(self) -> bool:
-        """Drop collection from Weaviate."""
-        try:
-            self.client.collections.delete(self.collection_name)
-            return True
-        except Exception as exc:
-            logger.warning("Error deleting collection '%s': %s", self.collection_name, self._redact(str(exc)))
-            return False
-
     def _build_properties(self, *, dimension_mapping: dict[str, int]) -> list[Property]:
         """Build Weaviate Property schema from feature mappings."""
         properties: list[Property] = [
             Property(
-                name="pk",
+                name=_PK,
                 data_type=DataType.TEXT,
                 tokenization=Tokenization.FIELD,
                 index_filterable=True,
@@ -295,7 +289,7 @@ class WeaviateIndexManager:
             )
         ]
 
-        added_props: set[str] = {"pk"}
+        added_props: set[str] = {_PK}
         content_mapped = False
 
         for entry in self.feature_mappings:
@@ -307,7 +301,7 @@ class WeaviateIndexManager:
             if not feat_name or not col_name:
                 continue
 
-            if col_name == "pk" or feat_name == "sparse_embeddings":
+            if col_name == _PK or feat_name == _SPARSE_FEATURE:
                 continue
 
             if feat_name in dimension_mapping or col_name in dimension_mapping:
@@ -319,7 +313,7 @@ class WeaviateIndexManager:
             feat_meta = self.available_features.get(feat_name, {})
             feat_type = feat_meta.get("type", "text") if isinstance(feat_meta, dict) else "text"
             data_type = map_feature_type(feat_type)
-            tokenization = tokenization_for(feat_name, col_name, feat_type)
+            tokenization = tokenization_for(feature_name=feat_name, column_name=col_name, feature_type=feat_type)
             is_content = self.is_content_mapping(feature_name=feat_name, column_name=col_name)
 
             if is_content:
@@ -417,7 +411,7 @@ class WeaviateIndexManager:
             )
             logger.info("Successfully created Weaviate collection '%s'", self.collection_name)
         except Exception as exc:
-            if sdk_status_code(exc) == HTTP_UNPROCESSABLE and self.index_type == "dynamic":
+            if sdk_status_code(exc) == HTTPStatus.UNPROCESSABLE_ENTITY and self.index_type == "dynamic":
                 raise DocpipeException(
                     message=(
                         "index_type 'dynamic' requires async indexing enabled on the Weaviate server "
@@ -537,7 +531,7 @@ class WeaviateIndexManager:
 
             # Identity property check
             is_identity = (
-                expected_prop.name == "pk" or getattr(expected_prop, "tokenization", None) == Tokenization.FIELD
+                expected_prop.name == _PK or getattr(expected_prop, "tokenization", None) == Tokenization.FIELD
             )
             if is_identity:
                 actual_tokenization = getattr(existing_prop, "tokenization", None)

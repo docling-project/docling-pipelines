@@ -77,7 +77,10 @@ class TestWeaviateIndexManagerStaticRules:
         expected_tokenization: Tokenization,
     ) -> None:
         """Verify identity vs content tokenization rule."""
-        assert tokenization_for(feat_name, col_name, feat_type) == expected_tokenization
+        assert (
+            tokenization_for(feature_name=feat_name, column_name=col_name, feature_type=feat_type)
+            == expected_tokenization
+        )
 
     @pytest.mark.parametrize(
         "name",
@@ -187,8 +190,8 @@ class TestWeaviateIndexManagerCollectionOperations:
         """Create mock Weaviate client."""
         return MagicMock()
 
-    def test_collection_exists_and_drop(self, *, mock_client: MagicMock) -> None:
-        """Verify collection_exists and drop_collection methods."""
+    def test_collection_exists(self, *, mock_client: MagicMock) -> None:
+        """Verify collection_exists queries the collection by name."""
         mock_client.collections.exists.return_value = True
         manager = WeaviateIndexManager(
             client=mock_client,
@@ -196,9 +199,6 @@ class TestWeaviateIndexManagerCollectionOperations:
         )
         assert manager.collection_exists() is True
         mock_client.collections.exists.assert_called_with("TestDocs")
-
-        assert manager.drop_collection() is True
-        mock_client.collections.delete.assert_called_with("TestDocs")
 
     def test_create_collection_already_exists_raises_409(self, *, mock_client: MagicMock) -> None:
         """Verify create_collection raises 409 if collection already exists."""

@@ -17,6 +17,7 @@ from weaviate.exceptions import (
     WeaviateTimeoutError,
 )
 
+from docpipe.core.constants import OperatorConstants
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
@@ -40,7 +41,9 @@ def redact_secrets(*, text: str, secrets: list[str]) -> str:
 
 _UNREACHABLE_ERRORS = (WeaviateConnectionError, WeaviateTimeoutError, WeaviateGRPCUnavailableError)
 _UNREACHABLE_GRPC_CODES = (grpc.StatusCode.DEADLINE_EXCEEDED, grpc.StatusCode.UNAVAILABLE)
-_SUPPORTED_CONNECTION_TYPES = ("on-prem", "cloud")
+_ON_PREM = OperatorConstants.VectorDB.CONNECTION_TYPE_ON_PREM
+_CLOUD = OperatorConstants.VectorDB.CONNECTION_TYPE_CLOUD
+_SUPPORTED_CONNECTION_TYPES = (_ON_PREM, _CLOUD)
 
 
 def sdk_status_code(exc: BaseException) -> int | None:
@@ -99,7 +102,7 @@ class WeaviateClient:
     Responsibilities:
     - On-prem and Weaviate Cloud connection creation
     - Authentication credential construction (none, api_key, bearer_token, client_password)
-    - Connection validation and is_ready check
+    - Connection readiness check
     - Idempotent resource cleanup and client closure
     - Secret redaction across error messages and log output
     """
@@ -107,7 +110,7 @@ class WeaviateClient:
     def __init__(
         self,
         *,
-        connection_type: str = "on-prem",
+        connection_type: str = _ON_PREM,
         host: str = "localhost",
         port: int = 8080,
         secure: bool = False,
@@ -241,7 +244,7 @@ class WeaviateClient:
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        if self.connection_type == "on-prem" and self.auth_type != "none":
+        if self.connection_type == _ON_PREM and self.auth_type != "none":
             if not (self.secure and effective_grpc_secure):
                 raise DocpipeException(
                     message=(
@@ -252,7 +255,7 @@ class WeaviateClient:
                     error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
                 )
 
-        target = self.cluster_url if self.connection_type == "cloud" else f"{self.host}:{self.port}"
+        target = self.cluster_url if self.connection_type == _CLOUD else f"{self.host}:{self.port}"
         auth_credentials = self._resolve_and_build_auth()
 
         additional_config = AdditionalConfig(
@@ -272,7 +275,7 @@ class WeaviateClient:
 
         raw_client: weaviate.WeaviateClient | None = None
         try:
-            if self.connection_type == "cloud":
+            if self.connection_type == _CLOUD:
                 if not self.cluster_url:
                     raise DocpipeException(
                         message="cluster_url is required when connection_type is 'cloud'",
@@ -333,14 +336,6 @@ class WeaviateClient:
         if self._client is None:
             return self.connect()
         return self._client
-
-    def is_ready(self) -> bool:
-        """Check if Weaviate server is reachable and ready."""
-        try:
-            client = self.get_client()
-            return bool(client.is_ready())
-        except Exception:
-            return False
 
     def close(self) -> None:
         """Close connection to Weaviate idempotently."""

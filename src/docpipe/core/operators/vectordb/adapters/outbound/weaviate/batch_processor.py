@@ -28,6 +28,8 @@ from docpipe.utils.operators.vectordb_utils import (
 
 logger = get_logger()
 
+_PK = OperatorConstants.VectorDB.DEFAULT_PRIMARY_KEY_FIELD
+
 DEFAULT_BATCH_SIZE: int = 100
 MAX_BATCH_SIZE_MB: int = 3
 BULK_DELETE_BATCH_SIZE: int = 500
@@ -47,7 +49,7 @@ class WeaviateBatchProcessor:
         batch_size: int = DEFAULT_BATCH_SIZE,
         available_features: dict[str, Any] | None = None,
         feature_mappings: list[dict[str, str]] | None = None,
-        primary_key_field: str = "pk",
+        primary_key_field: str = _PK,
         embeddings_column: str = OperatorConstants.Operators.EMBEDDINGS,
         add_sparse_vector: bool = False,
         secrets: list[str] | None = None,
@@ -218,7 +220,7 @@ class WeaviateBatchProcessor:
                 if error_count > 0:
                     for idx, err_obj in result.errors.items():
                         chunk_pk = (
-                            batch[idx].properties.get("pk", str(batch[idx].uuid))
+                            batch[idx].properties.get(_PK, str(batch[idx].uuid))
                             if batch[idx].properties
                             else str(batch[idx].uuid)
                         )
@@ -232,7 +234,7 @@ class WeaviateBatchProcessor:
                 err_str = self._redact(str(e))
                 logger.error("[WEAVIATE INSERT] Batch %d/%d failed: %s", i + 1, len(batches), err_str)
                 for obj in batch:
-                    chunk_pk = obj.properties.get("pk", str(obj.uuid)) if obj.properties else str(obj.uuid)
+                    chunk_pk = obj.properties.get(_PK, str(obj.uuid)) if obj.properties else str(obj.uuid)
                     all_failed.append({"index": {"_id": chunk_pk, "error": {"reason": err_str}}})
 
         logger.info("[WEAVIATE INSERT] Completed: %d inserted successfully, %d failed", total_success, len(all_failed))
@@ -284,14 +286,14 @@ class WeaviateBatchProcessor:
                 last_pk: str | None = None
 
                 while True:
-                    filt = Filter.by_property("pk").like(f"{prefix}*")
+                    filt = Filter.by_property(_PK).like(f"{prefix}*")
                     if last_pk is not None:
-                        filt = filt & Filter.by_property("pk").greater_than(last_pk)
+                        filt = filt & Filter.by_property(_PK).greater_than(last_pk)
 
                     res = collection.query.fetch_objects(
                         filters=filt,
-                        sort=Sort.by_property("pk", ascending=True),
-                        return_properties=["pk"],
+                        sort=Sort.by_property(_PK, ascending=True),
+                        return_properties=[_PK],
                         limit=KEYSET_PAGE_SIZE,
                     )
                     objects = res.objects or []
@@ -299,8 +301,8 @@ class WeaviateBatchProcessor:
                         break
 
                     for obj in objects:
-                        if obj.properties and "pk" in obj.properties:
-                            pk_val = str(obj.properties["pk"])
+                        if obj.properties and _PK in obj.properties:
+                            pk_val = str(obj.properties[_PK])
                             file_chunks.append(pk_val)
                             last_pk = pk_val
 

@@ -16,7 +16,7 @@ from typing import Any
 from weaviate.classes.config import Tokenization
 
 from docpipe.core.constants.operator_constants import OperatorConstants
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, redact_secrets
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import CONTENT_NAMES, tokenization_for
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -24,7 +24,6 @@ logger = get_logger()
 
 _VECTOR_TYPE = "VECTOR"
 _PK = OperatorConstants.VectorDB.DEFAULT_PRIMARY_KEY_FIELD
-_CONNECTION_TYPE_CLOUD = "cloud"
 _CLIENT_KWARG_KEYS: dict[str, str] = {
     "connection_type": OperatorConstants.VectorDB.CONNECTION_TYPE,
     "host": OperatorConstants.VectorDB.HOST,
@@ -77,7 +76,10 @@ class WeaviateResourceMetadata:
             returns the plain empty result; any other failure returns it with
             is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
         """
-        is_cloud = provider_config.get(OperatorConstants.VectorDB.CONNECTION_TYPE) == _CONNECTION_TYPE_CLOUD
+        is_cloud = (
+            provider_config.get(OperatorConstants.VectorDB.CONNECTION_TYPE)
+            == OperatorConstants.VectorDB.CONNECTION_TYPE_CLOUD
+        )
         endpoint_key = OperatorConstants.VectorDB.CLUSTER_URL if is_cloud else OperatorConstants.VectorDB.HOST
         if not provider_config.get(endpoint_key):
             logger.debug("Weaviate provider_config missing host/cluster_url - skipping metadata fetch")
@@ -144,7 +146,7 @@ class WeaviateResourceMetadata:
                 OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: stored,
             }
         except Exception as exc:
-            reason = client_manager._redact(str(exc))
+            reason = redact_secrets(text=str(exc), secrets=client_manager.resolved_secrets)
             logger.warning("Failed to fetch Weaviate metadata: %s", reason)
             result = empty_result()
             result[OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE] = {"supported": False, "error": reason}
@@ -237,7 +239,10 @@ class WeaviateResourceMetadata:
                 continue
             meta = available_features.get(feature, {})
             feature_type = meta.get(OperatorConstants.Misc.TYPE) if isinstance(meta, dict) else None
-            if tokenization_for(feature, column, feature_type) == Tokenization.FIELD:
+            if (
+                tokenization_for(feature_name=feature, column_name=column, feature_type=feature_type)
+                == Tokenization.FIELD
+            ):
                 columns.append(column)
         return columns
 
@@ -360,7 +365,7 @@ class WeaviateResourceMetadata:
             result: list[dict[str, str]] = []
             covered: set[str] = set()
 
-            def _map(feature: str | None, column: str) -> None:
+            def _map(*, feature: str | None, column: str) -> None:
                 if feature and feature not in covered:
                     result.append(
                         {
@@ -372,11 +377,11 @@ class WeaviateResourceMetadata:
 
             for name, entry in selected_resource_schema.items():
                 if entry.get("is_primary"):
-                    _map(primary_feature, name)
+                    _map(feature=primary_feature, column=name)
                 elif entry.get("type") == _VECTOR_TYPE:
-                    _map(vector_feature, name)
+                    _map(feature=vector_feature, column=name)
                 elif name in available_features:
-                    _map(name, name)
+                    _map(feature=name, column=name)
 
             if add_sparse:
                 content_prop = next((props[n] for n in CONTENT_NAMES if n in props), None)
@@ -385,10 +390,10 @@ class WeaviateResourceMetadata:
                         OperatorConstants.Columns.DOC_COLUMN, OperatorConstants.Columns.DOC_COLUMN_DEFAULT
                     )
                     if content_feature in available_features:
-                        _map(content_feature, content_prop.name)
+                        _map(feature=content_feature, column=content_prop.name)
                     _map(
-                        _first_feature(OperatorConstants.Types.TYPE_VECTOR_SPARSE),
-                        OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT,
+                        feature=_first_feature(OperatorConstants.Types.TYPE_VECTOR_SPARSE),
+                        column=OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT,
                     )
 
             if result:

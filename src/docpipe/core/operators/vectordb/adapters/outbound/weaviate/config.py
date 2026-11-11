@@ -8,9 +8,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from docpipe.core.constants import OperatorConstants
 from docpipe.core.operators.operator_utils import resolve_env_var
 
 ADAPTER_NAME = "weaviate"
+
+_ON_PREM = OperatorConstants.VectorDB.CONNECTION_TYPE_ON_PREM
+_CLOUD = OperatorConstants.VectorDB.CONNECTION_TYPE_CLOUD
 
 COLLECTION_NAME_REGEX = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
 
@@ -28,7 +32,7 @@ class WeaviateConfig(BaseModel):
         description="Name of the Weaviate collection to write to.",
     )
     connection_type: Literal["on-prem", "cloud"] = Field(
-        default="on-prem",
+        default=_ON_PREM,
         description="Connection type: 'on-prem' for self-hosted or 'cloud' for Weaviate Cloud.",
     )
     host: str = Field(
@@ -134,13 +138,13 @@ class WeaviateConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_cross_field(self) -> "WeaviateConfig":
-        if self.connection_type == "cloud":
+        if self.connection_type == _CLOUD:
             if not self.cluster_url:
                 raise ValueError("cluster_url is required when connection_type is 'cloud'")
 
         effective_grpc_secure = self.secure if self.grpc_secure is None else self.grpc_secure
 
-        if self.connection_type == "on-prem" and self.auth_type != "none":
+        if self.connection_type == _ON_PREM and self.auth_type != "none":
             if not (self.secure and effective_grpc_secure):
                 raise ValueError(
                     "secure and grpc_secure must both be true when auth_type is not 'none'; "

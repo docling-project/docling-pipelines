@@ -38,6 +38,9 @@ from docpipe.utils.operators.vectordb_utils import (
 
 logger = get_logger()
 
+_PK = OperatorConstants.VectorDB.DEFAULT_PRIMARY_KEY_FIELD
+_SPARSE_FEATURE = OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT
+
 
 @register_vector_store
 class WeaviateAdapter(VectorStorePort):
@@ -143,7 +146,7 @@ class WeaviateAdapter(VectorStorePort):
                 batch_size=config_model.batch_size,
                 available_features=self.available_features,
                 feature_mappings=self.feature_mappings,
-                primary_key_field="pk",
+                primary_key_field=_PK,
                 embeddings_column=self.embeddings_column,
                 add_sparse_vector=self.add_sparse_vector,
                 secrets=secrets,
@@ -202,7 +205,7 @@ class WeaviateAdapter(VectorStorePort):
                 entry.get("collection_column", entry.get("mapped_column_name")),
             )
             feat_name = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
-            if col_name and col_name != "pk" and feat_name != "sparse_embeddings":
+            if col_name and col_name != _PK and feat_name != _SPARSE_FEATURE:
                 property_names.append(col_name)
 
         try:
