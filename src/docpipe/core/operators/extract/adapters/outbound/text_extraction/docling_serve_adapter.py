@@ -27,6 +27,7 @@ from docpipe.core.operators.extract.adapters.outbound.factories.text_extraction_
 from docpipe.core.operators.extract.ports.outbound.text_extraction import TextExtractionPort
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.integrations.docling.client import DoclingServeClient
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -275,10 +276,11 @@ class DoclingServeAdapter(TextExtractionPort):
             return result_dict
 
         except Exception as e:
-            logger.error("Error extracting with docling-serve from %s: %s", file_path, str(e))
+            safe_error = sanitize_exception(exc=e, config_key="extract_operator.text_extraction.provider_config")
+            logger.error("Error extracting with docling-serve from %s: %s", file_path, safe_error)
             return {
                 OperatorConstants.Extraction.SUCCESS: False,
-                OperatorConstants.Extraction.ERROR: str(e),
+                OperatorConstants.Extraction.ERROR: safe_error,
                 OperatorConstants.Columns.DOC_COLUMN_DEFAULT: None,
             }
 
