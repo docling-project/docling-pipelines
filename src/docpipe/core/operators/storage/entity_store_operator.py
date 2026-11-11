@@ -15,6 +15,7 @@ from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorC
 from docpipe.storage.factory import StorageFactory
 from docpipe.storage.interfaces.table_storage_port import TableStoragePort
 from docpipe.types import FlowConfig, OperatorMetadata, OperatorOutputMetadata, TransformResult
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -135,7 +136,7 @@ class EntityStoreOperator(AbstractOperator):
                     metadata=metadata,
                     doc_id=doc_id,
                     doc_name=doc_name,
-                    reason=str(exc),
+                    reason=sanitize_exception(exc=exc, config_key=f"{self.short_name}.storage"),
                 )
 
         write_errors = self._write_tables(rows_by_table=rows_by_table, docs_by_table=docs_by_table)
@@ -186,14 +187,15 @@ class EntityStoreOperator(AbstractOperator):
                         self.storage.create_table(table_name=table_name, schema=entity_table.schema)
                     self.storage.upsert_data(table_name=table_name, data=entity_table)
                 except Exception as exc:
+                    safe_error = sanitize_exception(exc=exc, config_key=f"{self.short_name}.storage")
                     logger.warning(
                         "Failed to store entity table %s: %s",
                         table_name,
-                        exc,
+                        safe_error,
                         extra=self.common_log_arguments,
                     )
                     for doc_id in docs_by_table[table_name]:
-                        errors.setdefault(doc_id, []).append(f"Failed to store table {table_name}: {exc}")
+                        errors.setdefault(doc_id, []).append(f"Failed to store table {table_name}: {safe_error}")
         finally:
             self.storage.close()
         return errors
