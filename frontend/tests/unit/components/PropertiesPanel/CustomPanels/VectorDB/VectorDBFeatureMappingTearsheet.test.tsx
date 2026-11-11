@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { VectorDBFeatureMappingTearsheet } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDBFeatureMappingTearsheet';
 import { getProviderConfig } from '@/components/PropertiesPanel/CustomPanels/VectorDB/constants';
 import { enrichFlowFeaturesForNode } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-enrichment';
@@ -73,19 +74,19 @@ describe('VectorDBFeatureMappingTearsheet', () => {
   });
 
   it('renders without crashing when closed', () => {
-    const { container } = render(<VectorDBFeatureMappingTearsheet {...baseProps} />);
+    const { container } = renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} />);
     expect(container).toBeInTheDocument();
   });
 
   it('renders when open', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBFeatureMappingTearsheet {...baseProps} open />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders tearsheet title when open with no existing mappings', () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     expect(screen.getByTestId('tearsheet-title')).toHaveTextContent(
       'Add feature mappings'
     );
@@ -95,7 +96,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
     const mappings = [
       { feature_name: 'content', mapped_column_name: 'text', is_mandatory: true },
     ];
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -108,12 +109,12 @@ describe('VectorDBFeatureMappingTearsheet', () => {
   });
 
   it('does not render tearsheet when closed', () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open={false} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open={false} />);
     expect(screen.queryByTestId('tearsheet')).toBeNull();
   });
 
   it('renders with milvus provider', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -129,7 +130,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
   });
 
   it('renders with a non-empty savedResourceName', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -144,7 +145,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
       { feature_name: 'content', mapped_column_name: 'text', is_mandatory: true },
       { feature_name: 'embedding', mapped_column_name: 'vector', is_mandatory: false },
     ];
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -157,7 +158,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
 
   it('onClose prop is a function and tearsheet renders a close button', () => {
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet {...baseProps} open onClose={onClose} />
     );
     expect(screen.getByText('Close')).toBeInTheDocument();
@@ -165,21 +166,21 @@ describe('VectorDBFeatureMappingTearsheet', () => {
 
   it('onSave prop is a function (prop is accepted without error)', () => {
     const onSave = vi.fn();
-    const { container } = render(
+    const { container } = renderWithProviders(
       <VectorDBFeatureMappingTearsheet {...baseProps} open onSave={onSave} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders Save and Cancel action buttons', () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     expect(screen.getByText('Save')).toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
   });
 
   it('clicking Close button calls onClose', () => {
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet {...baseProps} open onClose={onClose} />
     );
     const closeBtn = screen.getByText('Close');
@@ -189,7 +190,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
 
   it('clicking Cancel action button calls onClose', () => {
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet {...baseProps} open onClose={onClose} />
     );
     const cancelBtn = screen.getByText('Cancel');
@@ -198,13 +199,13 @@ describe('VectorDBFeatureMappingTearsheet', () => {
   });
 
   it('renders index/collection name field when open', () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     // Resource name input should be present
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders vector similarity options for opensearch', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -216,7 +217,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
   });
 
   it('renders engine options for opensearch', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -228,7 +229,7 @@ describe('VectorDBFeatureMappingTearsheet', () => {
   });
 
   it('renders with addSparseVector true', () => {
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -252,18 +253,19 @@ const mockEnrich = vi.mocked(enrichFlowFeaturesForNode);
 /** A full enrichment result with available_resources, feature_mappings, available_features. */
 const enrichmentResult = {
   available_resources: ['my-index', 'other-index'],
+  selected_resource_schema: {} as Record<string, unknown>,
   feature_mappings: [
     { feature_name: 'content', mapped_column_name: 'text' },
     { feature_name: 'embedding', mapped_column_name: 'vector' },
   ],
   available_features: {
-    content: { description: 'Text content', mandatory_for_vector_db: true },
-    embedding: { description: 'Vector embedding', mandatory_for_vector_db: true },
-    score: { description: 'Quality score', mandatory_for_vector_db: false },
+    content: { name: 'content', type: 'string', description: 'Text content', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] as string[] },
+    embedding: { name: 'embedding', type: 'array', description: 'Vector embedding', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] as string[] },
+    score: { name: 'score', type: 'float', description: 'Quality score', available_for_filter: true, available_for_vector_db: false, mandatory_for_vector_db: false, node_id: 'node-1', tags: [] as string[] },
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result that makes the selected resource read-only (has stored similarity). */
 const enrichmentResultReadOnly = {
@@ -274,7 +276,7 @@ const enrichmentResultReadOnly = {
     dimension_size: 768,
   },
   is_docpipe_supported_resource: { supported: true },
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result that marks the resource as unsupported. */
 const enrichmentResultUnsupported = {
@@ -282,18 +284,19 @@ const enrichmentResultUnsupported = {
   available_resources: ['bad-index'],
   stored_resource_metadata: null,
   is_docpipe_supported_resource: { supported: false },
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 /** Enrichment result with only available_features (no feature_mappings). */
 const enrichmentResultFeaturesOnly = {
   available_resources: [],
+  selected_resource_schema: {} as Record<string, unknown>,
   feature_mappings: [],
   available_features: {
-    title: { description: 'Doc title', mandatory_for_vector_db: false },
+    title: { name: 'title', type: 'string', description: 'Doc title', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: false, node_id: 'node-1', tags: [] as string[] },
   },
   stored_resource_metadata: null,
   is_docpipe_supported_resource: null,
-};
+} as unknown as import('@/types').VectorDBEnrichmentResult;
 
 describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   beforeEach(() => {
@@ -308,7 +311,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('shows loading spinner while enrichment is in flight', async () => {
     // Never resolve — keeps loading=true
     mockEnrich.mockReturnValue(new Promise(() => {}));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     // The Loading component renders inside the tearsheet body
     expect(screen.getByTestId('tearsheet-body')).toBeInTheDocument();
   });
@@ -317,7 +320,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('renders mapping rows from API feature_mappings after enrichment resolves', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     // After enrichment resolves the loading spinner disappears and the ComboBox appears
     await waitFor(() =>
       expect(document.getElementById('resource-select')).toBeInTheDocument()
@@ -326,7 +329,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('renders new-resource name input when CREATE_NEW is selected (default)', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // "Create new" is the default — the name TextInput should appear
     expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument();
@@ -336,7 +339,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('populates table from API feature_mappings when no currentFeatureMappings', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -352,7 +355,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('populates table from available_features when no feature_mappings returned', async () => {
     mockEnrich.mockResolvedValue(enrichmentResultFeaturesOnly);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     expect(screen.getByTestId('tearsheet-body')).toBeInTheDocument();
   });
@@ -364,7 +367,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     const saved = [
       { feature_name: 'content', mapped_column_name: 'my_text', is_mandatory: true },
     ];
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -379,7 +382,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows error notification when enrichment rejects', async () => {
     mockEnrich.mockRejectedValue(new Error('Network error'));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() =>
       expect(screen.getByText(/failed to load available resources/i)).toBeInTheDocument()
     );
@@ -387,7 +390,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows error notification with savedResourceName in fallback state', async () => {
     mockEnrich.mockRejectedValue(new Error('Network error'));
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -403,7 +406,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows read-only similarity TextInput when existing resource has stored metadata', async () => {
     mockEnrich.mockResolvedValue(enrichmentResultReadOnly);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -422,7 +425,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows dimension size readonly input when storedMeta has dimension_size', async () => {
     mockEnrich.mockResolvedValue(enrichmentResultReadOnly);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -439,7 +442,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('renders ErrorEmptyState and disables Save when resource is unsupported', async () => {
     mockEnrich.mockResolvedValue(enrichmentResultUnsupported);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -457,7 +460,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows validation error when new name is empty', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
     const input = screen.getByLabelText(/enter a new index name/i);
     fireEvent.change(input, { target: { value: '' } });
@@ -468,7 +471,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows validation error when name starts with a digit', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
     const input = screen.getByLabelText(/enter a new index name/i);
     fireEvent.change(input, { target: { value: '1bad' } });
@@ -479,7 +482,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows validation error when name contains invalid characters', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
     const input = screen.getByLabelText(/enter a new index name/i);
     fireEvent.change(input, { target: { value: 'bad-name' } });
@@ -490,7 +493,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('shows duplicate name error when name already exists', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
     const input = screen.getByLabelText(/enter a new index name/i);
     // 'my-index' and 'other-index' are in available_resources
@@ -503,7 +506,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('clears name validation error when a valid name is entered', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
     const input = screen.getByLabelText(/enter a new index name/i);
     fireEvent.change(input, { target: { value: 'valid_name' } });
@@ -517,7 +520,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('calls onSave with correct payload when Save is clicked with valid name', async () => {
     const onSave = vi.fn();
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -541,7 +544,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('does not call onSave when Save is clicked with invalid name', async () => {
     const onSave = vi.fn();
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -558,7 +561,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('similarity dropdown is rendered for CREATE_NEW mode', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // Similarity Dropdown should be present (not skeleton, not read-only)
     expect(screen.getByText(/cosine similarity|euclidean|inner product/i)).toBeInTheDocument();
@@ -566,7 +569,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('engine dropdown is rendered for opensearch CREATE_NEW mode', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -582,7 +585,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('selecting an existing resource triggers re-enrichment', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
 
     // Change mock before interaction
@@ -599,7 +602,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('renders sparse vector checkbox for milvus provider', async () => {
     mockEnrich.mockResolvedValue({ ...enrichmentResult, available_resources: [] });
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -618,7 +621,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('toggling sparse vector checkbox triggers re-enrichment', async () => {
     mockEnrich.mockResolvedValue({ ...enrichmentResult, available_resources: [] });
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -642,7 +645,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     mockEnrich
       .mockResolvedValueOnce({ ...enrichmentResult, available_resources: [] })
       .mockRejectedValueOnce(new Error('fail'));
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -671,7 +674,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     // prop on item selection (not raw input change), so we verify the mock call count
     // after the initial open, then confirm a second call occurs after selection.
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // First call was on open
     expect(mockEnrich).toHaveBeenCalledTimes(1);
@@ -688,7 +691,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('does not render engine dropdown for milvus (hasEngine=false)', async () => {
     mockEnrich.mockResolvedValue({ ...enrichmentResult, available_resources: [] });
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -708,7 +711,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('validateNewName: shows already-exists error for a duplicate name', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
     // enrichmentResult.available_resources = ['my-index', 'other-index']
     // Type one of the existing resource names (hyphen is invalid so use underscore variant)
@@ -725,7 +728,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('does not show loading spinner after enrichment resolves', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // Loading component should be gone
     expect(screen.queryByRole('progressbar')).toBeNull();
@@ -734,7 +737,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── Tearsheet closed — no body rendered ──────────────────────────────────
 
   it('does not call enrichFlowFeaturesForNode when tearsheet is closed', () => {
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open={false} />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open={false} />);
     expect(mockEnrich).not.toHaveBeenCalled();
   });
 
@@ -742,7 +745,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('editing a column TextInput updates the table row value', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // column TextInput id = col-input-<feature>
     const colInput = document.getElementById('col-input-content') as HTMLInputElement | null;
@@ -758,15 +761,16 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('clicking Remove batch action in mapping table removes selected rows', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // Select non-mandatory row "embedding" (isMandatory=true for content, false for embedding/score)
     const embeddingCheckbox = screen.queryByLabelText('Select feature embedding') as HTMLInputElement | null;
     if (embeddingCheckbox) {
       fireEvent.click(embeddingCheckbox);
       const removeBtns = screen.queryAllByText(/^Remove$/i);
-      if (removeBtns.length > 0) {
-        fireEvent.click(removeBtns[0]);
+      const firstRemove = removeBtns[0];
+      if (firstRemove) {
+        fireEvent.click(firstRemove);
         // Row removed — embedding no longer in table
         expect(document.body).toBeInTheDocument();
       } else {
@@ -781,7 +785,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('clicking Add feature mappings button opens the AddFeatureMappingModal', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     const addFeatBtns = screen.queryAllByText('Add feature mappings');
     // Find button (not heading)
@@ -804,7 +808,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     mockEnrich
       .mockResolvedValueOnce(enrichmentResult)
       .mockRejectedValueOnce(new Error('fail'));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // Simulate resource selection via ComboBox input (triggers handleResourceChange)
     const combobox = document.getElementById('resource-select') as HTMLInputElement;
@@ -821,7 +825,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     const mappingsWithEmpty = [
       { feature_name: 'content', mapped_column_name: '', is_mandatory: true },
     ];
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -843,7 +847,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('handleSave filters rows with empty trimmed column before calling onSave', async () => {
     const onSave = vi.fn();
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -882,7 +886,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_resources: ['bad-coll'],
     };
     mockEnrich.mockResolvedValue(unsupportedMilvus);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -909,7 +913,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     mockEnrich
       .mockResolvedValueOnce(enrichmentResult)
       .mockReturnValueOnce(new Promise(() => {}));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // Trigger resource change to start loadingMappings
     const combobox = document.getElementById('resource-select') as HTMLInputElement;
@@ -922,7 +926,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('similarity dropdown onChange: clicking an option updates similarityMetric', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     // Wait for enrichment to settle
     await waitFor(() => expect(screen.getByTestId('tearsheet')).toBeInTheDocument());
 
@@ -943,7 +947,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('similarity dropdown onChange: null selectedItem is a no-op', async () => {
     // Exercises the `if (selectedItem)` guard at line 550
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('similarity-metric-select')).toBeInTheDocument());
 
     const dropdownBtn = document.getElementById('similarity-metric-select') as HTMLButtonElement;
@@ -957,7 +961,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('engine dropdown onChange: clicking an option updates engine state', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -982,7 +986,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('engine dropdown onChange: null selectedItem is a no-op', async () => {
     // Exercises the `if (selectedItem)` guard at lines 566
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1002,7 +1006,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('opening and closing AddFeatureMappingModal executes the onClose callback (line 622)', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByTestId('tearsheet')).toBeInTheDocument());
 
     // Find the "Add feature mappings" button inside the table toolbar
@@ -1030,11 +1034,11 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_features: {
         unknown_feature: { description: 'Unknown', mandatory_for_vector_db: false },
       },
-    });
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
     const mappingsWithEmpty = [
       { feature_name: 'unknown_feature', mapped_column_name: '', is_mandatory: false },
     ];
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1056,15 +1060,16 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     // only available_features
     mockEnrich.mockResolvedValue({
       available_resources: [],
+      selected_resource_schema: {} as Record<string, unknown>,
       feature_mappings: [],
       available_features: {
-        sparse_vector: { description: 'Sparse vector field', mandatory_for_vector_db: true },
-        dense_vector: { description: 'Dense vector field', mandatory_for_vector_db: false },
+        sparse_vector: { name: 'sparse_vector', type: 'array', description: 'Sparse vector field', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: true, node_id: 'node-1', tags: [] as string[] },
+        dense_vector: { name: 'dense_vector', type: 'array', description: 'Dense vector field', available_for_filter: false, available_for_vector_db: true, mandatory_for_vector_db: false, node_id: 'node-1', tags: [] as string[] },
       },
       stored_resource_metadata: null,
       is_docpipe_supported_resource: null,
-    });
-    render(
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1095,8 +1100,8 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       available_resources: ['my_existing_index'],
       stored_resource_metadata: null,
       is_docpipe_supported_resource: { supported: true },
-    });
-    render(
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1121,7 +1126,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('validateNewName: name with spaces shows invalid chars error and disables Save', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
 
     const input = screen.getByLabelText(/enter a new index name/i);
@@ -1138,7 +1143,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
 
   it('validateNewName: name starting with a number disables Save button', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(screen.getByLabelText(/enter a new index name/i)).toBeInTheDocument());
 
     const input = screen.getByLabelText(/enter a new index name/i);
@@ -1153,7 +1158,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── Similarity dropdown: select item by role/listbox (covers lines ~549-556) ─
   it('similarity dropdown: selecting item by listbox role updates state', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1184,7 +1189,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── Engine dropdown: select item by listbox role (covers lines ~564-570) ─────
   it('engine dropdown: selecting item by listbox role updates state', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1212,7 +1217,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── Resource ComboBox: selecting CREATE_NEW via input value (line 272-323) ───
   it('handleResourceChange: selecting CREATE_NEW from ComboBox calls enrichment', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1233,7 +1238,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     mockEnrich
       .mockResolvedValueOnce(enrichmentResult)
       .mockRejectedValueOnce(new Error('fail'));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
     // Fire ComboBox onChange with CREATE_NEW value → fetchOnResourceChange catches
     const combobox = document.getElementById('resource-select') as HTMLInputElement;
@@ -1249,7 +1254,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   it('renders Loading spinner inside tearsheet while enrichment is pending', async () => {
     // Never-resolving promise keeps loading=true
     mockEnrich.mockReturnValue(new Promise(() => {}));
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     // While loading, the tearsheet body should contain the loading component
     const body = screen.getByTestId('tearsheet-body');
     expect(body).toBeInTheDocument();
@@ -1260,7 +1265,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── handleResourceChange via listbox selection (lines 272-323) ─────────────
   it('handleResourceChange: selecting item from ComboBox listbox triggers re-enrichment', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
+    renderWithProviders(<VectorDBFeatureMappingTearsheet {...baseProps} open />);
     await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
 
     // Open the combobox to reveal the listbox
@@ -1282,7 +1287,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── Similarity dropdown onChange via listbox (lines 549-556) ─────────────────
   it('similarity dropdown onChange: selecting option from listbox fires handler', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1313,7 +1318,7 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
   // ── Engine dropdown onChange via listbox (lines 566-570) ─────────────────────
   it('engine dropdown onChange: selecting option from listbox fires handler', async () => {
     mockEnrich.mockResolvedValue(enrichmentResult);
-    render(
+    renderWithProviders(
       <VectorDBFeatureMappingTearsheet
         {...baseProps}
         open
@@ -1337,5 +1342,167 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       fireEvent.click(faiss);
     }
     expect(screen.getByTestId('tearsheet')).toBeInTheDocument();
+  });
+
+  // ── Binary vector similarity metric filtering and labels ──────────────────
+
+  it('filters Milvus similarity options to HAMMING and JACCARD when only vector_binary features are present', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="HAMMING"
+      />
+    );
+    await waitFor(() => expect(document.getElementById('resource-select')).toBeInTheDocument());
+
+    await waitFor(() => {
+      expect(screen.getByText(/Hamming distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
+  });
+
+  it('filters Milvus similarity options to Jaccard when saved similarity is JACCARD with binary vectors', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="JACCARD"
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Jaccard distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
+  });
+
+  it('filters Milvus similarity options to L2, IP, COSINE when only dense vector features are present', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        dense_emb: {
+          name: 'dense_emb',
+          type: 'vector',
+          description: 'Dense vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="L2"
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Euclidean distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Hamming distance/i)).toBeNull();
+    expect(screen.queryByText(/Jaccard distance/i)).toBeNull();
+  });
+
+  it('includes BM25 in similarity options when sparse vectors are enabled alongside binary vectors', async () => {
+    mockEnrich.mockResolvedValue({
+      available_resources: [],
+      selected_resource_schema: {},
+      feature_mappings: [],
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+      stored_resource_metadata: null,
+      is_docpipe_supported_resource: null,
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="BM25"
+        addSparseVector={true}
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/BM25/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
   });
 });

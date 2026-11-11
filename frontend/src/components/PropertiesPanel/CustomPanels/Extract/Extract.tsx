@@ -5,6 +5,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { useIntl, type MessageDescriptor } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip, VaultInput } from '@/components/common';
 import {
@@ -23,24 +24,17 @@ import { NodeOperator } from '@/constants/operators';
 import {
   ACCELERATOR_KEY,
   ADDITIONAL_FORMATS,
-  ADDITIONAL_FORMAT_LABELS,
   ASR_PIPELINE_KEY,
   DOCLING_ENTITY_CONFIG_KEY,
   DOCLING_LIBRARY_CONFIG_KEY,
   DOCLING_SERVE_CONFIG_KEY,
-  ENTITY_PROVIDER_LABELS,
   ENTITY_PROVIDERS,
   EXTRACT_ATTRIBUTE as ATTR,
   EXTRACTION_KEY,
-  EXTRACT_LABELS as LABEL,
-  IMAGE_EXPORT_MODE_LABELS,
   IMAGE_EXPORT_MODES,
   LLM_ENTITY_CONFIG_KEY,
-  PDF_BACKEND_LABELS,
   PDF_BACKENDS,
-  TEXT_PROVIDER_LABELS,
   TEXT_PROVIDERS,
-  VLM_ENGINE_LABELS,
   VLM_ENGINES,
   VLM_PIPELINE_KEY,
   WATSONX_CONTAINER_KINDS,
@@ -53,17 +47,59 @@ import {
   type VlmEngine,
   type WatsonxContainerKind,
 } from './constants';
+import { messages } from './Extract.messages';
 import styles from './Extract.module.scss';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { TagInput } from '@/components/common/TagInput/TagInput';
 import { isValidJsonObject } from '@/utils/json';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
 
+const TEXT_PROVIDER_MESSAGES: Record<TextProvider, MessageDescriptor> = {
+  docling_library: messages.textProviderDoclingLibrary,
+  docling_serve: messages.textProviderDoclingServe,
+};
+
+const VLM_ENGINE_MESSAGES: Record<VlmEngine, MessageDescriptor> = {
+  transformers: messages.vlmEngineTransformers,
+  mlx: messages.vlmEngineMlx,
+  api: messages.vlmEngineApi,
+  api_ollama: messages.vlmEngineApiOllama,
+  api_openai: messages.vlmEngineApiOpenai,
+  api_watsonx: messages.vlmEngineApiWatsonx,
+  api_lmstudio: messages.vlmEngineApiLmstudio,
+};
+
+const ADDITIONAL_FORMAT_MESSAGES: Record<AdditionalFormat, MessageDescriptor> = {
+  html: messages.formatHtml,
+  json: messages.formatJson,
+  text: messages.formatText,
+  doctags: messages.formatDoctags,
+  doclang: messages.formatDoclang,
+};
+
+const PDF_BACKEND_MESSAGES: Record<PdfBackend, MessageDescriptor> = {
+  dlparse_v2: messages.pdfBackendDlparseV2,
+  pypdfium2: messages.pdfBackendPypdfium2,
+};
+
+const IMAGE_EXPORT_MODE_MESSAGES: Record<ImageExportMode, MessageDescriptor> = {
+  placeholder: messages.imageExportModePlaceholder,
+  embedded: messages.imageExportModeEmbedded,
+};
+
+const ENTITY_PROVIDER_MESSAGES: Record<EntityProvider, MessageDescriptor> = {
+  none: messages.entityProviderNone,
+  litellm: messages.entityProviderLitellm,
+  watsonx: messages.entityProviderWatsonx,
+  docling: messages.entityProviderDocling,
+};
+
 interface ExtractPanelBodyProps {
   controller: any;
 }
 
 export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Operator metadata ─────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -309,7 +345,7 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
       {/* ═══════════════════════════════════════════════════════════════════
           TEXT EXTRACTION
       ═══════════════════════════════════════════════════════════════════ */}
-      <AccordionItem title="Text Extraction" open>
+      <AccordionItem title={intl.formatMessage(messages.textExtractionTitle)} open>
 
         {/* Provider */}
         <div className={styles.formField}>
@@ -317,19 +353,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <RequiredParamTooltip
               paramId={ATTR.TEXT_EXTRACTION}
               nodeAttributes={nodeAttributes}
-              definition="Choose between local Docling processing or a remote Docling Serve instance."
+              definition={intl.formatMessage(messages.textProviderDescription)}
             >
-              {LABEL.TEXT_PROVIDER}
+              {intl.formatMessage(messages.textProvider)}
             </RequiredParamTooltip>
           </div>
           <Dropdown
             id="text_provider"
-            titleText={LABEL.TEXT_PROVIDER}
+            titleText={intl.formatMessage(messages.textProvider)}
             hideLabel
-            label="Select provider"
+            label={intl.formatMessage(messages.selectProvider)}
             items={[...TEXT_PROVIDERS]}
             selectedItem={textProvider}
-            itemToString={(item: TextProvider | null) => (item ? TEXT_PROVIDER_LABELS[item] : '')}
+            itemToString={(item: TextProvider | null) => (item ? intl.formatMessage(TEXT_PROVIDER_MESSAGES[item]) : '')}
             invalid={textExtractionValidation.isInvalid}
             invalidText={textExtractionValidation.errorMessage}
             onChange={({ selectedItem }: { selectedItem: TextProvider | null }) => {
@@ -346,19 +382,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Enable the Vision-Language Model pipeline for enhanced document extraction."
+                  definition={intl.formatMessage(messages.vlmPipelineDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.VLM_PIPELINE}
+                  {intl.formatMessage(messages.vlmPipeline)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="vlm_pipeline_enabled"
-                labelText={LABEL.VLM_PIPELINE}
+                labelText={intl.formatMessage(messages.vlmPipeline)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={vlmEnabled}
                 onToggle={(checked: boolean) => {
                   if (checked) {
@@ -379,16 +415,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="VLM preset name (e.g., 'granite_docling', 'fast')."
+                      definition={intl.formatMessage(messages.vlmPresetDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.VLM_PRESET}
+                      {intl.formatMessage(messages.vlmPreset)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="vlm_preset"
-                    labelText={LABEL.VLM_PRESET}
+                    labelText={intl.formatMessage(messages.vlmPreset)}
                     hideLabel
                     value={vlmPreset}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -404,21 +440,21 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="VLM engine."
+                      definition={intl.formatMessage(messages.vlmEngineDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.VLM_ENGINE}
+                      {intl.formatMessage(messages.vlmEngine)}
                     </DefinitionTooltip>
                   </div>
                   <Dropdown
                     id="vlm_engine"
-                    titleText={LABEL.VLM_ENGINE}
+                    titleText={intl.formatMessage(messages.vlmEngine)}
                     hideLabel
-                    label="Select engine"
+                    label={intl.formatMessage(messages.selectEngine)}
                     items={[...VLM_ENGINES]}
                     selectedItem={vlmEngine}
-                    itemToString={(item: VlmEngine | null) => (item ? VLM_ENGINE_LABELS[item] : '')}
+                    itemToString={(item: VlmEngine | null) => (item ? intl.formatMessage(VLM_ENGINE_MESSAGES[item]) : '')}
                     onChange={({ selectedItem }: { selectedItem: VlmEngine | null }) => {
                       if (selectedItem) {
                         updateTextProviderConfigNested(
@@ -434,21 +470,21 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Engine-specific configuration (e.g. api_base, model_id, api_key)."
+                      definition={intl.formatMessage(messages.vlmEngineOptionsDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.VLM_ENGINE_OPTIONS}
+                      {intl.formatMessage(messages.vlmEngineOptions)}
                     </DefinitionTooltip>
                   </div>
                   <TextArea
                     id="vlm_engine_options"
-                    labelText={LABEL.VLM_ENGINE_OPTIONS}
+                    labelText={intl.formatMessage(messages.vlmEngineOptions)}
                     hideLabel
                     value={vlmEngineOptionsRaw ?? vlmEngineOptions}
                     rows={3}
                     invalid={touchedFields.vlmEngineOptions && !isValidJsonObject(vlmEngineOptionsRaw ?? vlmEngineOptions)}
-                    invalidText="Engine options must be a valid JSON object."
+                    invalidText={intl.formatMessage(messages.vlmEngineOptionsInvalid)}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                       const raw = e.target.value;
                       setVlmEngineOptionsRaw(raw);
@@ -475,19 +511,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Enable ASR (Automatic Speech Recognition) pipeline for audio/video extraction."
+                  definition={intl.formatMessage(messages.asrPipelineDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.ASR_PIPELINE}
+                  {intl.formatMessage(messages.asrPipeline)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="asr_pipeline_enabled"
-                labelText={LABEL.ASR_PIPELINE}
+                labelText={intl.formatMessage(messages.asrPipeline)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={asrEnabled}
                 onToggle={(checked: boolean) => {
                   if (checked) {
@@ -505,16 +541,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="ASR model name (e.g., whisper_turbo, whisper_small, whisper_medium). Valid values: whisper_tiny, whisper_small, whisper_medium, whisper_base, whisper_large, whisper_turbo, and their _mlx/_native variants."
+                      definition={intl.formatMessage(messages.asrModelIdDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ASR_MODEL_ID}
+                      {intl.formatMessage(messages.asrModelId)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="asr_model_id"
-                    labelText={LABEL.ASR_MODEL_ID}
+                    labelText={intl.formatMessage(messages.asrModelId)}
                     hideLabel
                     value={asrModelId}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -533,11 +569,11 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Additional output formats to generate beyond the mandatory markdown format."
+                  definition={intl.formatMessage(messages.additionalFormatsDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.ADDITIONAL_FORMATS}
+                  {intl.formatMessage(messages.additionalFormats)}
                 </DefinitionTooltip>
               </div>
               <div>
@@ -545,7 +581,7 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                   <Checkbox
                     key={fmt}
                     id={`additional_format_${fmt}`}
-                    labelText={ADDITIONAL_FORMAT_LABELS[fmt]}
+                    labelText={intl.formatMessage(ADDITIONAL_FORMAT_MESSAGES[fmt])}
                     checked={additionalFormats.includes(fmt)}
                     onChange={(_e: unknown, { checked }: { checked: boolean }) => {
                       const next = checked
@@ -562,19 +598,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Enable GPU acceleration for PDF and image processing. Requires Maximum workers = 1 and Use processes = false. Cannot be combined with VLM Pipeline."
+                  definition={intl.formatMessage(messages.standardPipelineDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.STANDARD_PIPELINE}
+                  {intl.formatMessage(messages.standardPipeline)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="standard_pipeline_enabled"
-                labelText={LABEL.STANDARD_PIPELINE}
+                labelText={intl.formatMessage(messages.standardPipeline)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={standardPipelineEnabled}
                 onToggle={(checked: boolean) => {
                   if (checked) {
@@ -592,16 +628,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="GPU device for acceleration. Accepted values: 'mps' (Apple Silicon), 'cuda' (NVIDIA), 'cuda:<index>' (e.g. 'cuda:0'), 'xpu' (Intel). When omitted, the best available device is auto-detected via torch (CUDA -> MPS -> XPU)."
+                      definition={intl.formatMessage(messages.acceleratorDeviceDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ACCELERATOR_DEVICE}
+                      {intl.formatMessage(messages.acceleratorDevice)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="accelerator_device"
-                    labelText={LABEL.ACCELERATOR_DEVICE}
+                    labelText={intl.formatMessage(messages.acceleratorDevice)}
                     hideLabel
                     value={acceleratorDevice}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -617,16 +653,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Number of CPU-side pipeline threads. Must be a positive integer. Defaults to 4 when not set."
+                      definition={intl.formatMessage(messages.acceleratorNumThreadsDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ACCELERATOR_NUM_THREADS}
+                      {intl.formatMessage(messages.acceleratorNumThreads)}
                     </DefinitionTooltip>
                   </div>
                   <NumberInput
                     id="accelerator_num_threads"
-                    label={LABEL.ACCELERATOR_NUM_THREADS}
+                    label={intl.formatMessage(messages.acceleratorNumThreads)}
                     hideLabel
                     value={acceleratorNumThreads ?? 4}
                     min={1}
@@ -653,16 +689,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Base URL of the Docling Serve API (e.g., http://0.0.0.0:5001)"
+                  definition={intl.formatMessage(messages.serveBaseUrlDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_BASE_URL}
+                  {intl.formatMessage(messages.serveBaseUrl)}
                 </DefinitionTooltip>
               </div>
               <TextInput
                 id="serve_base_url"
-                labelText={LABEL.SERVE_BASE_URL}
+                labelText={intl.formatMessage(messages.serveBaseUrl)}
                 hideLabel
                 value={serveBaseUrl}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -674,15 +710,15 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <VaultInput
                 id="serve_api_key"
-                labelText={LABEL.SERVE_API_KEY}
+                labelText={intl.formatMessage(messages.serveApiKey)}
                 labelComponent={
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="API key for authenticating with the Docling Serve endpoint (if required)."
+                      definition={intl.formatMessage(messages.serveApiKeyDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.SERVE_API_KEY}
+                      {intl.formatMessage(messages.serveApiKey)}
                     </DefinitionTooltip>
                   </div>
                 }
@@ -696,19 +732,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Verify the server's SSL certificate."
+                  definition={intl.formatMessage(messages.serveVerifySslDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_VERIFY_SSL}
+                  {intl.formatMessage(messages.serveVerifySsl)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="serve_verify_ssl"
-                labelText={LABEL.SERVE_VERIFY_SSL}
+                labelText={intl.formatMessage(messages.serveVerifySsl)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={serveVerifySsl}
                 onToggle={(checked: boolean) => {
                   updateTextProviderConfig(DOCLING_SERVE_CONFIG_KEY.VERIFY_SSL, checked);
@@ -719,19 +755,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Run OCR on document pages. When enabled, exposes OCR engine and language settings."
+                  definition={intl.formatMessage(messages.serveDoOcrDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_DO_OCR}
+                  {intl.formatMessage(messages.serveDoOcr)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="serve_do_ocr"
-                labelText={LABEL.SERVE_DO_OCR}
+                labelText={intl.formatMessage(messages.serveDoOcr)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={serveDoOcr}
                 onToggle={(checked: boolean) => {
                   updateTextProviderConfig(DOCLING_SERVE_CONFIG_KEY.DO_OCR, checked);
@@ -744,16 +780,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="OCR engine to use. Leave empty to use the server default."
+                      definition={intl.formatMessage(messages.serveOcrEngineDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.SERVE_OCR_ENGINE}
+                      {intl.formatMessage(messages.serveOcrEngine)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="serve_ocr_engine"
-                    labelText={LABEL.SERVE_OCR_ENGINE}
+                    labelText={intl.formatMessage(messages.serveOcrEngine)}
                     hideLabel
                     value={serveOcrEngine}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -765,16 +801,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="List of language codes for OCR (e.g., en, fr). Leave unset to use the server default."
+                      definition={intl.formatMessage(messages.serveOcrLanguagesDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.SERVE_OCR_LANGUAGES}
+                      {intl.formatMessage(messages.serveOcrLanguages)}
                     </DefinitionTooltip>
                   </div>
                   <TagInput
                     id="serve_ocr_languages"
-                    helperText="Press Enter or comma to add. Leave empty to use the server default."
+                    helperText={intl.formatMessage(messages.serveOcrLanguagesHelperText)}
                     tags={serveOcrLanguages}
                     onChange={(tags) => {
                       updateTextProviderConfig(DOCLING_SERVE_CONFIG_KEY.OCR_LANGUAGES, tags.length > 0 ? tags : null);
@@ -787,21 +823,21 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="PDF parsing backend."
+                  definition={intl.formatMessage(messages.servePdfBackendDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_PDF_BACKEND}
+                  {intl.formatMessage(messages.servePdfBackend)}
                 </DefinitionTooltip>
               </div>
               <Dropdown
                 id="serve_pdf_backend"
-                titleText={LABEL.SERVE_PDF_BACKEND}
+                titleText={intl.formatMessage(messages.servePdfBackend)}
                 hideLabel
-                label="Select backend"
+                label={intl.formatMessage(messages.selectBackend)}
                 items={[...PDF_BACKENDS]}
                 selectedItem={servePdfBackend}
-                itemToString={(item: PdfBackend | null) => (item ? PDF_BACKEND_LABELS[item] : '')}
+                itemToString={(item: PdfBackend | null) => (item ? intl.formatMessage(PDF_BACKEND_MESSAGES[item]) : '')}
                 onChange={({ selectedItem }: { selectedItem: PdfBackend | null }) => {
                   if (selectedItem) {
                     updateTextProviderConfig(DOCLING_SERVE_CONFIG_KEY.PDF_BACKEND, selectedItem);
@@ -813,21 +849,21 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="How to export images found in the document."
+                  definition={intl.formatMessage(messages.serveImageExportModeDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_IMAGE_EXPORT_MODE}
+                  {intl.formatMessage(messages.serveImageExportMode)}
                 </DefinitionTooltip>
               </div>
               <Dropdown
                 id="serve_image_export_mode"
-                titleText={LABEL.SERVE_IMAGE_EXPORT_MODE}
+                titleText={intl.formatMessage(messages.serveImageExportMode)}
                 hideLabel
-                label="Select mode"
+                label={intl.formatMessage(messages.selectMode)}
                 items={[...IMAGE_EXPORT_MODES]}
                 selectedItem={serveImageExportMode}
-                itemToString={(item: ImageExportMode | null) => (item ? IMAGE_EXPORT_MODE_LABELS[item] : '')}
+                itemToString={(item: ImageExportMode | null) => (item ? intl.formatMessage(IMAGE_EXPORT_MODE_MESSAGES[item]) : '')}
                 onChange={({ selectedItem }: { selectedItem: ImageExportMode | null }) => {
                   if (selectedItem) {
                     updateTextProviderConfig(DOCLING_SERVE_CONFIG_KEY.IMAGE_EXPORT_MODE, selectedItem);
@@ -839,16 +875,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Table extraction strategy. Leave empty to use the server default."
+                  definition={intl.formatMessage(messages.serveTableModeDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_TABLE_MODE}
+                  {intl.formatMessage(messages.serveTableMode)}
                 </DefinitionTooltip>
               </div>
               <TextInput
                 id="serve_table_mode"
-                labelText={LABEL.SERVE_TABLE_MODE}
+                labelText={intl.formatMessage(messages.serveTableMode)}
                 hideLabel
                 value={serveTableMode}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -860,16 +896,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Request timeout in seconds when calling Docling Serve."
+                  definition={intl.formatMessage(messages.serveTimeoutDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_TIMEOUT}
+                  {intl.formatMessage(messages.serveTimeout)}
                 </DefinitionTooltip>
               </div>
               <NumberInput
                 id="serve_timeout"
-                label={LABEL.SERVE_TIMEOUT}
+                label={intl.formatMessage(messages.serveTimeout)}
                 hideLabel
                 value={serveTimeout}
                 min={1}
@@ -884,16 +920,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Polling interval in seconds when waiting for async extraction results."
+                  definition={intl.formatMessage(messages.servePollIntervalDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_POLL_INTERVAL}
+                  {intl.formatMessage(messages.servePollInterval)}
                 </DefinitionTooltip>
               </div>
               <NumberInput
                 id="serve_poll_interval"
-                label={LABEL.SERVE_POLL_INTERVAL}
+                label={intl.formatMessage(messages.servePollInterval)}
                 hideLabel
                 value={servePollInterval}
                 min={1}
@@ -908,16 +944,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Maximum number of retries on transient failures."
+                  definition={intl.formatMessage(messages.serveMaxRetriesDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.SERVE_MAX_RETRIES}
+                  {intl.formatMessage(messages.serveMaxRetries)}
                 </DefinitionTooltip>
               </div>
               <NumberInput
                 id="serve_max_retries"
-                label={LABEL.SERVE_MAX_RETRIES}
+                label={intl.formatMessage(messages.serveMaxRetries)}
                 hideLabel
                 value={serveMaxRetries}
                 min={0}
@@ -936,16 +972,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
         <div className={styles.formField}>
           <div className={common.labelWithTooltip}>
             <DefinitionTooltip
-              definition="Column name to store the extracted document content."
+              definition={intl.formatMessage(messages.textDocColumnDescription)}
               openOnHover
               align="right"
             >
-              {LABEL.TEXT_DOC_COLUMN}
+              {intl.formatMessage(messages.textDocColumn)}
             </DefinitionTooltip>
           </div>
           <TextInput
             id="text_doc_column"
-            labelText={LABEL.TEXT_DOC_COLUMN}
+            labelText={intl.formatMessage(messages.textDocColumn)}
             hideLabel
             value={textDocColumn}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -959,7 +995,7 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
       {/* ═══════════════════════════════════════════════════════════════════
           ENTITY EXTRACTION
       ═══════════════════════════════════════════════════════════════════ */}
-      <AccordionItem title="Entity Extraction">
+      <AccordionItem title={intl.formatMessage(messages.entityExtractionTitle)}>
 
         {/* Provider */}
         <div className={styles.formField}>
@@ -967,19 +1003,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <RequiredParamTooltip
               paramId={ATTR.ENTITY_EXTRACTION}
               nodeAttributes={nodeAttributes}
-              definition="Choose the entity extraction strategy. Select 'None' to skip entity extraction."
+              definition={intl.formatMessage(messages.entityProviderDescription)}
             >
-              {LABEL.ENTITY_PROVIDER}
+              {intl.formatMessage(messages.entityProvider)}
             </RequiredParamTooltip>
           </div>
           <Dropdown
             id="entity_provider"
-            titleText={LABEL.ENTITY_PROVIDER}
+            titleText={intl.formatMessage(messages.entityProvider)}
             hideLabel
-            label="Select provider"
+            label={intl.formatMessage(messages.selectProvider)}
             items={[...ENTITY_PROVIDERS]}
             selectedItem={entityProvider}
-            itemToString={(item: EntityProvider | null) => (item ? ENTITY_PROVIDER_LABELS[item] : '')}
+            itemToString={(item: EntityProvider | null) => (item ? intl.formatMessage(ENTITY_PROVIDER_MESSAGES[item]) : '')}
             invalid={entityExtractionValidation.isInvalid}
             invalidText={entityExtractionValidation.errorMessage}
             onChange={({ selectedItem }: { selectedItem: EntityProvider | null }) => {
@@ -995,16 +1031,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Column name to store the extracted entities."
+                  definition={intl.formatMessage(messages.entityOutputColumnDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.ENTITY_OUTPUT_COLUMN}
+                  {intl.formatMessage(messages.entityOutputColumn)}
                 </DefinitionTooltip>
               </div>
               <TextInput
                 id="entity_output_column"
-                labelText={LABEL.ENTITY_OUTPUT_COLUMN}
+                labelText={intl.formatMessage(messages.entityOutputColumn)}
                 hideLabel
                 value={entityOutputColumn}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1020,16 +1056,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="LLM model identifier (e.g., 'ollama/llama3.2', 'openai/gpt-4o', 'ibm/granite-3-8b-instruct')."
+                      definition={intl.formatMessage(messages.entityModelIdDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_MODEL_ID}
+                      {intl.formatMessage(messages.entityModelId)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="entity_litellm_model_id"
-                    labelText={LABEL.ENTITY_MODEL_ID}
+                    labelText={intl.formatMessage(messages.entityModelId)}
                     hideLabel
                     value={strVal(entityProviderConfig, LLM_ENTITY_CONFIG_KEY.MODEL_ID) || (metaDefault<string>(litellmAttrs, LLM_ENTITY_CONFIG_KEY.MODEL_ID) ?? '')}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1041,16 +1077,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Base URL for the LLM API endpoint (e.g., 'http://localhost:11434/v1')."
+                      definition={intl.formatMessage(messages.entityApiBaseDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_API_BASE}
+                      {intl.formatMessage(messages.entityApiBase)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="entity_litellm_api_base"
-                    labelText={LABEL.ENTITY_API_BASE}
+                    labelText={intl.formatMessage(messages.entityApiBase)}
                     hideLabel
                     value={strVal(entityProviderConfig, LLM_ENTITY_CONFIG_KEY.API_BASE)}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1062,15 +1098,15 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <VaultInput
                     id="entity_litellm_api_key"
-                    labelText={LABEL.ENTITY_API_KEY}
+                    labelText={intl.formatMessage(messages.entityApiKey)}
                     labelComponent={
                       <div className={common.labelWithTooltip}>
                         <DefinitionTooltip
-                          definition="API key for authenticating with the LLM provider."
+                          definition={intl.formatMessage(messages.entityApiKeyDescription)}
                           openOnHover
                           align="right"
                         >
-                          {LABEL.ENTITY_API_KEY}
+                          {intl.formatMessage(messages.entityApiKey)}
                         </DefinitionTooltip>
                       </div>
                     }
@@ -1084,16 +1120,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Sampling temperature (0.0-1.0). Lower values produce more deterministic output."
+                      definition={intl.formatMessage(messages.entityTemperatureDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_TEMPERATURE}
+                      {intl.formatMessage(messages.entityTemperature)}
                     </DefinitionTooltip>
                   </div>
                   <NumberInput
                     id="entity_litellm_temperature"
-                    label={LABEL.ENTITY_TEMPERATURE}
+                    label={intl.formatMessage(messages.entityTemperature)}
                     hideLabel
                     value={
                       numVal(
@@ -1115,16 +1151,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Maximum number of tokens to generate in the LLM response."
+                      definition={intl.formatMessage(messages.entityMaxTokensDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_MAX_TOKENS}
+                      {intl.formatMessage(messages.entityMaxTokens)}
                     </DefinitionTooltip>
                   </div>
                   <NumberInput
                     id="entity_litellm_max_tokens"
-                    label={LABEL.ENTITY_MAX_TOKENS}
+                    label={intl.formatMessage(messages.entityMaxTokens)}
                     hideLabel
                     value={numVal(entityProviderConfig, LLM_ENTITY_CONFIG_KEY.MAX_TOKENS, metaDefault<number>(litellmAttrs, LLM_ENTITY_CONFIG_KEY.MAX_TOKENS) ?? '')}
                     min={1}
@@ -1146,16 +1182,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="LLM model identifier (e.g., 'ibm/granite-3-8b-instruct')."
+                      definition={intl.formatMessage(messages.entityModelIdDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_MODEL_ID}
+                      {intl.formatMessage(messages.entityModelId)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="entity_watsonx_model_id"
-                    labelText={LABEL.ENTITY_MODEL_ID}
+                    labelText={intl.formatMessage(messages.entityModelId)}
                     hideLabel
                     value={strVal(entityProviderConfig, LLM_ENTITY_CONFIG_KEY.MODEL_ID) || (metaDefault<string>(watsonxAttrs, LLM_ENTITY_CONFIG_KEY.MODEL_ID) ?? '')}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1167,16 +1203,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Watsonx.ai API endpoint URL (e.g., 'https://us-south.ml.cloud.ibm.com')."
+                      definition={intl.formatMessage(messages.entityWatsonxUrlDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_WATSONX_URL}
+                      {intl.formatMessage(messages.entityWatsonxUrl)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="entity_watsonx_url"
-                    labelText={LABEL.ENTITY_WATSONX_URL}
+                    labelText={intl.formatMessage(messages.entityWatsonxUrl)}
                     hideLabel
                     value={strVal(entityProviderConfig, WATSONX_ENTITY_CONFIG_KEY.URL)}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1188,15 +1224,15 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <VaultInput
                     id="entity_watsonx_api_key"
-                    labelText={LABEL.ENTITY_API_KEY}
+                    labelText={intl.formatMessage(messages.entityApiKey)}
                     labelComponent={
                       <div className={common.labelWithTooltip}>
                         <DefinitionTooltip
-                          definition="API key for authenticating with IBM watsonx."
+                          definition={intl.formatMessage(messages.entityWatsonxApiKeyDescription)}
                           openOnHover
                           align="right"
                         >
-                          {LABEL.ENTITY_API_KEY}
+                          {intl.formatMessage(messages.entityApiKey)}
                         </DefinitionTooltip>
                       </div>
                     }
@@ -1210,18 +1246,18 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Container type for the watsonx project or space."
+                      definition={intl.formatMessage(messages.entityContainerKindDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_CONTAINER_KIND}
+                      {intl.formatMessage(messages.entityContainerKind)}
                     </DefinitionTooltip>
                   </div>
                   <Dropdown
                     id="entity_watsonx_container_kind"
-                    titleText={LABEL.ENTITY_CONTAINER_KIND}
+                    titleText={intl.formatMessage(messages.entityContainerKind)}
                     hideLabel
-                    label="Select container type"
+                    label={intl.formatMessage(messages.selectContainerType)}
                     items={[...WATSONX_CONTAINER_KINDS]}
                     selectedItem={(entityProviderConfig[WATSONX_ENTITY_CONFIG_KEY.CONTAINER_KIND] as WatsonxContainerKind | undefined) ?? metaDefault<WatsonxContainerKind>(watsonxAttrs, WATSONX_ENTITY_CONFIG_KEY.CONTAINER_KIND) ?? 'project'}
                     itemToString={(item: WatsonxContainerKind | null) => item ?? ''}
@@ -1234,16 +1270,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Container ID for the watsonx project or space."
+                      definition={intl.formatMessage(messages.entityContainerIdDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_CONTAINER_ID}
+                      {intl.formatMessage(messages.entityContainerId)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="entity_watsonx_container_id"
-                    labelText={LABEL.ENTITY_CONTAINER_ID}
+                    labelText={intl.formatMessage(messages.entityContainerId)}
                     hideLabel
                     value={strVal(entityProviderConfig, WATSONX_ENTITY_CONFIG_KEY.CONTAINER_ID)}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1255,16 +1291,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Watsonx project ID."
+                      definition={intl.formatMessage(messages.entityProjectIdDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_PROJECT_ID}
+                      {intl.formatMessage(messages.entityProjectId)}
                     </DefinitionTooltip>
                   </div>
                   <TextInput
                     id="entity_watsonx_project_id"
-                    labelText={LABEL.ENTITY_PROJECT_ID}
+                    labelText={intl.formatMessage(messages.entityProjectId)}
                     hideLabel
                     value={strVal(entityProviderConfig, WATSONX_ENTITY_CONFIG_KEY.PROJECT_ID)}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1276,16 +1312,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Sampling temperature (0.0-1.0). Lower values produce more deterministic output."
+                      definition={intl.formatMessage(messages.entityTemperatureDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_TEMPERATURE}
+                      {intl.formatMessage(messages.entityTemperature)}
                     </DefinitionTooltip>
                   </div>
                   <NumberInput
                     id="entity_watsonx_temperature"
-                    label={LABEL.ENTITY_TEMPERATURE}
+                    label={intl.formatMessage(messages.entityTemperature)}
                     hideLabel
                     value={
                       numVal(
@@ -1307,16 +1343,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                 <div className={styles.formField}>
                   <div className={common.labelWithTooltip}>
                     <DefinitionTooltip
-                      definition="Maximum number of tokens to generate in the LLM response."
+                      definition={intl.formatMessage(messages.entityMaxTokensDescription)}
                       openOnHover
                       align="right"
                     >
-                      {LABEL.ENTITY_MAX_TOKENS}
+                      {intl.formatMessage(messages.entityMaxTokens)}
                     </DefinitionTooltip>
                   </div>
                   <NumberInput
                     id="entity_watsonx_max_tokens"
-                    label={LABEL.ENTITY_MAX_TOKENS}
+                    label={intl.formatMessage(messages.entityMaxTokens)}
                     hideLabel
                     value={numVal(entityProviderConfig, LLM_ENTITY_CONFIG_KEY.MAX_TOKENS, metaDefault<number>(watsonxAttrs, LLM_ENTITY_CONFIG_KEY.MAX_TOKENS) ?? '')}
                     min={1}
@@ -1338,21 +1374,21 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
                   <div className={styles.formField}>
                     <div className={common.labelWithTooltip}>
                       <DefinitionTooltip
-                        definition="Custom VLM model configuration for Docling entity extraction. Requires 'model_type': 'inline' and an 'inline_model' with a HuggingFace 'repo_id'."
+                        definition={intl.formatMessage(messages.entityDoclingVlmPipelineDescription)}
                         openOnHover
                         align="right"
                       >
-                        {LABEL.ENTITY_VLM_PIPELINE}
+                        {intl.formatMessage(messages.entityDoclingVlmPipeline)}
                       </DefinitionTooltip>
                     </div>
                     <TextArea
                       id="entity_docling_vlm_pipeline"
-                      labelText={LABEL.ENTITY_VLM_PIPELINE}
+                      labelText={intl.formatMessage(messages.entityDoclingVlmPipeline)}
                       hideLabel
                       value={entityDoclingVlmPipelineRaw ?? (!isNil(entityProviderConfig[DOCLING_ENTITY_CONFIG_KEY.VLM_PIPELINE]) ? JSON.stringify(entityProviderConfig[DOCLING_ENTITY_CONFIG_KEY.VLM_PIPELINE], null, 2) : '')}
                       rows={4}
                       invalid={touchedFields.entityDoclingVlmPipeline && !isValidJsonObject(entityDoclingVlmPipelineRaw ?? '')}
-                      invalidText="VLM pipeline configuration must be a valid JSON object."
+                      invalidText={intl.formatMessage(messages.entityDoclingVlmPipelineInvalid)}
                       onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                         const raw = e.target.value;
                         setEntityDoclingVlmPipelineRaw(raw);
@@ -1376,16 +1412,16 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Maximum characters of document content sent for entity extraction per document."
+                  definition={intl.formatMessage(messages.entityMaxDocCharsDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.ENTITY_MAX_DOC_CHARS}
+                  {intl.formatMessage(messages.entityMaxDocChars)}
                 </DefinitionTooltip>
               </div>
               <NumberInput
                 id="entity_max_doc_chars"
-                label={LABEL.ENTITY_MAX_DOC_CHARS}
+                label={intl.formatMessage(messages.entityMaxDocChars)}
                 hideLabel
                 value={entityMaxDocChars}
                 min={1}
@@ -1402,21 +1438,21 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="JSON object defining a schema dictionary for structured entity extraction."
+                  definition={intl.formatMessage(messages.entityCustomSchemaDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.ENTITY_CUSTOM_SCHEMA}
+                  {intl.formatMessage(messages.entityCustomSchema)}
                 </DefinitionTooltip>
               </div>
               <TextArea
                 id="entity_custom_schema"
-                labelText={LABEL.ENTITY_CUSTOM_SCHEMA}
+                labelText={intl.formatMessage(messages.entityCustomSchema)}
                 hideLabel
                 value={customSchemaRaw ?? entityCustomSchemaPersisted}
                 rows={3}
                 invalid={touchedFields.entityCustomSchema && !isValidJsonObject(customSchemaRaw ?? entityCustomSchemaPersisted)}
-                invalidText="Custom schema must be a valid JSON object."
+                invalidText={intl.formatMessage(messages.entityCustomSchemaInvalid)}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                   const raw = e.target.value;
                   setCustomSchemaRaw(raw);
@@ -1437,19 +1473,19 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <div className={styles.formField}>
               <div className={common.labelWithTooltip}>
                 <DefinitionTooltip
-                  definition="Expand extracted entity data into individual columns in the output table."
+                  definition={intl.formatMessage(messages.entityExpandDataDescription)}
                   openOnHover
                   align="right"
                 >
-                  {LABEL.ENTITY_EXPAND_DATA}
+                  {intl.formatMessage(messages.entityExpandData)}
                 </DefinitionTooltip>
               </div>
               <Toggle
                 id="entity_expand_data"
-                labelText={LABEL.ENTITY_EXPAND_DATA}
+                labelText={intl.formatMessage(messages.entityExpandData)}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={entityExpandData}
                 onToggle={(checked: boolean) => { updateEntityExtraction(EXTRACTION_KEY.EXPAND_EXTRACTED_DATA, checked); }}
               />
@@ -1461,20 +1497,20 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
       {/* ═══════════════════════════════════════════════════════════════════
           ADVANCED
       ═══════════════════════════════════════════════════════════════════ */}
-      <AccordionItem title="Advanced">
+      <AccordionItem title={intl.formatMessage(messages.advancedTitle)}>
         <div className={styles.formField}>
           <div className={common.labelWithTooltip}>
             <RequiredParamTooltip
               paramId={ATTR.MAX_WORKERS}
               nodeAttributes={nodeAttributes}
-              definition="Maximum number of parallel workers for extraction (auto-detects based on CPU count if not specified)."
+              definition={intl.formatMessage(messages.maxWorkersDescription)}
             >
-              {LABEL.MAX_WORKERS}
+              {intl.formatMessage(messages.maxWorkers)}
             </RequiredParamTooltip>
           </div>
           <NumberInput
             id="max_workers"
-            label={LABEL.MAX_WORKERS}
+            label={intl.formatMessage(messages.maxWorkers)}
             hideLabel
             value={maxWorkers}
             min={0}
@@ -1494,17 +1530,17 @@ export function ExtractPanelBody({ controller }: ExtractPanelBodyProps): React.J
             <RequiredParamTooltip
               paramId={ATTR.USE_PROCESSES}
               nodeAttributes={nodeAttributes}
-              definition="Use separate processes instead of threads for CPU-intensive tasks."
+              definition={intl.formatMessage(messages.useProcessesDescription)}
             >
-              {LABEL.USE_PROCESSES}
+              {intl.formatMessage(messages.useProcesses)}
             </RequiredParamTooltip>
           </div>
           <Toggle
             id="use_processes"
-            labelText={LABEL.USE_PROCESSES}
+            labelText={intl.formatMessage(messages.useProcesses)}
             hideLabel
-            labelA="Off"
-            labelB="On"
+            labelA={intl.formatMessage(messages.off)}
+            labelB={intl.formatMessage(messages.on)}
             toggled={useProcesses}
             onToggle={(checked: boolean) => { update(ATTR.USE_PROCESSES, checked); }}
           />

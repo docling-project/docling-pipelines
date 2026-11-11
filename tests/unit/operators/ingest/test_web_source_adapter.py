@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -1064,3 +1067,18 @@ class TestWebPageFetchDocumentsEdgeCases:
             adapter.build_config_from_operator_params(
                 provider_config={},
             )
+
+
+@pytest.mark.parametrize(
+    ("content_type", "expected"),
+    [
+        ("text/csv", (".csv", "text/csv")),
+        ("message/rfc822; charset=utf-8", (".eml", "message/rfc822")),
+        ("application/unknown", (".html", "text/html")),
+    ],
+)
+def test_added_content_types_and_fallback(content_type, expected):
+    adapter = WebPageSourceAdapter()
+    response = Mock(status_code=200, headers={"Content-Type": content_type})
+    with patch.object(adapter._rest_client, "call_rest", return_value=response):
+        assert adapter._detect_extension(url="https://example.com/file", timeout=10) == expected

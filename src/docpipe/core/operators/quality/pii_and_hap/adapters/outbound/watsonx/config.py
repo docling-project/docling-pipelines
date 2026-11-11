@@ -3,9 +3,15 @@
 
 """Pydantic config model for the WatsonX PII/HAP detection adapter."""
 
+from typing import Final, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
+from docpipe.core.constants.constants import ServiceConstants
+
 ADAPTER_NAME = "watsonx"
+
+DEFAULT_CONTAINER_KIND: Final = "project"
 
 
 class WatsonxPIIAndHAPConfig(BaseModel):
@@ -29,8 +35,8 @@ class WatsonxPIIAndHAPConfig(BaseModel):
         default=None,
         description="WatsonX API endpoint URL.",
     )
-    container_kind: str = Field(
-        default="project",
+    container_kind: Literal["project", "space"] = Field(
+        default=DEFAULT_CONTAINER_KIND,
         description="Container type: 'project' or 'space'.",
     )
     container_id: str | None = Field(
@@ -38,6 +44,7 @@ class WatsonxPIIAndHAPConfig(BaseModel):
         description="Project ID or space ID.",
     )
     timeout: int = Field(
-        default=300,
+        default=ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS,
+        ge=1,
         description="Request timeout in seconds.",
     )

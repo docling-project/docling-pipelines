@@ -9,11 +9,19 @@ Versioning follows [Semantic Versioning 2.0.0](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [2.1.0] - 2026-11-04
+
 ### Added
 
-- File event support (`created`, `modified`, `deleted`) in the Box (#347) and Dropbox (#348) ingest source adapters
+- File event support (`created`, `modified`, `deleted`) in the Box (#347), Dropbox (#348), SharePoint (#453), Google Drive (#398), and OneDrive (#482) ingest source adapters
 - Kafka event streaming integration, routing-key event mapping REST API (`/api/v1/event_mappings`), persistent mapping storage, and Docker Compose deployment with Kafka (#162, #233, #234)
+- `EntityStoreOperator` (`entity_store`) for storing curated entities in DuckDB or PostgreSQL, with upserts and automatic schema evolution (#184)
+- PostgreSQL repositories for document library and document set assets (#185)
+- Filesystem ingestion of top-level ZIP, TAR, TAR.GZ, TGZ, and GZ archives (#217)
 - Local Presidio PII detection provider (`pii_provider: "presidio"`) and capability-based detection port split in `PIIAndHAPAnnotator` (#187)
+- VLM-based entity extraction from binary documents (#287)
 - `DocumentClassProvider` port and static implementation (#285)
 - CPU and GPU Docker build support (`COMPUTE_BACKEND` build arg) (#216)
 - OpenSpec specification files covering backend and frontend capabilities (#155)
@@ -22,8 +30,11 @@ Versioning follows [Semantic Versioning 2.0.0](https://semver.org/).
 
 ### Changed
 
+- **Breaking:** `VectorDBOperator` manages index creation and validation automatically; the legacy `create_index` option is ignored with a warning (#328)
 - Cross-document embedding sub-batching in `EmbeddingsOperator` for higher embedding throughput (#191)
 - Enhanced `EdedupOperator` with persistent deduplication registry storage (#270)
+- Reuse Docling converters across documents and batches through a bounded process-wide pool (#190)
+- Load Vault configuration through the shared configuration loader (#247)
 - Hoisted hot-path imports in `ExtractOperator` (#142)
 - Migrated regular expression matching from `re` to `google-re2` across operator hot-paths for ReDoS hardening (#240)
 - Replaced `TagInput` with explicit Add button and table for provider list fields in the frontend (#273)
@@ -159,7 +170,8 @@ Versioning follows [Semantic Versioning 2.0.0](https://semver.org/).
 - SonarQube, ruff, mypy, and Mend CI quality gates
 - Comprehensive documentation under `docs/`
 
-[Unreleased]: https://github.com/docling-project/docling-pipelines/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/docling-project/docling-pipelines/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/docling-project/docling-pipelines/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/docling-project/docling-pipelines/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/docling-project/docling-pipelines/compare/v1.0.1...v2.0.0
 [1.0.1]: https://github.com/docling-project/docling-pipelines/compare/v1.0.0...v1.0.1

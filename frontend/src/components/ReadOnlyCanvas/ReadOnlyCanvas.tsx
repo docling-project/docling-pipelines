@@ -86,6 +86,7 @@ export function ReadOnlyCanvas({
     end_time: 0,
     duration: 0,
     heartbeat_timestamp: null,
+    progress_timestamp: 0,
     total_docs: 0,
     processed_docs: 0,
     completed_docs: null,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """HuggingFace adapter for LLM operations.
 
 This adapter provides embeddings using HuggingFace models with support for
@@ -108,6 +111,3 @@ class HuggingFaceAdapter(LLMEmbeddingPort):
                 LLMConstants.ValidationKeys.VALID: False,
                 LLMConstants.ValidationKeys.CONTEXT: LLMConstants.ValidationContexts.EMBEDDING,
             }
-
-
-# Made with Bob

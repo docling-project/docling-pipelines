@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow validation module for docpipe orchestrator.
 
 This module contains the FlowValidator class which handles all flow validation logic
@@ -207,7 +210,11 @@ class FlowValidator:
             )
             # Continue with whatever metadata was successfully loaded
         # Use injected propagator when available to avoid a redundant metadata load.
-        self.feature_propagator = feature_propagator if feature_propagator is not None else FeaturePropagator()
+        # Otherwise build one from the same orchestrator, so custom operators enabled only
+        # through the orchestrator (not the environment) contribute their output features.
+        self.feature_propagator = (
+            feature_propagator if feature_propagator is not None else FeaturePropagator(orchestrator=orchestrator)
+        )
 
     def validate(self, *, flow_def: FlowConfig, params: FlowConfig) -> None:
         """Main validation entry point for a flow definition.
@@ -601,7 +608,13 @@ class FlowValidator:
                     config = (
                         global_config
                         | op_def.get(OperatorConstants.Config.CONFIG, {})
-                        | {DocpipeConstants.VALIDATING_FLOW: True}
+                        | {
+                            DocpipeConstants.VALIDATING_FLOW: True,
+                            DocpipeConstants.VALIDATION_FEATURE_TYPES: {
+                                name: feature.get("type")
+                                for name, feature in node_result.get_input_features(node_id=node_id).items()
+                            },
+                        }
                     )
                     config = self._sanitize_vault_refs_for_validation(config)
                     operator = operator_class(config=config)

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for BoxDestinationAdapter."""
 
 from unittest.mock import MagicMock, patch
@@ -329,7 +332,30 @@ class TestBoxDestinationAdapterErrorPaths:
 
 
 class TestBoxDestinationAdapterBuildConfig:
-    def test_builds_config_with_required_fields(self):
+    def test_builds_config_with_credentials_path_in_provider_config(self):
+        adapter = BoxDestinationAdapter()
+        cfg = adapter.build_config_from_operator_params(
+            provider_config={
+                "folder_id": "123456789",
+                "credentials_path": "/tmp/box_config.json",
+            },
+            credentials={},
+        )
+        assert isinstance(cfg, BoxDestinationConfig)
+        assert cfg.folder_id == "123456789"
+        assert cfg.credentials_path == "/tmp/box_config.json"
+
+    def test_builds_config_with_credentials_path_in_credentials(self):
+        adapter = BoxDestinationAdapter()
+        cfg = adapter.build_config_from_operator_params(
+            provider_config={"folder_id": "123456789"},
+            credentials={"credentials_path": "/tmp/box_config.json"},
+        )
+        assert isinstance(cfg, BoxDestinationConfig)
+        assert cfg.folder_id == "123456789"
+        assert cfg.credentials_path == "/tmp/box_config.json"
+
+    def test_builds_config_with_legacy_credentials_json_path(self):
         adapter = BoxDestinationAdapter()
         cfg = adapter.build_config_from_operator_params(
             provider_config={"folder_id": "123456789"},
@@ -339,9 +365,9 @@ class TestBoxDestinationAdapterBuildConfig:
         assert cfg.folder_id == "123456789"
         assert cfg.credentials_path == "/tmp/box_config.json"
 
-    def test_missing_credentials_json_path_raises(self):
+    def test_missing_credentials_path_raises(self):
         adapter = BoxDestinationAdapter()
-        with pytest.raises(ValueError, match="credentials_json_path"):
+        with pytest.raises(ValueError, match="credentials_path"):
             adapter.build_config_from_operator_params(
                 provider_config={"folder_id": "123456789"},
                 credentials={},
@@ -350,24 +376,24 @@ class TestBoxDestinationAdapterBuildConfig:
     def test_folder_id_defaults_to_root(self):
         adapter = BoxDestinationAdapter()
         cfg = adapter.build_config_from_operator_params(
-            provider_config={},
-            credentials={"credentials_json_path": "/tmp/box_config.json"},
+            provider_config={"credentials_path": "/tmp/box_config.json"},
+            credentials={},
         )
         assert cfg.folder_id == "0"
 
     def test_create_dirs_defaults_to_true(self):
         adapter = BoxDestinationAdapter()
         cfg = adapter.build_config_from_operator_params(
-            provider_config={"folder_id": "123"},
-            credentials={"credentials_json_path": "/tmp/box_config.json"},
+            provider_config={"folder_id": "123", "credentials_path": "/tmp/box_config.json"},
+            credentials={},
         )
         assert cfg.create_dirs is True
 
     def test_create_dirs_false_passed_through(self):
         adapter = BoxDestinationAdapter()
         cfg = adapter.build_config_from_operator_params(
-            provider_config={"folder_id": "123", "create_dirs": False},
-            credentials={"credentials_json_path": "/tmp/box_config.json"},
+            provider_config={"folder_id": "123", "credentials_path": "/tmp/box_config.json", "create_dirs": False},
+            credentials={},
         )
         assert cfg.create_dirs is False
 
@@ -375,8 +401,8 @@ class TestBoxDestinationAdapterBuildConfig:
         monkeypatch.setenv("BOX_TEST_CFG", "/tmp/resolved_box.json")
         adapter = BoxDestinationAdapter()
         cfg = adapter.build_config_from_operator_params(
-            provider_config={"folder_id": "123"},
-            credentials={"credentials_json_path": "${BOX_TEST_CFG}"},
+            provider_config={"folder_id": "123", "credentials_path": "${BOX_TEST_CFG}"},
+            credentials={},
         )
         assert cfg.credentials_path == "/tmp/resolved_box.json"
 
@@ -384,8 +410,8 @@ class TestBoxDestinationAdapterBuildConfig:
         monkeypatch.setenv("BOX_DEST_FOLDER", "987654321")
         adapter = BoxDestinationAdapter()
         cfg = adapter.build_config_from_operator_params(
-            provider_config={"folder_id": "${BOX_DEST_FOLDER}"},
-            credentials={"credentials_json_path": "/tmp/box_config.json"},
+            provider_config={"folder_id": "${BOX_DEST_FOLDER}", "credentials_path": "/tmp/box_config.json"},
+            credentials={},
         )
         assert cfg.folder_id == "987654321"
 

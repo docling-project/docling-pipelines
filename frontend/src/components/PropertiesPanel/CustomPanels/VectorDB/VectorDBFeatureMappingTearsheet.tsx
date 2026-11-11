@@ -16,7 +16,8 @@
  *   is replaced with an error empty state.
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useIntl } from 'react-intl';
 import { useThemeElement } from '@/contexts';
 import {
   Checkbox,
@@ -34,11 +35,14 @@ import type { FeatureMappingRow, FeatureMappingItem, VectorDBEnrichmentResult } 
 import { enrichFlowFeaturesForNode } from './vectordb-enrichment';
 import {
   DEFAULT_COLUMN_MAPPINGS,
+  MILVUS_BINARY_METRIC_VALUES,
+  MILVUS_DENSE_METRIC_VALUES,
   VECTORDB_LABELS,
   VECTORDB_PROVIDERS,
   omitProviderConfigKeys,
   type ProviderConfig,
 } from './constants';
+import { messages } from './VectorDBFeatureMappingTearsheet.messages';
 import { VectorDBFeatureMappingTable } from './VectorDBFeatureMappingTable';
 import { AddFeatureMappingModal } from './AddFeatureMappingModal';
 import styles from './VectorDB.module.scss';
@@ -135,16 +139,6 @@ function buildTableRows(
   return [];
 }
 
-/** Validate a proposed new resource name. Returns an error string or null. */
-function validateNewName(name: string, existingNames: string[]): string | null {
-  const trimmed = name.trim();
-  if (!trimmed) { return 'Name is required'; }
-  if (!/^[A-Za-z_]/.test(trimmed)) { return 'Name must start with a letter or underscore'; }
-  if (!NEW_RESOURCE_NAME_RE.test(trimmed)) { return 'Only letters, numbers, and underscores are allowed'; }
-  if (existingNames.includes(trimmed)) { return `"${trimmed}" already exists — choose a different name`; }
-  return null;
-}
-
 export function VectorDBFeatureMappingTearsheet({
   open,
   onClose,
@@ -162,15 +156,43 @@ export function VectorDBFeatureMappingTearsheet({
   savedEngine,
   addSparseVector,
 }: VectorDBFeatureMappingTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
   const portalTarget = useThemeElement();
   const {
     resourceLabel,
     resourceNameKey,
     similarityLabel,
-    similarityLabels,
     hasEngine,
-    engineLabels,
   } = providerCfg;
+
+  const similarityMetricLabels: Record<string, string> = {
+    l2: intl.formatMessage(messages.metricL2),
+    L2: intl.formatMessage(messages.metricL2Milvus),
+    cosine: intl.formatMessage(messages.metricCosine),
+    COSINE: intl.formatMessage(messages.metricCosine),
+    inner_product: intl.formatMessage(messages.metricInnerProduct),
+    IP: intl.formatMessage(messages.metricIPMilvus),
+    BM25: intl.formatMessage(messages.metricBM25),
+    HAMMING: intl.formatMessage(messages.metricHamming),
+    JACCARD: intl.formatMessage(messages.metricJaccard),
+  };
+
+  const engineOptionLabels: Record<string, string> = {
+    faiss: intl.formatMessage(messages.engineFaiss),
+    lucene: intl.formatMessage(messages.engineLucene),
+    nmslib: intl.formatMessage(messages.engineNmslib),
+    jvector: intl.formatMessage(messages.engineJvector),
+  };
+
+  /** Validate a proposed new resource name. Returns an error string or null. */
+  const validateNewName = useCallback((name: string, existingNames: string[]): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) { return intl.formatMessage(messages.nameRequired); }
+    if (!/^[A-Za-z_]/.test(trimmed)) { return intl.formatMessage(messages.nameMustStartWithLetter); }
+    if (!NEW_RESOURCE_NAME_RE.test(trimmed)) { return intl.formatMessage(messages.nameOnlyLettersNumbersUnderscores); }
+    if (existingNames.includes(trimmed)) { return intl.formatMessage(messages.nameAlreadyExists, { name: trimmed }); }
+    return null;
+  }, [intl]);
 
   // ── Enrichment state — owned here, not in the parent panel ──
   const [loading, setLoading] = useState(false);
@@ -183,7 +205,7 @@ export function VectorDBFeatureMappingTearsheet({
   // ── Form state ──
   const [selectedResource, setSelectedResource] = useState<string>(CREATE_NEW);
   const [newResourceName, setNewResourceName] = useState<string>('');
-  const [newNameError, setNewNameError] = useState<string | null>('Name is required');
+  const [newNameError, setNewNameError] = useState<string | null>(intl.formatMessage(messages.nameRequired));
   const [resourceNameEdited, setResourceNameEdited] = useState<boolean>(true);
   const [similarityMetric, setSimilarityMetric] = useState<string>(savedVectorSimilarity);
   const [engine, setEngine] = useState<string>(savedEngine);
@@ -239,7 +261,7 @@ export function VectorDBFeatureMappingTearsheet({
         setTableRows(buildTableRows(result, currentFeatureMappings));
       } catch {
         if (runRef.current !== token) { return; }
-        setLoadError('Failed to load available resources. Check your connection settings and try again.');
+        setLoadError(intl.formatMessage(messages.loadResourcesError));
         // Still show the tearsheet with last-saved mappings so the user is not blocked.
         setSelectedResource(savedResourceName ? savedResourceName : CREATE_NEW);
         setNewResourceName('');
@@ -266,6 +288,38 @@ export function VectorDBFeatureMappingTearsheet({
   // Similarity and engine are locked for existing resources when the backend
   // already knows those values (they were set at index/collection creation time).
   const isConfigReadOnly = !isCreateNew && Boolean(storedMeta?.vector_similarity);
+
+  const effectiveSimilarityOptions = useMemo(() => {
+    if (provider !== VECTORDB_PROVIDERS.MILVUS) {
+      return vectorSimilarityOptions;
+    }
+    const hasBinary = tableRows.some((r) => availableFeatures[r.feature]?.type === 'vector_binary')
+      || Object.values(availableFeatures).some((f) => f?.type === 'vector_binary');
+    const hasDense = tableRows.some((r) => availableFeatures[r.feature]?.type === 'vector')
+      || Object.values(availableFeatures).some((f) => f?.type === 'vector');
+
+    if (hasBinary && !hasDense) {
+      const base: string[] = [...MILVUS_BINARY_METRIC_VALUES];
+      if (sparseVectorEnabled && !base.includes('BM25')) {
+        base.push('BM25');
+      }
+      return base.filter((v) => vectorSimilarityOptions.includes(v));
+    }
+    if (hasDense && !hasBinary) {
+      const base: string[] = [...MILVUS_DENSE_METRIC_VALUES];
+      if (sparseVectorEnabled && !base.includes('BM25')) {
+        base.push('BM25');
+      }
+      return base.filter((v) => vectorSimilarityOptions.includes(v));
+    }
+    return vectorSimilarityOptions;
+  }, [availableFeatures, provider, sparseVectorEnabled, tableRows, vectorSimilarityOptions]);
+
+  useEffect(() => {
+    if (isCreateNew && effectiveSimilarityOptions.length > 0 && !effectiveSimilarityOptions.includes(similarityMetric)) {
+      setSimilarityMetric(effectiveSimilarityOptions[0] ?? '');
+    }
+  }, [effectiveSimilarityOptions, isCreateNew, similarityMetric]);
 
   const handleResourceChange = ({ selectedItem }: { selectedItem?: string | null }): void => {
     const selectedResourceName = selectedItem ?? CREATE_NEW;
@@ -310,8 +364,8 @@ export function VectorDBFeatureMappingTearsheet({
         if (runRef.current !== token) { return; }
         setLoadError(
           resourceArg
-            ? 'Failed to load details for the selected resource. Try again or choose a different one.'
-            : 'Failed to load feature mappings for new resource. Try again.'
+            ? intl.formatMessage(messages.loadResourceDetailsError)
+            : intl.formatMessage(messages.loadNewResourceMappingsError)
         );
       } finally {
         if (runRef.current === token) { setLoadingMappings(false); }
@@ -370,7 +424,7 @@ export function VectorDBFeatureMappingTearsheet({
         setTableRows(buildTableRows(result, []));
       } catch {
         if (runRef.current !== token) { return; }
-        setLoadError('Failed to reload feature mappings. Try again.');
+        setLoadError(intl.formatMessage(messages.reloadMappingsError));
       } finally {
         if (runRef.current === token) { setLoadingMappings(false); }
       }
@@ -419,25 +473,25 @@ export function VectorDBFeatureMappingTearsheet({
 
   const unsupportedSubtitle =
     resourceLabel === 'collection'
-      ? `The selected ${resourceLabel} is not compatible since it does not have a vector field configured. Select another ${resourceLabel} or create a new one.`
-      : `The selected ${resourceLabel} is not compatible since it does not have a dense vector field with indexing enabled on that field. Select another ${resourceLabel} or create a new one.`;
+      ? intl.formatMessage(messages.unsupportedCollectionSubtitle, { resourceLabel })
+      : intl.formatMessage(messages.unsupportedIndexSubtitle, { resourceLabel });
 
   return (
     <Tearsheet
       open={open}
-      title={currentFeatureMappings.length > 0 ? 'Edit feature mappings' : 'Add feature mappings'}
-      description={`Configure the target ${resourceLabel} and map pipeline features to its columns`}
+      title={currentFeatureMappings.length > 0 ? intl.formatMessage(messages.editTitle) : intl.formatMessage(messages.addTitle)}
+      description={intl.formatMessage(messages.description, { resourceLabel })}
       onClose={onClose}
       portalTarget={portalTarget}
       actions={[
         {
-          label: 'Save',
+          label: intl.formatMessage(messages.save),
           onClick: handleSave,
           kind: 'primary' as const,
           disabled: !canSave,
         },
         {
-          label: 'Cancel',
+          label: intl.formatMessage(messages.cancel),
           onClick: onClose,
           kind: 'secondary' as const,
         },
@@ -457,7 +511,7 @@ export function VectorDBFeatureMappingTearsheet({
             {loadError && (
               <InlineNotification
                 kind="error"
-                title="Error"
+                title={intl.formatMessage(messages.errorTitle)}
                 subtitle={loadError}
                 lowContrast
                 hideCloseButton
@@ -468,7 +522,11 @@ export function VectorDBFeatureMappingTearsheet({
             {isConfigReadOnly && (
               <InlineNotification
                 kind="info"
-                title={`${similarityLabel}${hasEngine ? ', engine,' : ''} and dimension size are fixed by the existing ${resourceLabel} and cannot be changed.`}
+                title={intl.formatMessage(messages.readOnlyNotice, {
+                  similarityLabel,
+                  hasEngine: String(hasEngine),
+                  resourceLabel,
+                })}
                 lowContrast
                 hideCloseButton
               />
@@ -479,8 +537,8 @@ export function VectorDBFeatureMappingTearsheet({
             <div className={styles.rowInputs}>
               <ComboBox
                 id="resource-select"
-                titleText={`Search or select a ${resourceLabel} name`}
-                placeholder={`Search or select a ${resourceLabel} name`}
+                titleText={intl.formatMessage(messages.searchOrSelectResource, { resourceLabel })}
+                placeholder={intl.formatMessage(messages.searchOrSelectResource, { resourceLabel })}
                 items={dropdownItems}
                 selectedItem={selectedResource}
                 onChange={handleResourceChange}
@@ -493,8 +551,8 @@ export function VectorDBFeatureMappingTearsheet({
                   {isCreateNew && (
                     <TextInput
                       id="new-resource-name"
-                      labelText={`Enter a new ${resourceLabel} name`}
-                      placeholder={`e.g. my_${resourceLabel}`}
+                      labelText={intl.formatMessage(messages.enterNewResourceName, { resourceLabel })}
+                      placeholder={intl.formatMessage(messages.newResourceNamePlaceholder, { resourceLabel })}
                       value={newResourceName}
                       invalid={(resourceNameEdited || submitted) && Boolean(newNameError)}
                       invalidText={newNameError ?? undefined}
@@ -516,21 +574,21 @@ export function VectorDBFeatureMappingTearsheet({
                       <TextInput
                         id="similarity-metric-readonly"
                         labelText={similarityLabel}
-                        value={similarityLabels[similarityMetric] ?? similarityMetric}
+                        value={similarityMetricLabels[similarityMetric] ?? similarityMetric}
                         disabled
                       />
                       {hasEngine && (
                         <TextInput
                           id="engine-readonly"
-                          labelText="Engine"
-                          value={(engineLabels?.[engine] ?? engine)}
+                          labelText={intl.formatMessage(messages.engine)}
+                          value={(engineOptionLabels[engine] ?? engine)}
                           disabled
                         />
                       )}
                       {storedMeta?.dimension_size !== null && storedMeta?.dimension_size !== undefined && (
                         <TextInput
                           id="dimension-size-readonly"
-                          labelText="Dimension size"
+                          labelText={intl.formatMessage(messages.dimensionSize)}
                           value={String(storedMeta.dimension_size)}
                           disabled
                         />
@@ -541,13 +599,13 @@ export function VectorDBFeatureMappingTearsheet({
                       <Dropdown
                         id="similarity-metric-select"
                         titleText={similarityLabel}
-                        label={`Select ${similarityLabel.toLowerCase()}`}
-                        items={vectorSimilarityOptions.map((v) => similarityLabels[v] ?? v)}
-                        selectedItem={similarityLabels[similarityMetric] ?? similarityMetric}
+                        label={intl.formatMessage(messages.selectSimilarity, { similarityLabel: similarityLabel.toLowerCase() })}
+                        items={effectiveSimilarityOptions.map((v) => similarityMetricLabels[v] ?? v)}
+                        selectedItem={similarityMetricLabels[similarityMetric] ?? similarityMetric}
                         onChange={({ selectedItem }: { selectedItem?: string | null }) => {
                           if (selectedItem) {
-                            const value = vectorSimilarityOptions.find(
-                              (v) => (similarityLabels[v] ?? v) === selectedItem
+                            const value = effectiveSimilarityOptions.find(
+                              (v) => (similarityMetricLabels[v] ?? v) === selectedItem
                             );
                             if (value) { setSimilarityMetric(value); }
                           }
@@ -556,14 +614,14 @@ export function VectorDBFeatureMappingTearsheet({
                       {hasEngine && (
                         <Dropdown
                           id="engine-select"
-                          titleText="Engine"
-                          label="Select engine"
-                          items={engineOptions.map((v) => engineLabels?.[v] ?? v)}
-                          selectedItem={engineLabels?.[engine] ?? engine}
+                          titleText={intl.formatMessage(messages.engine)}
+                          label={intl.formatMessage(messages.selectEngine)}
+                          items={engineOptions.map((v) => engineOptionLabels[v] ?? v)}
+                          selectedItem={engineOptionLabels[engine] ?? engine}
                           onChange={({ selectedItem }: { selectedItem?: string | null }) => {
                             if (selectedItem) {
                               const value = engineOptions.find(
-                                (v) => (engineLabels?.[v] ?? v) === selectedItem
+                                (v) => (engineOptionLabels[v] ?? v) === selectedItem
                               );
                               if (value) { setEngine(value); }
                             }
@@ -581,7 +639,7 @@ export function VectorDBFeatureMappingTearsheet({
               <div className={styles.sparseVectorCheckbox}>
                 <Checkbox
                   id="add-sparse-vector"
-                  labelText="Compute sparse vectors for hybrid search"
+                  labelText={intl.formatMessage(messages.sparseVectorLabel)}
                   checked={sparseVectorEnabled}
                   onChange={handleSparseVectorChange}
                 />
@@ -599,7 +657,7 @@ export function VectorDBFeatureMappingTearsheet({
             ) : isUnsupported ? (
               <div className={styles.emptyStateWrapper}>
                 <ErrorEmptyState
-                  title={`Unsupported ${resourceLabel}`}
+                  title={intl.formatMessage(messages.unsupportedTitle, { resourceLabel })}
                   subtitle={unsupportedSubtitle}
                 />
               </div>

@@ -10,6 +10,7 @@ This guide covers advanced configuration topics for production deployments, dist
 4. [Asset Metadata Storage Configuration](#asset-metadata-storage-configuration)
 5. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
 6. [Execution Models](#execution-models)
+5. [Breaking Changes from the Central Config Loader](#breaking-changes-from-the-central-config-loader)
 
 ---
 
@@ -26,16 +27,14 @@ Docling Pipelines supports pluggable job stats storage for job runs, node execut
 
 ### Backend Selection
 
-Job-management components are wired through [`JobManagementFactory`](../../src/docpipe/core/job_management/adapters/config/job_management_factory.py). Backend selection is controlled by environment variables and defaults.
-
-The main user-facing configuration is controlled via environment variables:
+Job-management components are wired through [`JobManagementFactory`](../../src/docpipe/core/job_management/adapters/config/job_management_factory.py). The backend is selected from the central config file (`docling-pipelines-config.yaml`, or the path in `DOCPIPE_CONFIG_PATH`), which is read by `DocpipeConfigLoader`.
 
 ```yaml
 job_management:
   framework:
     type: default
     config: {}
-  store:
+  storage:
     type: filesystem
     config:
       base_dir: ./data/job_stats_store_data
@@ -43,27 +42,41 @@ job_management:
 
 This allows users to configure:
 
-- the job framework type via `DOCPIPE_FRAMEWORK_TYPE` environment variable
-- the job stats store backend via `DOCPIPE_STORAGE_BACKEND` environment variable
-- the job stats store runtime config via backend-specific environment variables
-- the flow repository via `LOCAL_FLOWS_DIR` environment variable
+- the job framework type via `job_management.framework.type`
+- the job stats storage backend and its settings via `job_management.storage`
+- the flow repository via the `LOCAL_FLOWS_DIR` environment variable
 
-Common overrides include:
+Environment variables that still apply on the submitter:
 
-- `DOCPIPE_CONFIG_PATH`
-- `DOCPIPE_STORAGE_BACKEND`
-- `DOCPIPE_FRAMEWORK_TYPE`
-- `DOCPIPE_JOB_STATS_BASE_DIR`
-- `DOCPIPE_POSTGRES_HOST`
-- `DOCPIPE_POSTGRES_PORT`
-- `DOCPIPE_POSTGRES_DB`
-- `DOCPIPE_POSTGRES_USER`
-- `DOCPIPE_POSTGRES_PASSWORD`
+- `DOCPIPE_CONFIG_PATH` (location of the config file)
+- `DOCPIPE_JOB_STATS_BASE_DIR` (honoured by the filesystem store)
+- `DOCPIPE_POSTGRES_HOST`, `DOCPIPE_POSTGRES_PORT`, `DOCPIPE_POSTGRES_DB`, `DOCPIPE_POSTGRES_USER`, `DOCPIPE_POSTGRES_PASSWORD`, `DOCPIPE_POSTGRES_SCHEMA`
+
+`DOCPIPE_STORAGE_BACKEND` and `DOCPIPE_FRAMEWORK_TYPE` **no longer override the config file** when the submitter selects a backend. They are still written into worker environments by `JobManagementFactory.resolve_worker_env()` so that distributed workers use the same backend as the submitter. See [Breaking changes](#breaking-changes-from-the-central-config-loader).
 
 Effective precedence for job-management runtime selection is:
 
-1. explicit environment variables
-2. built-in defaults in [`JobManagementFactory`](../../src/docpipe/core/job_management/adapters/config/job_management_factory.py)
+1. `job_management.storage` in the config file
+2. `global_storage` in the config file
+3. built-in default (see [Default backend](#default-backend))
+
+The config file is read once per process and cached. Changes to `DOCPIPE_CONFIG_PATH` or to the file made after the first read are ignored until the process restarts (or `DocpipeConfigLoader.reset()` is called, which is intended for tests).
+
+#### Default backend
+
+When the config file is absent, or neither `job_management.storage` nor `global_storage` sets a type, job stats use the **in-memory** backend. Nothing is written to disk, and run history is lost when the process exits. This differs from the other storage-backed services (incremental metadata, job run reports, flow definition snapshots), which default to **filesystem**.
+
+To persist job stats, configure a backend explicitly:
+
+```yaml
+job_management:
+  storage:
+    type: filesystem
+    config:
+      base_dir: ./data/job_stats_store_data
+```
+
+Alternatively, set `global_storage.type`; job management uses it when it has no `job_management.storage` block. A type configured in either place always takes precedence over the in-memory default.
 
 ### Filesystem Storage Guidance
 
@@ -91,7 +104,7 @@ Configuration example:
 
 ```yaml
 job_management:
-  store:
+  storage:
     type: duckdb
     config:
       database_path: ./data/duckdb/job_stats.duckdb
@@ -163,7 +176,7 @@ Document sets and document libraries store their metadata (name, description, st
 | `duckdb` (default in the shipped config) | `DuckDBAssetRepository` | Single process, local development. DuckDB is an embedded single-writer file, so only one process can write to it at a time. |
 | `postgres` | `PostgresAssetRepository` | More than one API replica or worker reads and writes the same document sets and libraries. |
 
-The repositories are created by [`RepositoryFactory`](../../src/docpipe/core/assets/common/factories/repository_factory.py). Both the REST API and the `document_set` operator resolve the backend from the same configuration, so flow runs and API requests always see the same records.
+The repositories are created by [`AssetRepositoryFactory`](../../src/docpipe/core/assets/common/factories/repository_factory.py). Both the REST API and the `document_set` operator resolve the backend from the same configuration, so flow runs and API requests always see the same records.
 
 ### PostgreSQL Configuration
 
@@ -284,14 +297,14 @@ incremental_metadata:
     config:
       base_dir: "./data"
       lock_timeout: 30.0
-  postgres:
-    host: "${POSTGRES_HOST:-localhost}"
-    port: 5432
-    database: "${POSTGRES_DB:-docpipe}"
-    user: "${POSTGRES_USER:-docpipe_user}"
-    password: "${POSTGRES_PASSWORD}"
-    schema: "incremental_metadata"
-```
+      postgres:
+        host: "${POSTGRES_HOST:-localhost}"
+        port: 5432
+        database: "${POSTGRES_DB:-docpipe}"
+        user: "${POSTGRES_USER:-docpipe_user}"
+        password: "${POSTGRES_PASSWORD}"
+        schema: "incremental_metadata"
+  ```
 
 Use PostgreSQL when:
 
@@ -310,13 +323,13 @@ incremental_metadata:
     config:
       base_dir: "${DATA_DIR:-./data}"
       lock_timeout: "${LOCK_TIMEOUT:-30.0}"
-  postgres:
-    host: "${INCR_META_DB_HOST:-localhost}"
-    port: "${INCR_META_DB_PORT:-5432}"
-    database: "${INCR_META_DB_NAME:-docpipe}"
-    user: "${INCR_META_DB_USER:-docpipe_user}"
-    password: "${INCR_META_DB_PASSWORD}"
-    schema: "${INCR_META_DB_SCHEMA:-incremental_metadata}"
+      postgres:
+        host: "${INCR_META_DB_HOST:-localhost}"
+        port: "${INCR_META_DB_PORT:-5432}"
+        database: "${INCR_META_DB_NAME:-docpipe}"
+        user: "${INCR_META_DB_USER:-docpipe_user}"
+        password: "${INCR_META_DB_PASSWORD}"
+        schema: "${INCR_META_DB_SCHEMA:-incremental_metadata}"
 ```
 
 Guidance:
@@ -426,6 +439,72 @@ This guide covers:
 - Batch storage strategies (inline and local filesystem)
 - Docker deployment configurations
 - Troubleshooting and performance tuning
+
+---
+
+## Breaking Changes from the Central Config Loader
+
+Reading `docling-pipelines-config.yaml` is now centralised in `DocpipeConfigLoader` ([`config_utils.py`](../../src/docpipe/utils/infrastructure/config_utils.py)), and every storage factory resolves its backend through it. The change is intentional and alters the behavior below. Review it before upgrading an existing deployment.
+
+### Configuration behavior
+
+| Area | Before | Now | Migration |
+|---|---|---|---|
+| `DOCPIPE_STORAGE_BACKEND`, `DOCPIPE_FRAMEWORK_TYPE` | Overrode `job_management` in the YAML on the submitter | Ignored when selecting a backend. Still written to workers by `resolve_worker_env()` | Set `job_management.storage.type` and `job_management.framework.type` in the config file |
+| `global_storage.config` and `global_storage.postgres` | Merged into job management, incremental metadata, job run reports and flow definition snapshots | Used only when the service has **no** `storage` block, and never merged with a service block | Copy the needed `config` and `postgres` values into each service's `storage` block |
+| Legacy job-management keys `storage_backend`, `storage_config` | Selected the backend and merged config | Ignored | Use `job_management.storage.type` and `job_management.storage.config` |
+| `store:` key under `job_management` | Documented form | `storage:` is the documented form. `store:` is still accepted when `storage:` is absent | Rename `store:` to `storage:` |
+| `DOCPIPE_INCREMENTAL_BASE_DIR` | Set the filesystem incremental store directory | Removed | Set `incremental_metadata.storage.config.base_dir` |
+| Config file lifetime | Re-read by each factory call | Read once per process and cached | Restart the process, or call `DocpipeConfigLoader.reset()` in tests |
+
+The default job-stats backend with no configuration is unchanged: **in-memory**.
+
+A service `storage` block that sets only `config` and no `type` takes its type from `global_storage.type`, and otherwise from the built-in default.
+
+#### Global storage is no longer merged
+
+Before, `global_storage.config` and `global_storage.postgres` were merged into the settings of job management, incremental metadata, job run reports and flow definition snapshots. Now the storage **type** is resolved from the service block, then `global_storage`, but the `config` and `postgres` values are never copied across.
+
+```yaml
+global_storage:
+  type: postgresql
+  config:
+    postgres:
+      host: db.internal      # Before: reached job management and incremental metadata
+      database: docpipe      # Now: ignored for connection settings, see below
+```
+
+Put the connection settings where each service reads them:
+
+```yaml
+job_management:
+  storage:
+    type: postgresql
+    config:
+      postgres:                # sibling of "storage"
+        host: db.internal
+        database: docpipe
+
+incremental_metadata:
+  storage:
+    type: postgresql
+    config:
+      postgres:            # inside "config"
+        host: db.internal
+        database: docpipe
+```
+
+Connection settings can still come from `DOCPIPE_POSTGRES_HOST`, `DOCPIPE_POSTGRES_PORT`, `DOCPIPE_POSTGRES_DB`, `DOCPIPE_POSTGRES_USER` and `DOCPIPE_POSTGRES_PASSWORD`, which apply to every service and need no per-service copy. The password should always come from `DOCPIPE_POSTGRES_PASSWORD` or a `${...}` substitution, not a literal value in the file.
+
+### Python API changes
+
+| Removed or renamed                                                                                                                                                                            | Replacement |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---|
+| `from_config_file()`, `from_default_sources()`, `from_environment()` on `JobManagementFactory`, `IncrementalMetadataFactory`, `ContentStorageFactory`, `FlowDefinitionSnapshotStorageFactory` | `create_default_factory()` |
+| Constructor keyword `backend=`                                                                                                                                                                | `storage_type=` |
+| `list_backends()` on the job run report and flow definition snapshot factories                                                                                                                | `list_storage_types()` |
+| `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`)                                                                                                                     | `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`) |
+| Module constants `DEFAULT_CONFIG_PATH`, `ENV_CONFIG_PATH_KEY`, `ENV_INCREMENTAL_BASE_DIR_KEY` in the factory modules                                                                          | `docpipe.utils.infrastructure.config_utils` (`ENV_INCREMENTAL_BASE_DIR_KEY` is removed) |
 
 ---
 
