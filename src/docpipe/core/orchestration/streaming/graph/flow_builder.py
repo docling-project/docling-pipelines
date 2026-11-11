@@ -71,22 +71,18 @@ class FlowBuilder:
 
     def _flow_enrich(self) -> dict:
         """Return an isolated flow with effective configuration, credentials, and feature metadata."""
-        # Merge global, node, and runtime configuration without modifying the supplied flow.
+        # Resolve stored configuration before merging runtime data, which must remain literal.
         enriched_flow = deepcopy(self.flow)
         flow_dag = enriched_flow[DocpipeConstants.DAG]
         global_config = enriched_flow.get(OperatorConstants.Config.GLOBAL_CONFIG) or {}
         for operator in flow_dag:
+            stored_config = {**global_config, **(operator.get(OperatorConstants.Config.CONFIG) or {})}
             operator[OperatorConstants.Config.CONFIG] = {
-                **global_config,
-                **(operator.get(OperatorConstants.Config.CONFIG) or {}),
+                **resolve_value(stored_config),
                 **self.params,
                 DocpipeConstants.NODE_ID: operator[OperatorConstants.Misc.ID],
                 DocpipeConstants.NODE_NAME: operator[OperatorConstants.Misc.NAME],
             }
-
-        # Resolve Vault references in the effective configuration before feature propagation.
-        for operator in flow_dag:
-            operator[OperatorConstants.Config.CONFIG] = resolve_value(operator[OperatorConstants.Config.CONFIG])
 
         # Propagate features and populate the metadata required by downstream operators.
         propagated_node_features = FlowFeatureValidator(orchestrator=PythonOrchestrator()).propagate_features_per_node(
