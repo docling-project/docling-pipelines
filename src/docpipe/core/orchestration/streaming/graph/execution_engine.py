@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
-"""Execution engine running a linear flow in dependency order."""
+"""Execution engine running streaming flow operators in dependency order."""
 
 from uuid import UUID
 
@@ -17,7 +17,7 @@ from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOut
 
 
 class GraphExecutionEngine:
-    """Executes one connected chain of operators and returns its terminal output."""
+    """Executes a dependency-ordered operator graph and returns terminal outputs."""
 
     def __init__(self, flow_graph: FlowGraph, ordered_operator_ids: list[UUID]):
         self.flow_graph = flow_graph
