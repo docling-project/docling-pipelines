@@ -24,6 +24,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.factories.des
     DestinationAdapterFactory,
 )
 from docpipe.core.operators.storage.domain.models import ContentFormat, WriteMode, WriteResult
+from docpipe.integrations.secrets.registry import scrub
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.binary_content_fetcher import get_binary_content
@@ -911,7 +912,8 @@ class StorageOutputOperator(AbstractOperator):
         write_status = [r.write_status for r in write_results]
         destination_path = [r.destination_path for r in write_results]
         bytes_written = [r.bytes_written for r in write_results]
-        write_error = [r.error_message for r in write_results]
+        # The column is written to the output table and from there to files; adapter messages can echo a path.
+        write_error = [scrub(r.error_message) if r.error_message else r.error_message for r in write_results]
 
         new_columns = pa.table(
             {
