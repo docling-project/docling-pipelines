@@ -87,11 +87,16 @@ class GraphExecutionEngine:
     def _execute_branching_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run a branching node or resolve its empty input into empty branch outputs."""
         if input_table is not None and input_table.num_rows == 0:
+            logger.info("Skipping operator '%s' (%s) because its input is empty", node.name, node.operator_name)
+            metadata = AbstractOperator.create_base_metadata(
+                total_docs_count=0, node_status=ExecutionStatus.COMPLETED.value
+            )
             branches = {
                 edge.branch_id: {OperatorConstants.Misc.RESULT_INDEX: 0}
                 for edge in self.flow_graph.get_output_edges(node.id)
             }
-            return OperatorOutput(tables=[input_table], metadata={OperatorConstants.Misc.BRANCHES: branches})
+            metadata[OperatorConstants.Misc.BRANCHES] = branches
+            return OperatorOutput(tables=[input_table], metadata=metadata)
         return self._execute_node(node=node, input_table=input_table)
 
     @staticmethod

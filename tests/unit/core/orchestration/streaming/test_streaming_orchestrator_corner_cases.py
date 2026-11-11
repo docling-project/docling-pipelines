@@ -10,9 +10,12 @@ from uuid import UUID
 import pyarrow as pa
 import pytest
 
+from docpipe.core.constants.constants import ExecutionStatus, Metrics
+from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.functional.branching_operator import BranchingOperator
 from docpipe.core.operators.functional.chunker import ChunkerOperator
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
+from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExecutionEngine
 from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
 
 INGEST_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -105,11 +108,26 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_empty_ingest)
     branching_transform = mocker.patch.object(BranchingOperator, "transform", autospec=True)
     chunker_transform = mocker.patch.object(ChunkerOperator, "transform", autospec=True)
+    branching_execution = mocker.spy(GraphExecutionEngine, "_execute_branching_node")
 
     outputs = StreamingOrchestrator().execute(flow=flow, params={})
 
     branching_transform.assert_not_called()
     chunker_transform.assert_not_called()
+    branching_execution.assert_called_once()
+    branch_output = branching_execution.spy_return
+    assert branch_output.metadata == {
+        Metrics.External.TOTAL_DOCS: 0,
+        Metrics.External.PROCESSED_DOCS: 0,
+        Metrics.External.FAILED_DOCS_COUNT: 0,
+        Metrics.External.FAILED_DOCS: [],
+        Metrics.External.SKIPPED_DOCS_COUNT: 0,
+        Metrics.External.SKIPPED_DOCS: [],
+        Metrics.External.NODE_STATUS: ExecutionStatus.COMPLETED.value,
+        OperatorConstants.Misc.BRANCHES: {"branch_1": {OperatorConstants.Misc.RESULT_INDEX: 0}},
+    }
+    assert len(branch_output.tables) == 1
+    assert branch_output.tables[0].num_rows == 0
     assert list(outputs) == [LAST_ID]
     (table,) = outputs[LAST_ID].tables
     assert table.num_rows == 0
