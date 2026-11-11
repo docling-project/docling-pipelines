@@ -115,43 +115,72 @@ def test_streaming_orchestrator_empty_input_skips_branching_node(mocker):
     assert table.num_rows == 0
 
 
-def test_streaming_orchestrator_unknown_operator_fails():
+def test_streaming_orchestrator_unknown_operator_fails(mocker):
     """A node whose operator is not registered fails with a clear error."""
     flow = {
         "name": "unknown-operator-flow",
-        "dag": [_node(INGEST_ID, "mystery_step", "does_not_exist", {}, [], [])],
+        "dag": [
+            _node(
+                INGEST_ID,
+                "ingest_source_filesystem",
+                "ingest_source",
+                INGEST_CONFIG,
+                [],
+                [{"node_id_ref": str(NEXT_ID)}],
+            ),
+            _node(NEXT_ID, "mystery_step", "does_not_exist", {}, [{"node_id_ref": str(INGEST_ID)}], []),
+        ],
     }
 
+    def _sample_ingest(self, table, *args, **kwargs):
+        doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
+        return [pa.Table.from_pylist([doc])], {}
+
+    mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
     with pytest.raises(ValueError, match=f"^{re.escape('Operator:does_not_exist not found.')}$"):
         StreamingOrchestrator().execute(flow=flow, params={})
 
 
 def test_streaming_orchestrator_cycle_detection_fails():
     # A cycle between operators is rejected with a ValueError listing cycle node names.
+    merge_config = {
+        "input_links": [
+            {"node_id_ref": str(INGEST_ID), "link_name": "in_1"},
+            {"node_id_ref": str(LAST_ID), "link_name": "in_2"},
+        ]
+    }
     flow = {
         "name": "cyclic-flow",
         "dag": [
             _node(
                 INGEST_ID,
-                "node_a",
-                "chunker",
-                CHUNKER_CONFIG,
-                [{"node_id_ref": str(NEXT_ID)}],
+                "ingest_source_filesystem",
+                "ingest_source",
+                INGEST_CONFIG,
+                [],
                 [{"node_id_ref": str(NEXT_ID)}],
             ),
             _node(
                 NEXT_ID,
-                "node_b",
+                "merge_branches",
+                "merge",
+                merge_config,
+                [{"node_id_ref": str(INGEST_ID)}, {"node_id_ref": str(LAST_ID)}],
+                [{"node_id_ref": str(LAST_ID)}],
+            ),
+            _node(
+                LAST_ID,
+                "simple_chunker",
                 "chunker",
                 CHUNKER_CONFIG,
-                [{"node_id_ref": str(INGEST_ID)}],
-                [{"node_id_ref": str(INGEST_ID)}],
+                [{"node_id_ref": str(NEXT_ID)}],
+                [{"node_id_ref": str(NEXT_ID)}],
             ),
         ],
     }
     with pytest.raises(
         ValueError,
-        match=r"^Cycle detected in flow graph: (node_a -> node_b -> node_a|node_b -> node_a -> node_b)\.$",
+        match=r"^Cycle detected in flow graph: (merge_branches -> simple_chunker -> merge_branches|simple_chunker -> merge_branches -> simple_chunker)\.$",
     ):
         StreamingOrchestrator().execute(flow=flow, params={})
 

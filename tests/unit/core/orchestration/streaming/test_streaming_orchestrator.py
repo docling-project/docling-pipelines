@@ -513,8 +513,8 @@ def test_flow_builder_config_precedence():
         "dag": [
             {
                 "id": str(node_id),
-                "name": "test_chunker",
-                "operator": "chunker",
+                "name": "test_ingest",
+                "operator": "ingest_source",
                 "config": {
                     "setting_b": "from_operator",
                     "setting_c": "from_operator",
@@ -546,13 +546,13 @@ def test_flow_builder_duplicate_node_ids_fail():
             {
                 "id": str(node_id),
                 "name": "node_1",
-                "operator": "chunker",
+                "operator": "ingest_source",
                 "output_edges": [],
             },
             {
                 "id": str(node_id),
                 "name": "node_2",
-                "operator": "chunker",
+                "operator": "ingest_source",
                 "output_edges": [],
             },
         ],
