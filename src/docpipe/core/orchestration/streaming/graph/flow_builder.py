@@ -3,7 +3,7 @@
 
 """Parser converting a compiled runtime flow into a FlowGraph."""
 
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 from typing import Any
 from uuid import UUID
 
@@ -59,9 +59,13 @@ class FlowBuilder:
         return flow_graph
 
     @staticmethod
-    def sort_graph(flow_graph: FlowGraph) -> list[UUID]:
+    def sort_graph(*, flow_graph: FlowGraph) -> list[UUID]:
         """Order nodes by their dependencies and reject cycles before execution."""
         dependencies = {
             node_id: [edge.source_id for edge in flow_graph.get_input_edges(node_id)] for node_id in flow_graph.nodes
         }
-        return list(TopologicalSorter(graph=dependencies).static_order())
+        try:
+            return list(TopologicalSorter(graph=dependencies).static_order())
+        except CycleError as err:
+            cycle_nodes = [flow_graph.nodes[node_id].name for node_id in err.args[1]]
+            raise ValueError(f"Cycle detected in flow graph: {' -> '.join(cycle_nodes)}.") from err

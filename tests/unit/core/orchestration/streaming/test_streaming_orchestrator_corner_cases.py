@@ -124,3 +124,71 @@ def test_streaming_orchestrator_unknown_operator_fails():
 
     with pytest.raises(ValueError, match=f"^{re.escape('Operator:does_not_exist not found.')}$"):
         StreamingOrchestrator().execute(flow=flow, params={})
+
+
+def test_streaming_orchestrator_cycle_detection_fails():
+    # A cycle between operators is rejected with a ValueError listing cycle node names.
+    flow = {
+        "name": "cyclic-flow",
+        "dag": [
+            _node(
+                INGEST_ID,
+                "node_a",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(NEXT_ID)}],
+                [{"node_id_ref": str(NEXT_ID)}],
+            ),
+            _node(
+                NEXT_ID,
+                "node_b",
+                "chunker",
+                CHUNKER_CONFIG,
+                [{"node_id_ref": str(INGEST_ID)}],
+                [{"node_id_ref": str(INGEST_ID)}],
+            ),
+        ],
+    }
+    with pytest.raises(
+        ValueError,
+        match=r"^Cycle detected in flow graph: (node_a -> node_b -> node_a|node_b -> node_a -> node_b)\.$",
+    ):
+        StreamingOrchestrator().execute(flow=flow, params={})
+
+
+def test_execution_engine_clears_buffer_on_failure(mocker):
+    # Output buffer is cleared when operator execution raises an exception.
+    from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExecutionEngine
+    from docpipe.core.orchestration.streaming.graph.flow_builder import FlowBuilder
+
+    flow = {
+        "name": "failing-flow",
+        "dag": [
+            _node(
+                INGEST_ID,
+                "ingest_source_filesystem",
+                "ingest_source",
+                INGEST_CONFIG,
+                [],
+                [{"node_id_ref": str(NEXT_ID)}],
+            ),
+            _node(NEXT_ID, "failing_chunker", "chunker", CHUNKER_CONFIG, [{"node_id_ref": str(INGEST_ID)}], []),
+        ],
+    }
+
+    def _sample_ingest(self, table, *args, **kwargs):
+        doc = {"id": "doc_1", "name": "test.pdf", "document_format": ".pdf"}
+        return [pa.Table.from_pylist([doc])], {}
+
+    mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
+    mocker.patch.object(ChunkerOperator, "transform", autospec=True, side_effect=RuntimeError("Operator boom"))
+
+    builder = FlowBuilder(flow=flow, params={})
+    flow_graph = builder.build_graph()
+    ordered_ids = FlowBuilder.sort_graph(flow_graph=flow_graph)
+    engine = GraphExecutionEngine(flow_graph=flow_graph, ordered_operator_ids=ordered_ids)
+
+    with pytest.raises(RuntimeError, match="Operator boom"):
+        engine.execute()
+
+    assert len(engine.output_buffer.data_buffer) == 0
