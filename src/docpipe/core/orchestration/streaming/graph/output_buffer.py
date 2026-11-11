@@ -22,10 +22,10 @@ class OperatorOutput:
 class OutputBuffer:
     """Buffers operator outputs by UUID until cleared."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.data_buffer: dict[UUID, OperatorOutput] = {}
 
-    def put_output(self, node_id: UUID, output: OperatorOutput) -> None:
+    def put_output(self, *, node_id: UUID, output: OperatorOutput) -> None:
         """Store a node's output tables and metadata."""
         self.data_buffer[node_id] = output
 
