@@ -3,6 +3,7 @@
 
 """StreamingOrchestrator corner cases: empty inputs and unknown operators."""
 
+import re
 from copy import deepcopy
 from typing import Any
 from unittest.mock import call
@@ -524,7 +525,9 @@ def test_execution_engine_missing_branch_metadata_raises_value_error(mocker):
     mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=_sample_ingest)
     mocker.patch.object(BranchingOperator, "transform", autospec=True, side_effect=_branching_missing_branch)
 
-    with pytest.raises(FlowExecutionFailedException, match=r"Branch 'branch_1' not found in branching node 'branch_by_format'\."):
+    with pytest.raises(
+        FlowExecutionFailedException, match=r"Branch 'branch_1' not found in branching node 'branch_by_format'\."
+    ):
         StreamingOrchestrator().execute(flow=flow, params={})
 
 
@@ -584,6 +587,7 @@ def test_execution_engine_missing_result_index_raises_value_error(mocker):
     mocker.patch.object(BranchingOperator, "transform", autospec=True, side_effect=_branching_missing_index)
 
     with pytest.raises(
-        FlowExecutionFailedException, match=r"Result index missing for branch 'branch_1' in branching node 'branch_by_format'\."
+        FlowExecutionFailedException,
+        match=r"Result index missing for branch 'branch_1' in branching node 'branch_by_format'\.",
     ):
         StreamingOrchestrator().execute(flow=flow, params={})
