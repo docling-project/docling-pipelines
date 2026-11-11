@@ -4,7 +4,8 @@
 """Unit tests for the local Hugging Face sequence-classification client.
 
 No model is downloaded: ``_load_model`` (or ``from_pretrained``) is patched with a fake
-word-level fast tokenizer and a fake model that returns fixed logits per input text.
+word-level fast tokenizer and a fake model that decodes the token IDs it receives and
+returns fixed logits per decoded text, or with a real WordPiece tokenizer built in memory.
 """
 
 import itertools
@@ -25,6 +26,7 @@ from docpipe.exceptions.docpipe_exceptions import ConfigurationError
 from docpipe.integrations.huggingface.classification_client import (
     HuggingFaceClassificationClient,
     LoadedModel,
+    SpecialTokens,
 )
 
 _MODEL_ID = "org/fake-classifier"
@@ -33,35 +35,38 @@ _WORD = re.compile(r"\S+")
 _WORD_OR_WHITESPACE = re.compile(r"\S+|\s+")
 
 
+_FAKE_PAD_ID, _FAKE_CLS_ID, _FAKE_SEP_ID = 0, 1, 2
+_FAKE_FIRST_TOKEN_ID = 3
+
+
 class FakeTokenizer:
-    """Word-level stand-in for a Hugging Face fast tokenizer."""
+    """Regex-based stand-in for a Hugging Face fast tokenizer: one token per pattern match."""
 
     is_fast = True
+    pad_token_id: int | None = _FAKE_PAD_ID
 
-    def __init__(
-        self, *, model_max_length: int = 512, special_tokens: int = 2, token_pattern: re.Pattern[str] = _WORD
-    ) -> None:
-        """Store limits and record every batch passed for scoring."""
+    def __init__(self, *, model_max_length: int = 512, token_pattern: re.Pattern[str] = _WORD) -> None:
+        """Store limits and start an empty vocabulary that grows as text is tokenized."""
         self.model_max_length = model_max_length
-        self.special_tokens = special_tokens
         self.token_pattern = token_pattern
-        self.batches: list[list[str]] = []
+        self.vocab: dict[str, int] = {}
 
-    def num_special_tokens_to_add(self, pair: bool = False) -> int:
-        """Return the number of special tokens added around one sequence."""
-        return self.special_tokens
+    def __call__(self, text: str, *, add_special_tokens: bool = True, **_: Any) -> dict[str, Any]:
+        """Return token IDs and offsets, wrapping the IDs in [CLS] and [SEP] when special tokens are requested."""
+        matches = list(self.token_pattern.finditer(text))
+        input_ids = [self.vocab.setdefault(match.group(), _FAKE_FIRST_TOKEN_ID + len(self.vocab)) for match in matches]
+        if add_special_tokens:
+            input_ids = [_FAKE_CLS_ID, *input_ids, _FAKE_SEP_ID]
+        return {"input_ids": input_ids, "offset_mapping": [(match.start(), match.end()) for match in matches]}
 
-    def __call__(self, text: Any, **kwargs: Any) -> dict[str, Any]:
-        """Return token offsets for one string, or dummy tensors for a batch."""
-        if isinstance(text, str):
-            return {"offset_mapping": [(match.start(), match.end()) for match in self.token_pattern.finditer(text)]}
-        self.batches.append(list(text))
-        input_ids = torch.zeros((len(text), 1), dtype=torch.long)
-        return {"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids)}
+    def decode(self, token_ids: list[int]) -> str:
+        """Join the tokens for ``token_ids`` with single spaces."""
+        tokens = {token_id: token for token, token_id in self.vocab.items()}
+        return " ".join(tokens[token_id] for token_id in token_ids)
 
 
 class FakeModel:
-    """Sequence-classification stand-in returning fixed logits per input text."""
+    """Sequence-classification stand-in returning fixed logits per decoded input text."""
 
     def __init__(
         self,
@@ -71,15 +76,23 @@ class FakeModel:
         id2label: dict[int, str],
         problem_type: str | None = None,
     ) -> None:
-        """Store the logits table and model config."""
+        """Store the logits table and model config, and record every scored batch."""
         self.tokenizer = tokenizer
         self.logits_by_text = logits_by_text
         self.config = SimpleNamespace(id2label=id2label, problem_type=problem_type)
+        self.batches: list[list[str]] = []
 
-    def __call__(self, **inputs: Any) -> SimpleNamespace:
-        """Return logits for the texts of the last tokenized batch."""
+    def __call__(self, *, input_ids: torch.Tensor, attention_mask: torch.Tensor, **_: Any) -> SimpleNamespace:
+        """Decode each row without special and padding tokens and return the logits for that text."""
+        texts = [
+            self.tokenizer.decode(
+                [token for token, keep in zip(row, mask, strict=True) if keep and token >= _FAKE_FIRST_TOKEN_ID]
+            )
+            for row, mask in zip(input_ids.tolist(), attention_mask.tolist(), strict=True)
+        ]
+        self.batches.append(texts)
         default = [0.0] * len(self.config.id2label)
-        rows = [self.logits_by_text.get(text, default) for text in self.tokenizer.batches[-1]]
+        rows = [self.logits_by_text.get(text, default) for text in texts]
         return SimpleNamespace(logits=torch.tensor(rows, dtype=torch.float32))
 
 
@@ -164,7 +177,7 @@ def test_window_span_returns_span_when_it_fits() -> None:
     windows = HuggingFaceClassificationClient._window_span(
         tokenizer=FakeTokenizer(), text=text, start=start, end=end, max_window_tokens=10
     )
-    assert [(window.start, window.end, window.token_count) for window in windows] == [(start, end, 5)]
+    assert [(window.start, window.end, len(window.token_ids)) for window in windows] == [(start, end, 5)]
 
 
 @pytest.mark.parametrize("max_window_tokens", [1, 3, 4, 9])
@@ -184,7 +197,7 @@ def test_window_span_splits_long_span_into_covering_windows(max_window_tokens: i
     assert all(left.end <= right.start for left, right in itertools.pairwise(windows))
     covered_words = [word for window in windows for word in text[window.start : window.end].split()]
     assert covered_words == sentence.split()
-    assert all(window.token_count <= max_window_tokens for window in windows)
+    assert all(len(window.token_ids) <= max_window_tokens for window in windows)
 
 
 @pytest.mark.parametrize(
@@ -208,6 +221,18 @@ def test_window_span_trims_whitespace_tokens_from_windows(max_window_tokens: int
     )
 
     assert [text[window.start : window.end] for window in windows] == expected_windows
+
+
+def test_window_span_drops_windows_of_zero_width_tokens() -> None:
+    """A window holding only tokens without characters (like SentencePiece word markers) is dropped."""
+    text = "a b c"
+    tokenizer = FakeTokenizer(token_pattern=re.compile(r"\S+|(?=\s)"))
+
+    windows = HuggingFaceClassificationClient._window_span(
+        tokenizer=tokenizer, text=text, start=0, end=len(text), max_window_tokens=1
+    )
+
+    assert [text[window.start : window.end] for window in windows] == ["a", "b", "c"]
 
 
 def test_score_spans_windows_by_model_max_length(mocker: Any) -> None:
@@ -287,7 +312,7 @@ def test_score_spans_restores_span_order_across_length_sorted_batches(mocker: An
     scores = _make_client(batch_size=1).score_spans(text=text, spans=spans)
 
     assert [(score.start, score.end) for score in scores] == spans
-    assert loaded.tokenizer.batches == [["e."], ["f g."], ["a b c d."]]
+    assert loaded.model.batches == [["e."], ["f g."], ["a b c d."]]
 
 
 def test_score_spans_returns_empty_list_without_loading_for_no_spans(mocker: Any) -> None:
@@ -508,6 +533,200 @@ def test_cap_max_length_respects_declared_model_maximum(model_max_length: Any, e
     assert (
         HuggingFaceClassificationClient._cap_max_length(max_length=512, model_max_length=model_max_length) == expected
     )
+
+
+# ---------------------------------------------------------------------- real subword tokenizer
+
+# A real WordPiece vocabulary with multi-token words. A window cut inside such a word changes how
+# the window's text re-tokenizes (e.g. "thought" + "##lessness" vs "less" + "##ness"), so these
+# tests check what the model actually receives, not only the window offsets.
+_WORDPIECE_VOCAB = {
+    "[PAD]": 0,
+    "[UNK]": 1,
+    "[CLS]": 2,
+    "[SEP]": 3,
+    "x": 4,
+    "hello": 5,
+    "world": 6,
+    "idiot": 7,
+    "thought": 8,
+    "less": 9,
+    "##lessness": 10,
+    "##ness": 11,
+    "care": 12,
+    "un": 13,
+    "##believ": 14,
+    "##able": 15,
+    ",": 16,
+    ".": 17,
+}
+_WORDPIECE_SPECIAL_IDS = {0, 2, 3}
+_IDIOT_ID = _WORDPIECE_VOCAB["idiot"]
+
+_WINDOWING_TEXTS = {
+    "subword_word_before_last": "x " * 9 + "thoughtlessness " + "x " * 8 + "idiot",
+    "subword_heavy": "unbelievable carelessness hello thoughtlessness world unbelievable idiot",
+    "single_token_words": "hello world x x x hello world x idiot",
+    "punctuation": "hello, world. unbelievable carelessness, idiot.",
+}
+_WINDOW_BUDGETS = (1, 2, 3, 5, 10)
+
+
+def _wordpiece_tokenizer(*, model_max_length: int = 512) -> transformers.PreTrainedTokenizerFast:
+    """Build a real WordPiece fast tokenizer in memory (no download)."""
+    from tokenizers import Tokenizer, models, pre_tokenizers, processors
+
+    backend = Tokenizer(models.WordPiece(vocab=_WORDPIECE_VOCAB, unk_token="[UNK]"))
+    backend.pre_tokenizer = pre_tokenizers.BertPreTokenizer()
+    backend.post_processor = processors.TemplateProcessing(
+        single="[CLS] $A [SEP]", special_tokens=[("[CLS]", 2), ("[SEP]", 3)]
+    )
+    return transformers.PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        unk_token="[UNK]",
+        pad_token="[PAD]",
+        cls_token="[CLS]",
+        sep_token="[SEP]",
+        model_max_length=model_max_length,
+    )
+
+
+def _span_tokens(text: str) -> tuple[list[int], list[tuple[int, int]]]:
+    """Return the WordPiece token IDs and character offsets of ``text``."""
+    encoding = _wordpiece_tokenizer()(text, add_special_tokens=False, return_offsets_mapping=True)
+    return list(encoding["input_ids"]), [(int(start), int(end)) for start, end in encoding["offset_mapping"]]
+
+
+def _word_sizes(offsets: list[tuple[int, int]]) -> list[int]:
+    """For each token, the token count of the whitespace-delimited word it belongs to."""
+    words: list[list[int]] = []
+    for index, (start, _) in enumerate(offsets):
+        if index == 0 or start > offsets[index - 1][1]:
+            words.append([])
+        words[-1].append(index)
+    return [len(word) for word in words for _ in word]
+
+
+class _IdiotFlaggingModel:
+    """Stub classifier that flags any input containing the ``idiot`` token and records its inputs."""
+
+    def __init__(self) -> None:
+        """Expose a binary-label config and an empty record of scored token IDs."""
+        self.config = SimpleNamespace(id2label={0: "LABEL_0", 1: "LABEL_1"}, problem_type=None)
+        self.scored_token_ids: list[list[int]] = []
+
+    def __call__(self, *, input_ids: torch.Tensor, attention_mask: torch.Tensor, **_: Any) -> SimpleNamespace:
+        """Record each row's non-special tokens and return logits flagging rows with ``idiot``."""
+        for row, mask in zip(input_ids.tolist(), attention_mask.tolist(), strict=True):
+            self.scored_token_ids.append(
+                [token for token, keep in zip(row, mask, strict=True) if keep and token not in _WORDPIECE_SPECIAL_IDS]
+            )
+        flagged = (input_ids == _IDIOT_ID).any(dim=1)
+        logits = torch.where(flagged[:, None], torch.tensor([0.0, 10.0]), torch.tensor([10.0, 0.0]))
+        return SimpleNamespace(logits=logits)
+
+
+def _wordpiece_client(mocker: Any, *, budget: int) -> tuple[HuggingFaceClassificationClient, _IdiotFlaggingModel]:
+    """Build a client whose real WordPiece tokenizer allows ``budget`` tokens per window."""
+    model = _IdiotFlaggingModel()
+    tokenizer = _wordpiece_tokenizer(model_max_length=budget + 2)  # + [CLS] and [SEP]
+    loaded = LoadedModel(tokenizer=tokenizer, model=model, device="cpu")
+    mocker.patch.object(HuggingFaceClassificationClient, "_load_model", return_value=loaded)
+    return _make_client(activation="softmax", max_length=512), model
+
+
+def test_load_learns_special_tokens_and_window_budget_from_tokenizer(mocker: Any) -> None:
+    """The tokens wrapped around a sequence come from the tokenizer and shrink the window budget."""
+    client, _ = _wordpiece_client(mocker, budget=10)
+
+    client.load()
+
+    assert client.special_tokens == SpecialTokens(
+        prefix_ids=(_WORDPIECE_VOCAB["[CLS]"],), suffix_ids=(_WORDPIECE_VOCAB["[SEP]"],), pad_token_id=0
+    )
+    assert client.max_window_tokens == 10
+
+
+def test_learn_special_tokens_falls_back_when_tokenizer_has_no_pad_token() -> None:
+    """A tokenizer without a padding token gets the fallback padding ID; padded positions are masked anyway."""
+    tokenizer = FakeTokenizer()
+    tokenizer.pad_token_id = None
+
+    special_tokens = HuggingFaceClassificationClient._learn_special_tokens(model_id=_MODEL_ID, tokenizer=tokenizer)
+
+    assert special_tokens == SpecialTokens(prefix_ids=(_FAKE_CLS_ID,), suffix_ids=(_FAKE_SEP_ID,), pad_token_id=0)
+
+
+def test_load_rejects_tokenizer_whose_special_tokens_cannot_be_learned(mocker: Any) -> None:
+    """A tokenizer that changes the text's own tokens when adding special tokens fails at load, not silently."""
+    tokenizer = mocker.Mock(
+        side_effect=lambda text, *, add_special_tokens: {"input_ids": [1, 2] if add_special_tokens else [3]}
+    )
+    loaded = LoadedModel(tokenizer=tokenizer, model=_IdiotFlaggingModel(), device="cpu")
+    mocker.patch.object(HuggingFaceClassificationClient, "_load_model", return_value=loaded)
+
+    with pytest.raises(ConfigurationError, match="Could not determine the special tokens"):
+        _make_client().load()
+
+
+@pytest.mark.parametrize("budget", _WINDOW_BUDGETS)
+@pytest.mark.parametrize("text", _WINDOWING_TEXTS.values(), ids=_WINDOWING_TEXTS.keys())
+def test_window_span_follows_windowing_rules(text: str, budget: int) -> None:
+    """Windows cover every token once, fit the budget, start at word starts, and keep clean offsets."""
+    _, offsets = _span_tokens(text)
+    word_sizes = _word_sizes(offsets)
+
+    windows = HuggingFaceClassificationClient._window_span(
+        tokenizer=_wordpiece_tokenizer(), text=text, start=0, end=len(text), max_window_tokens=budget
+    )
+
+    tokens_per_window = [
+        [index for index, (start, end) in enumerate(offsets) if window.start <= start and end <= window.end]
+        for window in windows
+    ]
+    assert [index for indexes in tokens_per_window for index in indexes] == list(range(len(offsets)))
+    assert all(len(indexes) <= budget for indexes in tokens_per_window)
+    for indexes in tokens_per_window:
+        first = indexes[0]
+        starts_word = first == 0 or offsets[first][0] > offsets[first - 1][1]
+        assert starts_word or word_sizes[first] > budget, text[offsets[first][0] :]
+    assert all(left.end <= right.start for left, right in itertools.pairwise(windows))
+    assert all(text[window.start : window.end] == text[window.start : window.end].strip() for window in windows)
+
+
+@pytest.mark.parametrize("budget", _WINDOW_BUDGETS)
+@pytest.mark.parametrize("text", _WINDOWING_TEXTS.values(), ids=_WINDOWING_TEXTS.keys())
+def test_score_spans_gives_the_model_every_span_token_once(mocker: Any, text: str, budget: int) -> None:
+    """The model receives exactly the span's tokens, each once, and no input exceeds the budget."""
+    client, model = _wordpiece_client(mocker, budget=budget)
+    span_token_ids, _ = _span_tokens(text)
+
+    client.score_spans(text=text, spans=[(0, len(text))])
+
+    assert all(len(window) <= budget for window in model.scored_token_ids)
+    assert sorted(token for window in model.scored_token_ids for token in window) == sorted(span_token_ids)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "idiot " + "x " * 22 + "x",
+        "x " * 11 + "idiot " + "x " * 11 + "x",
+        "x " * 23 + "idiot",
+        "x " * 9 + "thoughtlessness " + "x " * 8 + "idiot",
+        "x " * 8 + "unbelievable carelessness idiot " + "x " * 6 + "x",
+    ],
+    ids=["first", "middle", "last", "last_after_split_word", "after_split_words"],
+)
+def test_score_spans_detects_flagged_token_at_any_position(mocker: Any, text: str) -> None:
+    """A flagged word is detected wherever it sits in a span longer than one window."""
+    client, _ = _wordpiece_client(mocker, budget=10)
+
+    scores = client.score_spans(text=text, spans=[(0, len(text))])
+
+    flagged = [score for score in scores if score.probabilities["LABEL_1"] > 0.5]
+    assert len(flagged) == 1
+    assert "idiot" in text[flagged[0].start : flagged[0].end]
 
 
 # ---------------------------------------------------------------------- import side effects

@@ -84,9 +84,13 @@ Tokenize each span with `return_offsets_mapping=True`. If it has more than `max_
 
 `max_length` defaults to 512 and is capped at the tokenizer's `model_max_length`.
 
+Windows are scored from the span's original token IDs, with the model's special tokens added around them, and are never re-tokenized from their text. Re-tokenizing text that starts inside a word can produce more tokens than were counted (for example WordPiece splits `thoughtlessness` into `thought` + `##lessness`, but `lessness` on its own into `less` + `##ness`); truncation would then drop the window's last tokens without scoring them. The special-token prefix and suffix are learned when the client loads the model, by encoding a probe string with and without special tokens, because recent `transformers` versions no longer expose `build_inputs_with_special_tokens` on fast tokenizers. A tokenizer whose special tokens are not a fixed prefix and suffix is rejected at startup with an error naming the model.
+
+Cuts fall at word starts: a token may begin a window only when whitespace separates it from the previous token. A cut that would land inside a word moves back to that word's first token, so words stay whole (the model never starts on a word fragment, and redaction masks whole words). Only a single word longer than the whole window budget is split.
+
 ### D5. Scoring
 
-- Order spans by token length, to reduce padding, then run them in batches of `batch_size` (default 32) with `padding="longest"`, under `torch.inference_mode()`, in `model.eval()` mode. Restore the original order before returning.
+- Order spans by token length, to reduce padding, then run them in batches of `batch_size` (default 32), each padded to its longest window with an attention mask, under `torch.inference_mode()`, in `model.eval()` mode. Restore the original order before returning.
 - `activation`: `softmax`, `sigmoid`, or `auto`. `auto` uses sigmoid when `model.config.problem_type == "multi_label_classification"` and softmax otherwise. The default model uses softmax. The client applies it and returns probabilities for every label.
 - The adapter checks `toxic_labels` against the client's `labels` (the model's `id2label` values) in `validate_detection()`. Any name not found is a startup error that lists the available labels. The span score is the highest probability among the toxic labels, and the best label is kept for evidence.
 - The adapter reports a span when `score >= threshold`.

@@ -41,6 +41,10 @@ _OFFLINE_ENV_VARS: Final[tuple[str, ...]] = (
 )
 # Tokenizers report a huge sentinel as model_max_length when a model declares no maximum.
 _UNBOUNDED_MODEL_MAX_LENGTH: Final[int] = 1_000_000
+# Encoded with and without special tokens to learn which tokens the model wraps around one sequence.
+_SPECIAL_TOKEN_PROBE: Final[str] = "probe"
+# Padding ID for tokenizers that define none; padded positions are masked out either way.
+_FALLBACK_PAD_TOKEN_ID: Final[int] = 0
 
 
 @dataclass(frozen=True)
@@ -50,12 +54,28 @@ class TextWindow:
     Attributes:
         start: Start offset in the source text (inclusive).
         end: End offset in the source text (exclusive).
-        token_count: Number of model tokens in the range, without special tokens.
+        token_ids: The span's own token IDs for the range, without special tokens.  These are
+            scored as they are; the window text is never tokenized again.
     """
 
     start: int
     end: int
-    token_count: int
+    token_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class SpecialTokens:
+    """Token IDs a model expects around one sequence, and the ID used for padding.
+
+    Attributes:
+        prefix_ids: Tokens placed before the sequence, for example ``[CLS]`` or ``<s>``.
+        suffix_ids: Tokens placed after the sequence, for example ``[SEP]`` or ``</s>``.
+        pad_token_id: Token ID used to pad shorter rows of a batch.
+    """
+
+    prefix_ids: tuple[int, ...] = ()
+    suffix_ids: tuple[int, ...] = ()
+    pad_token_id: int = _FALLBACK_PAD_TOKEN_ID
 
 
 @dataclass(frozen=True)
@@ -98,8 +118,9 @@ class HuggingFaceClassificationClient:
     configuration errors before any text is scored.  Defaults for ``activation``,
     ``max_length`` and ``batch_size`` are resolved by the caller, not here.
 
-    ``loaded``, ``labels``, ``resolved_activation``, ``model_max_length`` and
-    ``max_window_tokens`` are set by ``load()`` and are only meaningful after it ran.
+    ``loaded``, ``labels``, ``resolved_activation``, ``model_max_length``,
+    ``special_tokens`` and ``max_window_tokens`` are set by ``load()`` and are only
+    meaningful after it ran.
     """
 
     _models: ClassVar[dict[tuple[str, str | None, str], LoadedModel]] = {}
@@ -153,6 +174,7 @@ class HuggingFaceClassificationClient:
         self.labels: tuple[str, ...] = ()
         self.resolved_activation = ServiceConstants.HUGGINGFACE_ACTIVATION_SOFTMAX
         self.model_max_length = max_length
+        self.special_tokens = SpecialTokens()
         self.max_window_tokens = max_length
         self.instance_lock = threading.Lock()
 
@@ -188,8 +210,11 @@ class HuggingFaceClassificationClient:
             self.model_max_length = HuggingFaceClassificationClient._cap_max_length(
                 max_length=self.max_length, model_max_length=getattr(loaded.tokenizer, "model_max_length", None)
             )
-            special_tokens = int(loaded.tokenizer.num_special_tokens_to_add(pair=False))
-            self.max_window_tokens = max(1, self.model_max_length - special_tokens)
+            self.special_tokens = HuggingFaceClassificationClient._learn_special_tokens(
+                model_id=self.model_id, tokenizer=loaded.tokenizer
+            )
+            special_count = len(self.special_tokens.prefix_ids) + len(self.special_tokens.suffix_ids)
+            self.max_window_tokens = max(1, self.model_max_length - special_count)
             self.loaded = loaded
             return loaded
 
@@ -237,12 +262,11 @@ class HuggingFaceClassificationClient:
             ]
             scores = HuggingFaceClassificationClient._score_windows(
                 loaded=loaded,
-                text=text,
                 windows=windows,
                 labels=self.labels,
                 activation=self.resolved_activation,
                 batch_size=self.batch_size,
-                max_length=self.model_max_length,
+                special_tokens=self.special_tokens,
             )
         logger.debug(
             "Scored %s windows from %s spans with %s in %.1f ms",
@@ -428,15 +452,47 @@ class HuggingFaceClassificationClient:
         by_index = {int(index): str(label) for index, label in id2label.items()}
         return tuple(by_index[index] for index in sorted(by_index))
 
+    @staticmethod
+    def _learn_special_tokens(*, model_id: str, tokenizer: Any) -> SpecialTokens:
+        """Learn the tokens the model wraps around one sequence by encoding a probe with and without them.
+
+        Fast tokenizers in ``transformers`` 5 no longer expose a helper that adds special
+        tokens to existing token IDs, so they are read off the difference between the two
+        encodings: whatever comes before the probe's own tokens is the prefix, whatever
+        comes after is the suffix.
+
+        Raises:
+            ConfigurationError: If the probe's tokens do not appear unchanged between the special tokens.
+        """
+        with_special = [int(token) for token in tokenizer(_SPECIAL_TOKEN_PROBE, add_special_tokens=True)["input_ids"]]
+        probe = [int(token) for token in tokenizer(_SPECIAL_TOKEN_PROBE, add_special_tokens=False)["input_ids"]]
+        for offset in range(len(with_special) - len(probe) + 1):
+            if with_special[offset : offset + len(probe)] == probe:
+                pad_token_id = getattr(tokenizer, "pad_token_id", None)
+                return SpecialTokens(
+                    prefix_ids=tuple(with_special[:offset]),
+                    suffix_ids=tuple(with_special[offset + len(probe) :]),
+                    pad_token_id=_FALLBACK_PAD_TOKEN_ID if pad_token_id is None else int(pad_token_id),
+                )
+        raise ConfigurationError(
+            f"Could not determine the special tokens of model '{model_id}': its tokenizer does not wrap a "
+            "sequence in fixed start and end tokens. Choose a model whose tokenizer only adds special tokens "
+            "before and after the text (for example BERT or RoBERTa models)."
+        )
+
     # ------------------------------------------------------------------ windowing and scoring
 
     @staticmethod
     def _window_span(*, tokenizer: Any, text: str, start: int, end: int, max_window_tokens: int) -> list[TextWindow]:
         """Cut one span into consecutive, non-overlapping token windows.
 
-        Uses the fast tokenizer's ``offset_mapping`` to map each window back to
-        character offsets inside the span.  A span that fits is returned as one window
-        with the span's own offsets.
+        The span is tokenized once and each window carries its share of those token IDs,
+        so the model later scores exactly the tokens counted here.  Windows end where a
+        new word starts, so no word is split across windows, unless a single word has
+        more tokens than ``max_window_tokens``.  The fast tokenizer's ``offset_mapping``
+        maps each window back to character offsets inside the span.  A span that fits is
+        returned as one window with the span's own offsets; windows without any text
+        (whitespace or zero-width tokens only) are dropped.
 
         Args:
             tokenizer: Hugging Face fast tokenizer.
@@ -448,63 +504,96 @@ class HuggingFaceClassificationClient:
         Returns:
             Windows in order; their offsets lie inside ``[start, end)``.
         """
-        encoding = tokenizer(text[start:end], add_special_tokens=False, return_offsets_mapping=True)
+        span_text = text[start:end]
+        encoding = tokenizer(span_text, add_special_tokens=False, return_offsets_mapping=True)
+        token_ids = tuple(int(token) for token in encoding["input_ids"])
         offsets = [(int(token_start), int(token_end)) for token_start, token_end in encoding["offset_mapping"]]
-        offsets = [(token_start, token_end) for token_start, token_end in offsets if token_end > token_start]
-        if len(offsets) <= max_window_tokens:
-            return [TextWindow(start=start, end=end, token_count=len(offsets))]
+        if len(token_ids) <= max_window_tokens:
+            return [TextWindow(start=start, end=end, token_ids=token_ids)]
 
+        word_starts = HuggingFaceClassificationClient._word_starts(text=span_text, offsets=offsets)
         windows: list[TextWindow] = []
-        for index in range(0, len(offsets), max_window_tokens):
-            group = offsets[index : index + max_window_tokens]
-            window_start, window_end = trim_whitespace_span(
-                text=text, start=start + group[0][0], end=start + group[-1][1]
-            )
-            if window_start < window_end:
-                windows.append(TextWindow(start=window_start, end=window_end, token_count=len(group)))
+        first = 0
+        while first < len(token_ids):
+            limit = first + max_window_tokens
+            if limit >= len(token_ids):
+                last = len(token_ids)
+            else:
+                # Cut before the latest word start that fits; cut inside a word only when it alone exceeds the budget.
+                last = next((index for index in range(limit, first, -1) if word_starts[index]), limit)
+            text_offsets = [
+                (token_start, token_end) for token_start, token_end in offsets[first:last] if token_end > token_start
+            ]
+            if text_offsets:
+                window_start, window_end = trim_whitespace_span(
+                    text=text, start=start + text_offsets[0][0], end=start + text_offsets[-1][1]
+                )
+                if window_start < window_end:
+                    windows.append(TextWindow(start=window_start, end=window_end, token_ids=token_ids[first:last]))
+            first = last
         return windows
+
+    @staticmethod
+    def _word_starts(*, text: str, offsets: Sequence[tuple[int, int]]) -> list[bool]:
+        """Return, for each token, whether a window may start at it without splitting a word.
+
+        A token starts a word when whitespace separates it from the previous token: a gap
+        between their offsets (most tokenizers leave spaces out of tokens) or whitespace at
+        the boundary (tokenizers that emit whitespace as tokens of their own).
+
+        Args:
+            text: The tokenized text.
+            offsets: Character offsets of each token in ``text``.
+        """
+        starts = [True] * len(offsets)
+        for index in range(1, len(offsets)):
+            previous_end = offsets[index - 1][1]
+            token_start = offsets[index][0]
+            starts[index] = (
+                token_start > previous_end
+                or text[previous_end - 1 : previous_end].isspace()
+                or text[token_start : token_start + 1].isspace()
+            )
+        return starts
 
     @staticmethod
     def _score_windows(
         *,
         loaded: LoadedModel,
-        text: str,
         windows: Sequence[TextWindow],
         labels: Sequence[str],
         activation: str,
         batch_size: int,
-        max_length: int,
+        special_tokens: SpecialTokens,
     ) -> list[WindowScores]:
         """Run the forward passes for already-windowed input, in length-sorted batches.
 
         Args:
             loaded: Tokenizer/model pair (the caller holds its inference lock).
-            text: Source text.
             windows: Windows to score.
             labels: Label names ordered by class index.
             activation: ``softmax`` or ``sigmoid``.
             batch_size: Windows per forward pass.
-            max_length: Tokenizer truncation length (a safety net; windows already fit).
+            special_tokens: Tokens wrapped around each window and the padding ID.
 
         Returns:
             One ``WindowScores`` per window, in the order of ``windows``.
         """
         import torch
 
-        order = sorted(range(len(windows)), key=lambda window_index: windows[window_index].token_count)
+        order = sorted(range(len(windows)), key=lambda window_index: len(windows[window_index].token_ids))
         results: list[WindowScores | None] = [None] * len(windows)
         with torch.inference_mode():
             for batch_start in range(0, len(order), batch_size):
                 batch = order[batch_start : batch_start + batch_size]
-                inputs = loaded.tokenizer(
-                    [text[windows[window_index].start : windows[window_index].end] for window_index in batch],
-                    padding="longest",
-                    truncation=True,
-                    max_length=max_length,
-                    return_tensors="pt",
+                input_ids, attention_mask = HuggingFaceClassificationClient._model_inputs(
+                    rows=[windows[window_index].token_ids for window_index in batch], special_tokens=special_tokens
                 )
-                inputs = {name: tensor.to(loaded.device) for name, tensor in inputs.items()}
-                logits = loaded.model(**inputs).logits.float().cpu()
+                logits = (
+                    loaded.model(input_ids=input_ids.to(loaded.device), attention_mask=attention_mask.to(loaded.device))
+                    .logits.float()
+                    .cpu()
+                )
                 if activation == ServiceConstants.HUGGINGFACE_ACTIVATION_SIGMOID:
                     probabilities = torch.sigmoid(logits)
                 else:
@@ -518,3 +607,22 @@ class HuggingFaceClassificationClient:
                         probabilities={label: float(values[index]) for index, label in enumerate(labels)},
                     )
         return [result for result in results if result is not None]
+
+    @staticmethod
+    def _model_inputs(*, rows: Sequence[Sequence[int]], special_tokens: SpecialTokens) -> tuple[Any, Any]:
+        """Wrap each row of token IDs in the model's special tokens and pad the batch to its longest row.
+
+        Args:
+            rows: Token IDs of each window, without special tokens.
+            special_tokens: Tokens wrapped around each row and the padding ID.
+
+        Returns:
+            ``input_ids`` and ``attention_mask`` tensors; padded positions have mask 0.
+        """
+        import torch
+
+        sequences = [[*special_tokens.prefix_ids, *row, *special_tokens.suffix_ids] for row in rows]
+        width = max(len(sequence) for sequence in sequences)
+        input_ids = [sequence + [special_tokens.pad_token_id] * (width - len(sequence)) for sequence in sequences]
+        attention_mask = [[1] * len(sequence) + [0] * (width - len(sequence)) for sequence in sequences]
+        return torch.tensor(input_ids, dtype=torch.long), torch.tensor(attention_mask, dtype=torch.long)
