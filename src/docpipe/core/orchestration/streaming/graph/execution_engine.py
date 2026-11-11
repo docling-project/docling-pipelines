@@ -81,7 +81,7 @@ class GraphExecutionEngine:
             input_tables[input_name] = self._get_input_table(source_id=source_id, branch_id=input_name)
         return input_tables
 
-    def _execute_branching_node(self, *, node: Node, input_table: pa.Table) -> OperatorOutput:
+    def _execute_branching_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run a branching node or resolve its empty input into empty branch outputs."""
         if input_table is not None and input_table.num_rows == 0:
             branches = {
@@ -97,7 +97,7 @@ class GraphExecutionEngine:
         output_tables, metadata = operator.transform(table=pa.table({}), tables=input_tables)
         return OperatorOutput(tables=output_tables, metadata=metadata)
 
-    def _execute_simple_node(self, *, node: Node, input_table: pa.Table) -> OperatorOutput:
+    def _execute_simple_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run a linear node or pass its empty input through."""
         if input_table is not None and input_table.num_rows == 0:
             return OperatorOutput(tables=[input_table], metadata={})
