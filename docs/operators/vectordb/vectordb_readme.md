@@ -117,10 +117,10 @@ Minimum supported server: Weaviate 1.23.6, the floor stated by the pinned `weavi
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `collection_name` | string | **Yes** | — | Collection to write to. Must start with an upper-case ASCII letter and contain only ASCII letters, digits, and underscores |
-| `connection_type` | string | No | `"custom"` | `custom` (self-hosted) or `cloud` (Weaviate Cloud) |
-| `host` | string | No | `"localhost"` | Server host (`custom`) |
-| `port` | integer | No | `8080` | HTTP port (`custom`) |
-| `secure` | boolean | No | `false` | Use TLS for HTTP (`custom`) |
+| `connection_type` | string | No | `"on-prem"` | `on-prem` (self-hosted server) or `cloud` (Weaviate Cloud) |
+| `host` | string | No | `"localhost"` | Server host (`on-prem`) |
+| `port` | integer | No | `8080` | HTTP port (`on-prem`) |
+| `secure` | boolean | No | `false` | Use TLS for HTTP (`on-prem`) |
 | `grpc_host` | string | No | `host` | gRPC host |
 | `grpc_port` | integer | No | `50051` | gRPC port |
 | `grpc_secure` | boolean | No | `secure` | Use TLS for gRPC |
@@ -141,7 +141,7 @@ Minimum supported server: Weaviate 1.23.6, the floor stated by the pinned `weavi
 
 Notes:
 
-- **TLS with credentials.** For `custom` connections, any `auth_type` other than `none` requires both `secure` and `grpc_secure` (which defaults to `secure`) to be `true`, so credentials are never sent unencrypted.
+- **TLS with credentials.** For `on-prem` connections, any `auth_type` other than `none` requires both `secure` and `grpc_secure` (which defaults to `secure`) to be `true`, so credentials are never sent unencrypted.
 - **Credential references.** Credential fields accept a literal value, a `$VAR` or `${VAR}` environment reference, or a `vault://` reference. The flow executor resolves `vault://` references before the operator runs; flow validation skips the server connection when a credential is still a vault placeholder. A string that is all upper case and contains an underscore (for example `MY_TOKEN`) is replaced by the environment variable of the same name when one exists, so use an explicit `$VAR` reference for environment-sourced secrets.
 - **Identity property.** The primary feature must be mapped to `pk`. It is stored as a field-tokenized text property and is distinct from the Weaviate object UUID, which the adapter derives deterministically from the chunk key.
 - **Unsupported options.** `schema_template_path` is OpenSearch-only and is ignored with a warning. Access control is not supported: a mapped `allowed_users` is dropped with a warning, and ACL-enforced reads are OpenSearch-only.
@@ -451,7 +451,7 @@ For a sparse-only run, omit the embeddings feature and see the in-memory chunk r
 | Vector dimension mismatch | `vector_dimension` does not match embedding model output | Omit it for auto-detection, or set it to match your model (e.g. 384, 768, 1536) |
 | Slow indexing | `batch_size` too small | Increase `batch_size` to 500–1000 inside `provider_config` |
 | Weaviate: credentials rejected over a plaintext connection | `auth_type` is not `none` but `secure` or `grpc_secure` is `false` | Set `secure: true` (and `grpc_secure: true` if you override it) |
-| Weaviate: "Failed to initialize vector database adapter" | A configuration error (bad `collection_name`, missing credential, unset `$VAR`, reserved property name) raised before connecting | Read the listed messages; they name the field without echoing secret values |
+| Weaviate: flow validation reports configuration errors | A configuration problem (bad `collection_name`, missing credential, unset `$VAR`, reserved property name, bad `pk` mapping) found by `validate()` before any connection | Read the listed messages; they name the field without echoing secret values |
 | Weaviate: primary feature rejected | The primary feature is mapped to a name other than `pk`, or another feature is mapped to `pk` | Map `doc_id_hash` (or your `doc_id_column`) to `pk` |
 | Weaviate: documents with a null `id` | Rows without an `id` | Chunks are keyed by the document hash instead; no action needed |
 | Weaviate: cannot connect | gRPC port unreachable (the client needs both HTTP and gRPC) | Publish port 50051 and set `grpc_host` and `grpc_port` |

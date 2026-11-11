@@ -4,7 +4,7 @@
 
 The Weaviate provider of the `vectordb` operator. It defines how `provider: "weaviate"` is configured, authenticated, and connected to, how collections are created and validated, how re-ingest stays idempotent, and how failures and flow-enrichment metadata are reported. The provider-agnostic table, metadata, and provider-selection contract lives in `backend/vectordb-operator`; this capability does not repeat it.
 
-Configuration problems are detected while the operator is constructed, before any network connection. They surface as initialization failures: the adapter's message is wrapped by the vector store factory ("Failed to create vector store adapter 'weaviate': ...") and by the operator ("Failed to initialize vector database adapter 'weaviate': ..."), and flow validation reports it as "Validation failed for operator 'vectordb': ...". Every requirement below that says "fails to initialize" means the original message text is contained in each of those wrapped messages.
+Configuration problems are reported by the operator's `validate()`, in the same way as for the other providers: the provider's configuration schema reports per-field messages (`<field> is not provided` for a missing field, the validator's message otherwise), and the provider's validation hook reports the mapping-level problems (primary key, property names, sparse content) as error strings. Every requirement below that says validation "rejects the configuration" means the message text appears in the `errors` list of `validate()` and no credential is sent. During flow validation a configuration that cannot be parsed does not open a connection. A run that skips validation and passes a configuration that cannot be parsed fails when the operator is constructed with a 400 `DocpipeException` carrying the same messages, raised unchanged by the factory and the operator.
 
 ## ADDED Requirements
 
@@ -20,15 +20,15 @@ The operator SHALL accept `provider: "weaviate"` and route all writes to the Wea
 - **THEN** the `api_key`, `bearer_token`, and `password` fields of `provider_config.providers.weaviate` are marked sensitive
 
 ### Requirement: Weaviate connection configuration validation
-The Weaviate `provider_config` SHALL require `collection_name`, matching `^[A-Z][_0-9A-Za-z]*$`. It SHALL support a self-hosted deployment (host, HTTP port default 8080, gRPC host and port default 50051, TLS) and a Weaviate Cloud deployment (cluster URL). The operator SHALL fail to initialize, before connecting, for each missing or invalid field, with a message that names the field. The failure message MUST NOT contain any value taken from `provider_config`.
+The Weaviate `provider_config` SHALL require `collection_name`, matching `^[A-Z][_0-9A-Za-z]*$`. It SHALL support a self-hosted deployment (host, HTTP port default 8080, gRPC host and port default 50051, TLS) and a Weaviate Cloud deployment (cluster URL). Validation SHALL reject, before any write, each missing or invalid field, with a message that names the field. The failure message MUST NOT contain any value taken from `provider_config`.
 
 #### Scenario: Collection name missing
 - **WHEN** a `weaviate` node's `provider_config` omits `collection_name`
-- **THEN** the operator fails to initialize with a message stating that `collection_name` is not provided, and no connection is attempted
+- **THEN** validation rejects the configuration with a message stating that `collection_name` is not provided, and no credential is sent
 
 #### Scenario: Collection name naming rule
 - **WHEN** `collection_name` is evaluated against the Weaviate collection naming pattern `^[A-Z][_0-9A-Za-z]*$`
-- **THEN** the values below are accepted or rejected as listed, and each rejection fails initialization with a message stating that the name must start with an uppercase ASCII letter and contain only ASCII letters, digits, and underscores
+- **THEN** the values below are accepted or rejected as listed, and each rejection reports a message stating that the name must start with an uppercase ASCII letter and contain only ASCII letters, digits, and underscores
 
 | Collection name | Result |
 |---|---|
@@ -43,7 +43,7 @@ The Weaviate `provider_config` SHALL require `collection_name`, matching `^[A-Z]
 
 #### Scenario: Cloud deployment without cluster URL
 - **WHEN** the deployment is Weaviate Cloud and no cluster URL is provided
-- **THEN** the operator fails to initialize with a message stating that the cluster URL is required
+- **THEN** validation rejects the configuration with a message stating that the cluster URL is required
 
 #### Scenario: Pattern not published in metadata
 - **WHEN** a client requests the `vectordb` operator metadata
@@ -54,7 +54,7 @@ The Weaviate provider SHALL support four authentication methods: none, API key, 
 
 #### Scenario: API key method without key
 - **WHEN** the authentication method is API key and no API key is provided
-- **THEN** the operator fails to initialize with a message stating that the API key is required
+- **THEN** validation rejects the configuration with a message stating that the API key is required
 
 #### Scenario: Environment variable credential
 - **WHEN** the API key is configured as `$WEAVIATE_API_KEY` or `${WEAVIATE_API_KEY}` and that variable is set
@@ -78,7 +78,7 @@ The Weaviate provider SHALL support four authentication methods: none, API key, 
 
 #### Scenario: Unset environment variable
 - **WHEN** the API key is configured as `${WEAVIATE_API_KEY}` and that variable is not set
-- **THEN** the operator fails to initialize, before connecting, with a message that names `WEAVIATE_API_KEY` and contains no credential value
+- **THEN** validation rejects the configuration with a message that names `WEAVIATE_API_KEY` and contains no credential value
 
 #### Scenario: Literal all-caps credential
 - **WHEN** a literal credential consists only of upper-case letters and underscores and an environment variable of that exact name exists
@@ -89,15 +89,15 @@ The Weaviate provider SHALL support four authentication methods: none, API key, 
 - **THEN** the message raised by the adapter, the factory, and the operator, every log record, and every failed-item reason show a redaction marker in place of the secret
 
 ### Requirement: Credentials require an encrypted connection
-The Weaviate provider SHALL NOT send credentials over an unencrypted connection. For a self-hosted deployment with any authentication method other than none, both the HTTP and gRPC connections SHALL use TLS; otherwise initialization SHALL fail before any connection is attempted. The same check SHALL run whenever a connection is built, including flow enrichment. A gRPC setting left unset inherits the HTTP TLS setting.
+The Weaviate provider SHALL NOT send credentials over an unencrypted connection. For a self-hosted deployment with any authentication method other than none, both the HTTP and gRPC connections SHALL use TLS; otherwise validation SHALL reject the configuration and no credential SHALL be sent. The same check SHALL run whenever a connection is built, including flow enrichment. A gRPC setting left unset inherits the HTTP TLS setting.
 
 #### Scenario: Credentials over plaintext HTTP
 - **WHEN** a self-hosted `weaviate` node uses API key, bearer token, or username/password authentication and the HTTP connection is not secure
-- **THEN** the operator fails to initialize with a message stating that `secure` and `grpc_secure` must both be true when authentication is configured, and no connection is attempted
+- **THEN** validation rejects the configuration with a message stating that `secure` and `grpc_secure` must both be true when authentication is configured, and no credential is sent
 
 #### Scenario: Credentials with plaintext gRPC only
 - **WHEN** a self-hosted `weaviate` node uses authentication, the HTTP connection is secure, and the gRPC connection is explicitly not secure
-- **THEN** the operator fails to initialize with the same message, and no connection is attempted
+- **THEN** validation rejects the configuration with the same message, and no credential is sent
 
 #### Scenario: Unauthenticated local server
 - **WHEN** a self-hosted `weaviate` node uses no authentication and leaves the TLS settings at their defaults
@@ -109,7 +109,7 @@ The Weaviate provider SHALL NOT send credentials over an unencrypted connection.
 
 #### Scenario: Flow validation disabled
 - **WHEN** flow validation is disabled and a self-hosted `weaviate` node uses authentication over a non-secure connection
-- **THEN** the operator still fails to initialize with the same message before any network connection is made, and no credential is sent
+- **THEN** the operator still rejects the configuration with the same message before any credential is sent, and no credential is sent
 
 #### Scenario: Enrichment with authentication over plaintext
 - **WHEN** flow enrichment runs for a self-hosted `weaviate` node that uses authentication over a non-secure connection
@@ -150,19 +150,19 @@ When `create_index` is true and the collection does not exist, the provider SHAL
 - **THEN** the collection is created with a dynamic index, and vector queries return the written objects once the server's indexing queue is empty
 
 ### Requirement: Fixed identity property
-The provider's identity property in every Weaviate collection SHALL be named `pk`. It is an ordinary text property, distinct from the Weaviate object UUID. The provider SHALL declare it itself and SHALL store the chunk's primary key verbatim in it. Initialization SHALL fail, before connecting, when a feature mapping sends the primary feature to any name other than `pk`, or sends any other feature to `pk`, so that a collection never has two identity properties.
+The provider's identity property in every Weaviate collection SHALL be named `pk`. It is an ordinary text property, distinct from the Weaviate object UUID. The provider SHALL declare it itself and SHALL store the chunk's primary key verbatim in it. Validation SHALL reject the configuration when a feature mapping sends the primary feature to any name other than `pk`, or sends any other feature to `pk`, so that a collection never has two identity properties.
 
 #### Scenario: Primary feature mapped to pk
 - **WHEN** the primary feature is mapped to `pk`
-- **THEN** the operator initializes and the collection declares exactly one primary-key property, `pk`
+- **THEN** the operator accepts the configuration and the collection declares exactly one primary-key property, `pk`
 
 #### Scenario: Primary feature mapped elsewhere
 - **WHEN** the primary feature is mapped to a name other than `pk`, such as `chunk_id`
-- **THEN** the operator fails to initialize, before connecting, with a message stating that the primary key property must be `pk`, and no property `chunk_id` is created
+- **THEN** validation rejects the configuration with a message stating that the primary key property must be `pk`, and no property `chunk_id` is created
 
 #### Scenario: Another feature mapped to pk
 - **WHEN** a feature other than the primary feature is mapped to `pk`
-- **THEN** the operator fails to initialize, before connecting, with a message stating that `pk` is reserved for the primary key
+- **THEN** validation rejects the configuration with a message stating that `pk` is reserved for the primary key
 
 ### Requirement: Weaviate property schema mapping
 New collections SHALL declare one property per mapped non-vector feature, plus the primary-key property and the content property. Feature types SHALL map as follows: text/string/keyword/date to text; integer types to int; float/double to number; bool to boolean; json/object/nested to text holding serialized JSON.
@@ -211,7 +211,7 @@ When `add_sparse_vector` is true, the provider SHALL configure keyword (BM25) re
 
 #### Scenario: Content not mapped
 - **WHEN** sparse mode is on and no feature mapping targets the content feature
-- **THEN** the operator fails to initialize, before connecting, with a message stating that sparse mode requires the content feature to be mapped to a text property
+- **THEN** validation rejects the configuration with a message stating that sparse mode requires the content feature to be mapped to a text property
 
 #### Scenario: Sparse mapping not stored
 - **WHEN** the mappings include `sparse_embeddings` mapped to `sparse_embeddings`
@@ -269,22 +269,22 @@ The provider SHALL reject existing collections without an indexed named vector w
 
 #### Scenario: Reserved property name
 - **WHEN** a feature is mapped to the target name `id`
-- **THEN** the operator fails to initialize, before connecting, with a message naming the reserved property
+- **THEN** validation rejects the configuration with a message naming the reserved property
 
 #### Scenario: Legacy single-vector collection
 - **WHEN** the configured existing collection has no named vectors and the run has dense vector columns
 - **THEN** no objects are written and the failure reason states that only collections with indexed named vectors are supported
 
 ### Requirement: Property names are stored as given
-Weaviate lower-cases the first character of a property name. The provider SHALL therefore reject, before connecting, mapped property names whose first character is upper case and two mapped names that differ only by case, so that writes, filters, and reads all use the stored spelling.
+Weaviate lower-cases the first character of a property name. The provider SHALL therefore reject mapped property names whose first character is upper case and two mapped names that differ only by case, so that writes, filters, and reads all use the stored spelling.
 
 #### Scenario: Upper-case first character
 - **WHEN** a feature is mapped to the target name `Department`
-- **THEN** the operator fails to initialize, before connecting, with a message naming `Department` and suggesting `department`
+- **THEN** validation rejects the configuration with a message naming `Department` and suggesting `department`
 
 #### Scenario: Names differing only by case
 - **WHEN** two features are mapped to `fileName` and `filename`
-- **THEN** the operator fails to initialize, before connecting, with a message naming both properties
+- **THEN** validation rejects the configuration with a message naming both properties
 
 #### Scenario: Existing property stored with a lower-cased first character
 - **WHEN** the existing collection was created with a property `Department` and the run maps a feature to `department`
@@ -295,7 +295,7 @@ The Weaviate provider SHALL NOT store or enforce document access-control lists. 
 
 #### Scenario: allowed_users mapped
 - **WHEN** a `weaviate` node maps `allowed_users` to a target property
-- **THEN** the operator initializes and writes normally, the collection has no property for that mapping, no written object carries it, and one warning states that ACLs are not supported for Weaviate and the mapping was ignored
+- **THEN** the operator accepts the configuration and writes normally, the collection has no property for that mapping, no written object carries it, and one warning states that ACLs are not supported for Weaviate and the mapping was ignored
 
 #### Scenario: ACL operator upstream, feature unmapped
 - **WHEN** `available_features` contains `allowed_users` and no mapping references it
@@ -310,7 +310,7 @@ The Weaviate provider SHALL ignore the operator-level `schema_template_path` opt
 
 #### Scenario: Schema template path set
 - **WHEN** a `weaviate` node sets `schema_template_path` to a path, including one that does not exist
-- **THEN** the operator initializes without error, one warning names the ignored option, and the created collection is identical to one created without the option
+- **THEN** the operator accepts the configuration without error, one warning names the ignored option, and the created collection is identical to one created without the option
 
 ### Requirement: Deterministic object identity and in-place re-ingest
 Each Weaviate object SHALL use a UUIDv5 derived from the chunk's positional primary key, which is formed from the hashed file ID and the chunk index. The primary-key property SHALL store that key verbatim. Writing an object whose UUID already exists SHALL replace it, so re-ingesting a document never duplicates chunks.
@@ -439,3 +439,56 @@ For `vectordb` nodes with `provider: "weaviate"`, flow enrichment SHALL return `
 #### Scenario: Reachable deployment with no collections
 - **WHEN** the deployment is reachable but holds no collections
 - **THEN** `available_resources` is empty and `is_docpipe_supported_resource` carries no `error`
+
+### Requirement: Weaviate connection type
+`connection_type` SHALL be `on-prem` (the default, a self-hosted server) or `cloud`. Any other value, including the earlier name `custom`, SHALL be rejected by validation.
+
+#### Scenario: On-prem is the default
+- **WHEN** `connection_type` is omitted
+- **THEN** the provider treats the deployment as on-prem
+
+#### Scenario: Earlier name rejected
+- **WHEN** `connection_type` is `custom`
+- **THEN** validation rejects the configuration with a message listing `on-prem` and `cloud`
+
+### Requirement: Weaviate failures are reported as docpipe exceptions
+Every failure of a Weaviate operation SHALL surface as a `DocpipeException` that names the operation and the collection and carries the redacted cause. An unreachable or timed-out server SHALL give status 503 and any other server failure 500. The original SDK exception SHALL NOT remain attached as the cause. Server errors SHALL be recognized by exception type and status code, never by message text, and a check that cannot be answered SHALL raise instead of reporting a false negative.
+
+#### Scenario: Existence check cannot reach the server
+- **WHEN** the collection-existence check fails because the server cannot be reached
+- **THEN** a `DocpipeException` with status code 503 naming Weaviate and the collection is raised, and the provider does not report that the collection is absent
+
+#### Scenario: Dynamic index refused by status code
+- **WHEN** creating a collection with `index_type` `dynamic` is refused with HTTP status 422
+- **THEN** the failure states that async indexing must be enabled, and the same status code with another index type produces the generic creation failure
+
+#### Scenario: Creation refused with a message that contains 422
+- **WHEN** creating a collection fails with a status other than 422 and a message that happens to contain the digits 422
+- **THEN** the generic creation failure is reported and the async-indexing hint is not
+
+#### Scenario: Count or lookup fails
+- **WHEN** counting objects or looking up documents by name fails
+- **THEN** a `DocpipeException` is raised with the redacted cause
+
+#### Scenario: Wrapped gRPC timeout
+- **WHEN** a query fails with the SDK's `WeaviateQueryError` raised from a gRPC `DEADLINE_EXCEEDED` or `UNAVAILABLE` error
+- **THEN** the `DocpipeException` has status code 503, because the status is read from the exception chain
+
+#### Scenario: Traceback carries no credential
+- **WHEN** a Weaviate operation fails with an SDK error whose text contains a resolved credential
+- **THEN** the formatted traceback and a `logger.exception` record of the raised `DocpipeException` contain no credential, because the SDK exception is not chained
+
+#### Scenario: Unsupported connection type
+- **WHEN** a client is built with a `connection_type` other than `on-prem` or `cloud` (for example a saved `custom` configuration used by flow enrichment) and a credential
+- **THEN** a 400 `DocpipeException` is raised before any connection is made
+
+#### Scenario: Missing property cannot be added
+- **WHEN** adding a missing mapped property to an existing collection fails
+- **THEN** a `DocpipeException` naming the property and the collection is raised before any object is written
+
+### Requirement: Weaviate server setup guide
+`USER_GUIDE_PIPELINE_SETUP.md` SHALL contain a section describing how to start a local Weaviate server with Docker, the ports it uses, how to check it is ready, how to point a flow at it with `connection_type` `on-prem`, and a statement that the bundled compose file is for testing only and is anonymous.
+
+#### Scenario: Reader sets up a local server
+- **WHEN** a reader follows the section
+- **THEN** they can start the server, verify readiness, and run `sample_flows/vectordb/weaviate_integration.json` against it

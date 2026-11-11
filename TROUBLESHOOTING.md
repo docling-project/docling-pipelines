@@ -1110,13 +1110,13 @@ For the full `provider_config` field list, see the [VectorDB operator README](do
 - Flow validation fails before any connection is attempted
 
 **Cause:**
-- A `custom` connection sets `auth_type` to `api_key`, `bearer_token`, or `client_password` while `secure` or `grpc_secure` is `false`. `grpc_secure` defaults to the value of `secure`.
+- An `on-prem` connection sets `auth_type` to `api_key`, `bearer_token`, or `client_password` while `secure` or `grpc_secure` is `false`. `grpc_secure` defaults to the value of `secure`.
 
 **Solution:**
 
 ```json
 "provider_config": {
-  "connection_type": "custom",
+  "connection_type": "on-prem",
   "host": "weaviate.example.com",
   "secure": true,
   "grpc_secure": true,

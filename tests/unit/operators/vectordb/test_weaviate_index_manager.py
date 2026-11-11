@@ -5,8 +5,10 @@
 
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from weaviate.classes.config import DataType, Tokenization
+from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateConnectionError
 
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import (
     WeaviateIndexManager,
@@ -495,19 +497,58 @@ class TestWeaviateIndexManagerCollectionOperations:
         assert exc_info.value.status_code == 400
         assert "Invalid index_parameters" in str(exc_info.value)
 
+    @staticmethod
+    def _status_error(*, status: int, text: str = "refused") -> UnexpectedStatusCodeError:
+        return UnexpectedStatusCodeError(text, httpx.Response(status, json={"error": text}))
+
     def test_create_collection_dynamic_422_converted_to_400(self, *, mock_client: MagicMock) -> None:
-        """Verify dynamic index 422 error is converted to 400 with async indexing guidance."""
+        """Verify a 422 status error on a dynamic index becomes a 400 with async indexing guidance."""
         mock_client.collections.exists.return_value = False
-        mock_client.collections.create.side_effect = Exception("422 Unprocessable Entity: dynamic indexing not enabled")
-        manager = WeaviateIndexManager(
-            client=mock_client,
-            collection_name="TestDocs",
-            index_type="dynamic",
-        )
+        mock_client.collections.create.side_effect = self._status_error(status=422)
+        manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs", index_type="dynamic")
         with pytest.raises(DocpipeException) as exc_info:
             manager.create_collection(dimension_mapping={"embeddings": 384})
         assert exc_info.value.status_code == 400
         assert "requires async indexing enabled" in str(exc_info.value)
+        assert exc_info.value.__cause__ is None
+
+    def test_create_collection_422_with_other_index_type_is_generic(self, *, mock_client: MagicMock) -> None:
+        """The same status with hnsw gives the generic creation failure, not the async hint."""
+        mock_client.collections.exists.return_value = False
+        mock_client.collections.create.side_effect = self._status_error(status=422)
+        manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs", index_type="hnsw")
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 500
+        assert "async indexing" not in str(exc_info.value)
+        assert "status 422" in str(exc_info.value)
+
+    def test_create_collection_message_containing_422_is_not_the_async_hint(self, *, mock_client: MagicMock) -> None:
+        """Message text is never inspected: another status whose text contains 422 is a generic failure."""
+        mock_client.collections.exists.return_value = False
+        mock_client.collections.create.side_effect = self._status_error(status=500, text="object 422 rejected")
+        manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs", index_type="dynamic")
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 500
+        assert "async indexing" not in str(exc_info.value)
+
+    def test_collection_exists_raises_instead_of_returning_false(self, *, mock_client: MagicMock) -> None:
+        """An unanswerable existence check raises (503 when the server is unreachable)."""
+        mock_client.collections.exists.side_effect = WeaviateConnectionError("down")
+        manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs")
+        with pytest.raises(DocpipeException, match="'TestDocs' exists") as exc_info:
+            manager.collection_exists()
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.__cause__ is None
+
+    def test_collection_exists_error_is_redacted(self, *, mock_client: MagicMock) -> None:
+        secret = "resolved-" + "credential-value"  # pragma: allowlist secret
+        mock_client.collections.exists.side_effect = RuntimeError(f"denied for {secret}")
+        manager = WeaviateIndexManager(client=mock_client, collection_name="TestDocs", secrets=[secret])
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.collection_exists()
+        assert secret not in str(exc_info.value)
 
     def test_validate_existing_collection_missing_raises_400(self, *, mock_client: MagicMock) -> None:
         """Verify validate_existing_collection raises 400 if collection does not exist."""
@@ -751,3 +792,78 @@ class TestWeaviateIndexManagerCollectionOperations:
         mock_coll.config.add_property.assert_called_once()
         added_prop = mock_coll.config.add_property.call_args[0][0]
         assert added_prop.name == "doc_name"
+
+    def test_validate_existing_collection_adds_missing_properties_failure_raises(
+        self, *, mock_client: MagicMock
+    ) -> None:
+        """A failed add_property raises: later writes to the missing property would fail."""
+        mock_client.collections.exists.return_value = True
+        mock_coll = MagicMock()
+        mock_cfg = MagicMock()
+
+        mock_vec_cfg = MagicMock()
+        mock_vec_cfg.vector_index_config.skip = False
+        mock_cfg.vector_config = {"embeddings": mock_vec_cfg}
+
+        # Existing properties have pk and content, but missing "doc_name"
+        pk_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        pk_prop.name = "pk"
+        pk_prop.data_type = DataType.TEXT
+        pk_prop.dataType = DataType.TEXT
+        pk_prop.tokenization = Tokenization.FIELD
+        pk_prop.indexFilterable = True
+        pk_prop.indexSearchable = True
+
+        content_prop = MagicMock(
+            spec=[
+                "name",
+                "data_type",
+                "dataType",
+                "tokenization",
+                "index_filterable",
+                "indexFilterable",
+                "index_searchable",
+                "indexSearchable",
+            ]
+        )
+        content_prop.name = "content"
+        content_prop.data_type = DataType.TEXT
+        content_prop.dataType = DataType.TEXT
+        content_prop.tokenization = Tokenization.WORD
+        content_prop.indexFilterable = True
+        content_prop.indexSearchable = True
+
+        mock_cfg.properties = [pk_prop, content_prop]
+        mock_coll.config.get.return_value = mock_cfg
+        mock_coll.aggregate.over_all.return_value.total_count = 0
+        mock_client.collections.get.return_value = mock_coll
+
+        manager = WeaviateIndexManager(
+            client=mock_client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "collection_column": "pk"},
+                {"feature_name": "content", "collection_column": "content"},
+                {"feature_name": "doc_name", "collection_column": "doc_name"},
+            ],
+            available_features={
+                "doc_id_hash": {"type": "keyword", "is_primary": True},
+                "content": {"type": "text"},
+                "doc_name": {"type": "string"},
+            },
+        )
+        mock_coll.config.add_property.side_effect = RuntimeError("add failed")
+        with pytest.raises(DocpipeException, match=r"Failed to add property 'doc_name'.*'TestDocs'") as exc_info:
+            manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
+        assert exc_info.value.status_code == 500

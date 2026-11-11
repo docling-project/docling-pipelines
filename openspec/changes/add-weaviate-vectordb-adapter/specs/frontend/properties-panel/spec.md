@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: VectorDB feature mapping and backend configuration
-The VectorDB custom panel SHALL support database backend selection (OpenSearch / Milvus / Weaviate), index/collection naming, and a feature mapping tearsheet that manages embeddings-to-field bindings and calls the feature enrichment endpoint. The provider list SHALL come from operator metadata. Each provider SHALL be rendered with its own connection, authentication, naming, and similarity configuration; an unknown provider MUST NOT silently render another provider's fields. For Weaviate the panel SHALL provide custom and Weaviate Cloud connection controls, authentication-method-specific masked credential inputs, a collection-name rule, a distance metric selector without an engine selector, and a capability-driven BM25 option. Invalid Weaviate connection or credential configuration SHALL block opening the feature-mapping tearsheet and enrichment. Every new user-facing string SHALL be localizable, and every new control SHALL be keyboard operable with accessible labels and error messages. OpenSearch and Milvus behavior SHALL be unchanged.
+The VectorDB custom panel SHALL support database backend selection (OpenSearch / Milvus / Weaviate), index/collection naming, and a feature mapping tearsheet that manages embeddings-to-field bindings and calls the feature enrichment endpoint. The provider list SHALL come from operator metadata. Each provider SHALL be rendered with its own connection, authentication, naming, and similarity configuration; an unknown provider MUST NOT silently render another provider's fields. For Weaviate the panel SHALL provide on-prem and Weaviate Cloud connection controls, authentication-method-specific masked credential inputs, a collection-name rule, a distance metric selector without an engine selector, and a capability-driven BM25 option. Invalid Weaviate connection or credential configuration SHALL block opening the feature-mapping tearsheet and enrichment. Every new user-facing string SHALL be localizable, and every new control SHALL be keyboard operable with accessible labels and error messages. OpenSearch and Milvus behavior SHALL be unchanged.
 
 #### Scenario: Backend selection displays relevant configuration fields
 - **WHEN** the user selects "OpenSearch" or "Milvus" as the vector database provider
@@ -22,10 +22,10 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 - **THEN** the provider dropdown offers only OpenSearch and Milvus
 
 #### Scenario: Custom versus cloud connection
-- **WHEN** the user selects the Weaviate "custom" connection type
+- **WHEN** the user selects the Weaviate "on-prem" connection type
 - **THEN** host, HTTP port, HTTP TLS, gRPC host, gRPC port, and gRPC TLS controls are displayed and the cluster URL control is not
 - **AND WHEN** the user selects the "cloud" connection type
-- **THEN** only the cluster URL control is displayed, and the saved `provider_config` no longer contains any custom-connection key
+- **THEN** only the cluster URL control is displayed, and the saved `provider_config` no longer contains any on-prem-connection key
 
 #### Scenario: gRPC settings inherit from HTTP
 - **WHEN** the user leaves the gRPC host empty and the gRPC TLS control on "Same as HTTP"
@@ -52,7 +52,7 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 - **THEN** an inline error message is displayed on that field, attached to it for assistive technology, and the feature-mapping tearsheet is not opened
 
 #### Scenario: Authenticated plaintext connection blocked
-- **WHEN** the Weaviate connection type is custom, the authentication method is not "none", and the HTTP TLS setting is off or the effective gRPC TLS setting is off
+- **WHEN** the Weaviate connection type is on-prem, the authentication method is not "none", and the HTTP TLS setting is off or the effective gRPC TLS setting is off
 - **THEN** an error alert explains that both HTTP and gRPC must use TLS when authentication is configured, the controls involved are marked invalid, and the feature-mapping tearsheet is not opened and enrichment is not requested
 
 #### Scenario: Blocked open moves focus

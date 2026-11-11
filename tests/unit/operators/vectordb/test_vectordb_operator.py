@@ -97,7 +97,9 @@ class TestVectorDBOperatorInitialization:
         config[OperatorConstants.Config.PROVIDER_CONFIG] = provider_cfg
 
         with patch("docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearch"):
-            with pytest.raises(DocpipeException, match="Failed to initialize vector database adapter"):
+            with pytest.raises(
+                DocpipeException, match=r"Failed to create vector store adapter 'opensearch'.*index_name"
+            ):
                 VectorDBOperator(config=config)
 
     def test_missing_index_name_also_caught_by_schema_validation(self, basic_config):
@@ -136,7 +138,9 @@ class TestVectorDBOperatorInitialization:
             "docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient.__init__",
             return_value=None,
         ):
-            with pytest.raises(DocpipeException, match="Failed to initialize vector database adapter"):
+            with pytest.raises(
+                DocpipeException, match=r"Failed to create vector store adapter 'milvus'.*collection_name"
+            ):
                 VectorDBOperator(config=config)
 
     def test_missing_collection_name_also_caught_by_schema_validation(self):
@@ -169,8 +173,9 @@ class TestVectorDBOperatorInitialization:
         config = basic_config.copy()
         config["provider"] = "invalid_db"
 
-        with pytest.raises(DocpipeException, match="Failed to initialize vector database adapter"):
+        with pytest.raises(DocpipeException, match="Unknown vector store adapter: 'invalid_db'") as exc_info:
             VectorDBOperator(config)
+        assert exc_info.value.status_code == 400
 
     def test_missing_provider_config(self, basic_config):
         """Test that missing provider_config raises clear error"""
@@ -1301,12 +1306,12 @@ class TestChunkPkBranching:
 
 
 # ---------------------------------------------------------------------------
-# _process_doc_id_row
+# _build_doc_id_mappings
 # ---------------------------------------------------------------------------
 
 
-class TestProcessDocIdRow:
-    """Direct unit tests for _process_doc_id_row."""
+class TestBuildDocIdMappings:
+    """Direct unit tests for the columnar _build_doc_id_mappings."""
 
     @pytest.fixture
     def op(self):
@@ -1318,89 +1323,42 @@ class TestProcessDocIdRow:
                 }
             )
 
-    def test_adds_doc_hash_to_unique_ids(self, op):
+    def test_builds_all_mappings(self, op):
         table = pa.table({"doc_id_hash": ["h1"], "id": ["f1"], "name": ["doc.pdf"]})
-        unique_doc_ids: set = set()
-        doc_hash_to_id: dict = {}
-        doc_hash_to_name: dict = {}
-        file_ids: set = set()
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=True,
-            has_name_col=True,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id=doc_hash_to_id,
-            doc_hash_to_name=doc_hash_to_name,
-            file_ids=file_ids,
-        )
-        assert "h1" in unique_doc_ids
-        assert doc_hash_to_id["h1"] == "f1"
+        unique_doc_ids, doc_hash_to_id, doc_hash_to_name, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
+        assert doc_hash_to_id == {"h1": "f1"}
         assert file_ids == {"f1"}
-        assert doc_hash_to_name["h1"] == "doc.pdf"
+        assert doc_hash_to_name == {"h1": "doc.pdf"}
 
     def test_null_original_id_falls_back_to_document_id(self, op):
         table = pa.table({"doc_id_hash": ["h1"], "id": pa.array([None], type=pa.string())})
-        unique_doc_ids: set = set()
-        doc_hash_to_id: dict = {}
-        doc_hash_to_name: dict = {}
-        file_ids: set = set()
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=True,
-            has_name_col=False,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id=doc_hash_to_id,
-            doc_hash_to_name=doc_hash_to_name,
-            file_ids=file_ids,
-        )
-        assert "h1" in unique_doc_ids
+        unique_doc_ids, doc_hash_to_id, _, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
         assert doc_hash_to_id == {"h1": "h1"}
         assert file_ids == {"h1"}
 
     def test_null_name_not_added_to_name_map(self, op):
         table = pa.table({"doc_id_hash": ["h1"], "name": pa.array([None], type=pa.string())})
-        unique_doc_ids: set = set()
-        doc_hash_to_name: dict = {}
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=False,
-            has_name_col=True,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id={},
-            doc_hash_to_name=doc_hash_to_name,
-            file_ids=set(),
-        )
+        _, _, doc_hash_to_name, _ = op._build_doc_id_mappings(table=table)
         assert doc_hash_to_name == {}
 
     def test_no_id_col_falls_back_to_document_id(self, op):
         table = pa.table({"doc_id_hash": ["h1"]})
-        unique_doc_ids: set = set()
-        doc_hash_to_id: dict = {}
-        file_ids: set = set()
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=False,
-            has_name_col=False,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id=doc_hash_to_id,
-            doc_hash_to_name={},
-            file_ids=file_ids,
-        )
-        assert "h1" in unique_doc_ids
+        unique_doc_ids, doc_hash_to_id, _, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
         assert doc_hash_to_id == {"h1": "h1"}
         assert file_ids == {"h1"}
+
+    def test_rows_with_empty_doc_hash_are_skipped(self, op):
+        table = pa.table({"doc_id_hash": ["h1", None, ""], "id": ["f1", "f2", "f3"]})
+        unique_doc_ids, _, _, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
+        assert file_ids == {"f1"}
+
+    def test_missing_doc_id_column_returns_empty(self, op):
+        table = pa.table({"other": ["x"]})
+        assert op._build_doc_id_mappings(table=table) == (set(), {}, {}, set())
 
 
 # ---------------------------------------------------------------------------
@@ -2511,6 +2469,57 @@ class TestBinaryVectorColumnHandling:
         assert vec_cols == []
         assert dim_map is None
         assert metadata[Metrics.External.NODE_STATUS] == "Failed"
+
+
+class TestProviderValidationHookAndPassThrough:
+    """Operator calls the adapter validation hook and does not re-wrap docpipe exceptions."""
+
+    CONFIG: ClassVar[dict] = {
+        OperatorConstants.Config.PROVIDER: "opensearch",
+        OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+    }
+
+    def test_validate_calls_adapter_hook_and_collects_messages(self):
+        adapter = MagicMock()
+        adapter.get_config_schema.return_value = OpenSearchConfig
+
+        def _hook(*, errors, warnings):
+            errors.append("hook error")
+            warnings.append("hook warning")
+
+        adapter.validate_configuration.side_effect = _hook
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", return_value=adapter):
+            op = VectorDBOperator(dict(self.CONFIG))
+        errors: list = []
+        warnings: list = []
+        op.validate(errors=errors, warnings=warnings, available_features=[])
+        adapter.validate_configuration.assert_called_once()
+        assert "hook error" in errors
+        assert "hook warning" in warnings
+
+    def test_provider_without_hook_is_unaffected(self):
+        from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
+
+        # The base port implements a no-op hook: it must not add errors or warnings.
+        errors: list = []
+        warnings: list = []
+        VectorStorePort.validate_configuration(MagicMock(), errors=errors, warnings=warnings)
+        assert errors == []
+        assert warnings == []
+
+    def test_docpipe_exception_from_factory_is_reraised_unchanged(self):
+        original = DocpipeException(message="boom", status_code=400)
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=original):
+            with pytest.raises(DocpipeException) as exc_info:
+                VectorDBOperator(dict(self.CONFIG))
+        assert exc_info.value is original
+
+    def test_unexpected_error_is_wrapped_with_cause(self):
+        cause = ValueError("bad value")
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=cause):
+            with pytest.raises(DocpipeException, match="bad value") as exc_info:
+                VectorDBOperator(dict(self.CONFIG))
+        assert exc_info.value.__cause__ is cause
 
 
 if __name__ == "__main__":

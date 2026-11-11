@@ -85,3 +85,22 @@ The operator SHALL return its input table unchanged as the single output table. 
 #### Scenario: Row without a document ID is skipped
 - **WHEN** a row's document ID value is empty
 - **THEN** that row is recorded in `skipped_docs` with reason "Missing document ID" and the remaining rows are still written
+
+### Requirement: Provider validation hook and exception pass-through
+`validate()` SHALL call the selected provider's optional configuration-validation hook, which appends provider-specific problems to `errors` and notices to `warnings`; a provider that does not implement it SHALL be unaffected. When the provider raises a `DocpipeException` while the adapter is being created, the operator SHALL raise that exception unchanged. Any other exception SHALL still be wrapped as a `DocpipeException` that names the provider and keeps the original as its cause.
+
+#### Scenario: Provider reports problems through validate
+- **WHEN** a provider's hook finds two problems and `validate()` is called
+- **THEN** both messages appear in `errors`, and validation does not stop at the first one
+
+#### Scenario: Provider without the hook
+- **WHEN** `validate()` is called for a provider that does not implement the hook
+- **THEN** no error or warning is added by the hook step
+
+#### Scenario: DocpipeException from an adapter
+- **WHEN** adapter creation raises a `DocpipeException` with status code 400
+- **THEN** the operator raises the same exception, with the same status code and message, and does not wrap it
+
+#### Scenario: Other exception from an adapter
+- **WHEN** adapter creation raises a `ValueError`
+- **THEN** the operator raises a `DocpipeException` that names the provider and has the `ValueError` as its cause

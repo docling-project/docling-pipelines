@@ -13,7 +13,11 @@ from weaviate.classes.query import Filter, Sort
 from weaviate.util import generate_uuid5
 
 from docpipe.core.constants import OperatorConstants
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, redact_secrets
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import (
+    WeaviateClient,
+    redact_secrets,
+    to_docpipe_exception,
+)
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
@@ -263,10 +267,11 @@ class WeaviateBatchProcessor:
             res = collection.aggregate.over_all(total_count=True)
             return int(res.total_count or 0)
         except Exception as exc:
-            logger.warning(
-                "Error getting document count for collection '%s': %s", self.collection_name, self._redact(str(exc))
-            )
-            return 0
+            raise to_docpipe_exception(
+                exc=exc,
+                operation=f"Failed to count objects in Weaviate collection '{self.collection_name}'",
+                secrets=self.secrets,
+            ) from None
 
     def get_chunk_ids_for_documents(self, *, file_ids: list[str]) -> dict[str, list[str]]:
         """Retrieve chunk primary keys for given file IDs using keyset paging."""
@@ -305,8 +310,11 @@ class WeaviateBatchProcessor:
                 chunk_ids_map[file_id] = file_chunks
             return chunk_ids_map
         except Exception as exc:
-            logger.warning("Error querying chunk IDs for file IDs: %s", self._redact(str(exc)))
-            return {}
+            raise to_docpipe_exception(
+                exc=exc,
+                operation=f"Failed to query chunk IDs in Weaviate collection '{self.collection_name}'",
+                secrets=self.secrets,
+            ) from None
 
     def _name_field(self) -> str:
         """Return the column mapped to the document name, independent of mapping order."""
@@ -342,5 +350,8 @@ class WeaviateBatchProcessor:
             )
             return [dict(obj.properties) for obj in (res.objects or []) if obj.properties]
         except Exception as exc:
-            logger.warning("Error querying documents by name: %s", self._redact(str(exc)))
-            return []
+            raise to_docpipe_exception(
+                exc=exc,
+                operation=f"Failed to query documents by name in Weaviate collection '{self.collection_name}'",
+                secrets=self.secrets,
+            ) from None

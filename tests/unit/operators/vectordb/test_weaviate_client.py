@@ -4,11 +4,14 @@
 """Unit tests for WeaviateClient."""
 
 import logging
+import traceback
 from unittest.mock import MagicMock, patch
 
+import grpc
 import pytest
+from weaviate.exceptions import WeaviateQueryError
 
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, to_docpipe_exception
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
 
@@ -23,7 +26,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="wv-host",
             port=8080,
             secure=False,
@@ -72,7 +75,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="wv-host",
             port=8080,
             secure=True,
@@ -92,7 +95,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="wv-host",
             port=8080,
             secure=True,
@@ -108,7 +111,7 @@ class TestWeaviateClient:
     def test_plaintext_guard_custom_auth(self) -> None:
         """Verify plaintext guard rejects authenticated custom connections without calling connect."""
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="localhost",
             port=8080,
             secure=False,
@@ -136,7 +139,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="wv-host",
             secure=True,
             grpc_secure=True,
@@ -150,7 +153,7 @@ class TestWeaviateClient:
         """Verify unset environment variable raises DocpipeException with 400 status."""
         monkeypatch.delenv("UNSET_KEY_XYZ", raising=False)
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="wv-host",
             secure=True,
             grpc_secure=True,
@@ -170,7 +173,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="localhost",
             port=8080,
             secure=False,
@@ -192,7 +195,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="localhost",
             port=8080,
             secure=False,
@@ -217,7 +220,7 @@ class TestWeaviateClient:
         mock_connect.side_effect = Exception(f"Connection failed: invalid auth for Bearer {secret} and token {secret}")
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="localhost",
             port=8080,
             secure=True,
@@ -245,7 +248,7 @@ class TestWeaviateClient:
         mock_connect.return_value = mock_instance
 
         client = WeaviateClient(
-            connection_type="custom",
+            connection_type="on-prem",
             host="localhost",
             port=8080,
             secure=False,
@@ -261,3 +264,99 @@ class TestWeaviateClient:
         # Second close should be a no-op
         client.close()
         assert mock_instance.close.call_count == 1
+
+
+class _FakeRpcError(grpc.RpcError):
+    """gRPC error carrying a status code, as raised by the SDK's grpc stub."""
+
+    def __init__(self, *, code: grpc.StatusCode, details: str = "") -> None:
+        super().__init__(details)
+        self._code = code
+        self._details = details
+
+    def code(self) -> grpc.StatusCode:
+        return self._code
+
+    def details(self) -> str:
+        return self._details
+
+
+def _sdk_wrapped_query_error(*, code: grpc.StatusCode, details: str = "boom") -> WeaviateQueryError:
+    """Reproduce how weaviate's grpc_search wraps an RpcError: raised inside the except block."""
+    try:
+        try:
+            raise _FakeRpcError(code=code, details=details)
+        except grpc.RpcError as rpc:
+            raise WeaviateQueryError(rpc.details(), "GRPC search")  # noqa: B904 - mirrors the SDK
+    except WeaviateQueryError as wrapped:
+        return wrapped
+
+
+class TestConnectionTypeGuard:
+    """The client enforces the connection type and TLS rule itself (flow enrichment skips WeaviateConfig)."""
+
+    @patch("weaviate.connect_to_custom")
+    def test_unsupported_connection_type_is_rejected_before_connecting(self, mock_connect: MagicMock) -> None:
+        client = WeaviateClient(
+            connection_type="custom",
+            host="localhost",
+            secure=False,
+            grpc_secure=False,
+            auth_type="api_key",
+            api_key="k",  # pragma: allowlist secret
+        )
+        with pytest.raises(DocpipeException, match="Unsupported connection_type: 'custom'") as exc_info:
+            client.connect()
+        assert exc_info.value.status_code == 400
+        mock_connect.assert_not_called()
+
+
+class TestUnreachableClassification:
+    """to_docpipe_exception inspects the exception chain, not only the outer type."""
+
+    @pytest.mark.parametrize("code", [grpc.StatusCode.DEADLINE_EXCEEDED, grpc.StatusCode.UNAVAILABLE])
+    def test_wrapped_grpc_timeout_or_unavailable_is_503(self, code: grpc.StatusCode) -> None:
+        exc = _sdk_wrapped_query_error(code=code)
+        assert to_docpipe_exception(exc=exc, operation="op", secrets=[]).status_code == 503
+
+    def test_wrapped_grpc_other_status_is_500(self) -> None:
+        exc = _sdk_wrapped_query_error(code=grpc.StatusCode.INVALID_ARGUMENT)
+        assert to_docpipe_exception(exc=exc, operation="op", secrets=[]).status_code == 500
+
+    def test_plain_query_error_without_cause_is_500(self) -> None:
+        assert (
+            to_docpipe_exception(exc=WeaviateQueryError("x", "GRPC search"), operation="op", secrets=[]).status_code
+            == 500
+        )
+
+
+class TestChainedExceptionsDoNotLeakSecrets:
+    """Tracebacks and logged exceptions must not contain the credential even through the chain."""
+
+    SECRET = "resolved-" + "credential-value"  # pragma: allowlist secret
+
+    def test_formatted_traceback_has_no_secret(self) -> None:
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import WeaviateIndexManager
+
+        client = MagicMock()
+        client.collections.exists.side_effect = RuntimeError(f"denied for {self.SECRET}")
+        manager = WeaviateIndexManager(client=client, collection_name="TestDocs", secrets=[self.SECRET])
+        with pytest.raises(DocpipeException) as exc_info:
+            manager.collection_exists()
+        rendered = "".join(traceback.format_exception(exc_info.value))
+        assert self.SECRET not in rendered
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__suppress_context__ is True
+
+    def test_logger_exception_has_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.batch_processor import WeaviateBatchProcessor
+
+        client = MagicMock()
+        client.collections.get.side_effect = RuntimeError(f"denied for {self.SECRET}")
+        processor = WeaviateBatchProcessor(client=client, collection_name="TestDocs", secrets=[self.SECRET])
+        with caplog.at_level(logging.DEBUG):
+            try:
+                processor.get_document_count()
+            except DocpipeException:
+                logging.getLogger("test").exception("failed")
+        assert self.SECRET not in caplog.text

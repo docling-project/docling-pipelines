@@ -604,6 +604,43 @@ podman-compose -f docker/docker-compose.opensearch.yml down -v
 podman-compose -f docker/docker-compose.opensearch.yml logs
 ```
 
+### Alternative: Weaviate Server with Docker
+
+Weaviate is an alternative vector store for the `vectordb` operator (`"provider": "weaviate"`). Skip this section if you use OpenSearch.
+
+> **Note:** `docker/docker-compose.weaviate.yml` is a **test-only** setup. It enables anonymous access, binds ports to `127.0.0.1`, and pulls the image from the upstream registry. Do not use it to deploy Weaviate.
+
+**Start Weaviate:**
+
+```bash
+# From project root
+docker compose -f docker/docker-compose.weaviate.yml up -d
+```
+
+Weaviate listens on HTTP port `8080` and gRPC port `50051`. The Python client needs both ports.
+
+**Check that Weaviate is ready:**
+
+```bash
+curl http://localhost:8080/v1/.well-known/ready
+# Expected: HTTP 200 with an empty body
+```
+
+**Point a flow at it:** use `"connection_type": "on-prem"`, `"host": "localhost"`, `"port": 8080`, `"grpc_port": 50051`, `"auth_type": "none"`, and a `collection_name` that starts with an uppercase letter (for example `DocpipeChunks`). A complete flow is in [`sample_flows/vectordb/weaviate_integration.json`](sample_flows/vectordb/weaviate_integration.json):
+
+```bash
+docling-pipelines --flow-file sample_flows/vectordb/weaviate_integration.json --validate
+docling-pipelines --flow-file sample_flows/vectordb/weaviate_integration.json
+```
+
+See the [VectorDB operator README](docs/operators/vectordb/vectordb_readme.md) for every `provider_config` field and TLS and API key setups.
+
+**Stop Weaviate (add `-v` to delete the data):**
+
+```bash
+docker compose -f docker/docker-compose.weaviate.yml down
+```
+
 ---
 
 ## 5. Creating Your First Flow

@@ -6,10 +6,12 @@
 from unittest.mock import MagicMock
 
 import pytest
+from weaviate.exceptions import WeaviateConnectionError, WeaviateTimeoutError
 
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.batch_processor import (
     WeaviateBatchProcessor,
 )
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
 
 class TestWeaviateBatchProcessor:
@@ -271,7 +273,7 @@ class TestWeaviateBatchProcessor:
         assert total_failed == 0
 
     def test_get_document_count(self, *, mock_client: MagicMock) -> None:
-        """Verify get_document_count returns count or 0 on error."""
+        """Verify get_document_count returns the count and raises a DocpipeException on error."""
         mock_coll = MagicMock()
         mock_coll.aggregate.over_all.return_value.total_count = 42
         mock_client.collections.get.return_value = mock_coll
@@ -282,9 +284,28 @@ class TestWeaviateBatchProcessor:
         )
         assert processor.get_document_count() == 42
 
-        # Error case returns 0
         mock_coll.aggregate.over_all.side_effect = RuntimeError("Aggregate failed")
-        assert processor.get_document_count() == 0
+        with pytest.raises(
+            DocpipeException, match="Failed to count objects in Weaviate collection 'TestDocs'"
+        ) as exc_info:
+            processor.get_document_count()
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.__cause__ is None
+
+    def test_read_failures_for_unreachable_server_are_503(self, *, mock_client: MagicMock) -> None:
+        """Connection and timeout errors from the SDK map to 503; chunk-id lookup also raises."""
+        processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs")
+        for sdk_error in (WeaviateConnectionError("down"), WeaviateTimeoutError("slow")):
+            mock_client.collections.get.side_effect = sdk_error
+            for call in (
+                lambda: processor.get_document_count(),
+                lambda: processor.get_chunk_ids_for_documents(file_ids=["f"]),
+                lambda: processor.query_by_doc_names(doc_names=["a.pdf"]),
+            ):
+                with pytest.raises(DocpipeException) as exc_info:
+                    call()
+                assert exc_info.value.status_code == 503
+                assert type(sdk_error).__name__ in str(exc_info.value)
 
     def test_get_chunk_ids_for_documents_keyset_paging(self, *, mock_client: MagicMock) -> None:
         """Verify keyset paging fetches all chunks across multiple pages."""
@@ -334,12 +355,15 @@ class TestWeaviateBatchProcessor:
         used = mock_coll.query.fetch_objects.call_args.kwargs["filters"]
         assert used.target == "doc_name"
 
-    def test_query_by_doc_names_error_is_redacted_in_logs(self, *, mock_client: MagicMock, caplog) -> None:
+    def test_query_by_doc_names_error_is_redacted(self, *, mock_client: MagicMock, caplog) -> None:
         secret = "resolved-" + "credential-value"  # pragma: allowlist secret
         mock_client.collections.get.side_effect = RuntimeError(f"denied for {secret}")
         processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs", secrets=[secret])
-        with caplog.at_level("WARNING"):
-            assert processor.query_by_doc_names(doc_names=["a.pdf"]) == []
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(DocpipeException) as exc_info:
+                processor.query_by_doc_names(doc_names=["a.pdf"])
+        assert secret not in str(exc_info.value)
+        assert "***" in str(exc_info.value)
         assert secret not in caplog.text
 
     def test_query_by_doc_names(self, *, mock_client: MagicMock) -> None:

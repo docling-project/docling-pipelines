@@ -391,6 +391,25 @@ class TestFailureReporting:
         assert "secure" in supported["error"]
         assert SECRET not in supported["error"]
 
+    def test_unsupported_connection_type_with_credentials_reports_error_without_connecting(self):
+        """A saved 'custom' connection must not reach connect_to_custom with a credential over plaintext."""
+        with patch("weaviate.connect_to_custom") as connect:
+            result, _ = self._run_real_client(
+                {
+                    "connection_type": "custom",
+                    "host": "localhost",
+                    "auth_type": "api_key",
+                    "api_key": SECRET,
+                    "secure": False,
+                    "grpc_secure": False,
+                }
+            )
+        connect.assert_not_called()
+        supported = result[VB.IS_DOCPIPE_SUPPORTED_RESOURCE]
+        assert supported["supported"] is False
+        assert "Unsupported connection_type" in supported["error"]
+        assert SECRET not in supported["error"]
+
     def test_connection_error_reports_redacted_error_and_warning(self):
         failure = RuntimeError(f"401 Unauthorized for Bearer {SECRET}")
         with (

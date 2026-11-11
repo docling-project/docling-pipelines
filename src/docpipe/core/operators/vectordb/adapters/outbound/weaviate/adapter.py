@@ -50,18 +50,9 @@ class WeaviateAdapter(VectorStorePort):
     ADAPTER_DISPLAY_NAME = "Weaviate"
 
     def __init__(self, **adapter_config: Any) -> None:
-        # 1. Validate provider_config using WeaviateConfig model
-        try:
-            config_model = WeaviateConfig.model_validate(adapter_config)
-        except ValidationError as exc:
-            formatted_errors = format_config_errors(exc)
-            raise DocpipeException(
-                message="; ".join(formatted_errors),
-                status_code=400,
-                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-            ) from None
-
-        self.collection_name = config_model.collection_name
+        # Light construction (same as the OpenSearch and Milvus adapters): read keys, parse provider_config,
+        # connect and build the managers. Mapping validation lives in validate_configuration().
+        self.collection_name: str = adapter_config.get("collection_name", "")
         self.embeddings_column = adapter_config.get(
             OperatorConstants.Columns.EMBEDDINGS_COLUMN,
             OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT,
@@ -70,86 +61,47 @@ class WeaviateAdapter(VectorStorePort):
             OperatorConstants.VectorDB.ADD_SPARSE_VECTOR,
             OperatorConstants.VectorDB.ADD_SPARSE_VECTOR_DEFAULT,
         )
+        self.available_features: dict[str, Any] = adapter_config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {})
+        self._schema_template_path_set = bool(adapter_config.get("schema_template_path"))
+        self.feature_mappings, self._acl_notice = self._drop_acl_mappings(
+            feature_mappings=adapter_config.get(OperatorConstants.Config.FEATURE_MAPPINGS, []),
+            available_features=self.available_features,
+        )
+        self.client_manager: WeaviateClient | None = None
+        self.index_manager: WeaviateIndexManager | None = None
+        self.batch_processor: WeaviateBatchProcessor | None = None
 
-        available_features: dict[str, Any] = adapter_config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {})
-        feature_mappings: list[dict[str, str]] = adapter_config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
+        validating_flow = bool(adapter_config.get(DocpipeConstants.VALIDATING_FLOW, False))
+        try:
+            config_model = WeaviateConfig.model_validate(adapter_config)
+        except ValidationError as exc:
+            if validating_flow:
+                # validate() reports the same problems field by field; do not open a connection for them.
+                logger.info("Weaviate configuration is invalid; skipping the connection during flow validation")
+                return
+            # from None: the pydantic error text carries the offending input values (possibly credentials).
+            raise DocpipeException(
+                message="; ".join(format_config_errors(exc)),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            ) from None
 
-        # 2. If add_sparse_vector is True, require a mapping for the content feature
-        if self.add_sparse_vector:
-            has_content_mapping = any(
-                WeaviateIndexManager.is_content_mapping(
-                    feature_name=entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name")) or "",
-                    column_name=entry.get(
-                        OperatorConstants.Misc.MAPPED_COLUMN_NAME,
-                        entry.get("collection_column", entry.get("mapped_column_name")),
-                    )
-                    or "",
-                )
-                for entry in feature_mappings
-            )
-            if not has_content_mapping:
-                raise DocpipeException(
-                    message="A mapping for the content feature is required when add_sparse_vector is true",
-                    status_code=400,
-                    error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-                )
+        self.collection_name = config_model.collection_name
 
-        # 3. Warn once on schema_template_path without reading it
-        if adapter_config.get("schema_template_path"):
+        if self._schema_template_path_set:
             logger.warning(
                 "schema_template_path is OpenSearch-specific and is not supported by Weaviate; it will be ignored"
             )
+        if self._acl_notice:
+            logger.warning(self._acl_notice)
 
-        # 4. Drop any allowed_users mapping with one warning, and warn once if allowed_users is upstream but unmapped
-        filtered_mappings: list[dict[str, str]] = []
-        has_mapped_acl = False
-        for entry in feature_mappings:
-            fn = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
-            if fn == "allowed_users":
-                has_mapped_acl = True
-                continue
-            filtered_mappings.append(entry)
-
-        if has_mapped_acl:
-            logger.warning(
-                "Access control (allowed_users) is not supported by Weaviate; the allowed_users mapping has been dropped"
-            )
-        elif "allowed_users" in available_features:
-            logger.warning(
-                "Access control (allowed_users) is available upstream but is not supported by Weaviate; ACL checks will not be enforced"
-            )
-
-        # 5. Run validate_primary_key_mapping and validate_property_names on filtered mappings
-        validate_primary_key_mapping(
-            feature_mappings=filtered_mappings,
-            available_features=available_features,
-        )
-
-        property_names_to_validate: list[str] = []
-        for entry in filtered_mappings:
-            col_name = entry.get(
-                OperatorConstants.Misc.MAPPED_COLUMN_NAME,
-                entry.get("collection_column", entry.get("mapped_column_name")),
-            )
-            feat_name = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
-            if col_name and col_name != "pk" and feat_name != "sparse_embeddings":
-                property_names_to_validate.append(col_name)
-
-        validate_property_names(property_names_to_validate)
-
-        # 6. Deferral check for flow validation with Vault placeholder credentials
-        validating_flow = bool(adapter_config.get(DocpipeConstants.VALIDATING_FLOW, False))
+        # Flow validation replaces vault:// credentials with a placeholder that the server would reject
         credentials_in_use = [config_model.api_key, config_model.bearer_token, config_model.password]
         has_vault_placeholder = any(cred == DocpipeConstants.VAULT_PLACEHOLDER for cred in credentials_in_use if cred)
-
         if validating_flow and has_vault_placeholder:
             logger.info("Deferring Weaviate connection during flow validation due to Vault credential placeholder")
-            self.client_manager: WeaviateClient | None = None
-            self.index_manager: WeaviateIndexManager | None = None
-            self.batch_processor: WeaviateBatchProcessor | None = None
             return
 
-        # 7. Connect WeaviateClient and construct managers
         self.client_manager = WeaviateClient(
             connection_type=config_model.connection_type,
             host=config_model.host,
@@ -181,25 +133,113 @@ class WeaviateAdapter(VectorStorePort):
                 distance_metric=config_model.distance_metric,
                 index_parameters=config_model.index_parameters,
                 add_sparse_vector=self.add_sparse_vector,
-                feature_mappings=filtered_mappings,
-                available_features=available_features,
+                feature_mappings=self.feature_mappings,
+                available_features=self.available_features,
                 secrets=secrets,
             )
             self.batch_processor = WeaviateBatchProcessor(
                 client=client,
                 collection_name=config_model.collection_name,
                 batch_size=config_model.batch_size,
-                available_features=available_features,
-                feature_mappings=filtered_mappings,
+                available_features=self.available_features,
+                feature_mappings=self.feature_mappings,
                 primary_key_field="pk",
                 embeddings_column=self.embeddings_column,
                 add_sparse_vector=self.add_sparse_vector,
                 secrets=secrets,
             )
         except Exception:
-            if self.client_manager is not None:
-                self.client_manager.close()
+            self.client_manager.close()
             raise
+
+    @staticmethod
+    def _drop_acl_mappings(
+        *,
+        feature_mappings: list[dict[str, str]],
+        available_features: dict[str, Any],
+    ) -> tuple[list[dict[str, str]], str | None]:
+        """Remove the allowed_users mapping (Weaviate has no ACL) and return a notice describing what was ignored."""
+        kept = [
+            entry
+            for entry in feature_mappings
+            if entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name")) != "allowed_users"
+        ]
+        if len(kept) != len(feature_mappings):
+            return kept, (
+                "Access control (allowed_users) is not supported by Weaviate; the allowed_users mapping has been dropped"
+            )
+        if "allowed_users" in available_features:
+            return kept, (
+                "Access control (allowed_users) is available upstream but is not supported by Weaviate; "
+                "ACL checks will not be enforced"
+            )
+        return kept, None
+
+    def _mapping_problems(self) -> tuple[list[str], list[str]]:
+        """Collect blocking mapping problems and notices without raising."""
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        if self.add_sparse_vector:
+            has_content_mapping = any(
+                WeaviateIndexManager.is_content_mapping(
+                    feature_name=entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name")) or "",
+                    column_name=entry.get(
+                        OperatorConstants.Misc.MAPPED_COLUMN_NAME,
+                        entry.get("collection_column", entry.get("mapped_column_name")),
+                    )
+                    or "",
+                )
+                for entry in self.feature_mappings
+            )
+            if not has_content_mapping:
+                errors.append("A mapping for the content feature is required when add_sparse_vector is true")
+
+        property_names: list[str] = []
+        for entry in self.feature_mappings:
+            col_name = entry.get(
+                OperatorConstants.Misc.MAPPED_COLUMN_NAME,
+                entry.get("collection_column", entry.get("mapped_column_name")),
+            )
+            feat_name = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
+            if col_name and col_name != "pk" and feat_name != "sparse_embeddings":
+                property_names.append(col_name)
+
+        try:
+            validate_primary_key_mapping(
+                feature_mappings=self.feature_mappings,
+                available_features=self.available_features,
+            )
+        except DocpipeException as exc:
+            errors.append(str(exc))
+        try:
+            validate_property_names(property_names)
+        except DocpipeException as exc:
+            errors.append(str(exc))
+
+        if self._schema_template_path_set:
+            warnings.append(
+                "schema_template_path is OpenSearch-specific and is not supported by Weaviate; it is ignored"
+            )
+        if self._acl_notice:
+            warnings.append(self._acl_notice)
+        return errors, warnings
+
+    def validate_configuration(self, *, errors: list[str], warnings: list[str]) -> None:
+        """Report mapping problems (primary key, property names, sparse content) to operator validation."""
+        mapping_errors, mapping_warnings = self._mapping_problems()
+        errors.extend(mapping_errors)
+        warnings.extend(mapping_warnings)
+
+    def _raise_on_mapping_errors(self) -> None:
+        """Safety net for runs that skip validation: fail before anything is written."""
+        mapping_errors, _ = self._mapping_problems()
+        if mapping_errors:
+            raise DocpipeException(
+                message="; ".join(mapping_errors),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
 
     @staticmethod
     def get_config_schema() -> type[BaseModel]:
@@ -208,11 +248,13 @@ class WeaviateAdapter(VectorStorePort):
 
     def create_index(self, *, dimension_mapping: dict[str, int]) -> None:
         """Create the Weaviate collection."""
+        self._raise_on_mapping_errors()
         if self.index_manager:
             self.index_manager.create_collection(dimension_mapping=dimension_mapping)
 
     def validate_existing_schema(self, *, dimension_mapping: dict[str, int]) -> None:
         """Validate existing Weaviate collection against runtime schema."""
+        self._raise_on_mapping_errors()
         if self.index_manager:
             self.index_manager.validate_existing_collection(dimension_mapping=dimension_mapping)
 

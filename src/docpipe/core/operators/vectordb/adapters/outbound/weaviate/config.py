@@ -27,9 +27,9 @@ class WeaviateConfig(BaseModel):
     collection_name: str = Field(
         description="Name of the Weaviate collection to write to.",
     )
-    connection_type: Literal["custom", "cloud"] = Field(
-        default="custom",
-        description="Connection type: 'custom' for self-hosted or 'cloud' for Weaviate Cloud.",
+    connection_type: Literal["on-prem", "cloud"] = Field(
+        default="on-prem",
+        description="Connection type: 'on-prem' for self-hosted or 'cloud' for Weaviate Cloud.",
     )
     host: str = Field(
         default="localhost",
@@ -140,7 +140,7 @@ class WeaviateConfig(BaseModel):
 
         effective_grpc_secure = self.secure if self.grpc_secure is None else self.grpc_secure
 
-        if self.connection_type == "custom" and self.auth_type != "none":
+        if self.connection_type == "on-prem" and self.auth_type != "none":
             if not (self.secure and effective_grpc_secure):
                 raise ValueError(
                     "secure and grpc_secure must both be true when auth_type is not 'none'; "

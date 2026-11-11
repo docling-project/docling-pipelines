@@ -24,7 +24,7 @@ class TestWeaviateConfig:
         """Verify all default configuration values."""
         cfg = WeaviateConfig(collection_name="Documents")
         assert cfg.collection_name == "Documents"
-        assert cfg.connection_type == "custom"
+        assert cfg.connection_type == "on-prem"
         assert cfg.host == "localhost"
         assert cfg.port == 8080
         assert cfg.secure is False

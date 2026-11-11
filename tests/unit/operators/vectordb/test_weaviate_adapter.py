@@ -79,7 +79,7 @@ def validation_error_text(*, flow: dict[str, Any]) -> str:
 @pytest.fixture
 def base_adapter_config() -> dict[str, Any]:
     return {
-        "connection_type": "custom",
+        "connection_type": "on-prem",
         "host": "localhost",
         "port": 8080,
         "grpc_port": 50051,
@@ -109,7 +109,7 @@ def test_vector_store_factory_registration():
         mock_conn.return_value = mock_client
         adapter = VectorStoreFactory.create(
             "weaviate",
-            connection_type="custom",
+            connection_type="on-prem",
             host="localhost",
             port=8080,
             grpc_port=50051,
@@ -148,73 +148,116 @@ def test_rejections_before_connect_and_error_message(base_adapter_config):
 
 def test_flow_validator_error_reporting():
     """FlowValidator includes the exact validation error message for a vectordb node."""
-    flow = vectordb_flow(provider_config={"connection_type": "custom", "host": "localhost"})
+    flow = vectordb_flow(provider_config={"connection_type": "on-prem", "host": "localhost"})
     with patch(CONNECT_PATH) as mock_conn:
         error_text = validation_error_text(flow=flow)
     mock_conn.assert_not_called()
     assert "collection_name is not provided" in error_text
 
 
+def _validate_hook(adapter: WeaviateAdapter) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    adapter.validate_configuration(errors=errors, warnings=warnings)
+    return errors, warnings
+
+
+def test_construction_does_not_validate_mappings(base_adapter_config):
+    """Mapping problems do not stop construction; validate_configuration reports them (OpenSearch/Milvus pattern)."""
+    cfg = dict(base_adapter_config)
+    cfg["feature_mappings"] = [
+        {"feature_name": "doc_id_hash", "mapped_column_name": "id_col"},
+        {"feature_name": "content", "mapped_column_name": "vector"},
+    ]
+    with patch(CONNECT_PATH, return_value=MagicMock()) as mock_conn:
+        adapter = WeaviateAdapter(**cfg)
+    mock_conn.assert_called_once()
+    errors, _ = _validate_hook(adapter)
+    assert len(errors) == 2
+
+
 def test_sparse_mode_requires_content_mapping(base_adapter_config):
-    """Sparse mode without content mapping fails before connect, and succeeds with mapping."""
+    """Sparse mode without content mapping is reported by validate_configuration, and accepted with the mapping."""
     cfg = dict(base_adapter_config)
     cfg["add_sparse_vector"] = True
     cfg["feature_mappings"] = [
         {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
         {"feature_name": "embeddings", "mapped_column_name": "embeddings"},
     ]
-    with patch(CONNECT_PATH) as mock_conn:
-        with pytest.raises(DocpipeException) as exc_info:
-            WeaviateAdapter(**cfg)
-        mock_conn.assert_not_called()
-        assert "A mapping for the content feature is required when add_sparse_vector is true" in str(exc_info.value)
-
-    # With content mapping
-    cfg["feature_mappings"].append({"feature_name": "content", "mapped_column_name": "text"})
-    with patch(CONNECT_PATH) as mock_conn:
-        mock_conn.return_value = MagicMock()
+    with patch(CONNECT_PATH, return_value=MagicMock()):
         adapter = WeaviateAdapter(**cfg)
-        assert adapter is not None
-        mock_conn.assert_called_once()
+    errors, _ = _validate_hook(adapter)
+    assert errors == ["A mapping for the content feature is required when add_sparse_vector is true"]
+
+    cfg["feature_mappings"] = [*cfg["feature_mappings"], {"feature_name": "content", "mapped_column_name": "text"}]
+    with patch(CONNECT_PATH, return_value=MagicMock()):
+        adapter = WeaviateAdapter(**cfg)
+    assert _validate_hook(adapter) == ([], [])
 
 
 def test_invalid_property_names_and_primary_key_rules(base_adapter_config):
-    """Reserved property name, mapped away from pk, or mapped to pk fail before connecting."""
-    # Reserved name 'vector'
-    cfg = dict(base_adapter_config)
-    cfg["feature_mappings"] = [
-        {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
-        {"feature_name": "content", "mapped_column_name": "vector"},
+    """Reserved property name, primary key mapped away from pk, or another feature mapped to pk are reported."""
+    cases = [
+        (
+            [
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "content", "mapped_column_name": "vector"},
+            ],
+            "reserved",
+        ),
+        (
+            [
+                {"feature_name": "doc_id_hash", "mapped_column_name": "id_col"},
+                {"feature_name": "content", "mapped_column_name": "text"},
+            ],
+            "Primary feature 'doc_id_hash' must be mapped to column 'pk'",
+        ),
+        (
+            [
+                {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                {"feature_name": "content", "mapped_column_name": "pk"},
+            ],
+            "Only the primary feature 'doc_id_hash' can be mapped to column 'pk'",
+        ),
     ]
-    with patch(CONNECT_PATH) as mock_conn:
-        with pytest.raises(DocpipeException) as exc_info:
-            WeaviateAdapter(**cfg)
-        mock_conn.assert_not_called()
-        assert "reserved" in str(exc_info.value)
+    for mappings, expected in cases:
+        cfg = dict(base_adapter_config)
+        cfg["feature_mappings"] = mappings
+        with patch(CONNECT_PATH, return_value=MagicMock()):
+            adapter = WeaviateAdapter(**cfg)
+        errors, _ = _validate_hook(adapter)
+        assert any(expected in err for err in errors), (expected, errors)
 
-    # Primary key mapped away from pk
+
+def test_mapping_errors_block_writes_when_validation_was_skipped(base_adapter_config):
+    """create_index and validate_existing_schema raise a 400 DocpipeException before touching the server."""
     cfg = dict(base_adapter_config)
+    cfg["feature_mappings"] = [{"feature_name": "doc_id_hash", "mapped_column_name": "id_col"}]
+    with patch(CONNECT_PATH, return_value=MagicMock()):
+        adapter = WeaviateAdapter(**cfg)
+    adapter.index_manager = MagicMock()
+    for call in (adapter.create_index, adapter.validate_existing_schema):
+        with pytest.raises(DocpipeException, match="must be mapped to column 'pk'") as exc_info:
+            call(dimension_mapping={"embeddings": 3})
+        assert exc_info.value.status_code == 400
+    adapter.index_manager.create_collection.assert_not_called()
+    adapter.index_manager.validate_existing_collection.assert_not_called()
+
+
+def test_validate_configuration_reports_every_problem(base_adapter_config):
+    """All problems are collected in one pass rather than stopping at the first."""
+    cfg = dict(base_adapter_config)
+    cfg["add_sparse_vector"] = True
     cfg["feature_mappings"] = [
         {"feature_name": "doc_id_hash", "mapped_column_name": "id_col"},
-        {"feature_name": "content", "mapped_column_name": "text"},
+        {"feature_name": "embeddings", "mapped_column_name": "embeddings"},
     ]
-    with patch(CONNECT_PATH) as mock_conn:
-        with pytest.raises(DocpipeException) as exc_info:
-            WeaviateAdapter(**cfg)
-        mock_conn.assert_not_called()
-        assert "Primary feature 'doc_id_hash' must be mapped to column 'pk'" in str(exc_info.value)
-
-    # Non-primary feature mapped to pk
-    cfg = dict(base_adapter_config)
-    cfg["feature_mappings"] = [
-        {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
-        {"feature_name": "content", "mapped_column_name": "pk"},
-    ]
-    with patch(CONNECT_PATH) as mock_conn:
-        with pytest.raises(DocpipeException) as exc_info:
-            WeaviateAdapter(**cfg)
-        mock_conn.assert_not_called()
-        assert "Only the primary feature 'doc_id_hash' can be mapped to column 'pk'" in str(exc_info.value)
+    with patch(CONNECT_PATH, return_value=MagicMock()):
+        adapter = WeaviateAdapter(**cfg)
+    errors, _ = _validate_hook(adapter)
+    assert len(errors) == 2
+    assert any("content feature" in err for err in errors)
+    assert any("'pk'" in err for err in errors)
 
 
 def test_schema_template_path_warning(base_adapter_config, caplog):
@@ -227,6 +270,8 @@ def test_schema_template_path_warning(base_adapter_config, caplog):
             adapter = WeaviateAdapter(**cfg)
         assert "schema_template_path is OpenSearch-specific" in caplog.text
         assert adapter is not None
+    _, warnings = _validate_hook(adapter)
+    assert any("schema_template_path" in warning for warning in warnings)
 
 
 def test_acl_handling_and_warnings(base_adapter_config, caplog):
@@ -257,6 +302,7 @@ def test_acl_handling_and_warnings(base_adapter_config, caplog):
             adapter2 = WeaviateAdapter(**cfg2)
         assert "available upstream but is not supported by Weaviate" in caplog.text
         assert adapter2 is not None
+    assert any("not supported by Weaviate" in warning for warning in _validate_hook(adapter2)[1])
 
 
 def test_isolated_import_dependencies():
@@ -392,20 +438,59 @@ def test_vault_placeholder_flow_validation(base_adapter_config):
         adapter = WeaviateAdapter(**cfg)
         mock_conn.assert_called_once()
 
-    # Flow validation over plaintext with Vault placeholder still fails TLS rule
+    # Plaintext with a Vault placeholder: no connection during flow validation (validate() reports the TLS rule) ...
     cfg_plain = dict(cfg)
     cfg_plain["secure"] = False
     cfg_plain["grpc_secure"] = False
     cfg_plain[DocpipeConstants.VALIDATING_FLOW] = True
+    with patch(CONNECT_PATH) as mock_conn:
+        adapter = WeaviateAdapter(**cfg_plain)
+        mock_conn.assert_not_called()
+    assert adapter.client_manager is None
+
+    # ... but a real run fails fast with a 400 DocpipeException
+    cfg_plain[DocpipeConstants.VALIDATING_FLOW] = False
     with pytest.raises(DocpipeException) as exc_info:
         WeaviateAdapter(**cfg_plain)
     assert "secure and grpc_secure must both be true" in str(exc_info.value)
+    assert exc_info.value.status_code == 400
+
+
+def test_invalid_config_during_flow_validation_opens_no_connection(base_adapter_config):
+    """An unparsable provider_config is deferred to validate() while validating a flow."""
+    cfg = dict(base_adapter_config)
+    del cfg["collection_name"]
+    cfg[DocpipeConstants.VALIDATING_FLOW] = True
+    with patch(CONNECT_PATH) as mock_conn:
+        adapter = WeaviateAdapter(**cfg)
+    mock_conn.assert_not_called()
+    assert adapter.client_manager is None
+    adapter.close()
+
+
+def test_docpipe_exception_from_adapter_is_not_rewrapped(base_adapter_config):
+    """Factory and operator re-raise the adapter's DocpipeException unchanged (400, original message)."""
+    from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
+
+    cfg = {k: v for k, v in base_adapter_config.items() if k not in ("available_features", "feature_mappings")}
+    cfg["collection_name"] = "lowercase"
+    with patch(CONNECT_PATH) as mock_conn:
+        with pytest.raises(DocpipeException) as exc_info:
+            VectorStoreFactory.create("weaviate", **cfg)
+        assert exc_info.value.status_code == 400
+        assert "Failed to create vector store adapter" not in str(exc_info.value)
+        with pytest.raises(DocpipeException) as op_exc:
+            VectorDBOperator(config={"provider": "weaviate", "provider_config": cfg})
+        assert op_exc.value.status_code == 400
+        assert "Failed to initialize vector database adapter" not in str(op_exc.value)
+        assert "uppercase ASCII letter" in str(op_exc.value)
+    mock_conn.assert_not_called()
 
 
 def test_flow_validator_with_vault_api_key():
     """FlowValidator defers connection for a Vault API key; plaintext fails the TLS rule."""
     provider_config = {
-        "connection_type": "custom",
+        "connection_type": "on-prem",
         "host": "localhost",
         "port": 8080,
         "secure": True,
@@ -430,7 +515,7 @@ def test_secret_safety_across_adapter_paths(monkeypatch, caplog):
     """Secret values never appear in raised messages or caplog."""
     monkeypatch.setenv("WEAVIATE_SECRET_KEY", "super-secret-token-12345")
     cfg = {
-        "connection_type": "custom",
+        "connection_type": "on-prem",
         "host": "localhost",
         "port": 8080,
         "secure": True,
@@ -454,7 +539,7 @@ def test_managers_receive_resolved_credentials_for_redaction(monkeypatch):
     resolved = "resolved-" + "credential-value"
     monkeypatch.setenv("WEAVIATE_REDACTION_KEY", resolved)
     cfg = {
-        "connection_type": "custom",
+        "connection_type": "on-prem",
         "host": "localhost",
         "port": 8080,
         "secure": True,

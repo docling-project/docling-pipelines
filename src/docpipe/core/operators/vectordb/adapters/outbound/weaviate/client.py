@@ -7,8 +7,15 @@ import contextlib
 import re
 from typing import Any
 
+import grpc
 import weaviate
 from weaviate.classes.init import AdditionalConfig, Auth, Timeout
+from weaviate.exceptions import (
+    UnexpectedStatusCodeError,
+    WeaviateConnectionError,
+    WeaviateGRPCUnavailableError,
+    WeaviateTimeoutError,
+)
 
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
@@ -31,11 +38,66 @@ def redact_secrets(*, text: str, secrets: list[str]) -> str:
     return _AUTH_HEADER_RE.sub(r"\1***", redacted)
 
 
+_UNREACHABLE_ERRORS = (WeaviateConnectionError, WeaviateTimeoutError, WeaviateGRPCUnavailableError)
+_UNREACHABLE_GRPC_CODES = (grpc.StatusCode.DEADLINE_EXCEEDED, grpc.StatusCode.UNAVAILABLE)
+_SUPPORTED_CONNECTION_TYPES = ("on-prem", "cloud")
+
+
+def sdk_status_code(exc: BaseException) -> int | None:
+    """Return the HTTP/gRPC status code of an SDK status error, else None. Decided by type, never by message text."""
+    if isinstance(exc, UnexpectedStatusCodeError):
+        return int(exc.status_code)
+    return None
+
+
+def _is_unreachable(exc: BaseException) -> bool:
+    """True when exc, or any exception in its cause/context chain, means the server is unreachable or timed out.
+
+    The SDK wraps gRPC failures (for example DEADLINE_EXCEEDED on a query) in ``WeaviateQueryError`` raised inside
+    ``except RpcError``, so the gRPC status is only present on the chained exception, never on the outer type.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _UNREACHABLE_ERRORS):
+            return True
+        if isinstance(current, grpc.RpcError):
+            code = getattr(current, "code", None)
+            with contextlib.suppress(Exception):
+                if callable(code) and code() in _UNREACHABLE_GRPC_CODES:
+                    return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def to_docpipe_exception(*, exc: Exception, operation: str, secrets: list[str]) -> DocpipeException:
+    """Convert any exception raised by a Weaviate operation into a DocpipeException with a redacted message.
+
+    A DocpipeException is returned unchanged. An unreachable or timed-out server (decided from the exception and its
+    chain) gives status 503, any other failure 500. The caller must raise the result with ``from None``: the SDK
+    exception can carry credentials, so it must not stay reachable through ``__cause__`` where tracebacks and
+    ``logger.exception`` would print it unredacted.
+    """
+    if isinstance(exc, DocpipeException):
+        return exc
+    status = sdk_status_code(exc)
+    detail = f"{exc.__class__.__name__}"
+    if status is not None:
+        detail += f", status {status}"
+    message = redact_secrets(text=f"{operation} ({detail}): {exc}", secrets=secrets)
+    return DocpipeException(
+        message=message,
+        status_code=503 if _is_unreachable(exc) else 500,
+        error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
+    )
+
+
 class WeaviateClient:
     """Manages connection, authentication, and lifecycle for the Weaviate Python SDK client.
 
     Responsibilities:
-    - Custom and Weaviate Cloud connection creation
+    - On-prem and Weaviate Cloud connection creation
     - Authentication credential construction (none, api_key, bearer_token, client_password)
     - Connection validation and is_ready check
     - Idempotent resource cleanup and client closure
@@ -45,7 +107,7 @@ class WeaviateClient:
     def __init__(
         self,
         *,
-        connection_type: str = "custom",
+        connection_type: str = "on-prem",
         host: str = "localhost",
         port: int = 8080,
         secure: bool = False,
@@ -167,7 +229,19 @@ class WeaviateClient:
 
         effective_grpc_secure = self.secure if self.grpc_secure is None else self.grpc_secure
 
-        if self.connection_type == "custom" and self.auth_type != "none":
+        # The client can be built without WeaviateConfig validation (flow enrichment), so it enforces the
+        # connection type and the TLS rule itself and never falls through to an unchecked connection.
+        if self.connection_type not in _SUPPORTED_CONNECTION_TYPES:
+            raise DocpipeException(
+                message=(
+                    f"Unsupported connection_type: '{self.connection_type}'. "
+                    f"Use one of: {', '.join(_SUPPORTED_CONNECTION_TYPES)}"
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+
+        if self.connection_type == "on-prem" and self.auth_type != "none":
             if not (self.secure and effective_grpc_secure):
                 raise DocpipeException(
                     message=(

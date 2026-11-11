@@ -2090,7 +2090,7 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
      - SSL/TLS support for secure connections
 
 3. **Weaviate** (`provider: "weaviate"`)
-   - Self-hosted (`connection_type: "custom"`) or Weaviate Cloud (`connection_type: "cloud"`)
+   - Self-hosted (`connection_type: "on-prem"`) or Weaviate Cloud (`connection_type: "cloud"`)
    - Index types: `hnsw` (default), `flat`, `dynamic` (needs a server with `ASYNC_INDEXING=true`)
    - Distance metrics: cosine (default), dot, l2-squared, manhattan, hamming
    - Authentication: none, API key, bearer token, or client password (credentials require TLS)
@@ -2293,7 +2293,7 @@ See [Milvus GPU indexes](../operators/vectordb/milvus.md#gpu-indexes) for setup 
 **Weaviate:**
 
 - `collection_name`: **Required** - Collection name; starts with an upper-case ASCII letter
-- `connection_type`: `custom` (default) or `cloud`; `cloud` requires `cluster_url`
+- `connection_type`: `on-prem` (default) or `cloud`; `cloud` requires `cluster_url`
 - `host`, `port`, `secure`: HTTP connection (defaults: `localhost`, 8080, `false`)
 - `grpc_host`, `grpc_port`, `grpc_secure`: gRPC connection (defaults: `host`, 50051, `secure`)
 - `auth_type`: `none` (default), `api_key`, `bearer_token`, or `client_password`

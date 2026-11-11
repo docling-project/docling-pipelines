@@ -167,6 +167,9 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 adapter_config[DocpipeConstants.VALIDATING_FLOW] = self.validating_flow
 
             self.adapter: VectorStorePort = VectorStoreFactory.create(self.provider, **adapter_config)
+        except DocpipeException:
+            # Already a docpipe exception with its own status/error code and message: do not wrap it again.
+            raise
         except Exception as e:
             raise DocpipeException(
                 message=f"Failed to initialize vector database adapter '{self.provider}': {e!s}",
@@ -223,6 +226,9 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     errors.append(f"{field_name} is not provided")
                 else:
                     errors.append(error["msg"])
+
+        # Provider-specific mapping/configuration checks (optional hook; default reports nothing).
+        self.adapter.validate_configuration(errors=errors, warnings=warnings)
 
         # Reject index settings that cannot work with the vector kinds produced upstream (e.g. BIN_* without
         # a binary vector feature). Only possible when the validator supplied the propagated feature types.
@@ -383,51 +389,25 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         id_column = OperatorConstants.Misc.ID
 
         if self.doc_id_column and self.doc_id_column in table.column_names:
-            has_name_col = "name" in table.column_names
-            has_id_col = id_column in table.column_names
-            for idx in range(table.num_rows):
-                doc_hash = table[self.doc_id_column][idx].as_py()
-                if doc_hash:
-                    self._process_doc_id_row(
-                        table=table,
-                        idx=idx,
-                        doc_hash=str(doc_hash),
-                        id_column=id_column,
-                        has_id_col=has_id_col,
-                        has_name_col=has_name_col,
-                        unique_doc_ids=unique_doc_ids,
-                        doc_hash_to_id=doc_hash_to_id,
-                        doc_hash_to_name=doc_hash_to_name,
-                        file_ids=file_ids,
-                    )
+            # Read each needed column once (columnar) instead of per-cell as_py() calls.
+            doc_hashes = table[self.doc_id_column].to_pylist()
+            original_ids = table[id_column].to_pylist() if id_column in table.column_names else None
+            names = table["name"].to_pylist() if "name" in table.column_names else None
+            for idx, raw_hash in enumerate(doc_hashes):
+                if not raw_hash:
+                    continue
+                doc_hash = str(raw_hash)
+                unique_doc_ids.add(doc_hash)
+                # Identity is the row's id when usable, else the document ID, matching chunk-key generation.
+                original_id = original_ids[idx] if original_ids is not None else None
+                identity = str(original_id) if original_id else doc_hash
+                doc_hash_to_id[doc_hash] = identity
+                file_ids.add(identity)
+                name_val = names[idx] if names is not None else None
+                if name_val:
+                    doc_hash_to_name[doc_hash] = str(name_val)
 
         return unique_doc_ids, doc_hash_to_id, doc_hash_to_name, file_ids
-
-    def _process_doc_id_row(
-        self,
-        *,
-        table: pa.Table,
-        idx: int,
-        doc_hash: str,
-        id_column: str,
-        has_id_col: bool,
-        has_name_col: bool,
-        unique_doc_ids: set[str],
-        doc_hash_to_id: dict[str, str],
-        doc_hash_to_name: dict[str, str],
-        file_ids: set[str],
-    ) -> None:
-        """Register one row's doc_id_hash, document identity, and name into the mapping dicts."""
-        unique_doc_ids.add(doc_hash)
-        # Identity is the row's id when usable, else the document ID, matching chunk-key generation.
-        original_id = table[id_column][idx].as_py() if has_id_col else None
-        identity = str(original_id) if original_id else doc_hash
-        doc_hash_to_id[doc_hash] = identity
-        file_ids.add(identity)
-        if has_name_col:
-            name_val = table["name"][idx].as_py()
-            if name_val:
-                doc_hash_to_name[doc_hash] = str(name_val)
 
     def _resolve_vector_dimensions(
         self, *, table: pa.Table, metadata: dict[str, Any]
@@ -638,14 +618,16 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         documents: list[tuple[str, dict[str, Any]]] = []
         # Map chunk IDs back to original document IDs for failure tracking
         chunk_id_to_doc_id: dict[str, str] = {}
+        # Convert once to columnar Python lists, then slice rows from them.
+        column_names = table.column_names
+        columns: dict[str, list[Any]] = {name: table[name].to_pylist() for name in column_names}
 
         for idx in range(table.num_rows):
+            row_data: dict[str, Any] = {}
             try:
                 # Extract row data
-                row_data: dict[str, Any] = {}
-                for col_name in table.column_names:
-                    value: Any = table[col_name][idx].as_py()
-                    row_data[col_name] = value
+                for col_name in column_names:
+                    row_data[col_name] = columns[col_name][idx]
 
                 # Get document ID
                 row_doc_id: Any = row_data.get(self.doc_id_column)

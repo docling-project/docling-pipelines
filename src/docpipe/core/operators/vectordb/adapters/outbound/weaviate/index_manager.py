@@ -16,7 +16,12 @@ from weaviate.classes.config import (
 )
 
 from docpipe.core.constants import OperatorConstants
-from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, redact_secrets
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import (
+    WeaviateClient,
+    redact_secrets,
+    sdk_status_code,
+    to_docpipe_exception,
+)
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
@@ -49,6 +54,7 @@ RESERVED_SUFFIXES: tuple[str, ...] = (
 
 PROPERTY_NAME_REGEX = re.compile(r"^[a-zA-Z][_0-9a-zA-Z]*$")
 
+HTTP_UNPROCESSABLE: int = 422
 CONTENT_NAMES: tuple[str, ...] = ("content", "text")
 
 # Content property declared when no feature is mapped to document text (design D7).
@@ -258,12 +264,15 @@ class WeaviateIndexManager:
         )
 
     def collection_exists(self) -> bool:
-        """Check if collection exists in Weaviate."""
+        """Check if collection exists in Weaviate. Raises DocpipeException when the check cannot be answered."""
         try:
             return bool(self.client.collections.exists(self.collection_name))
         except Exception as exc:
-            logger.warning("Error checking collection existence: %s", self._redact(str(exc)))
-            return False
+            raise to_docpipe_exception(
+                exc=exc,
+                operation=f"Failed to check whether Weaviate collection '{self.collection_name}' exists",
+                secrets=self._secrets,
+            ) from None
 
     def drop_collection(self) -> bool:
         """Drop collection from Weaviate."""
@@ -386,7 +395,7 @@ class WeaviateIndexManager:
                         message=f"Invalid index_parameters for index_type '{self.index_type}': {self._redact(str(exc))}",
                         status_code=400,
                         error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-                    ) from None
+                    ) from exc
 
                 vector_config.append(
                     Configure.Vectors.self_provided(
@@ -408,8 +417,7 @@ class WeaviateIndexManager:
             )
             logger.info("Successfully created Weaviate collection '%s'", self.collection_name)
         except Exception as exc:
-            err_str = str(exc)
-            if "422" in err_str and self.index_type == "dynamic":
+            if sdk_status_code(exc) == HTTP_UNPROCESSABLE and self.index_type == "dynamic":
                 raise DocpipeException(
                     message=(
                         "index_type 'dynamic' requires async indexing enabled on the Weaviate server "
@@ -420,10 +428,10 @@ class WeaviateIndexManager:
                     error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
                 ) from None
 
-            raise DocpipeException(
-                message=f"Failed to create collection '{self.collection_name}': {self._redact(str(exc))}",
-                status_code=500,
-                error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
+            raise to_docpipe_exception(
+                exc=exc,
+                operation=f"Failed to create collection '{self.collection_name}'",
+                secrets=self._secrets,
             ) from None
 
     def validate_existing_collection(self, *, dimension_mapping: dict[str, int]) -> None:
@@ -569,9 +577,11 @@ class WeaviateIndexManager:
                 collection.config.add_property(missing_prop)
                 logger.info("Added missing property '%s' to collection '%s'", missing_prop.name, self.collection_name)
             except Exception as exc:
-                logger.warning(
-                    "Failed to add property '%s' to collection '%s': %s",
-                    missing_prop.name,
-                    self.collection_name,
-                    self._redact(str(exc)),
-                )
+                raise to_docpipe_exception(
+                    exc=exc,
+                    operation=(
+                        f"Failed to add property '{missing_prop.name}' to existing Weaviate collection "
+                        f"'{self.collection_name}'"
+                    ),
+                    secrets=self._secrets,
+                ) from None
