@@ -2,6 +2,7 @@
 
 - Jojo Joseph - jjojo@in.ibm.com
 - Aditya Rohan Singh - adityars@ibm.com
+- Adrian Lee - adrian.lee@ibm.com
 - Anudeep Dunaboyina - anudeep.dunaboyina@ibm.com
 - Aravind NK - aravind.nk@ibm.com
 - Ashok Kumar Angadi - asangadi@in.ibm.com
