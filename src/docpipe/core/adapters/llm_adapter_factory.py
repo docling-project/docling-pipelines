@@ -133,7 +133,7 @@ class LLMAdapterFactory:
                 container_id=provider_config.get("project_id") or provider_config.get("container_id"),
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
-                timeout=provider_config.get("timeout", 120),
+                timeout=provider_config.get("timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS),
             )
         if provider == "litellm":
             # Extract connection-level config (stream, timeout) for the HTTP client
@@ -222,7 +222,7 @@ class LLMAdapterFactory:
                 container_id=provider_config.get("project_id") or provider_config.get("container_id"),
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
-                timeout=provider_config.get("timeout", 120),
+                timeout=provider_config.get("timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS),
                 embedding_batch_size=LLMAdapterFactory._positive_int_option(
                     provider_config=provider_config,
                     key=OperatorConstants.Config.BATCH_SIZE,
@@ -336,7 +336,7 @@ class LLMAdapterFactory:
                 container_id=provider_config.get("project_id") or provider_config.get("container_id"),
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
-                timeout=provider_config.get("timeout", 120),
+                timeout=provider_config.get("timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS),
             )
         raise ValueError(f"Provider '{provider}' not yet implemented for text detection")
 

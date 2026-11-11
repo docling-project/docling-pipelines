@@ -3,11 +3,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CanvasConfig, ToolbarConfig } from '@elyra/canvas';
 import { IconButton, InlineLoading } from '@carbon/react';
-import { type CanvasController, CommonProperties } from '@elyra/canvas';
+import type { CanvasController } from '@elyra/canvas';
 import type { ClickActionSource } from '@elyra/canvas';
 import { useIntl, type MessageDescriptor } from 'react-intl';
 import { useDateTimeFormatter } from '@/utils/dateTimeUtils';
@@ -28,8 +27,7 @@ import type {
   EditActionHandler,
   ClickActionHandler,
 } from '@/types/canvas';
-import type { Flow, OperatorFeature } from '@/types';
-import { hasAnyRequiredParamMissing } from '@/utils/requiredParamValidation';
+import type { Flow } from '@/types';
 import type { FlowDefinition } from '@/types/flow';
 import type { PaletteData } from '@/types/palette';
 import {
@@ -47,7 +45,7 @@ import {
   type NotificationPanelState,
   type NotificationItem,
 } from '@/components/Canvas';
-import CommonPropertiesPanelWrapper from '@/components/PropertiesPanel/CommonPropertiesPanelWrapper';
+import { CommonPropertiesWrapper } from '@/components/PropertiesPanel';
 import { getParameterDef } from '@/services/parameterDefs';
 import { CANVAS_ACTIONS, JOB_ASSET_REF_TYPE } from '@/constants/canvasActions';
 import { NodeOperator, BRANCHING_OUTPORT_ID, MERGING_INPORT_ID } from '@/constants/operators';
@@ -209,12 +207,6 @@ export function Canvas(): React.JSX.Element {
   const [linkInputFeatures, setLinkInputFeatures] = useState<Record<string, FeatureAttributes>>({});
   /** Auto-incrementing counter for default link names (Link_0, Link_1, …). */
   const linkNameCounterRef = useRef(0);
-  // Holds the Elyra propertiesController instance, obtained via the controllerHandler callback.
-  // Used to call applyPropertiesEditing(false) to auto-save before switching nodes.
-  const propertiesControllerRef = useRef<any>(null);
-  // Tracks the nodeId whose panel is currently open, so openNodePanel can auto-save before
-  // switching to a different node.
-  const openPanelNodeIdRef = useRef<string | null>(null);
   // Caches fetched paramDefs by operator name — all nodes of the same operator type share
   // the same static paramDef JSON, so one fetch serves every node of that type.
   const memoizedParamDefs = useRef<Record<string, any>>({});
@@ -1055,16 +1047,9 @@ export function Canvas(): React.JSX.Element {
     const node = controller.getNode(nodeId);
     if (node?.type !== 'execution_node') { return; }
 
-    // Auto-save the currently open panel before switching nodes.
-    if (openPanelNodeIdRef.current && openPanelNodeIdRef.current !== nodeId) {
-
-      propertiesControllerRef.current?.applyPropertiesEditing?.(false);
-    }
-
     const operatorName = node.op;
     setSelectedNodeId(nodeId);
     setSelectedOperator(operatorName);
-    openPanelNodeIdRef.current = nodeId;
 
     const currentPipelineFlow = controller.getPipelineFlow();
 
@@ -1260,6 +1245,11 @@ export function Canvas(): React.JSX.Element {
         return;
       }
 
+      // Close the suggestion panel if its source node no longer exists (e.g. deleted).
+      if (nodeSuggestion && !canvasControllerRef.current?.getNode(nodeSuggestion.sourceNodeId)) {
+        handleNodeSuggestionClose();
+      }
+
       // ── Branching link condition actions ────────────────────────────────────
       if (data.type === 'link' && data.editType === CANVAS_ACTIONS.ADD_CONDITION) {
         openLinkConditionTearsheet((data as any).id as string);
@@ -1364,7 +1354,7 @@ export function Canvas(): React.JSX.Element {
     // removeConditionFromLink, syncDeletedLinks, persistLinkCondition are plain functions
     // re-created every render; listing them here would cause unnecessary callback churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [handleRun, handleSave, openNodePanel, applyNodeDefaults, openLinkConditionTearsheet]
+    [handleRun, handleSave, openNodePanel, applyNodeDefaults, openLinkConditionTearsheet, nodeSuggestion, handleNodeSuggestionClose]
   );
 
   // Double-click on a node opens the properties panel.
@@ -1384,6 +1374,8 @@ export function Canvas(): React.JSX.Element {
       if (!controller) { return; }
       const nodeId = (source as any).nodeId as string | undefined;
       if (!nodeId) { return; }
+      // Clicking the port of the node whose card is already open toggles it closed.
+      if (nodeSuggestion?.sourceNodeId === nodeId) { return; }
       openNodeSuggestion(nodeId, controller);
       return;
     }
@@ -1392,36 +1384,13 @@ export function Canvas(): React.JSX.Element {
     if (source.clickType === 'DOUBLE_CLICK' && source.objectType === 'node' && source.id) {
       openNodePanel(String(source.id));
     }
-  }, [openNodePanel, handleNodeSuggestionClose]);
-
-  const handleApplyPropertyChanges = useCallback(
-    (propertySet: Record<string, unknown>, appData?: Record<string, unknown>) => {
-      const nodeId = (appData as { nodeId?: string } | undefined)?.nodeId;
-      const controller = canvasControllerRef.current;
-
-      if (!nodeId || !controller) { return; }
-
-      // Use setNodeParameters (targeted parameter update) rather than the broader
-      // setNodeProperties(). The TS declaration is typed as array but the JS impl
-      // dispatches the value as-is; a plain object works here.
-      controller.setNodeParameters(nodeId, propertySet as unknown as Array<Record<string, unknown>>);
-
-      setIsDirty(true);
-    },
-    []
-  );
+  }, [openNodePanel, handleNodeSuggestionClose, openNodeSuggestion, nodeSuggestion]);
 
   const handleClosePropertiesDialog = useCallback(() => {
-    propertiesControllerRef.current = null;
-    openPanelNodeIdRef.current = null;
     setIsPanelOpen(false);
     setSelectedNodeId(null);
     setSelectedOperator(null);
     setPropertiesInfo(null);
-  }, []);
-
-  const handleControllerHandler = useCallback((propertiesController: any) => {
-    propertiesControllerRef.current = propertiesController;
   }, []);
 
   /**
@@ -1450,19 +1419,6 @@ export function Canvas(): React.JSX.Element {
     [openLinkConditionTearsheet]
   );
 
-  const handlePropertyListener = useCallback((_data: unknown): void => {
-    const controller = propertiesControllerRef.current;
-    if (!controller) { return; }
-
-    const propertyValues = (controller.getPropertyValues?.() ?? {}) as Record<string, unknown>;
-    const attrs: Record<string, OperatorFeature> =
-      selectedOperator ? (operatorMetadata[selectedOperator]?.attributes ?? {}) : {};
-
-    const shouldDisable = hasAnyRequiredParamMissing(attrs, propertyValues);
-
-    controller.setSaveButtonDisable?.(shouldDisable);
-  }, [operatorMetadata, selectedOperator]);
-
   // Stable callback so ElyraCanvas's onCanvasControllerReady useEffect
   // does not re-fire on every theme-driven re-render.
   const handleCanvasControllerReady = useCallback((controller: CanvasController) => {
@@ -1480,22 +1436,18 @@ export function Canvas(): React.JSX.Element {
       return undefined;
     }
     return (
-      <CommonProperties
-        propertiesInfo={propertiesInfo as any}
-        propertiesConfig={{ containerType: 'Custom', rightFlyout: true, applyPropertiesWithoutEdit: true }}
-        customPanels={[CommonPropertiesPanelWrapper]}
-        callbacks={{
-          applyPropertyChanges: handleApplyPropertyChanges,
-          closePropertiesDialog: handleClosePropertiesDialog,
-          controllerHandler: handleControllerHandler,
-          propertyListener: handlePropertyListener,
-        }}
+      <CommonPropertiesWrapper
+        propertiesInfo={propertiesInfo}
+        canvasController={canvasControllerRef.current}
+        selectedOperator={selectedOperator}
+        operatorMetadata={operatorMetadata}
+        setIsDirty={setIsDirty}
+        onClose={handleClosePropertiesDialog}
       />
     );
   }, [
     isPanelOpen, selectedNodeId, selectedOperator, propertiesInfo,
-    handleApplyPropertyChanges, handleClosePropertiesDialog, handleControllerHandler,
-    handlePropertyListener,
+    operatorMetadata, setIsDirty, handleClosePropertiesDialog,
   ]);
 
   // ── ReadOnlyCanvas callbacks ──────────────────────────────────────────────

@@ -118,6 +118,7 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
     TMP = "tmp"
@@ -128,7 +129,7 @@ class DocpipeConstants:
 
     # Custom Operator Control
     ENABLE_CUSTOM_OPERATORS = "enable_custom_operators"
-    ENABLE_CUSTOM_OPERATORS_DEFAULT = True
+    ENABLE_CUSTOM_OPERATORS_DEFAULT = False
 
     # Operator Ownership Tiers
     OWNER_DOCPIPE = "docpipe"
@@ -455,6 +456,9 @@ class ServiceConstants:
     # a per-instance limit of 8 req/s, so concurrency stays opt-in).
     DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
     DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
+    # watsonx.ai request timeout (seconds) applied by every watsonx path (inference, embeddings,
+    # text detection).
+    DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
 
     # Hugging Face local HAP text classification (text_detection capability).
     # Model id, revision and toxic labels are one unit: change them together, in a release.

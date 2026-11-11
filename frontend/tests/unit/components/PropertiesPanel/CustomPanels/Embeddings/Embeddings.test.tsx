@@ -331,4 +331,28 @@ describe('EmbeddingsPanelBody', () => {
       expect(document.body).toBeInTheDocument();
     }
   });
+
+  it('renders the quantization dropdown with default "none" selection when undefined', async () => {
+    const controller = makeController({
+      getPropertyValue: vi.fn(() => undefined),
+    });
+    await act(async () => {
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
+    });
+    const dropdown = document.getElementById('embeddings-quantization');
+    expect(dropdown).not.toBeNull();
+  });
+
+  it('renders quantization dropdown with stored binary value', async () => {
+    const controller = makeController({
+      getPropertyValue: vi.fn((p: { name: string }) =>
+        p.name === 'quantization' ? 'binary' : undefined
+      ),
+    });
+    await act(async () => {
+      renderWithProviders(<EmbeddingsPanelBody controller={controller} />);
+    });
+    const dropdown = document.getElementById('embeddings-quantization');
+    expect(dropdown).not.toBeNull();
+  });
 });

@@ -1,5 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for JobManagementService."""
 
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 import pytest
@@ -57,6 +61,10 @@ class DummyJobRunItem:
         self.job_run_id = payload.get(DocpipeConstants.JOB_RUN_ID)
         self.flow_id = payload.get(DocpipeConstants.FLOW_ID)
         self.flow_name = payload.get(DocpipeConstants.FLOW_NAME)
+        self.status = payload.get(DocpipeConstants.STATUS)
+        self.start_time = payload.get(DocpipeConstants.START_TIME, 0)
+        self.end_time = payload.get(DocpipeConstants.END_TIME, 0)
+        self.duration = payload.get(DocpipeConstants.DURATION, 0)
 
     def model_dump(self, *, include: set[str]):
         return {key: self.payload[key] for key in include if key in self.payload}
@@ -230,6 +238,54 @@ class TestJobManagementService:
         assert result["total"] == 1
         assert result["list"][0][DocpipeConstants.JOB_RUN_ID] == "run-1"
         assert result["list"][0][DocpipeConstants.FLOW_NAME] == "My Test Flow"
+
+    def test_list_job_runs_computes_live_duration_for_running_job(self):
+        """In-progress runs report elapsed time since start instead of the stored 0."""
+        start = int(datetime.now(tz=UTC).timestamp()) - 30
+        dummy_run = DummyJobRunItem(
+            {
+                DocpipeConstants.JOB_RUN_ID: "run-3",
+                DocpipeConstants.JOB_ID: "job-1",
+                DocpipeConstants.STATUS: ExecutionStatus.RUNNING.value,
+                DocpipeConstants.START_TIME: start,
+                DocpipeConstants.END_TIME: 0,
+                DocpipeConstants.DURATION: 0,
+            }
+        )
+        dummy_run.flow_name = "Flow"
+        self.job_stats_service.list_job_runs.return_value = [dummy_run]
+
+        result = self.service.list_job_runs(job_id="job-1")
+
+        assert 30 <= result["list"][0][DocpipeConstants.DURATION] <= 35
+
+    @pytest.mark.parametrize(
+        ("status", "start", "end", "stored", "expected"),
+        [
+            (ExecutionStatus.COMPLETED, 100, 107, 7, 7),
+            (ExecutionStatus.COMPLETED, 100, 107, 0, 7),
+            (ExecutionStatus.FAILED, 100, 0, 0, 0),
+            (ExecutionStatus.PENDING, 0, 0, 0, 0),
+        ],
+    )
+    def test_list_job_runs_duration_for_finished_or_unstarted_runs(self, status, start, end, stored, expected):
+        """Finished runs keep stored/derived duration and never grow against the clock."""
+        dummy_run = DummyJobRunItem(
+            {
+                DocpipeConstants.JOB_RUN_ID: "run-4",
+                DocpipeConstants.JOB_ID: "job-1",
+                DocpipeConstants.STATUS: status.value,
+                DocpipeConstants.START_TIME: start,
+                DocpipeConstants.END_TIME: end,
+                DocpipeConstants.DURATION: stored,
+            }
+        )
+        dummy_run.flow_name = "Flow"
+        self.job_stats_service.list_job_runs.return_value = [dummy_run]
+
+        result = self.service.list_job_runs(job_id="job-1")
+
+        assert result["list"][0][DocpipeConstants.DURATION] == expected
 
     def test_list_job_runs_flow_name_none_when_not_set(self):
         """Test list_job_runs returns None for flow_name when no snapshot exists."""

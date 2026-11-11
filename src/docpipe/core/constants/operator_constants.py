@@ -251,6 +251,7 @@ class OperatorConstants:
         MANDATORY_FOR_VECTOR_DB: Final[str] = "mandatory_for_vector_db"
         NEW_COLLECTION_DEFAULT_FEATURE_MAPPINGS: Final[str] = "new_collection_default_feature_mappings"
         OUTPUT_FEATURES: Final[str] = "output_features"
+        QUANTIZATION: Final[str] = "quantization"
         VALID_COLUMNS: Final[str] = "valid_columns"
         VALID_VALUES: Final[str] = "valid_values"
 
@@ -426,6 +427,8 @@ class OperatorConstants:
         # Vector Configuration
         ADD_SPARSE_VECTOR: Final[str] = "add_sparse_vector"
         ADD_SPARSE_VECTOR_DEFAULT: Final[bool] = False
+        VECTOR_MODE: Final[str] = "vector_mode"
+        VECTOR_MODE_DEFAULT: Final[str] = "dense"
         SPARSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "sparse_embeddings"
         DENSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "dense_embeddings"
         # Milvus field names (mapped names in collection schema)
@@ -536,6 +539,7 @@ class OperatorConstants:
         # Complex Data Types
         TYPE_JSON: Final[str] = "json"
         TYPE_VECTOR: Final[str] = "vector"
+        TYPE_VECTOR_BINARY: Final[str] = "vector_binary"
         TYPE_VECTOR_SPARSE: Final[str] = "vector_sparse"
 
     class FileExtensions:
@@ -551,6 +555,30 @@ class OperatorConstants:
         EXT_MD: Final[str] = ".md"
         EXT_TXT: Final[str] = ".txt"
         EXT_HTML: Final[str] = ".html"
+
+        # Additional document formats
+        EXT_CSV: Final[str] = ".csv"
+        EXT_EPUB: Final[str] = ".epub"
+        EXT_EML: Final[str] = ".eml"
+        EXT_MSG: Final[str] = ".msg"
+        EXT_TEX: Final[str] = ".tex"
+        EXT_LATEX: Final[str] = ".latex"
+        EXT_ADOC: Final[str] = ".adoc"
+        EXT_ASCIIDOC: Final[str] = ".asciidoc"
+        EXT_ASC: Final[str] = ".asc"
+        EXT_VTT: Final[str] = ".vtt"
+        EXT_HTM: Final[str] = ".htm"
+        EXT_XHTML: Final[str] = ".xhtml"
+        EXT_MHTML: Final[str] = ".mhtml"
+        EXT_MHT: Final[str] = ".mht"
+        EXT_MARKDOWN: Final[str] = ".markdown"
+        EXT_TEXT: Final[str] = ".text"
+        EXT_QMD: Final[str] = ".qmd"
+        EXT_RMD: Final[str] = ".rmd"
+        EXT_PPTM: Final[str] = ".pptm"
+        EXT_XLSM: Final[str] = ".xlsm"
+        EXT_XLTX: Final[str] = ".xltx"
+        EXT_XLTM: Final[str] = ".xltm"
 
         # Image formats
         EXT_PNG: Final[str] = ".png"
@@ -575,6 +603,8 @@ class OperatorConstants:
         EXT_MP4: Final[str] = ".mp4"
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
+        EXT_MKV: Final[str] = ".mkv"
+        EXT_WEBM: Final[str] = ".webm"
 
         # Archive formats (filesystem ingest only)
         ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
@@ -596,25 +626,71 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_MARKDOWN,
+            EXT_TEXT,
+            EXT_QMD,
+            EXT_RMD,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
-        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [
+        AUDIO_EXTENSIONS: Final[list[str]] = [
             EXT_WAV,
             EXT_MP3,
             EXT_M4A,
             EXT_AAC,
             EXT_OGG,
             EXT_FLAC,
+        ]
+
+        VIDEO_EXTENSIONS: Final[list[str]] = [
             EXT_MP4,
             EXT_AVI,
             EXT_MOV,
+            EXT_MKV,
+            EXT_WEBM,
         ]
+
+        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_EXTENSIONS, *VIDEO_EXTENSIONS]
 
         DOCLING_LIBRARY_BASE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
 
         DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_VIDEO_EXTENSIONS]
 
-        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
+        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [
+            EXT_PDF,
+            EXT_DOCX,
+            EXT_PPTX,
+            EXT_XLSX,
+            EXT_MD,
+            EXT_TXT,
+            EXT_HTML,
+            EXT_PNG,
+            EXT_JPEG,
+            EXT_JPG,
+            EXT_TIFF,
+            EXT_TIF,
+            EXT_BMP,
+            EXT_WEBP,
+            EXT_GIF,
+            EXT_JFIF,
+        ]
 
         DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY: Final[list[str]] = [
             EXT_PDF,  # .pdf  → InputFormat.PDF
@@ -643,6 +719,24 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
     class Extraction:
@@ -1147,6 +1241,8 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         PDF: Final[str] = "application/pdf"
         HTML: Final[str] = "text/html"
         PLAIN: Final[str] = "text/plain"
+        CSV: Final[str] = "text/csv"
+        EML: Final[str] = "message/rfc822"
 
         # Google Workspace Document Types
         GOOGLE_APPS_PREFIX: Final[str] = "application/vnd.google-apps."

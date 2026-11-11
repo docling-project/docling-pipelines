@@ -374,6 +374,3 @@ class HuggingFaceAdapter(LLMEmbeddingPort, TextDetectionPort):
             _VALIDATION.ERRORS: errors,
             _VALIDATION.WARNINGS: [],
         }
-
-
-# Made with Bob

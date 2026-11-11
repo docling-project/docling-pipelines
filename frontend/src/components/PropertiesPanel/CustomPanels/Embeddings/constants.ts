@@ -25,6 +25,8 @@ export const EMBEDDINGS_ATTRIBUTE = {
   OVERLAP_RATIO: 'overlap_ratio',
   /** Maximum token limit for chunking */
   TOKEN_LIMIT: 'token_limit',
+  /** Quantization method for generated embeddings */
+  QUANTIZATION: 'quantization',
 } as const;
 
 /**
@@ -70,7 +72,14 @@ export const EMBEDDINGS_DEFAULTS = {
   PROVIDER_CONFIG: '',
   OVERLAP_RATIO: 0.2,
   TOKEN_LIMIT: 8192,
+  QUANTIZATION: 'none' as EmbeddingsQuantization,
 } as const;
+
+/**
+ * Valid `quantization` values for the embeddings operator.
+ */
+export const EMBEDDINGS_QUANTIZATION_OPTIONS = ['none', 'binary'] as const;
+export type EmbeddingsQuantization = typeof EMBEDDINGS_QUANTIZATION_OPTIONS[number];
 
 /**
  * Valid `container_kind` values for the watsonx provider.

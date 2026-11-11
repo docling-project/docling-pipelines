@@ -5,7 +5,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from docpipe.core.adapters.llm_adapter_factory import LLMAdapterFactory
 from docpipe.core.constants.constants import LLMConstants
@@ -44,20 +44,31 @@ class WatsonxPIIAndHAPAdapter(PIIAndHAPDetectionPort):
     SUPPORTS_PII = True
     SUPPORTS_HAP = True
 
-    _REQUIRED_CONFIG_KEYS = ("api_key", "url", "container_kind", "container_id")
+    # Keys without a usable default in ``WatsonxPIIAndHAPConfig``; everything else is optional.
+    _REQUIRED_CONFIG_KEYS = ("api_key", "url", "container_id")
 
     def __init__(self, *, model_id: str, provider_config: dict[str, Any]) -> None:
         """Initialise the WatsonX PII/HAP adapter.
+
+        ``WatsonxPIIAndHAPConfig`` is authoritative: ``provider_config`` is validated against it and
+        the resolved values (schema defaults applied) are what the underlying WatsonX adapter receives,
+        so the defaults advertised by the operator metadata are the defaults used at run time.
 
         Args:
             model_id: WatsonX model identifier.
             provider_config: Provider-specific config (api_key, url, container_kind, container_id, timeout).
         """
         super().__init__(model_id=model_id, provider_config=provider_config)
+        config, self._config_errors = WatsonxPIIAndHAPAdapter._parse_config(
+            provider_config=provider_config, config_key="provider_config"
+        )
+        self._resolved_config = WatsonxPIIAndHAPAdapter._resolve_config(
+            provider_config=provider_config, config=config or WatsonxPIIAndHAPConfig()
+        )
         self._adapter = LLMAdapterFactory.create_text_detection_adapter(
             provider="watsonx",
             model_id=model_id,
-            provider_config=provider_config,
+            provider_config=self._resolved_config,
         )
         logger.info("Initialised WatsonxPIIAndHAPAdapter")
 
@@ -68,11 +79,15 @@ class WatsonxPIIAndHAPAdapter(PIIAndHAPDetectionPort):
 
     @classmethod
     def validate_provider_config(cls, *, provider_config: dict[str, Any], config_key: str) -> list[str]:
-        """Check ``model_id`` plus the WatsonX credential keys without instantiating the adapter."""
+        """Check ``model_id``, the config schema and the WatsonX credential keys without instantiating the adapter."""
         errors = super().validate_provider_config(provider_config=provider_config, config_key=config_key)
         if not provider_config:
             return errors
-        missing_keys = [key for key in cls._REQUIRED_CONFIG_KEYS if key not in provider_config]
+        config, schema_errors = cls._parse_config(provider_config=provider_config, config_key=config_key)
+        errors.extend(schema_errors)
+        missing_keys = cls._missing_required_keys(
+            config=cls._resolve_config(provider_config=provider_config, config=config or WatsonxPIIAndHAPConfig())
+        )
         if missing_keys:
             errors.append(
                 f"WatsonX provider requires {', '.join(cls._REQUIRED_CONFIG_KEYS)} in {config_key}. "
@@ -86,13 +101,14 @@ class WatsonxPIIAndHAPAdapter(PIIAndHAPDetectionPort):
         Returns:
             Validation result dict with ``valid``, ``errors``, and ``warnings`` keys.
         """
-        missing = [k for k in self._REQUIRED_CONFIG_KEYS if not self._provider_config.get(k)]
+        errors = list(self._config_errors)
+        missing = self._missing_required_keys(config=self._resolved_config)
         if missing:
+            errors.append(f"WatsonX provider_config is missing required keys: {', '.join(missing)}")
+        if errors:
             return {
                 LLMConstants.ValidationKeys.VALID: False,
-                LLMConstants.ValidationKeys.ERRORS: [
-                    f"WatsonX provider_config is missing required keys: {', '.join(missing)}"
-                ],
+                LLMConstants.ValidationKeys.ERRORS: errors,
                 LLMConstants.ValidationKeys.WARNINGS: [],
             }
         return self._adapter.validate()
@@ -120,3 +136,31 @@ class WatsonxPIIAndHAPAdapter(PIIAndHAPDetectionPort):
 
         detection_results = convert_detection_dicts_to_results(result_dict.get("detections", []))
         return PIIHAPDetectionResponse(detections=detection_results, input_text=text)
+
+    @staticmethod
+    def _parse_config(
+        *, provider_config: dict[str, Any] | None, config_key: str
+    ) -> tuple[WatsonxPIIAndHAPConfig | None, list[str]]:
+        """Validate ``provider_config`` against ``WatsonxPIIAndHAPConfig``.
+
+        Returns:
+            ``(config, [])`` when valid, or ``(None, [error])`` when the schema rejects the values.
+        """
+        try:
+            return WatsonxPIIAndHAPConfig.model_validate(provider_config or {}), []
+        except ValidationError as exc:
+            return None, [f"{config_key} is invalid for provider '{ADAPTER_NAME}': {exc}"]
+
+    @staticmethod
+    def _resolve_config(*, provider_config: dict[str, Any], config: WatsonxPIIAndHAPConfig) -> dict[str, Any]:
+        """Overlay the schema-resolved values (defaults applied) on the user's ``provider_config``.
+
+        Keys the schema does not model (such as the ``project_id`` / ``api_base`` aliases understood
+        by ``LLMAdapterFactory``) are preserved; unset optional values are not injected as ``None``.
+        """
+        return {**(provider_config or {}), **config.model_dump(exclude_none=True)}
+
+    @classmethod
+    def _missing_required_keys(cls, *, config: dict[str, Any]) -> list[str]:
+        """Return the required credential keys that are absent or empty in ``config``."""
+        return [key for key in cls._REQUIRED_CONFIG_KEYS if not config.get(key)]

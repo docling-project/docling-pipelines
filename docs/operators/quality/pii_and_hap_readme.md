@@ -111,9 +111,9 @@ validation error raised when the operator is created, before any document is pro
 | `model_id` | string | Yes | WatsonX model identifier |
 | `api_key` | string | Yes | IBM Cloud API key |
 | `url` | string | Yes | WatsonX endpoint URL |
-| `container_kind` | string | Yes | `"project"` or `"space"` |
+| `container_kind` | string | No | `"project"` or `"space"` (default: `"project"`) |
 | `container_id` | string | Yes | Project or space UUID |
-| `timeout` | integer | No | Request timeout in seconds (default: `300`) |
+| `timeout` | integer | No | Request timeout in seconds (default: `120`) |
 
 ### Presidio `provider_config`
 
@@ -397,7 +397,7 @@ Use another Hugging Face classifier without code changes. Pin `revision` to a co
 |---|---|---|
 | Connection errors to provider | LLM service not running or wrong `api_base` | Verify Ollama is running (`ollama serve`); check `api_base` and credentials |
 | Low detection accuracy / many false positives | Model or threshold mismatch | Adjust `pii_threshold` / `hap_threshold`; try a larger or more capable model |
-| `ValidationError` for WatsonX | Missing required `provider_config` fields | Ensure `api_key`, `url`, `container_kind`, `container_id` are all set |
+| `ValidationError` for WatsonX | Missing required `provider_config` fields | Ensure `api_key`, `url`, `container_id` are all set |
 | `Provider 'presidio' ... does not support HAP detection` | A PII-only provider was selected for HAP (directly or via `provider`) | Set `hap_provider` to `litellm` or `watsonx`, or remove `hap` from `expected_redactions` |
 | `The 'presidio' PII provider requires the optional 'presidio-analyzer' package` | Presidio is not installed | `pip install "docling-pipelines[presidio]"` (or `pip install presidio-analyzer`) |
 | `Failed to initialise Presidio AnalyzerEngine ...` | spaCy model in `spacy_model` is not installed | `python -m spacy download en_core_web_lg` (or set `spacy_model` to an installed model) |

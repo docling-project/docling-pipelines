@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Web page source adapter using LangChain's RecursiveUrlLoader."""
 
 from typing import Any, AsyncGenerator
@@ -21,6 +24,8 @@ _CONTENT_TYPE_TO_EXTENSION: dict[str, str] = {
     OperatorConstants.MimeTypes.PDF: OperatorConstants.FileExtensions.EXT_PDF,
     OperatorConstants.MimeTypes.HTML: OperatorConstants.FileExtensions.EXT_HTML,
     OperatorConstants.MimeTypes.PLAIN: OperatorConstants.FileExtensions.EXT_TXT,
+    OperatorConstants.MimeTypes.CSV: OperatorConstants.FileExtensions.EXT_CSV,
+    OperatorConstants.MimeTypes.EML: OperatorConstants.FileExtensions.EXT_EML,
 }
 
 

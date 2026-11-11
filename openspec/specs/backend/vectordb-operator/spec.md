@@ -21,18 +21,26 @@ The VectorDB operator SHALL accept a PyArrow table containing a document ID/hash
 - **THEN** the operator logs an error, marks node status as `FAILED`, and returns the table without indexing
 
 ### Requirement: Vector dimension auto-detection
-The operator SHALL inspect configured vector features in `available_features` and automatically detect vector dimensions from in-memory arrays or memory-mapped embedding files for all dense vector columns.
+The operator SHALL inspect configured vector features in `available_features` and automatically detect vector dimensions from in-memory arrays or memory-mapped embedding files for all dense and binary vector columns. For binary vector columns the detected dimension SHALL be the number of bits (`len(bytes) * 8`), and rows holding empty byte strings SHALL be skipped.
 
 #### Scenario: Dense embeddings dimension detection
 - **WHEN** one or more dense embedding columns are present in `available_features`
 - **THEN** the operator detects dimensions for each column and maps them to their respective target vector fields
+
+#### Scenario: Binary embeddings dimension detection
+- **WHEN** a binary vector column holds packed-bit `bytes` values (in memory or in a memory-mapped embedding file)
+- **THEN** the detected dimension is the byte length of the first non-empty value multiplied by 8
+
+#### Scenario: Empty byte strings are skipped
+- **WHEN** the first rows of a binary vector column hold empty `bytes` values (for example chunks without an embedding)
+- **THEN** dimension detection uses the first non-empty value instead of reporting a dimension of 0
 
 #### Scenario: Dimension detection failure
 - **WHEN** vector dimensions cannot be determined from the table or embedding metadata
 - **THEN** the transform fails with node status `FAILED` and records failures for all input documents
 
 ### Requirement: Sparse and hybrid vector indexing
-The operator SHALL support pure dense vectors, pure sparse vectors (BM25), and dual dense-sparse hybrid vector configurations via `add_sparse_vector`.
+The operator SHALL support pure dense vectors, pure sparse vectors (BM25), pure binary vectors, dual dense-sparse hybrid vector configurations via `add_sparse_vector`, and multi-vector configurations combining dense and binary vectors.
 
 #### Scenario: Pure sparse vector mode
 - **WHEN** `add_sparse_vector` is enabled and no dense vector columns are configured
@@ -41,6 +49,14 @@ The operator SHALL support pure dense vectors, pure sparse vectors (BM25), and d
 #### Scenario: Hybrid dense and sparse vector mode
 - **WHEN** `add_sparse_vector` is enabled and dense vector columns are configured
 - **THEN** the operator indexes both dense vector embeddings and sparse text representations into the target vector store
+
+#### Scenario: Pure binary vector mode
+- **WHEN** a binary vector feature is available for Milvus
+- **THEN** the operator creates a `BINARY_VECTOR` field and indexes the byte-packed embeddings using binary indexing algorithms
+
+#### Scenario: Multi-vector hybrid binary and dense mode
+- **WHEN** both binary vector and dense float vector features are available for Milvus
+- **THEN** the operator creates a collection with both binary and float vector fields and indexes both representations for hybrid and two-stage retrieval
 
 ### Requirement: Index and collection lifecycle management
 The operator SHALL manage the target vector store index or collection lifecycle automatically during transform, creating the index/collection when absent and validating schema compatibility when present, without exposing a user-configurable `create_index` option. When legacy configurations provide `create_index`, the operator SHALL log a deprecation warning and proceed with automatic index lifecycle handling.
@@ -96,3 +112,198 @@ The vector database adapters SHALL provide live resource introspection for flow 
 #### Scenario: Unreachable vector store during enrichment
 - **WHEN** the vector database is unreachable or connection fails during enrichment
 - **THEN** an empty fallback metadata structure is returned without raising an unhandled exception or breaking flow enrichment
+
+### Requirement: Binary vector field classification and flow validation
+The operator SHALL decide whether a vector field is binary only from the type of its feature (`vector_binary` or `vector_type: "binary"`), never from `index_type` or `metric_type`, and flow validation SHALL reject combinations that cannot work before any collection is created.
+
+#### Scenario: Field kind is decided by feature type, not index configuration
+- **WHEN** a vector feature has type `vector` and `index_type` is a `BIN_*` index
+- **THEN** the field is still created as `FLOAT_VECTOR`; the operator never infers binary from `index_type`, and fails with an invalid-configuration error if the collection has no binary field to use that index
+
+#### Scenario: Flow validation rejects a binary index without a binary vector feature
+- **WHEN** a flow is validated and the Milvus `index_type` is a `BIN_*` index while no upstream feature has type `vector_binary`
+- **THEN** validation fails with an invalid-configuration error naming the `quantization` setting of the embeddings operator, before any collection is created
+
+#### Scenario: Flow validation rejects binary vector features for OpenSearch
+- **WHEN** a flow is validated and an OpenSearch VectorDB node receives an upstream feature of type `vector_binary` (for example from `EmbeddingsOperator` with `quantization` of `binary` or `ubinary`)
+- **THEN** validation fails with an invalid-configuration error stating that binary vector features are not supported by OpenSearch, instead of silently creating a `text` field
+
+### Requirement: Binary quantization of embeddings
+`EmbeddingsOperator` SHALL support a node-level `quantization` setting (`none`, `binary`, `ubinary`) that converts float embeddings into packed 1-bit vectors and SHALL expose the resulting `embeddings` feature as `vector_binary`. The setting is read from the embeddings node configuration, not from `global_config`.
+
+#### Scenario: Binary quantization types the embeddings feature
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary` on its node
+- **THEN** feature propagation exposes the embeddings feature as `vector_binary` so downstream VectorDB nodes create a `BINARY_VECTOR` field
+
+#### Scenario: Quantized output format
+- **WHEN** an embedding of dimension `d` is quantized
+- **THEN** the output is a `bytes` value of `ceil(d / 8)` bytes using sign thresholding (`value > 0`) and `numpy.packbits`, and file-backed embeddings record the dimension in bits with dtype `packed_bits`
+
+#### Scenario: Unsupported quantization value
+- **WHEN** `quantization` is not one of `none`, `binary` or `ubinary`
+- **THEN** the operator raises an invalid-configuration error listing the supported values
+
+### Requirement: Milvus binary index and metric configuration
+The Milvus adapter SHALL support binary vector index algorithms (`BIN_FLAT`, `BIN_IVF_FLAT`) and binary similarity metrics (`HAMMING`, `JACCARD`), which are the binary metrics supported by Milvus 2.6.
+
+#### Scenario: Configured BIN_IVF_FLAT index with HAMMING distance
+- **WHEN** `index_type="BIN_IVF_FLAT"` and `metric_type="HAMMING"` with custom `nlist` parameters are configured
+- **THEN** the Milvus adapter creates the collection index using `BIN_IVF_FLAT` and `HAMMING` metric with the specified parameters
+
+#### Scenario: Configured BIN_FLAT index with JACCARD metric
+- **WHEN** `index_type="BIN_FLAT"` and `metric_type="JACCARD"` are configured
+- **THEN** the Milvus adapter creates the collection index using exact binary flat scanning and the `JACCARD` similarity metric
+
+#### Scenario: Dense index configured for a collection with a binary field
+- **WHEN** `index_type` is a dense index (e.g. `HNSW`) and the collection contains a binary vector field
+- **THEN** the dense field uses the configured index, metric and parameters and the binary field is indexed with `BIN_FLAT` and `HAMMING`
+
+#### Scenario: Binary index configured for a mixed collection
+- **WHEN** `index_type` is a `BIN_*` index and the collection contains both a binary and a dense vector field
+- **THEN** the binary field uses the configured index, binary metric and parameters and the dense field is indexed with `HNSW` and `L2` defaults, and a warning is logged when configured dense settings were replaced
+
+#### Scenario: Dense index with binary-only metric
+- **WHEN** `index_type` is a dense index and `metric_type` is one of `HAMMING`, `JACCARD`
+- **THEN** initialization fails with an invalid-configuration error
+
+#### Scenario: Binary metric removed in Milvus 2.6
+- **WHEN** `metric_type` is `TANIMOTO`, `SUBSTRUCTURE` or `SUPERSTRUCTURE`
+- **THEN** validation fails with an invalid-configuration error before any collection is created
+
+### Requirement: Milvus binary vector dimension and data format validation
+The Milvus adapter SHALL enforce that binary vector dimensions represent total bit counts divisible by 8 and that document values are ingested as raw byte sequences.
+
+#### Scenario: Valid binary vector dimension
+- **WHEN** a binary vector field has a bit dimension divisible by 8 (e.g. 128, 256, 768, 1536)
+- **THEN** the field schema is created with the exact bit dimension and byte payloads of length `dim / 8` are inserted
+
+#### Scenario: Invalid binary vector dimension not divisible by 8
+- **WHEN** a binary vector field configuration specifies a dimension not divisible by 8
+- **THEN** collection creation fails with a validation error indicating binary vector dimensions must be multiples of 8
+
+#### Scenario: Batch sizing with binary payloads
+- **WHEN** documents carry `bytes` vector values
+- **THEN** batch size estimation counts each value by its byte length so batches split in proportion to the real payload
+
+### Requirement: Milvus Lite binary vector restriction enforcement
+The Milvus adapter SHALL reject binary vector field creation and binary index types when running under Milvus Lite (`auth_type: "lite"`), and flow validation SHALL reject a binary vector feature for Lite whatever the configured `index_type` is.
+
+#### Scenario: Binary index type configured with Milvus Lite
+- **WHEN** `auth_type="lite"` is configured alongside a binary index type (`BIN_FLAT`, `BIN_IVF_FLAT`)
+- **THEN** adapter initialization raises an invalid configuration exception stating that binary vectors are not supported by Milvus Lite
+
+#### Scenario: Binary vector feature with Milvus Lite and a dense index type
+- **WHEN** `auth_type="lite"` is configured with `FLAT` and an upstream embeddings operator sets `quantization` to `binary` or `ubinary`
+- **THEN** flow validation fails with an invalid configuration exception stating that binary vector features are not supported by Milvus Lite
+
+### Requirement: Milvus vector mode
+
+The Milvus adapter SHALL accept `vector_mode` with the values `dense`, `sparse`, `binary` and `gpu`. When `vector_mode` is not provided, the adapter SHALL resolve it from `add_sparse_vector` (`true` -> `sparse`), then from `index_type` (`BIN_*` -> `binary`, `GPU_*` -> `gpu`), and otherwise use `dense`.
+
+#### Scenario: Explicit vector mode
+- **WHEN** `vector_mode="gpu"` is configured
+- **THEN** the adapter uses the GPU mode regardless of `add_sparse_vector`
+
+#### Scenario: Legacy sparse flag
+- **WHEN** `vector_mode` is unset and `add_sparse_vector=true`
+- **THEN** the adapter resolves `vector_mode="sparse"`
+
+#### Scenario: Conflicting sparse flag
+- **WHEN** `add_sparse_vector=true` is configured together with a `vector_mode` other than `sparse`
+- **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`)
+
+#### Scenario: Unknown vector mode
+- **WHEN** `vector_mode` is not one of `dense`, `sparse`, `binary`, `gpu`
+- **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`)
+
+### Requirement: Milvus GPU index types
+
+The Milvus adapter SHALL accept the index types `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ` and `GPU_BRUTE_FORCE` in `vector_mode="gpu"` for standalone and remote Milvus deployments. The adapter SHALL NOT probe the host running the pipeline for a GPU and SHALL NOT change an explicitly configured index type based on local hardware.
+
+#### Scenario: GPU index type is sent to the server as configured
+- **WHEN** `vector_mode="gpu"` and `index_type="GPU_CAGRA"` are configured
+- **THEN** the collection index is created with `GPU_CAGRA` and its default or configured parameters, regardless of the GPU hardware on the pipeline host
+
+#### Scenario: CPU index type rejected in GPU mode
+- **WHEN** `vector_mode="gpu"` is configured with `index_type="HNSW"`
+- **THEN** the adapter raises a `DocpipeException` (status 400) listing the supported GPU index types
+
+#### Scenario: GPU index type rejected for Milvus Lite
+- **WHEN** a GPU index type is configured with `auth_type="lite"`
+- **THEN** the adapter raises a `DocpipeException` (status 400) stating that GPU indexes are not supported by Milvus Lite
+
+### Requirement: Milvus GPU metric and parameter validation
+
+The adapter SHALL validate vector mode, index type, metric type and GPU parameters before connecting to Milvus, so the errors are also reported by flow validation when Milvus is unreachable.
+
+#### Scenario: GPU index rejects COSINE
+- **WHEN** `vector_mode="gpu"` is configured with `metric_type="COSINE"`
+- **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`) suggesting `IP` on normalized vectors or `L2`
+
+#### Scenario: GPU_CAGRA graph degree constraint violated
+- **WHEN** `index_type="GPU_CAGRA"` is configured with `graph_degree` greater than `intermediate_graph_degree` after merging defaults and user parameters
+- **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`)
+
+#### Scenario: GPU_CAGRA non-integer parameter
+- **WHEN** `graph_degree` or `intermediate_graph_degree` is neither an integer nor a numeric string
+- **THEN** the adapter raises a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`); numeric strings such as `"64"` are compared as integers
+
+#### Scenario: GPU_CAGRA valid parameters accepted
+- **WHEN** `index_type="GPU_CAGRA"` is configured with `graph_degree` less than or equal to `intermediate_graph_degree`
+- **THEN** the adapter accepts the configuration
+
+#### Scenario: Flow validation without a Milvus connection
+- **WHEN** a flow with an invalid configuration is validated and Milvus is not reachable
+- **THEN** validation reports the configuration error and no Milvus client is created
+
+### Requirement: Milvus GPU indexes by collection kind
+
+GPU indexes SHALL apply only to dense `FLOAT_VECTOR` fields. Each vector field SHALL be indexed according to its own data type.
+
+#### Scenario: Dense-only collection
+- **WHEN** `vector_mode="gpu"` and every vector feature is a dense float vector
+- **THEN** each vector field is indexed with the configured GPU index type and metric
+
+#### Scenario: Binary-only collection
+- **WHEN** `vector_mode="gpu"` and the only vector features are binary vectors
+- **THEN** flow validation fails with a `DocpipeException` stating that GPU indexes only apply to dense float vectors
+
+#### Scenario: Mixed dense and binary collection
+- **WHEN** `vector_mode="gpu"` and the collection has both dense and binary vector features
+- **THEN** the dense field uses the configured GPU index and the binary field uses `BIN_FLAT` with `HAMMING`
+
+#### Scenario: Sparse-only collection
+- **WHEN** `vector_mode="sparse"` and no dense vector feature is present
+- **THEN** the GPU, binary and dense index checks are skipped and the sparse field uses `SPARSE_INVERTED_INDEX` with `BM25`
+
+#### Scenario: Hybrid dense and sparse collection
+- **WHEN** `vector_mode="sparse"` and a dense vector feature is present
+- **THEN** the sparse field uses `SPARSE_INVERTED_INDEX` with `BM25`, and flow validation checks that the configured `index_type` is a CPU dense or GPU index type, that the `metric_type` is valid for that index family, and the `GPU_CAGRA` parameters
+
+#### Scenario: Hybrid collection with invalid dense settings
+- **WHEN** `vector_mode="sparse"`, a dense vector feature is present and `index_type="GPU_CAGRA"` is configured with `metric_type="COSINE"` (or `index_type` is not a dense or GPU index type)
+- **THEN** flow validation fails with a `DocpipeException` (status 400, `OPERATOR_CONFIGURATION_INVALID`)
+
+#### Scenario: Hybrid collection on Milvus Lite
+- **WHEN** `vector_mode="sparse"`, a dense vector feature is present, `auth_type="lite"` and `index_type` is a GPU type or a CPU dense type other than `FLAT`
+- **THEN** flow validation fails with a `DocpipeException` (status 400) stating that the index type is not supported by Milvus Lite
+
+#### Scenario: Collection already exists
+- **WHEN** the target collection already exists
+- **THEN** the collection is not recreated and `vector_mode` and `index_type` are not applied to or compared with its existing indexes; only vector dimensions are validated
+
+### Requirement: Milvus collection cleanup after index failure
+
+When index creation fails after the collection was created, the adapter SHALL drop the collection so that no collection without an index remains.
+
+#### Scenario: Index creation fails
+- **WHEN** `create_index` (the sparse or the dense index) fails after `create_collection` succeeded
+- **THEN** the adapter drops the collection and raises a `DocpipeException` carrying the original error
+
+#### Scenario: Collection creation fails
+- **WHEN** `create_collection` itself fails
+- **THEN** no drop is attempted
+
+#### Scenario: Cleanup drop fails
+- **WHEN** dropping the collection also fails
+- **THEN** the drop failure is logged and the original index error is still raised

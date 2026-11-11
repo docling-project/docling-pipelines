@@ -1,7 +1,7 @@
-import axios from 'axios';
 import type { Request, Response, Router } from 'express';
-import { log4js, logUtil } from '../../src/utils/logger';
-import { BODY_HEADERS, NO_BODY_HEADERS } from './http-headers';
+import { log4js } from '../../src/utils/logger';
+import { handleProxyError, proxyRequest } from '../utils/proxy';
+import { queryString, queryStringList, routeParam } from '../utils/query';
 
 const logger = log4js.getLogger('flow.controller');
 
@@ -9,21 +9,13 @@ const logger = log4js.getLogger('flow.controller');
  * Create a new flow
  * BFF controller that proxies flow creation to Python FastAPI backend
  */
-const createFlow = async (req: Request, res: Response) => {
+const createFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows?is_elyra=true`;
-
-    const response = await axios.post(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await proxyRequest({ method: 'POST', path: ['api', 'v1', 'flows'], query: { is_elyra: 'true' }, body: req.body });
 
     res.status(response.status).json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error creating flow', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to create flow' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to create flow' });
   }
 };
 
@@ -31,22 +23,15 @@ const createFlow = async (req: Request, res: Response) => {
  * Get flow by ID
  * BFF controller that proxies flow retrieval to Python FastAPI backend
  */
-const getFlow = async (req: Request, res: Response) => {
+const getFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}`;
+    const flowId = routeParam(req.params.flowId);
 
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'flows', flowId] });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error fetching flow', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to fetch flow' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to fetch flow' });
   }
 };
 
@@ -54,34 +39,26 @@ const getFlow = async (req: Request, res: Response) => {
  * List flows with pagination and filtering
  * BFF controller that proxies flow listing to Python FastAPI backend
  */
-const getFlows = async (req: Request, res: Response) => {
+const getFlows = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { limit = 100, offset = 0, name, tags, is_hidden } = req.query;
+    const { limit, offset, name, tags, is_hidden } = req.query;
 
-    const params = new URLSearchParams({
-      limit: limit.toString(),
-      offset: offset.toString(),
-      is_elyra: 'true',
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'flows'],
+      query: {
+        limit: queryString(limit) ?? '100',
+        offset: queryString(offset) ?? '0',
+        is_elyra: 'true',
+        name: queryString(name) || undefined,
+        tags: queryStringList(tags),
+        is_hidden: queryString(is_hidden),
+      },
     });
 
-    if (name) params.append('name', name);
-    if (tags) params.append('tags', tags);
-    if (is_hidden !== undefined) params.append('is_hidden', is_hidden);
-
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows?${params.toString()}`;
-    logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
-
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
-
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error listing flows', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to list flows' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list flows' });
   }
 };
 
@@ -89,22 +66,15 @@ const getFlows = async (req: Request, res: Response) => {
  * Update flow (full replacement)
  * BFF controller that proxies flow update to Python FastAPI backend
  */
-const updateFlow = async (req: Request, res: Response) => {
+const updateFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}?is_elyra=true`;
+    const flowId = routeParam(req.params.flowId);
 
-    const response = await axios.put(requestUrl, req.body, { headers: BODY_HEADERS });
+    const response = await proxyRequest({ method: 'PUT', path: ['api', 'v1', 'flows', flowId], query: { is_elyra: 'true' }, body: req.body });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error updating flow', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to update flow' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to update flow' });
   }
 };
 
@@ -136,32 +106,26 @@ const syncElyraDefinitionName = (definition: Record<string, unknown>, newName: s
  * UI state the backend does not manage. Skipped when name is not being patched
  * to avoid setting ds_flow.name to undefined.
  */
-const patchFlow = async (req: Request, res: Response) => {
+const patchFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}?is_elyra=true`;
+    const flowId = routeParam(req.params.flowId);
+    const target = { path: ['api', 'v1', 'flows', flowId], query: { is_elyra: 'true' } };
 
     let body = req.body;
 
     if (req.body.name) {
-      const current = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
+      const current = await proxyRequest({ method: 'GET', ...target });
       body = {
         ...req.body,
         definition: syncElyraDefinitionName(current.data.definition, req.body.name),
       };
     }
 
-    const response = await axios.patch(requestUrl, body, { headers: BODY_HEADERS });
+    const response = await proxyRequest({ method: 'PATCH', ...target, body });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error partially updating flow', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to partially update flow' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to partially update flow' });
   }
 };
 
@@ -169,22 +133,15 @@ const patchFlow = async (req: Request, res: Response) => {
  * Delete flow by ID
  * BFF controller that proxies flow deletion to Python FastAPI backend
  */
-const deleteFlow = async (req: Request, res: Response) => {
+const deleteFlow = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flowId } = req.params;
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows/${flowId}`;
+    const flowId = routeParam(req.params.flowId);
 
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({ method: 'DELETE', path: ['api', 'v1', 'flows', flowId] });
 
     res.status(response.status).send();
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error deleting flow', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to delete flow' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to delete flow' });
   }
 };
 
@@ -192,28 +149,24 @@ const deleteFlow = async (req: Request, res: Response) => {
  * Bulk delete flows
  * BFF controller that proxies bulk flow deletion to Python FastAPI backend
  */
-const bulkDeleteFlows = async (req: Request, res: Response) => {
+const bulkDeleteFlows = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { flow_ids } = req.query;
+    const flowIds = queryString(req.query.flow_ids);
 
-    if (!flow_ids) {
-      return res.status(400).json({ error: 'flow_ids query parameter is required' });
+    if (!flowIds) {
+      res.status(400).json({ error: 'flow_ids query parameter is required' });
+      return;
     }
 
-    const params = new URLSearchParams({ flow_ids });
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/flows?${params.toString()}`;
-
-    const response = await axios.delete(requestUrl, { headers: NO_BODY_HEADERS });
+    const response = await proxyRequest({
+      method: 'DELETE',
+      path: ['api', 'v1', 'flows'],
+      query: { flow_ids: flowIds },
+    });
 
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error bulk deleting flows', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to bulk delete flows' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to bulk delete flows' });
   }
 };
 
@@ -221,44 +174,33 @@ const bulkDeleteFlows = async (req: Request, res: Response) => {
  * List flows for a specific project
  * BFF controller that proxies to Python backend: GET /api/v1/projects/:projectId/flows
  */
-const getFlowsByProject = async (req: Request, res: Response) => {
+const getFlowsByProject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectId } = req.params;
-    const { limit = 100, offset = 0, name, tags } = req.query;
+    const projectId = routeParam(req.params.projectId);
+    const { limit, offset, name, tags } = req.query;
 
-    const params = new URLSearchParams({
-      limit: limit.toString(),
-      offset: offset.toString(),
-      is_elyra: 'true',
+    const response = await proxyRequest({
+      method: 'GET',
+      path: ['api', 'v1', 'projects', projectId, 'flows'],
+      query: {
+        limit: queryString(limit) ?? '100',
+        offset: queryString(offset) ?? '0',
+        is_elyra: 'true',
+        name: queryString(name) || undefined,
+        tags: queryStringList(tags),
+      },
     });
 
-    if (name) params.append('name', name as string);
-    if (tags) {
-      const tagList = Array.isArray(tags) ? tags : [tags];
-      tagList.forEach((tag) => params.append('tags', tag as string));
-    }
-
-    const requestUrl = `${process.env.BACKEND_API_URL}/api/v1/projects/${projectId}/flows?${params.toString()}`;
-    logUtil.debug({ logger, message: 'Request URL', data: requestUrl });
-
-    const response = await axios.get(requestUrl, { headers: NO_BODY_HEADERS });
-
     res.json(response.data);
-
-  } catch (error) {
-    logUtil.error({ logger, message: 'Error listing flows for project', data: error.message });
-
-    const status = error.response?.status ?? 500;
-    const errorData = error.response?.data ?? { error: 'Failed to list flows for project' };
-
-    res.status(status).json(errorData);
+  } catch (err) {
+    await handleProxyError({ res, err, logger, fallbackMessage: 'Failed to list flows for project' });
   }
 };
 
 /**
  * Export routes function that registers all flow endpoints
  */
-export const routes = (router: Router) => {
+export const routes = (router: Router): void => {
   router.post('/flows', createFlow);
   router.get('/flows/:flowId', getFlow);
   router.get('/flows', getFlows);
