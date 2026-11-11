@@ -91,7 +91,8 @@ class GraphExecutionEngine:
             return OperatorOutput(tables=[input_table], metadata={OperatorConstants.Misc.BRANCHES: branches})
         return self._execute_node(node=node, input_table=input_table)
 
-    def _execute_merging_node(self, *, node: Node, input_tables: dict[str, pa.Table]) -> OperatorOutput:
+    @staticmethod
+    def _execute_merging_node(*, node: Node, input_tables: dict[str, pa.Table]) -> OperatorOutput:
         """Run the merge operator with its resolved input tables."""
         operator = MergeOperator(config=node.operator_config)
         output_tables, metadata = operator.transform(table=pa.table({}), tables=input_tables)
