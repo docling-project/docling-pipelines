@@ -27,6 +27,7 @@ from docpipe.core.operators.ingest.ports.outbound.document_source import Documen
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.rest_client import RestMethod
 from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -377,6 +378,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         Returns:
             bytes | None: Binary content of the SharePoint file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             document_library_id = resolve_env_var(provider_config.get("document_library_id"))
             client_id = resolve_env_var(provider_config.get("client_id"))
@@ -477,6 +479,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         Returns:
             SharePointSourceConfig: Validated configuration object
         """
+        provider_config = reveal_value(provider_config)
         if included_extensions is None:
             included_extensions = []
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """SharePoint ACL adapter for extracting permissions using Microsoft Graph API.
 
 This adapter extracts Access Control List (ACL) information from SharePoint documents
@@ -18,6 +21,7 @@ Key Features:
 
 import asyncio
 import re
+from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +37,7 @@ from docpipe.exceptions.docpipe_exceptions import (
 )
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -114,6 +119,10 @@ class SharePointACLConfig(BaseModel):
         max_concurrent_requests: Maximum concurrent API requests
         request_timeout: Request timeout in seconds
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields. The ACL operator declares
+    # ``credentials.*`` operator-wide, which covers these.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = ("client_secret",)
 
     client_id: str = Field(..., description="Azure AD application (client) ID")
     client_secret: str = Field(..., description="Azure AD application client secret")
@@ -259,13 +268,13 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
             raise
         except ImportError as e:
             # Missing dependencies
-            logger.error(f"Missing required dependency for SharePoint ACL extraction: {e}", exc_info=True)
+            logger.exception("Missing required dependency for SharePoint ACL extraction: %s", e)
             raise ConfigurationError(
                 f"SharePoint ACL adapter requires missing dependency: {e!s}. Install with: pip install msal"
             ) from e
         except Exception as e:
             # Wrap unknown exceptions as ExternalServiceError
-            logger.error(f"Failed to extract ACL for SharePoint item {request.resource_path}: {e}", exc_info=True)
+            logger.exception("Failed to extract ACL for SharePoint item %s: %s", request.resource_path, e)
             raise ExternalServiceError(
                 f"SharePoint ACL extraction failed for {request.resource_path}: {e!s}",
                 error_code=ErrorCode.ACL_EXTRACTION_FAILED,
@@ -344,7 +353,7 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                 current_id = parent_id
 
         except Exception as e:
-            logger.warning(f"Failed to resolve full inheritance chain for {resource_id}: {e}")
+            logger.warning("Failed to resolve full inheritance chain for %s: %s", resource_id, e)
 
         return inheritance_chain
 
@@ -396,7 +405,7 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
             self._group_cache[group_id] = members
 
         except Exception as e:
-            logger.warning(f"Failed to expand group {group_id}: {e}")
+            logger.warning("Failed to expand group %s: %s", group_id, e)
 
         return members
 
@@ -471,11 +480,11 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
             endpoint = f"/drives/{config.drive_id}"
             rest_client.call_rest_json(method=RestMethod.GET, url=endpoint, headers=headers)
 
-            logger.info(f"Successfully connected to SharePoint drive {config.drive_id}")
+            logger.info("Successfully connected to SharePoint drive %s", config.drive_id)
             return True
 
         except Exception as e:
-            logger.error(f"Failed to connect to SharePoint: {e}")
+            logger.error("Failed to connect to SharePoint: %s", e)
             return False
 
     def build_config_from_operator_params(
@@ -497,6 +506,9 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
         Raises:
             ValueError: If required parameters are missing
         """
+        connection_params = reveal_value(connection_params)
+        credentials = reveal_value(credentials)
+        provider_metadata = reveal_value(provider_metadata)
         # Extract required credentials
         client_id = credentials.get(_CONFIG_CLIENT_ID)
         client_secret = credentials.get(_CONFIG_CLIENT_SECRET)
@@ -649,7 +661,7 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                 permissions.extend(self._parse_graph_permission(permission=perm))
 
         except Exception as e:
-            logger.warning(f"Failed to fetch permissions for item {item_id}: {e}")
+            logger.warning("Failed to fetch permissions for item %s: %s", item_id, e)
 
         return permissions
 
@@ -802,7 +814,7 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                 site_path = f"/{managed_path}/{site_name}"
                 endpoint = f"/sites/{parsed.netloc}:{site_path}:/drive/root:/{encoded_path}:"
 
-            logger.info(f"Resolving URL to item_id: {source_url} -> {endpoint}")
+            logger.info("Resolving URL to item_id: %s -> %s", source_url, endpoint)
 
             # Call Graph API to resolve path to item
             rest_client = self._create_rest_client(config=config)
@@ -817,7 +829,7 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                     f"No item ID returned for URL: {source_url}", error_code=ErrorCode.ACL_EXTRACTION_FAILED
                 )
 
-            logger.info(f"Resolved SharePoint URL to item ID: {item_id}")
+            logger.info("Resolved SharePoint URL to item ID: %s", item_id)
             return str(item_id)
 
         except (ConfigurationError, ExternalServiceError):
@@ -854,24 +866,24 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
         # BEST: Try to get item_id from metadata (set by MicrosoftGraphLoader)
         item_id = provider_metadata.get(_CONFIG_ITEM_ID) or provider_metadata.get(OperatorConstants.Columns.ID)
         if item_id:
-            logger.info(f"Using item_id from metadata: {item_id}")
+            logger.info("Using item_id from metadata: %s", item_id)
             return str(item_id)
 
         # If resource_id looks like an item ID (not a URL), use it directly
         if resource_id and not resource_id.startswith("http") and not resource_id.startswith("/"):
-            logger.info(f"Using resource_id as item_id: {resource_id}")
+            logger.info("Using resource_id as item_id: %s", resource_id)
             return str(resource_id)
 
         # Try to extract from path (format: /drives/{drive_id}/items/{item_id})
         match = re.search(r"/items/([^/]+)", resource_path)
         if match:
             item_id = match.group(1)
-            logger.info(f"Extracted item_id from path: {item_id}")
+            logger.info("Extracted item_id from path: %s", item_id)
             return item_id
 
         # FALLBACK: Check if resource_id is a SharePoint URL and resolve it
         if resource_id and resource_id.startswith("http"):
-            logger.info(f"Resolving item_id from URL: {resource_id}")
+            logger.info("Resolving item_id from URL: %s", resource_id)
             # Resolve URL to item ID using Graph API
             return await self._resolve_item_id_from_url(config=config, source_url=resource_id)
 

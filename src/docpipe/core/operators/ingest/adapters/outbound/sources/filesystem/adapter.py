@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Filesystem source adapter implementation."""
 
 import mimetypes
@@ -13,6 +16,7 @@ from pydantic import BaseModel
 from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import register_source_adapter
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
+from docpipe.integrations.secrets.secret_value import reveal_value
 
 from .archive import build_archive_uri, file_extension, is_archive_path, list_archive_entries, read_archive_uri
 from .config import FilesystemSourceConfig
@@ -223,6 +227,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
+        provider_config = reveal_value(provider_config)
         config_dict = {
             "paths": provider_config.get("paths"),
             "recursive": provider_config.get("recursive", True),
@@ -253,6 +258,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
         Returns:
             bytes | None: Binary content of the file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             if source_id.startswith("zip://"):
                 return read_archive_uri(source_id)

@@ -92,6 +92,12 @@ repos:
   # OpenSpec spec and change validation
   - repo: local
     hooks:
+      - id: check-secret-reveal
+        name: Secret reveal guard (reveal only in adapters, credential fields declared)
+        entry: python3 scripts/check_secret_reveal.py
+        language: system
+        types: [python]
+        files: ^(src/docpipe/|scripts/check_secret_reveal\.py$)
       - id: openspec-validate
         name: OpenSpec validate (strict)
         entry: openspec validate --all --strict --no-interactive

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Milvus Client
 Handles connection setup, authentication, and lifecycle management for Milvus.
@@ -11,6 +14,7 @@ from pymilvus import MilvusClient as PyMilvusClient
 
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.registry import register_secret
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -228,12 +232,18 @@ class MilvusClient:
                 if self.username and self.password:
                     client_params["token"] = f"{self.username}:{self.password}"
 
-            logger.info(f"Connecting to Milvus [{self.auth_type}]")
+            # Strings built here (user:password, ibmlhtoken_<user>:<token>) and a URI with an embedded key
+            # are not the registered values, so register them for scrubbing.
+            for derived in (client_params.get("token"), client_params.get("uri") if self.auth_type == "uri" else None):
+                if derived:
+                    register_secret(value=derived)
+
+            logger.info("Connecting to Milvus [%s]", self.auth_type)
             self._client = PyMilvusClient(**client_params)
 
             # Test connection
             _ = self._client.list_collections()
-            logger.info(f"Successfully connected to Milvus using {self.auth_type} authentication type")
+            logger.info("Successfully connected to Milvus using %s authentication type", self.auth_type)
             return self._client
 
         except Exception as exc:
@@ -266,7 +276,7 @@ class MilvusClient:
             _ = client.list_collections()
             return True
         except Exception as e:
-            logger.error(f"Connection test failed: {e}")
+            logger.error("Connection test failed: %s", e)
             return False
 
     def close(self) -> None:
@@ -276,6 +286,6 @@ class MilvusClient:
                 self._client.close()
                 logger.info("Milvus client connection closed")
             except Exception as e:
-                logger.warning(f"Error closing Milvus client: {e}")
+                logger.warning("Error closing Milvus client: %s", e)
             finally:
                 self._client = None

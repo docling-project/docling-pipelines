@@ -466,7 +466,6 @@ CASES: tuple[Case, ...] = (
 
 _GDRIVE = "ingest_source:google_drive:provider_config."
 _PARENT = "A plain-string canary cannot become a mapping: the resolver rejects it, so only resolution is exercised."
-_JSON_FORM = "build_config_from_operator_params ignores the inline JSON forms, so no client is built from them."
 _FILE_CHECK = "The missing-file check fails before any faked client is constructed."
 _NO_FAKE = "Reached only through a client the fakes do not cover."
 _DOCLING_LIB = (
@@ -479,11 +478,7 @@ NOT_REACHED: dict[tuple[str, str], str] = {
         for test_id in ("acl_operator:any:credentials", "storage_output:any:destination_config.credentials")
         for scenario in ("client_failure", "mid_run_failure")
     },
-    **{
-        (f"{_GDRIVE}{name}", scenario): _JSON_FORM
-        for name in ("credentials_json", "service_account_json")
-        for scenario in ("client_failure", "mid_run_failure")
-    },
+    (f"{_GDRIVE}service_account_json", "mid_run_failure"): _NO_FAKE,
     (f"{_GDRIVE}credentials_path", "client_failure"): _FILE_CHECK,
     (f"{_GDRIVE}service_account_json_path", "client_failure"): _FILE_CHECK,
     (f"{_GDRIVE}service_account_json_path", "mid_run_failure"): _NO_FAKE,

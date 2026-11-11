@@ -9,10 +9,10 @@ reference is resolved only for the node whose own configuration holds it
 (design D6). :func:`resolve_operator_config` removes the framework-owned shared
 keys, resolves the rest through the shared resolver, and merges the result back.
 
-``reveal_secret_values`` is a temporary compatibility shim (task B.4): adapter
-configuration models still take plain ``str``, so the operator constructor
-receives plain values again, exactly as before. Task B.5 moves ``reveal()`` into
-the adapters and deletes the shim.
+The operator constructor receives :class:`SecretValue` objects for resolved
+fields. Adapters call ``reveal()`` (through
+:func:`~docpipe.integrations.secrets.secret_value.reveal_value`) at the one place
+where they build a client or a validated configuration model (task B.5).
 """
 
 from typing import TYPE_CHECKING, Any, Final
@@ -22,7 +22,6 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 from docpipe.integrations.secrets.resolver import resolve_node_config
 from docpipe.integrations.secrets.secret_provider import has_vault_references
-from docpipe.integrations.secrets.secret_value import SecretValue
 
 if TYPE_CHECKING:
     from docpipe.core.operators.abstract_operator import AbstractOperator
@@ -105,45 +104,13 @@ class ResolvedNodeConfig(dict[str, Any]):
     """
 
 
-def _contains_secret_value(*, node: Any) -> bool:
-    if isinstance(node, SecretValue):
-        return True
-    if isinstance(node, dict):
-        return any(_contains_secret_value(node=child) for child in node.values())
-    if isinstance(node, list):
-        return any(_contains_secret_value(node=child) for child in node)
-    return False
-
-
-def _reveal_node(*, node: Any) -> Any:
-    if isinstance(node, SecretValue):
-        return node.reveal()
-    if isinstance(node, dict):
-        return {key: _reveal_node(node=child) for key, child in node.items()}
-    if isinstance(node, list):
-        return [_reveal_node(node=child) for child in node]
-    return node
-
-
-def reveal_secret_values(*, config: dict[str, Any]) -> dict[str, Any]:
-    """Temporary shim (B.4, removed by B.5): replace each ``SecretValue`` by its plain value.
-
-    Returns ``config`` itself when it holds no ``SecretValue``; otherwise a copy, so
-    the caller's dict never changes.
-    """
-    if not _contains_secret_value(node=config):
-        return config
-    revealed: dict[str, Any] = _reveal_node(node=config)
-    return revealed
-
-
 def prepare_operator_config(*, operator_class: "type[AbstractOperator]", config: dict[str, Any]) -> dict[str, Any]:
     """Return the configuration an operator constructor should read.
 
-    Resolves the node's own references, then (temporary shim, see the module docstring)
-    turns each resolved value back into a plain value. A configuration that was already
-    prepared is returned unchanged, so the executor and the constructor never both call
-    a provider. A configuration without references is returned as is.
+    Resolves the node's own references. The resolved values stay :class:`SecretValue`
+    objects; each adapter reveals them at its client-construction point. A configuration
+    that was already prepared is returned unchanged, so the executor and the constructor
+    never both call a provider. A configuration without references is returned as is.
 
     An untrusted custom operator is not resolved here: its references are never resolved in the process that holds
     the provider, and its isolation proxy decides what crosses to the worker (design D12).
@@ -153,4 +120,4 @@ def prepare_operator_config(*, operator_class: "type[AbstractOperator]", config:
     resolved = resolve_operator_config(operator_class=operator_class, config=config)
     if resolved is config:
         return config
-    return ResolvedNodeConfig(reveal_secret_values(config=resolved))
+    return ResolvedNodeConfig(resolved)

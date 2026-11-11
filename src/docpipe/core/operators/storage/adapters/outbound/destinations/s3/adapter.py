@@ -29,6 +29,7 @@ from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
 from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -243,6 +244,8 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
 
         Resolves environment variable references in credential values.
         """
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
         access_key = resolve_env_var(credentials.get("access_key"))
         secret_key = resolve_env_var(credentials.get("secret_key"))
 

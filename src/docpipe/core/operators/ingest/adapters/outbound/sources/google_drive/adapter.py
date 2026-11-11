@@ -21,6 +21,7 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -597,6 +598,7 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         Returns:
             bytes | None: Binary content of the Google Drive file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             from io import BytesIO
         except ImportError:
@@ -702,6 +704,7 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
+        provider_config = reveal_value(provider_config)
         config_dict = {
             "folder_id": resolve_env_var(provider_config.get("folder_id")),
             "recursive": provider_config.get("recursive", False),
@@ -716,11 +719,17 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         if credentials_path:
             config_dict["credentials_path"] = resolve_env_var(credentials_path)
             config_dict["token_path"] = resolve_env_var(token_path)
+        # Inline OAuth client JSON (a dict or JSON text), for example resolved from a secret provider
+        if provider_config.get("credentials_json"):
+            config_dict["credentials_json"] = provider_config["credentials_json"]
 
         # Add Service Account credentials if provided
         service_account_json_path = provider_config.get("service_account_json_path")
         if service_account_json_path:
             config_dict["service_account_json_path"] = resolve_env_var(service_account_json_path)
+        # Inline service account JSON (a dict or JSON text), for example resolved from a secret provider
+        if provider_config.get("service_account_json"):
+            config_dict["service_account_json"] = provider_config["service_account_json"]
 
         # Add optional fields only if they exist
         if "drive_id" in provider_config:
