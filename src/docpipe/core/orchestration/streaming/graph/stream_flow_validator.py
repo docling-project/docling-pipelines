@@ -11,7 +11,7 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph
 
 
-class FlowValidator:
+class StreamFlowValidator:
     """Validate graph structure."""
 
     @staticmethod

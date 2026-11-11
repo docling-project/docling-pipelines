@@ -10,7 +10,7 @@ from uuid import UUID
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.streaming.graph.flow_model import Edge, FlowGraph, Node
-from docpipe.core.orchestration.streaming.graph.flow_validator import FlowValidator
+from docpipe.core.orchestration.streaming.graph.stream_flow_validator import StreamFlowValidator
 
 
 class FlowBuilder:
@@ -55,7 +55,7 @@ class FlowBuilder:
                 )
                 flow_graph.add_edge(edge=edge)
 
-        FlowValidator.validate(flow_graph=flow_graph, flow=self.flow)
+        StreamFlowValidator.validate(flow_graph=flow_graph, flow=self.flow)
         return flow_graph
 
     @staticmethod
