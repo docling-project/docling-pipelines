@@ -34,6 +34,7 @@ from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
     detect_vector_dimension,
     generate_positional_pk,
+    is_binary_vector_feature,
 )
 
 logger = get_logger()
@@ -261,6 +262,30 @@ class WeaviateAdapter(VectorStorePort):
         if self.index_manager:
             self.index_manager.validate_existing_collection(dimension_mapping=dimension_mapping)
 
+    @staticmethod
+    def validate_vector_feature_types(*, feature_types: dict[str, str | None]) -> None:
+        """Reject binary vector features, which Weaviate stores no vector for.
+
+        Args:
+            feature_types: Mapping of input feature name to its propagated feature type.
+
+        Raises:
+            DocpipeException: An upstream operator emits a binary vector feature.
+        """
+        binary_features = sorted(
+            name for name, ftype in feature_types.items() if is_binary_vector_feature(feature_config={"type": ftype})
+        )
+        if binary_features:
+            raise DocpipeException(
+                message=(
+                    f"Weaviate Error: Binary vector features are not supported (found: {', '.join(binary_features)}). "
+                    "Remove 'quantization' from the embeddings operator or use a provider that supports binary vectors "
+                    "(e.g. Milvus)."
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
+
     def index_exists(self) -> bool:
         """Check if the Weaviate collection exists."""
         return self.index_manager.collection_exists() if self.index_manager else False
@@ -272,8 +297,9 @@ class WeaviateAdapter(VectorStorePort):
         """Insert a batch of documents into the Weaviate collection."""
         if not self.batch_processor:
             return 0, []
-        batches = self.batch_processor.create_batches(documents=documents)
-        return self.batch_processor.process_batches(batches=batches)
+        batches, preparation_failures = self.batch_processor.create_batches(documents=documents)
+        success_count, write_failures = self.batch_processor.process_batches(batches=batches)
+        return success_count, [*preparation_failures, *write_failures]
 
     def delete_documents_by_ids(self, doc_ids: list[str]) -> tuple[int, int]:
         """Delete documents by their primary keys."""

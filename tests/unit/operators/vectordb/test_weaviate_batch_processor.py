@@ -125,7 +125,8 @@ class TestWeaviateBatchProcessor:
             ("chunk_3", {"content": "Doc 3", "embeddings": [0.5, 0.6]}),
         ]
 
-        batches = processor.create_batches(documents=documents)
+        batches, failed_items = processor.create_batches(documents=documents)
+        assert failed_items == []
 
         assert len(batches) == 2
         assert len(batches[0]) == 2
@@ -137,7 +138,7 @@ class TestWeaviateBatchProcessor:
         assert obj1.vector["embeddings"] == [0.1, 0.2]
 
         # Verify UUID determinism
-        batches_again = processor.create_batches(
+        batches_again, _ = processor.create_batches(
             documents=[("chunk_1", {"content": "Doc 1", "embeddings": [0.1, 0.2]})]
         )
         assert batches_again[0][0].uuid == obj1.uuid
@@ -154,9 +155,38 @@ class TestWeaviateBatchProcessor:
             add_sparse_vector=True,
         )
 
-        batches = processor.create_batches(documents=[("chunk_pk", {"content": "text only"})])
+        batches, _ = processor.create_batches(documents=[("chunk_pk", {"content": "text only"})])
         assert len(batches) == 1
         assert batches[0][0].vector is None
+
+    def test_create_batches_isolates_unpreparable_document(self, *, mock_client: MagicMock) -> None:
+        """A non-numeric vector fails only its own chunk; the other chunks are still batched."""
+        secret = "wv-secret-value"  # pragma: allowlist secret
+        processor = WeaviateBatchProcessor(
+            client=mock_client,
+            collection_name="TestDocs",
+            secrets=[secret],
+            feature_mappings=[
+                {"feature_name": "content", "collection_column": "content"},
+                {"feature_name": "embeddings", "collection_column": "embeddings"},
+            ],
+            available_features={"content": {"type": "text"}, "embeddings": {"type": "vector"}},
+        )
+
+        batches, failed_items = processor.create_batches(
+            documents=[
+                ("pk_ok_1", {"content": "a", "embeddings": [0.1, 0.2]}),
+                ("pk_bad", {"content": "b", "embeddings": [0.1, f"not-a-number-{secret}"]}),
+                ("pk_ok_2", {"content": "c", "embeddings": [0.3, 0.4]}),
+            ]
+        )
+
+        assert [obj.properties["pk"] for batch in batches for obj in batch] == ["pk_ok_1", "pk_ok_2"]
+        assert len(failed_items) == 1
+        assert failed_items[0]["index"]["_id"] == "pk_bad"
+        reason = failed_items[0]["index"]["error"]["reason"]
+        assert secret not in reason
+        assert "ValueError" in reason
 
     def test_process_batches_success(self, *, mock_client: MagicMock) -> None:
         """Verify successful batch insertion."""
@@ -173,7 +203,7 @@ class TestWeaviateBatchProcessor:
             available_features={"content": {"type": "text"}},
         )
 
-        batches = processor.create_batches(
+        batches, _ = processor.create_batches(
             documents=[
                 ("pk1", {"content": "doc1"}),
                 ("pk2", {"content": "doc2"}),
@@ -204,7 +234,7 @@ class TestWeaviateBatchProcessor:
             available_features={"content": {"type": "text"}},
         )
 
-        batches = processor.create_batches(
+        batches, _ = processor.create_batches(
             documents=[
                 ("pk1", {"content": "doc1"}),
                 ("pk2", {"content": "doc2"}),
@@ -238,7 +268,7 @@ class TestWeaviateBatchProcessor:
             available_features={"content": {"type": "text"}},
         )
 
-        batches = processor.create_batches(
+        batches, _ = processor.create_batches(
             documents=[
                 ("pk1", {"content": "doc1"}),
                 ("pk2", {"content": "doc2"}),
@@ -365,6 +395,59 @@ class TestWeaviateBatchProcessor:
         assert secret not in str(exc_info.value)
         assert "***" in str(exc_info.value)
         assert secret not in caplog.text
+
+    @staticmethod
+    def _page(*, start: int, count: int, extra: dict | None = None) -> MagicMock:
+        objects = [MagicMock(properties={"pk": f"k_{i:05d}", **(extra or {})}) for i in range(start, start + count)]
+        return MagicMock(objects=objects)
+
+    def test_query_by_doc_names_pages_through_all_results(self, *, mock_client: MagicMock) -> None:
+        """More matches than one page are all returned, and each later page starts after the last pk."""
+        mock_coll = MagicMock()
+        mock_coll.query.fetch_objects.side_effect = [
+            self._page(start=0, count=1000, extra={"doc_name": "a.pdf"}),
+            self._page(start=1000, count=40, extra={"doc_name": "a.pdf"}),
+        ]
+        mock_client.collections.get.return_value = mock_coll
+        processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs")
+
+        results = processor.query_by_doc_names(doc_names=["a.pdf"])
+
+        assert len(results) == 1040
+        assert results[-1]["pk"] == "k_01039"
+        assert mock_coll.query.fetch_objects.call_count == 2
+        first, second = mock_coll.query.fetch_objects.call_args_list
+        assert first.kwargs["limit"] == 1000
+        assert first.kwargs["return_properties"] is None
+        assert "greater_than" not in repr(first.kwargs["filters"]).lower()
+        assert second.kwargs["filters"].filters[1].value == "k_00999"
+
+    def test_query_by_doc_names_adds_and_strips_pk_when_not_requested(self, *, mock_client: MagicMock) -> None:
+        """pk is fetched to page when fields omit it, and removed from the results."""
+        mock_coll = MagicMock()
+        mock_coll.query.fetch_objects.side_effect = [
+            self._page(start=0, count=1000, extra={"doc_name": "a.pdf"}),
+            self._page(start=1000, count=1, extra={"doc_name": "a.pdf"}),
+        ]
+        mock_client.collections.get.return_value = mock_coll
+        processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs")
+
+        results = processor.query_by_doc_names(doc_names=["a.pdf"], fields=["doc_name"])
+
+        assert len(results) == 1001
+        assert all(set(row) == {"doc_name"} for row in results)
+        assert mock_coll.query.fetch_objects.call_args_list[0].kwargs["return_properties"] == ["doc_name", "pk"]
+
+    def test_query_by_doc_names_keeps_pk_when_requested(self, *, mock_client: MagicMock) -> None:
+        mock_coll = MagicMock()
+        mock_coll.query.fetch_objects.return_value = self._page(start=0, count=3, extra={"doc_name": "a.pdf"})
+        mock_client.collections.get.return_value = mock_coll
+        processor = WeaviateBatchProcessor(client=mock_client, collection_name="TestDocs")
+
+        results = processor.query_by_doc_names(doc_names=["a.pdf"], fields=["pk", "doc_name"])
+
+        assert [row["pk"] for row in results] == ["k_00000", "k_00001", "k_00002"]
+        assert mock_coll.query.fetch_objects.call_args.kwargs["return_properties"] == ["pk", "doc_name"]
 
     def test_query_by_doc_names(self, *, mock_client: MagicMock) -> None:
         """Verify query_by_doc_names queries Weaviate and returns property dicts."""

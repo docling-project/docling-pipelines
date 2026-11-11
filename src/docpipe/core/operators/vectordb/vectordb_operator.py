@@ -857,7 +857,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     len(stale_pks),
                     extra=self.common_log_arguments,
                 )
-                self.adapter.delete_documents_by_ids(stale_pks)
+                _, failed_deletions = self.adapter.delete_documents_by_ids(stale_pks)
+                if failed_deletions:
+                    logger.warning(
+                        "%s stale chunk(s) could not be deleted and remain in the store (insert will proceed)",
+                        failed_deletions,
+                        extra=self.common_log_arguments,
+                    )
 
         except Exception as e:
             logger.warning(

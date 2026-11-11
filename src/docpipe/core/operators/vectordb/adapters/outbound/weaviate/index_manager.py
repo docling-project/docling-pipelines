@@ -352,11 +352,9 @@ class WeaviateIndexManager:
     def create_collection(self, *, dimension_mapping: dict[str, int]) -> None:
         """Create a new Weaviate collection with configured properties and vectors."""
         if self.collection_exists():
-            raise DocpipeException(
-                message=f"Collection '{self.collection_name}' already exists",
-                status_code=409,
-                error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
-            )
+            # Another micro-batch created it after the operator's existence check: validate against this run.
+            self._validate_collection_created_concurrently(dimension_mapping=dimension_mapping)
+            return
 
         properties = self._build_properties(dimension_mapping=dimension_mapping)
 
@@ -411,6 +409,11 @@ class WeaviateIndexManager:
             )
             logger.info("Successfully created Weaviate collection '%s'", self.collection_name)
         except Exception as exc:
+            if self._collection_exists_after_failure():
+                # Another micro-batch created it between the pre-check and this call.
+                self._validate_collection_created_concurrently(dimension_mapping=dimension_mapping)
+                return
+
             if sdk_status_code(exc) == HTTPStatus.UNPROCESSABLE_ENTITY and self.index_type == "dynamic":
                 raise DocpipeException(
                     message=(
@@ -427,6 +430,40 @@ class WeaviateIndexManager:
                 operation=f"Failed to create collection '{self.collection_name}'",
                 secrets=self._secrets,
             ) from None
+
+    def _validate_collection_created_concurrently(self, *, dimension_mapping: dict[str, int]) -> None:
+        logger.info(
+            "Weaviate collection '%s' was created concurrently; validating the existing collection",
+            self.collection_name,
+        )
+        self.validate_existing_collection(dimension_mapping=dimension_mapping)
+
+    def _collection_exists_after_failure(self) -> bool:
+        """Re-check existence after a failed create; an unanswerable check leaves the original error in charge."""
+        try:
+            return self.collection_exists()
+        except DocpipeException:
+            return False
+
+    def _property_added_concurrently(self, *, expected: Property) -> bool:
+        """True when a re-read shows the property with the expected data type and tokenization."""
+        try:
+            config = self.client.collections.get(self.collection_name).config.get()
+        except Exception:
+            return False
+        existing = next(
+            (
+                prop
+                for prop in (config.properties or [])
+                if self.canonical_property_name(prop.name) == self.canonical_property_name(expected.name)
+            ),
+            None,
+        )
+        return (
+            existing is not None
+            and existing.data_type == expected.dataType
+            and existing.tokenization == expected.tokenization
+        )
 
     def validate_existing_collection(self, *, dimension_mapping: dict[str, int]) -> None:
         """Validate existing collection against runtime schema and add any missing scalar properties."""
@@ -571,6 +608,13 @@ class WeaviateIndexManager:
                 collection.config.add_property(missing_prop)
                 logger.info("Added missing property '%s' to collection '%s'", missing_prop.name, self.collection_name)
             except Exception as exc:
+                if self._property_added_concurrently(expected=missing_prop):
+                    logger.info(
+                        "Property '%s' was added to collection '%s' concurrently",
+                        missing_prop.name,
+                        self.collection_name,
+                    )
+                    continue
                 raise to_docpipe_exception(
                     exc=exc,
                     operation=(

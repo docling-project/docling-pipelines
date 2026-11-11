@@ -3,7 +3,7 @@
 
 """Unit tests for WeaviateIndexManager."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -18,6 +18,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager im
     validate_property_names,
 )
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
 
 
 class TestWeaviateIndexManagerStaticRules:
@@ -200,17 +201,19 @@ class TestWeaviateIndexManagerCollectionOperations:
         assert manager.collection_exists() is True
         mock_client.collections.exists.assert_called_with("TestDocs")
 
-    def test_create_collection_already_exists_raises_409(self, *, mock_client: MagicMock) -> None:
-        """Verify create_collection raises 409 if collection already exists."""
+    def test_create_collection_that_already_exists_is_validated_instead_of_created(
+        self, *, mock_client: MagicMock
+    ) -> None:
+        """A collection created by another batch after the operator's check is validated against this run."""
         mock_client.collections.exists.return_value = True
         manager = WeaviateIndexManager(
             client=mock_client,
             collection_name="TestDocs",
         )
-        with pytest.raises(DocpipeException) as exc_info:
+        with patch.object(manager, "validate_existing_collection") as validate:
             manager.create_collection(dimension_mapping={"embeddings": 384})
-        assert exc_info.value.status_code == 409
-        assert "already exists" in str(exc_info.value)
+        validate.assert_called_once_with(dimension_mapping={"embeddings": 384})
+        mock_client.collections.create.assert_not_called()
 
     def test_create_collection_dense_single_vector(self, *, mock_client: MagicMock) -> None:
         """Verify create_collection with single dense vector."""
@@ -867,3 +870,124 @@ class TestWeaviateIndexManagerCollectionOperations:
         with pytest.raises(DocpipeException, match=r"Failed to add property 'doc_name'.*'TestDocs'") as exc_info:
             manager.validate_existing_collection(dimension_mapping={"embeddings": 384})
         assert exc_info.value.status_code == 500
+
+
+class TestWeaviateIndexManagerConcurrentSetup:
+    """Parallel micro-batches race to create the collection and to add the same property."""
+
+    @staticmethod
+    def _already_exists_error() -> UnexpectedStatusCodeError:
+        response = httpx.Response(500, text="class name TestDocs already exists")
+        return UnexpectedStatusCodeError("Collection may not have been created properly.", response)
+
+    @staticmethod
+    def _manager(*, client: MagicMock) -> WeaviateIndexManager:
+        return WeaviateIndexManager(
+            client=client,
+            collection_name="TestDocs",
+            feature_mappings=[
+                {"feature_name": "doc_id_hash", "collection_column": "pk"},
+                {"feature_name": "doc_name", "collection_column": "doc_name"},
+            ],
+            available_features={"doc_id_hash": {"type": "keyword", "is_primary": True}, "doc_name": {"type": "string"}},
+        )
+
+    def test_collection_created_concurrently_is_validated_and_accepted(self) -> None:
+        client = MagicMock()
+        client.collections.exists.side_effect = [False, True]
+        client.collections.create.side_effect = self._already_exists_error()
+        manager = self._manager(client=client)
+        with patch.object(manager, "validate_existing_collection") as validate:
+            manager.create_collection(dimension_mapping={"embeddings": 8})
+        validate.assert_called_once_with(dimension_mapping={"embeddings": 8})
+
+    def test_collection_created_concurrently_with_incompatible_schema_still_fails(self) -> None:
+        client = MagicMock()
+        client.collections.exists.side_effect = [False, True]
+        client.collections.create.side_effect = self._already_exists_error()
+        manager = self._manager(client=client)
+        mismatch = DocpipeException(
+            message="Vector dimension mismatch for 'embeddings'",
+            status_code=400,
+            error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+        )
+        with patch.object(manager, "validate_existing_collection", side_effect=mismatch):
+            with pytest.raises(DocpipeException, match="dimension mismatch") as exc_info:
+                manager.create_collection(dimension_mapping={"embeddings": 8})
+        assert exc_info.value is mismatch
+
+    def test_creation_failure_without_the_collection_reports_the_creation_error(self) -> None:
+        client = MagicMock()
+        client.collections.exists.side_effect = [False, False]
+        client.collections.create.side_effect = RuntimeError("boom")
+        manager = self._manager(client=client)
+        with pytest.raises(DocpipeException, match=r"Failed to create collection 'TestDocs'.*boom") as exc_info:
+            manager.create_collection(dimension_mapping={"embeddings": 8})
+        assert exc_info.value.status_code == 500
+
+    def test_creation_failure_with_unanswerable_existence_check_reports_the_creation_error(self) -> None:
+        client = MagicMock()
+        client.collections.exists.side_effect = [False, RuntimeError("exists check failed")]
+        client.collections.create.side_effect = RuntimeError("boom")
+        manager = self._manager(client=client)
+        with pytest.raises(DocpipeException, match=r"Failed to create collection 'TestDocs'.*boom"):
+            manager.create_collection(dimension_mapping={"embeddings": 8})
+
+    @staticmethod
+    def _existing_property(*, name: str, tokenization: Tokenization, data_type: DataType = DataType.TEXT) -> MagicMock:
+        prop = MagicMock(spec=["name", "data_type", "dataType", "tokenization", "index_filterable", "index_searchable"])
+        prop.name = name
+        prop.data_type = data_type
+        prop.dataType = data_type
+        prop.tokenization = tokenization
+        prop.index_filterable = True
+        prop.index_searchable = True
+        return prop
+
+    def _setup_missing_property(self, *, after_failure_properties: list[MagicMock]) -> tuple[MagicMock, MagicMock]:
+        client = MagicMock()
+        client.collections.exists.return_value = True
+        collection = MagicMock()
+        vector_cfg = MagicMock()
+        vector_cfg.vector_index_config.skip = False
+        initial = MagicMock(
+            vector_config={"embeddings": vector_cfg},
+            properties=[
+                self._existing_property(name="pk", tokenization=Tokenization.FIELD),
+                self._existing_property(name="text", tokenization=Tokenization.WORD),
+            ],
+        )
+        after = MagicMock(vector_config={"embeddings": vector_cfg}, properties=after_failure_properties)
+        collection.config.get.side_effect = [initial, after]
+        collection.aggregate.over_all.return_value.total_count = 0
+        collection.config.add_property.side_effect = RuntimeError("property already exists")
+        client.collections.get.return_value = collection
+        return client, collection
+
+    def test_property_added_concurrently_with_expected_schema_continues(self) -> None:
+        client, collection = self._setup_missing_property(
+            after_failure_properties=[self._existing_property(name="doc_name", tokenization=Tokenization.FIELD)]
+        )
+        self._manager(client=client).validate_existing_collection(dimension_mapping={"embeddings": 8})
+        collection.config.add_property.assert_called_once()
+
+    def test_property_present_with_different_tokenization_still_fails(self) -> None:
+        client, _ = self._setup_missing_property(
+            after_failure_properties=[self._existing_property(name="doc_name", tokenization=Tokenization.WORD)]
+        )
+        with pytest.raises(DocpipeException, match="Failed to add property 'doc_name'"):
+            self._manager(client=client).validate_existing_collection(dimension_mapping={"embeddings": 8})
+
+    def test_property_present_with_different_type_still_fails(self) -> None:
+        client, _ = self._setup_missing_property(
+            after_failure_properties=[
+                self._existing_property(name="doc_name", tokenization=Tokenization.FIELD, data_type=DataType.INT)
+            ]
+        )
+        with pytest.raises(DocpipeException, match="Failed to add property 'doc_name'"):
+            self._manager(client=client).validate_existing_collection(dimension_mapping={"embeddings": 8})
+
+    def test_property_absent_after_failure_still_fails(self) -> None:
+        client, _ = self._setup_missing_property(after_failure_properties=[])
+        with pytest.raises(DocpipeException, match="Failed to add property 'doc_name'"):
+            self._manager(client=client).validate_existing_collection(dimension_mapping={"embeddings": 8})

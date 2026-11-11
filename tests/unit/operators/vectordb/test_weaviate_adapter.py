@@ -353,13 +353,15 @@ def test_delegations_and_helpers(base_adapter_config):
             adapter.validate_existing_schema(dimension_mapping={"embeddings": 3})
             mock_val.assert_called_once_with(dimension_mapping={"embeddings": 3})
 
-        # index_documents
-        with patch.object(adapter.batch_processor, "create_batches", return_value=[[]]) as mock_cb:
-            with patch.object(adapter.batch_processor, "process_batches", return_value=(1, [])) as mock_pb:
+        # index_documents merges preparation failures with write failures
+        prep_failure = {"index": {"_id": "pk0", "error": {"reason": "bad vector"}}}
+        write_failure = {"index": {"_id": "pk1", "error": {"reason": "rejected"}}}
+        with patch.object(adapter.batch_processor, "create_batches", return_value=([[]], [prep_failure])) as mock_cb:
+            with patch.object(adapter.batch_processor, "process_batches", return_value=(1, [write_failure])) as mock_pb:
                 docs = [("pk1", {"content": "hello"})]
                 indexed_count, failed = adapter.index_documents(docs)
                 assert indexed_count == 1
-                assert failed == []
+                assert failed == [prep_failure, write_failure]
                 mock_cb.assert_called_once_with(documents=docs)
                 mock_pb.assert_called_once_with(batches=[[]])
 
@@ -554,3 +556,22 @@ def test_managers_receive_resolved_credentials_for_redaction(monkeypatch):
     assert resolved in adapter.batch_processor.secrets
     assert "${WEAVIATE_REDACTION_KEY}" not in adapter.batch_processor.secrets
     assert adapter.index_manager._redact(f"echoed {resolved}") == "echoed ***"
+
+
+class TestValidateVectorFeatureTypes:
+    """validate_vector_feature_types rejects binary vector features and keeps accepting sparse ones."""
+
+    def test_rejects_binary_vector_feature(self):
+        with pytest.raises(DocpipeException, match=r"Weaviate Error: Binary vector features.*embeddings") as exc_info:
+            WeaviateAdapter.validate_vector_feature_types(
+                feature_types={"embeddings": "vector_binary", "content": "string"}
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_accepts_dense_and_untyped_features(self):
+        WeaviateAdapter.validate_vector_feature_types(feature_types={"embeddings": "vector", "content": None})
+
+    def test_accepts_sparse_vector_feature(self):
+        WeaviateAdapter.validate_vector_feature_types(
+            feature_types={"embeddings": "vector", "sparse_embeddings": "sparse_vector"}
+        )

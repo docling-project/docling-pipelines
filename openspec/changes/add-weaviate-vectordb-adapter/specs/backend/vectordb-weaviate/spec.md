@@ -149,6 +149,40 @@ When `create_index` is true and the collection does not exist, the provider SHAL
 - **WHEN** `index_type` is `dynamic` and the server has async indexing enabled
 - **THEN** the collection is created with a dynamic index, and vector queries return the written objects once the server's indexing queue is empty
 
+### Requirement: Concurrent schema setup
+Parallel micro-batches SHALL be able to set up the same collection. When the collection exists at creation time, or creation fails and the collection exists afterwards, the provider SHALL validate the existing collection instead of failing. When adding a property fails and a re-read shows the property with the mapped type and tokenization, the provider SHALL continue.
+
+#### Scenario: Collection created by another batch
+- **WHEN** two batches both find no collection, and one creates it before the other creates it or while the other's creation request is in flight
+- **THEN** the second batch validates the existing collection against its own run and writes its objects, and none of its documents are recorded as failed
+
+#### Scenario: Concurrent creation with an incompatible schema
+- **WHEN** the collection created by another batch has a vector dimension that differs from this run's embeddings
+- **THEN** no objects are written and the failure reason is the existing-collection dimension mismatch
+
+#### Scenario: Creation fails and the collection does not exist
+- **WHEN** collection creation fails and the collection still does not exist afterwards
+- **THEN** the creation error is reported with its redacted message
+
+#### Scenario: Property added by another batch
+- **WHEN** adding the property `department` is refused because another batch added it, and a re-read shows `department` with the mapped type and tokenization
+- **THEN** the write proceeds and no document is recorded as failed
+
+#### Scenario: Property add fails and the property is absent or different
+- **WHEN** adding a property fails and a re-read shows the property absent, or present with a different type or tokenization
+- **THEN** the add error is reported with its redacted message and nothing is written
+
+### Requirement: Binary vector features rejected
+The provider SHALL reject binary vector features during flow validation, because it stores only dense float vectors. The message SHALL name the provider and the offending features. Supplied sparse vector features SHALL remain accepted and ignored.
+
+#### Scenario: Binary embeddings upstream
+- **WHEN** an upstream operator emits a vector feature of a binary type
+- **THEN** validation fails with a 400 stating that binary vector features are not supported by Weaviate and naming the feature
+
+#### Scenario: Dense and untyped features
+- **WHEN** the upstream vector features are dense or have no type
+- **THEN** validation raises no error from this check
+
 ### Requirement: Fixed identity property
 The provider's identity property in every Weaviate collection SHALL be named `pk`. It is an ordinary text property, distinct from the Weaviate object UUID. The provider SHALL declare it itself and SHALL store the chunk's primary key verbatim in it. Validation SHALL reject the configuration when a feature mapping sends the primary feature to any name other than `pk`, or sends any other feature to `pk`, so that a collection never has two identity properties.
 
@@ -353,6 +387,10 @@ The provider SHALL write objects in batches no larger than `batch_size` objects 
 - **WHEN** a batch request fails entirely, for example because of a network error
 - **THEN** every object in that batch is reported as failed with the redacted request error, and subsequent batches are still attempted
 
+#### Scenario: Object cannot be prepared
+- **WHEN** one document in a write call has a value that cannot be converted for storage, for example a non-numeric vector element
+- **THEN** only that chunk is reported as failed with its primary key and the redacted reason, and the other chunks of the call are still written
+
 #### Scenario: Every object in a batch rejected
 - **WHEN** the server rejects every object in a batch, for example a single-object batch whose integer property receives text, and the client reports this as one error without per-object detail
 - **THEN** every object in that batch is reported as failed with the redacted error message, the owning documents appear in `failed_docs`, and subsequent batches are still attempted
@@ -360,7 +398,11 @@ The provider SHALL write objects in batches no larger than `batch_size` objects 
 
 
 ### Requirement: Weaviate maintenance operations
-The provider SHALL support deleting objects by chunk primary key, returning success and failure counts and processing any number of keys in bounded requests. It SHALL also support returning the total object count and querying objects by document name through the mapped name property.
+The provider SHALL support deleting objects by chunk primary key, returning success and failure counts and processing any number of keys in bounded requests. It SHALL also support returning the total object count and querying objects by document name through the mapped name property, returning every matching object however many there are.
+
+#### Scenario: Query matches more objects than one page
+- **WHEN** 40 objects match the requested document names and the server returns at most 25 objects per request by default
+- **THEN** the query returns all 40 objects, each with the requested fields, and the identity property appears in the results only when it was requested
 
 #### Scenario: Delete more keys than one request allows
 - **WHEN** deletion is requested for 25,000 chunk primary keys

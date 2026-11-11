@@ -1134,6 +1134,7 @@ class TestStalePkCleanup:
         adapter.detect_all_vector_dimensions.return_value = {"embeddings": 3}
         adapter.index_documents.return_value = (1, [])
         adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.delete_documents_by_ids.return_value = (0, 0)
         return adapter
 
     @pytest.fixture
@@ -1209,6 +1210,41 @@ class TestStalePkCleanup:
         deleted = mock_adapter.delete_documents_by_ids.call_args[0][0]
         assert pk0 in deleted
         assert pk1 in deleted
+
+    def test_failed_stale_deletions_are_warned_and_insert_proceeds(
+        self, mock_adapter, stale_cleanup_config, chunked_table
+    ) -> None:
+        """Deletions the store reports as failed are logged with their count and do not block the insert."""
+        mock_adapter.get_chunk_ids_for_documents.return_value = {"/docs/file_a.pdf": {"stale_a", "stale_b"}}
+        mock_adapter.delete_documents_by_ids.return_value = (0, 2)
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            op = VectorDBOperator(stale_cleanup_config)
+            op.transform(chunked_table)
+        warnings = [call.args for call in mock_logger.warning.call_args_list]
+        assert any("could not be deleted" in args[0] and args[1] == 2 for args in warnings)
+        mock_adapter.index_documents.assert_called_once()
+
+    def test_no_warning_when_all_stale_deletions_succeed(
+        self, mock_adapter, stale_cleanup_config, chunked_table
+    ) -> None:
+        mock_adapter.get_chunk_ids_for_documents.return_value = {"/docs/file_a.pdf": {"stale_a"}}
+        mock_adapter.delete_documents_by_ids.return_value = (1, 0)
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            op = VectorDBOperator(stale_cleanup_config)
+            op.transform(chunked_table)
+        assert not any("could not be deleted" in call.args[0] for call in mock_logger.warning.call_args_list)
 
     def test_insert_proceeds_even_if_cleanup_raises(self, mock_adapter, stale_cleanup_config, chunked_table) -> None:
         """A failure in stale PK cleanup must not prevent index_documents from being called."""

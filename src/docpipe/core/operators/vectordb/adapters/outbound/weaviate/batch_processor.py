@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import weaviate
@@ -154,9 +155,17 @@ class WeaviateBatchProcessor:
         self,
         *,
         documents: list[tuple[str, dict[str, Any]]],
-    ) -> list[list[DataObject[Any, Any]]]:
-        """Create batches of DataObjects respecting batch_size count and 3 MB payload caps."""
+    ) -> tuple[list[list[DataObject[Any, Any]]], list[dict[str, Any]]]:
+        """Create batches of DataObjects respecting batch_size count and 3 MB payload caps.
+
+        A document whose values cannot be converted for storage is left out of the batches and reported in the
+        returned failed items, in the same shape as a write failure, so it does not fail the other documents.
+
+        Returns:
+            Tuple of (batches, failed_items)
+        """
         batches: list[list[DataObject[Any, Any]]] = []
+        failed_items: list[dict[str, Any]] = []
         current_batch: list[DataObject[Any, Any]] = []
         current_size: int = 0
         max_size_bytes: int = MAX_BATCH_SIZE_MB * 1024 * 1024
@@ -169,7 +178,13 @@ class WeaviateBatchProcessor:
         )
 
         for chunk_pk, doc_data in documents:
-            props, vecs = self.prepare_document(row_data=doc_data)
+            try:
+                props, vecs = self.prepare_document(row_data=doc_data)
+            except (ValueError, TypeError) as exc:
+                reason = self._redact(f"{exc.__class__.__name__}: {exc}")
+                logger.warning("Skipping chunk '%s' that cannot be prepared for Weaviate: %s", chunk_pk, reason)
+                failed_items.append({"index": {"_id": chunk_pk, "error": {"reason": reason}}})
+                continue
             props[self.primary_key_field] = chunk_pk
             obj_uuid = str(generate_uuid5(chunk_pk))
 
@@ -192,7 +207,7 @@ class WeaviateBatchProcessor:
             batches.append(current_batch)
 
         logger.info("Created %d batches from %d documents", len(batches), len(documents))
-        return batches
+        return batches, failed_items
 
     def process_batches(
         self,
@@ -275,6 +290,39 @@ class WeaviateBatchProcessor:
                 secrets=self.secrets,
             ) from None
 
+    @staticmethod
+    def _keyset_pages(
+        *,
+        collection: Any,
+        base_filter: Any,
+        return_properties: list[str] | None,
+    ) -> Iterator[list[Any]]:
+        """Yield pages of objects matching base_filter, ordered by the primary key.
+
+        Each page is a query at offset 0 whose filter starts after the last primary key of the previous page, so
+        the server's maximum query result size never limits the total. Requires ``pk`` to be field-tokenized and
+        present in the returned properties.
+        """
+        last_pk: str | None = None
+        while True:
+            filt = base_filter if last_pk is None else base_filter & Filter.by_property(_PK).greater_than(last_pk)
+            res = collection.query.fetch_objects(
+                filters=filt,
+                sort=Sort.by_property(_PK, ascending=True),
+                return_properties=return_properties,
+                limit=KEYSET_PAGE_SIZE,
+            )
+            objects = res.objects or []
+            if not objects:
+                return
+            yield objects
+            if len(objects) < KEYSET_PAGE_SIZE:
+                return
+            last_object_properties = objects[-1].properties
+            if not last_object_properties or _PK not in last_object_properties:
+                return
+            last_pk = str(last_object_properties[_PK])
+
     def get_chunk_ids_for_documents(self, *, file_ids: list[str]) -> dict[str, list[str]]:
         """Retrieve chunk primary keys for given file IDs using keyset paging."""
         chunk_ids_map: dict[str, list[str]] = {}
@@ -282,34 +330,16 @@ class WeaviateBatchProcessor:
             collection = self.client.collections.get(self.collection_name)
             for file_id in file_ids:
                 prefix = f"{hashlib.sha3_512(file_id.encode('utf-8')).hexdigest()}_chunk_"
-                file_chunks: list[str] = []
-                last_pk: str | None = None
-
-                while True:
-                    filt = Filter.by_property(_PK).like(f"{prefix}*")
-                    if last_pk is not None:
-                        filt = filt & Filter.by_property(_PK).greater_than(last_pk)
-
-                    res = collection.query.fetch_objects(
-                        filters=filt,
-                        sort=Sort.by_property(_PK, ascending=True),
+                chunk_ids_map[file_id] = [
+                    str(obj.properties[_PK])
+                    for page in self._keyset_pages(
+                        collection=collection,
+                        base_filter=Filter.by_property(_PK).like(f"{prefix}*"),
                         return_properties=[_PK],
-                        limit=KEYSET_PAGE_SIZE,
                     )
-                    objects = res.objects or []
-                    if not objects:
-                        break
-
-                    for obj in objects:
-                        if obj.properties and _PK in obj.properties:
-                            pk_val = str(obj.properties[_PK])
-                            file_chunks.append(pk_val)
-                            last_pk = pk_val
-
-                    if len(objects) < KEYSET_PAGE_SIZE:
-                        break
-
-                chunk_ids_map[file_id] = file_chunks
+                    for obj in page
+                    if obj.properties and _PK in obj.properties
+                ]
             return chunk_ids_map
         except Exception as exc:
             raise to_docpipe_exception(
@@ -338,19 +368,33 @@ class WeaviateBatchProcessor:
         doc_names: list[str],
         fields: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Query document properties by matching document names."""
+        """Query document properties by matching document names, returning every match across pages.
+
+        The primary key is fetched to page through the results and is removed again when ``fields`` was given
+        without it.
+        """
         if not doc_names:
             return []
 
         name_field = self._name_field()
+        drop_pk = fields is not None and _PK not in fields
+        return_properties = [*fields, _PK] if drop_pk and fields is not None else fields
 
         try:
             collection = self.client.collections.get(self.collection_name)
-            res = collection.query.fetch_objects(
-                filters=Filter.by_property(name_field).contains_any(doc_names),
-                return_properties=fields,
-            )
-            return [dict(obj.properties) for obj in (res.objects or []) if obj.properties]
+            results: list[dict[str, Any]] = []
+            for page in self._keyset_pages(
+                collection=collection,
+                base_filter=Filter.by_property(name_field).contains_any(doc_names),
+                return_properties=return_properties,
+            ):
+                for obj in page:
+                    if obj.properties:
+                        properties = dict(obj.properties)
+                        if drop_pk:
+                            properties.pop(_PK, None)
+                        results.append(properties)
+            return results
         except Exception as exc:
             raise to_docpipe_exception(
                 exc=exc,

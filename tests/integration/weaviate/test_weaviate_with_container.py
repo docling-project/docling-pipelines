@@ -29,6 +29,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -804,6 +805,45 @@ def test_stale_cleanup_covers_files_larger_than_the_server_result_limit(
     )
 
     assert count(sdk, collection_name) == 1
+
+
+def test_query_by_doc_names_returns_every_chunk_of_a_document_larger_than_one_page(
+    server: Endpoint, sdk: weaviate.WeaviateClient, collection_name: str
+) -> None:
+    chunks = 40
+    run(
+        config=vectordb_config(server=server, collection=collection_name),
+        table=make_table(docs=[doc(hash_="big", chunks=chunks)]),
+    )
+    adapter = WeaviateAdapter(**server.provider_config(collection_name=collection_name))
+
+    try:
+        results = adapter.query_by_doc_names(["big.txt"], fields=["text"])
+    finally:
+        adapter.close()
+
+    assert len(results) == chunks
+    assert all(set(result) == {"text"} for result in results)
+
+
+def test_concurrent_runs_against_a_new_collection_all_write_their_documents(
+    server: Endpoint, sdk: weaviate.WeaviateClient, collection_name: str
+) -> None:
+    runs = 4
+    with ThreadPoolExecutor(max_workers=runs) as pool:
+        futures = [
+            pool.submit(
+                run,
+                config=vectordb_config(server=server, collection=collection_name),
+                table=make_table(docs=[doc(hash_=f"d{index}", chunks=2)]),
+            )
+            for index in range(runs)
+        ]
+        metadata = [future.result() for future in futures]
+
+    assert all(entry[Metrics.External.NODE_STATUS] != ExecutionStatus.FAILED.value for entry in metadata)
+    assert all(not failed_ids(entry) for entry in metadata)
+    assert count(sdk, collection_name) == runs * 2
 
 
 def test_dense_run_is_rejected_when_the_content_property_is_not_word_tokenized(
