@@ -1126,6 +1126,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         NORMALIZED_VALUE: Final[str] = "normalized_value"
         OLD_FEATURE: Final[str] = "old_feature"
         ORIGINAL_FEATURE: Final[str] = "original_feature"
+        RESULT_INDEX: Final[str] = "result_index"
         TRANSFORM: Final[str] = "transform"
         TYPE: Final[str] = "type"
         USER_CODE: Final[str] = "user_code"
