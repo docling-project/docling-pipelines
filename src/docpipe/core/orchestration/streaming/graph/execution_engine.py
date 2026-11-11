@@ -7,13 +7,16 @@ from uuid import UUID
 
 import pyarrow as pa
 
-from docpipe.core.constants.constants import DocpipeConstants, OrchestratorType
+from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.operators.functional.merge import MergeOperator
 from docpipe.core.orchestration.operator_factory import OperatorFactory, OperatorFactoryProvider
 from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph, Node
 from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOutput, OutputBuffer
+from docpipe.utils.infrastructure.logging import get_logger
+
+logger = get_logger()
 
 
 class GraphExecutionEngine:
@@ -101,7 +104,11 @@ class GraphExecutionEngine:
     def _execute_simple_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run a linear node or pass its empty input through."""
         if input_table is not None and input_table.num_rows == 0:
-            return OperatorOutput(tables=[input_table], metadata={})
+            logger.info("Skipping operator '%s' (%s) because its input is empty", node.name, node.operator_name)
+            metadata = AbstractOperator.create_base_metadata(
+                total_docs_count=0, node_status=ExecutionStatus.COMPLETED.value
+            )
+            return OperatorOutput(tables=[input_table], metadata=metadata)
         return self._execute_node(node=node, input_table=input_table)
 
     def _execute_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
