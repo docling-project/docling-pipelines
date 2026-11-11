@@ -238,13 +238,14 @@ Configuration for tracking and processing only changed documents.
 
 **Type**: `integer`  
 **Default**: `3`  
-**Description**: Maximum number of retries for a document that fails at the same node on consecutive runs of the same job. A document gets one initial attempt plus `max_retry_attempts` retries, so with the default it is attempted up to 4 times. On each rerun the document resumes at the node where it failed, using the saved output of the previous node, instead of being processed from the start.
+**Description**: Maximum number of retries for a document that fails at the same node on consecutive runs of the same job. A document gets one initial attempt plus `max_retry_attempts` retries, so with the default it is attempted up to 4 times. On each rerun the document resumes at the node where it failed, using the intermediate output that the previous node saved in the job run where the failure happened, instead of being processed from the start. A document that failed at several nodes (for example in different branches) is resumed at each of them.
 
-Once the retries are exhausted, the document is recorded as non-recoverable in incremental metadata, its checkpoint is retained, and the job report lists it as `Failed` with a "Maximum retries exhausted" reason. Use `force_ingest: true` to discard resumption state and reprocess everything.
+For every failed document the job keeps the failed node(s), the `job_run_id` of the run in which it failed, and the original error message. Once the retries are exhausted, the document is recorded as non-recoverable in incremental metadata, and the job report lists it as `Failed` with a "Maximum retries exhausted" reason that includes the original error. Use `force_ingest: true` to discard resumption state and reprocess everything.
 
 **Requirements**:
-- Resumption is active only when `data_storage_type` is `"local"`. With `"memory"`, failed documents are re-ingested from the start.
-- A newer source `modified_time` invalidates the saved checkpoint, and the document is re-ingested fresh.
+- Resumption is active only when `data_storage_type` is not `"memory"`, because it reads the intermediate node output. With `"memory"`, failed documents are re-ingested from the start.
+- A newer source `modified_time` invalidates the saved failure state, and the document is re-ingested fresh.
+- A node that receives input from more than one node (for example `merge`) cannot be resumed; its documents are re-ingested from the start.
 
 **Example**:
 ```json

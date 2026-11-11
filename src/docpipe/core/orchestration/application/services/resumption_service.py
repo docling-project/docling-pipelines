@@ -3,11 +3,15 @@
 
 """Service implementing node-level failure resumption.
 
-A document that fails at node K of a flow is recorded together with a checkpoint of its input row (the output of
-node K-1). On the next run of the same job the document is not re-ingested from scratch: it is deferred and injected
-into node K, bypassing nodes 1 to K-1, until it succeeds or exhausts ``max_retry_attempts`` retries.
+A document that fails at node K of a flow is recorded with the node, the job run and the original error. On the next
+run of the same job the document is not re-ingested from scratch: it is deferred and its input row is read back from
+the intermediate output that node K-1 saved in the failed run (available when ``data_storage_type`` is not
+``memory``). The row is injected into node K, bypassing nodes 1 to K-1, until the document succeeds or exhausts
+``max_retry_attempts`` retries. A document that failed at several nodes (for example in different branches) is
+resumed at each of them.
 """
 
+from collections import defaultdict
 from enum import StrEnum
 from typing import Any
 
@@ -16,7 +20,8 @@ import pyarrow.compute as pc
 
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
-from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
+from docpipe.core.orchestration.models.resumption_plan import DeferredRecord, FailedNode, ResumptionRecord
+from docpipe.core.orchestration.ports.node_output_reader import NodeOutputReader
 from docpipe.core.orchestration.ports.resumption_store import ResumptionStore
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -24,6 +29,7 @@ logger = get_logger()
 
 RETRIES_EXHAUSTED_PREFIX = "Maximum retries exhausted"
 SINGLE_BATCH_KEY = "__single__"
+_BRANCH_CRITERIA = "branch_criteria"
 
 
 class ResumptionDecision(StrEnum):
@@ -42,8 +48,15 @@ def resumption_batch_key(*, batch_id: str | None) -> str:
 class ResumptionService:
     """Decides, records and applies node-level resumption of failed documents."""
 
-    def __init__(self, *, store: ResumptionStore, max_retry_attempts: int) -> None:
+    def __init__(
+        self,
+        *,
+        store: ResumptionStore,
+        max_retry_attempts: int,
+        output_reader: NodeOutputReader | None = None,
+    ) -> None:
         self._store = store
+        self._output_reader = output_reader
         # Total attempts per document = 1 initial execution + max_retry_attempts retries
         self._max_retry_attempts = max(0, max_retry_attempts)
 
@@ -64,42 +77,39 @@ class ResumptionService:
         """Decide how a document seen at ingest must be handled.
 
         * no record                                   -> FRESH
-        * source newer than the saved modified_time   -> checkpoint invalidated, FRESH
-        * retries exhausted                           -> EXHAUSTED (not scheduled automatically)
-        * checkpoint missing                          -> record dropped, FRESH (root ingestion)
-        * otherwise                                   -> DEFER (resume at the failed node)
+        * source newer than the saved modified_time   -> failure state invalidated, FRESH
+        * retries exhausted at any failed node        -> EXHAUSTED (not scheduled automatically)
+        * otherwise                                   -> DEFER (resume at every failed node)
         """
         record = self._store.get_record(job_id=job_id, doc_id=doc_id)
         if record is None:
             return ResumptionDecision.FRESH, None
 
         if record.modified_time is not None and modified_time is not None and modified_time > record.modified_time:
-            logger.info("Source of document %s changed since its failure; checkpoint invalidated", doc_id)
+            logger.info("Source of document %s changed since its failure; saved failure state invalidated", doc_id)
             self.discard(job_id=job_id, record=record)
             return ResumptionDecision.FRESH, None
 
-        if record.exhausted or record.failure_count > self._max_retry_attempts:
-            return ResumptionDecision.EXHAUSTED, record
-
-        if not self._store.checkpoint_exists(job_id=job_id, path=record.checkpoint_path):
-            logger.info("No checkpoint for failed document %s; falling back to root ingestion", doc_id)
-            self._store.delete_record(job_id=job_id, doc_id=doc_id)
+        if not record.failed_nodes:
+            self.discard(job_id=job_id, record=record)
             return ResumptionDecision.FRESH, None
+
+        if record.exhausted:
+            return ResumptionDecision.EXHAUSTED, record
 
         return ResumptionDecision.DEFER, record
 
     def discard(self, *, job_id: str, record: ResumptionRecord) -> None:
-        """Delete a record together with its checkpoint."""
-        self._store.delete_checkpoint(job_id=job_id, path=record.checkpoint_path)
+        """Delete a record."""
         self._store.delete_record(job_id=job_id, doc_id=record.doc_id)
 
     def discard_all(self, *, job_id: str) -> None:
-        """Delete every record and checkpoint of a job."""
+        """Delete every record of a job."""
         for record in self._store.get_all_records(job_id=job_id).values():
             self.discard(job_id=job_id, record=record)
 
     def discard_all_for_ids(self, *, job_id: str, doc_ids: list[str]) -> None:
-        """Delete records and checkpoints for the given documents (used by force ingest)."""
+        """Delete records for the given documents (used by force ingest and unusable resumption entries)."""
         for doc_id in doc_ids:
             record = self._store.get_record(job_id=job_id, doc_id=doc_id)
             if record is not None:
@@ -111,46 +121,115 @@ class ResumptionService:
     def build_plan(
         *,
         entries: list[dict[str, Any]],
-        node_ids: list[str],
+        op_flow: list[dict[str, Any]],
         batch_keys: list[str],
-        node_names: list[str] | None = None,
     ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
         """Distribute deferred entries across batches and compute the nodes that carry them.
 
         Args:
-            entries: Deferred entries emitted by ingest (``doc_id``, ``target_node_id``, ``checkpoint_path`` ...).
-            node_ids: Node ids of the flow in execution order; ``node_ids[0]`` is the ingest node.
+            entries: One :class:`DeferredRecord` dump per (document, failed node) emitted by ingest.
+            op_flow: Flow nodes in execution order; ``op_flow[0]`` is the ingest node.
             batch_keys: Keys of the batches, see :func:`resumption_batch_key`.
-            node_names: Optional node names aligned with ``node_ids``. Flows compiled from the authoring format get
-                new node ids on every run, so an entry whose ``target_node_id`` is unknown is matched by
-                ``target_node_name`` and remapped to the node id of the current flow.
 
         Returns:
-            ``(plan, unresolved)``. ``plan`` maps a batch key to its entries, each extended with
-            ``pending_node_ids``. ``unresolved`` holds entries whose target node is not part of the flow (or is the
-            ingest node); they must be processed as fresh documents.
+            ``(plan, unresolved)``. ``plan`` maps a batch key to its entries, each extended with the saved output
+            to read (``source_node_name``, ``source_output_index``) and ``pending_node_ids``. ``unresolved`` holds
+            the entries of documents that cannot be resumed (target node missing from the flow, the ingest node, or
+            a node with several inputs); they are re-ingested fresh on the next run. All entries of a document go
+            to the same batch.
         """
         plan: dict[str, list[dict[str, Any]]] = {}
-        unresolved: list[dict[str, Any]] = []
-        position = {node_id: idx for idx, node_id in enumerate(node_ids)}
-        name_position = {name: idx for idx, name in enumerate(node_names or []) if name}
         if not batch_keys:
             return plan, list(entries)
 
-        assigned = 0
+        node_ids = [str(node[OperatorConstants.Columns.ID]) for node in op_flow]
+        by_doc: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for entry in entries:
-            target_idx = position.get(entry.get("target_node_id", ""))
-            if target_idx is None:
-                target_idx = name_position.get(entry.get("target_node_name", ""), 0)
-            if target_idx <= 0:
-                unresolved.append(entry)
+            by_doc[entry["doc_id"]].append(entry)
+
+        unresolved: list[dict[str, Any]] = []
+        assigned = 0
+        for doc_entries in by_doc.values():
+            resolved = [
+                ResumptionService._resolve_entry(entry=entry, op_flow=op_flow, node_ids=node_ids)
+                for entry in doc_entries
+            ]
+            if any(item is None for item in resolved):
+                unresolved.extend(doc_entries)
                 continue
             key = batch_keys[assigned % len(batch_keys)]
             assigned += 1
-            plan.setdefault(key, []).append(
-                {**entry, "target_node_id": node_ids[target_idx], "pending_node_ids": node_ids[1:target_idx]}
-            )
+            plan.setdefault(key, []).extend(item for item in resolved if item is not None)
         return plan, unresolved
+
+    @staticmethod
+    def _resolve_entry(
+        *, entry: dict[str, Any], op_flow: list[dict[str, Any]], node_ids: list[str]
+    ) -> dict[str, Any] | None:
+        """Extend a deferred entry with the saved output it is read from; None when it cannot be resumed.
+
+        The target is looked up by ``target_node_id``. Only when the id is not part of the flow (authoring-format
+        flows get new ids on every compile) is the node found again by ``target_node_name``.
+        """
+        target_id = entry["target_node_id"]
+        if target_id not in node_ids:
+            target_name = entry.get("target_node_name") or ""
+            names = [str(node.get(OperatorConstants.Columns.NAME, "")) for node in op_flow]
+            if not target_name or names.count(target_name) != 1:
+                return None
+            target_id = node_ids[names.index(target_name)]
+            entry = {**entry, "target_node_id": target_id}
+        target_idx = node_ids.index(target_id)
+        if target_idx <= 0:
+            return None
+        target = op_flow[target_idx]
+        edges = target.get(DocpipeConstants.INPUT_EDGES) or []
+        if len(edges) > 1:
+            return None
+        source = op_flow[target_idx - 1]
+        if edges:
+            source_id = edges[0].get(DocpipeConstants.NODE_ID_REF)
+            if source_id not in node_ids:
+                return None
+            source = op_flow[node_ids.index(source_id)]
+        return {
+            **entry,
+            "source_node_name": str(source.get(OperatorConstants.Columns.NAME, "")),
+            "source_output_index": ResumptionService._output_index(source=source, target=target),
+            "pending_node_ids": ResumptionService._ancestors(op_flow=op_flow, node_ids=node_ids, index=target_idx),
+        }
+
+    @staticmethod
+    def _ancestors(*, op_flow: list[dict[str, Any]], node_ids: list[str], index: int) -> list[str]:
+        """Node ids between the ingest node (excluded) and ``op_flow[index]`` (excluded) that lead to it.
+
+        Flows without edges are sequential, so every earlier node is an ancestor. In a DAG only the nodes reachable
+        backwards through the input edges are, which keeps nodes of sibling branches out.
+        """
+        if not any(node.get(DocpipeConstants.INPUT_EDGES) for node in op_flow):
+            return node_ids[1:index]
+        found: set[str] = set()
+        stack = [node_ids[index]]
+        while stack:
+            current = op_flow[node_ids.index(stack.pop())]
+            for edge in current.get(DocpipeConstants.INPUT_EDGES) or []:
+                parent = edge.get(DocpipeConstants.NODE_ID_REF)
+                if parent in node_ids and parent != node_ids[0] and parent not in found:
+                    found.add(parent)
+                    stack.append(parent)
+        return [node_id for node_id in node_ids[1:index] if node_id in found]
+
+    @staticmethod
+    def _output_index(*, source: dict[str, Any], target: dict[str, Any]) -> int:
+        """Index of the source output feeding ``target``; only branching nodes have more than one output."""
+        if source.get(OperatorConstants.Misc.OPERATOR) != OperatorConstants.Operators.BRANCHING:
+            return 0
+        link_id = target.get(OperatorConstants.Misc.LINK_ID)
+        branches = (source.get(OperatorConstants.Config.CONFIG) or {}).get(_BRANCH_CRITERIA) or []
+        for idx, branch in enumerate(branches):
+            if branch.get(OperatorConstants.Misc.LINK_ID) == link_id:
+                return idx
+        return 0
 
     @staticmethod
     def entries_for_node(
@@ -159,48 +238,70 @@ class ResumptionService:
         batch_id: str | None,
         node_id: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Return ``(inject_here, carried)`` entries of a batch for the given node."""
+        """Return ``(inject_here, carried)`` entries of a batch for the given node.
+
+        A document injected at this node is not reported as carried by it, even when it is still deferred to a
+        later node.
+        """
         if not plan:
             return [], []
         batch_entries = plan.get(resumption_batch_key(batch_id=batch_id), [])
         inject = [e for e in batch_entries if e.get("target_node_id") == node_id]
-        carried = [e for e in batch_entries if node_id in e.get("pending_node_ids", [])]
+        injected_ids = {e["doc_id"] for e in inject}
+        carried = [
+            e for e in batch_entries if node_id in e.get("pending_node_ids", []) and e["doc_id"] not in injected_ids
+        ]
         return inject, carried
 
     # ------------------------------------------------------------------ executor side
 
-    def inject_checkpoints(
+    def inject_saved_rows(
         self,
         *,
-        job_id: str,
         table: pa.Table | None,
         entries: list[dict[str, Any]],
     ) -> tuple[pa.Table | None, list[str], list[dict[str, Any]]]:
-        """Append checkpoint rows of deferred documents to the node input table.
+        """Append the saved input rows of deferred documents to the node input table.
 
         Returns:
-            ``(table, injected_ids, unavailable_entries)``. Entries whose checkpoint cannot be read or merged are
+            ``(table, injected_ids, unavailable_entries)``. Entries whose saved output cannot be read or merged are
             returned in ``unavailable_entries`` so the caller can report them as failed.
         """
+        if self._output_reader is None:
+            return table, [], list(entries)
+
+        groups: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
+        for entry in entries:
+            key = (entry["job_run_id"], entry.get("source_node_name") or "", int(entry.get("source_output_index", 0)))
+            groups[key].append(entry)
+
         injected_ids: list[str] = []
         unavailable: list[dict[str, Any]] = []
         parts: list[pa.Table] = []
-        for entry in entries:
-            checkpoint = self._store.read_checkpoint(job_id=job_id, path=entry["checkpoint_path"])
-            if checkpoint is None or checkpoint.num_rows == 0:
-                unavailable.append(entry)
-                continue
-            parts.append(checkpoint)
-            injected_ids.append(entry["doc_id"])
+        for (job_run_id, node_name, output_index), group in groups.items():
+            rows = self._output_reader.read_rows(
+                job_run_id=job_run_id,
+                node_name=node_name,
+                output_index=output_index,
+                doc_ids=[entry["doc_id"] for entry in group],
+            )
+            found = set(rows[OperatorConstants.Misc.ID].to_pylist()) if rows is not None else set()
+            for entry in group:
+                if entry["doc_id"] in found:
+                    injected_ids.append(entry["doc_id"])
+                else:
+                    unavailable.append(entry)
+            if rows is not None and rows.num_rows > 0:
+                parts.append(rows)
 
         if not parts:
-            return table, injected_ids, unavailable
+            return table, [], unavailable
 
         try:
             base = [table] if table is not None else []
             merged = pa.concat_tables(base + parts, promote_options="permissive")
         except Exception as exc:
-            logger.warning("Failed to merge resumption checkpoints into node input: %s", type(exc).__name__)
+            logger.warning("Failed to merge saved node output into node input: %s", type(exc).__name__)
             return table, [], list(entries)
         return merged, injected_ids, unavailable
 
@@ -208,6 +309,7 @@ class ResumptionService:
         self,
         *,
         job_id: str,
+        job_run_id: str,
         node_id: str,
         node_name: str,
         input_table: pa.Table,
@@ -215,10 +317,14 @@ class ResumptionService:
         doc_name: str,
         reason: str,
     ) -> ResumptionRecord | None:
-        """Record a failure of ``doc_id`` at ``node_id`` and persist the checkpoint of its input row.
+        """Record a failure of ``doc_id`` at ``node_id`` together with the original error message.
 
-        Returns the stored record (``exhausted`` set once the retry budget is spent) or ``None`` when the document
-        has no input row to checkpoint.
+        A document that already failed at the node keeps the job run of its first failure: that run is the one whose
+        saved output holds the node's input row, because a resumed document is not part of a later run's upstream
+        output. Failures at other nodes of the document are kept, so every failed node is resumed.
+
+        Returns the stored record (the node entry is ``exhausted`` once the retry budget is spent) or ``None`` when
+        the document has no input row to record.
         """
         id_col = OperatorConstants.Misc.ID
         if id_col not in input_table.column_names:
@@ -229,33 +335,66 @@ class ResumptionService:
 
         if not doc_name and OperatorConstants.Misc.NAME in rows.column_names:
             doc_name = str(rows[OperatorConstants.Misc.NAME][0].as_py() or "")
-        modified_time = self._modified_time(rows=rows)
         existing = self._store.get_record(job_id=job_id, doc_id=doc_id)
-        failure_count = (
-            existing.failure_count + 1
-            if existing and (existing.failed_node_id == node_id or existing.failed_node_name == node_name)
-            else 1
+        previous = existing.failed_node(node_id=node_id, node_name=node_name) if existing else None
+        failure_count = previous.failure_count + 1 if previous else 1
+        failed_node = FailedNode(
+            node_id=node_id,
+            node_name=node_name,
+            job_run_id=previous.job_run_id if previous else job_run_id,
+            failure_count=failure_count,
+            error_message=reason,
+            exhausted=failure_count > self._max_retry_attempts,
         )
-        exhausted = failure_count > self._max_retry_attempts
-
-        checkpoint_path = self._store.write_checkpoint(job_id=job_id, node_id=node_id, doc_id=doc_id, table=rows)
-        if existing and existing.checkpoint_path and existing.checkpoint_path != checkpoint_path:
-            self._store.delete_checkpoint(job_id=job_id, path=existing.checkpoint_path)
-
+        others = [node for node in existing.failed_nodes if node is not previous] if existing else []
         record = ResumptionRecord(
             doc_id=doc_id,
             doc_name=doc_name,
-            failed_node_id=node_id,
-            failed_node_name=node_name,
-            failure_count=failure_count,
-            modified_time=modified_time,
-            checkpoint_path=checkpoint_path,
-            last_reason=reason,
-            exhausted=exhausted,
+            modified_time=self._modified_time(rows=rows),
+            failed_nodes=[*others, failed_node],
         )
         self._store.save_record(job_id=job_id, record=record)
-        logger.info("Recorded failure %d for a document at node %s (exhausted=%s)", failure_count, node_name, exhausted)
+        logger.info(
+            "Recorded failure %d for a document at node %s (exhausted=%s)",
+            failure_count,
+            node_name,
+            failed_node.exhausted,
+        )
         return record
+
+    def clear_node_success(self, *, job_id: str, node_id: str, node_name: str = "", doc_ids: list[str]) -> None:
+        """Drop the failure entry of a node for documents that passed it; exhausted entries are retained.
+
+        A record without any failed node left is deleted.
+        """
+        for doc_id in doc_ids:
+            record = self._store.get_record(job_id=job_id, doc_id=doc_id)
+            if record is None:
+                continue
+            node = record.failed_node(node_id=node_id, node_name=node_name)
+            if node is None or node.exhausted:
+                continue
+            remaining = [n for n in record.failed_nodes if n is not node]
+            if remaining:
+                self._store.save_record(job_id=job_id, record=record.model_copy(update={"failed_nodes": remaining}))
+            else:
+                self._store.delete_record(job_id=job_id, doc_id=doc_id)
+
+    @staticmethod
+    def to_deferred_records(*, record: ResumptionRecord) -> list[DeferredRecord]:
+        """One deferred record per node the document has to be resumed at."""
+        return [
+            DeferredRecord(
+                doc_id=record.doc_id,
+                doc_name=record.doc_name,
+                target_node_id=node.node_id,
+                target_node_name=node.node_name,
+                job_run_id=node.job_run_id,
+                failure_count=node.failure_count,
+                error_message=node.error_message,
+            )
+            for node in record.failed_nodes
+        ]
 
     @staticmethod
     def _modified_time(*, rows: pa.Table) -> int | None:
@@ -267,19 +406,16 @@ class ResumptionService:
         return value if isinstance(value, int) else None
 
     def format_exhausted_reason(self, *, record: ResumptionRecord) -> str:
-        """Failure reason shown in node metadata and the job run report for retry-exhausted documents."""
-        return (
-            f"{RETRIES_EXHAUSTED_PREFIX} ({record.failure_count} attempts, "
-            f"max_retry_attempts={self._max_retry_attempts}) at node '{record.failed_node_name}': "
-            f"{record.last_reason}"
-        )
+        """Failure reason shown in node metadata and the job run report for retry-exhausted documents.
 
-    def clear_completed(self, *, job_id: str, doc_ids: list[str]) -> None:
-        """Drop resumption state of documents that completed the whole flow; exhausted records are retained."""
-        for doc_id in doc_ids:
-            record = self._store.get_record(job_id=job_id, doc_id=doc_id)
-            if record is not None and not record.exhausted:
-                self.discard(job_id=job_id, record=record)
+        Names every node that exhausted its retries together with the original error it reported.
+        """
+        return "; ".join(
+            f"{RETRIES_EXHAUSTED_PREFIX} ({node.failure_count} attempts, "
+            f"max_retry_attempts={self._max_retry_attempts}) at node '{node.node_name}': {node.error_message}"
+            for node in record.failed_nodes
+            if node.exhausted
+        )
 
 
 def retry_attempts_from_config(*, config: dict[str, Any]) -> int:

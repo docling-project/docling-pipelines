@@ -104,8 +104,11 @@ class TestNodeLevelResumption:
 
         records = FilesystemResumptionStore().get_all_records(job_id=job_id)
         assert records, "failed documents must have resumption records after run 1"
-        assert all(record.failure_count == 1 for record in records.values())
-        assert all(record.checkpoint_path for record in records.values())
+        failed_nodes = [node for record in records.values() for node in record.failed_nodes]
+        assert all(len(record.failed_nodes) == 1 for record in records.values())
+        assert all(node.failure_count == 1 for node in failed_nodes)
+        assert all(node.job_run_id for node in failed_nodes)
+        assert all("simulated failure" in node.error_message for node in failed_nodes)
 
         # Run 2: same job, failure cleared. Documents resume at the failed node.
         fail["enabled"] = False
@@ -135,5 +138,6 @@ class TestNodeLevelResumption:
         records = store.get_all_records(job_id=job_id)
         for doc_id in first_run_ids:
             assert records[doc_id].exhausted
-            assert records[doc_id].failure_count == 2
-            assert records[doc_id].checkpoint_path, "checkpoints are retained for exhausted documents"
+            (node,) = records[doc_id].failed_nodes
+            assert node.failure_count == 2
+            assert "simulated failure" in node.error_message

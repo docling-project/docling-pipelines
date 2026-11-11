@@ -6,31 +6,66 @@
 from pydantic import BaseModel, Field
 
 
-class ResumptionRecord(BaseModel):
-    """Persistent per-document failure state used to resume a document at the node where it failed."""
+class FailedNode(BaseModel):
+    """A node at which a document failed, together with the run that produced the failure.
 
-    doc_id: str
-    doc_name: str = ""
-    failed_node_id: str
-    failed_node_name: str = ""
-    # Consecutive failures at ``failed_node_id``; resets when the document fails at a different node.
+    The intermediate output the node consumed is located from ``job_run_id``; nothing else is persisted.
+    """
+
+    node_id: str
+    node_name: str = ""
+    # Job run in which the document last failed at this node.
+    job_run_id: str
+    # Consecutive failures at this node; a node that later succeeds is removed from the record.
     failure_count: int = 1
-    # Source modification time captured when the document failed; ``None`` when unknown.
-    modified_time: int | None = None
-    # Checkpoint location (relative to the store root) holding the failed node's input row, if available.
-    checkpoint_path: str | None = None
-    last_reason: str = ""
+    # Original error reported by the node for the latest failure.
+    error_message: str = ""
     # True once ``failure_count`` exceeded ``max_retry_attempts``; no further automated resumption.
     exhausted: bool = False
 
 
-class DeferredDocument(BaseModel):
-    """A document scheduled for resumption at a downstream node of the current run."""
+class ResumptionRecord(BaseModel):
+    """Persistent per-document failure state used to resume a document at every node where it failed."""
+
+    doc_id: str
+    doc_name: str = ""
+    # Source modification time captured when the document failed; ``None`` when unknown.
+    modified_time: int | None = None
+    # A document processed by several branches can fail at several nodes; each one is resumed.
+    failed_nodes: list[FailedNode] = Field(default_factory=list)
+
+    @property
+    def exhausted(self) -> bool:
+        """True when the document exhausted its retries at any of its failed nodes."""
+        return any(node.exhausted for node in self.failed_nodes)
+
+    def failed_node(self, *, node_id: str, node_name: str = "") -> FailedNode | None:
+        """Return the failure entry of ``node_id``, or None.
+
+        Flows compiled from the authoring format get new node ids on every compile, so an entry is also matched by
+        ``node_name`` when no entry carries ``node_id``.
+        """
+        by_id = next((node for node in self.failed_nodes if node.node_id == node_id), None)
+        if by_id is not None or not node_name:
+            return by_id
+        return next((node for node in self.failed_nodes if node.node_name == node_name), None)
+
+
+class DeferredRecord(BaseModel):
+    """A document scheduled for resumption at one downstream node of the current run."""
 
     doc_id: str
     doc_name: str = ""
     target_node_id: str
-    checkpoint_path: str
-    batch_num: int = 0
-    # Ancestor nodes of ``target_node_id`` (including ingest) that carry the document as deferred.
+    # Name of the target node; only used to find the node again when its id changed between runs.
+    target_node_name: str = ""
+    # Job run in which the document failed at ``target_node_id``.
+    job_run_id: str
+    failure_count: int = 1
+    # Original error reported when the document failed at ``target_node_id``.
+    error_message: str = ""
+    # Predecessor node whose saved output is the input of ``target_node_id`` and the index of that output.
+    source_node_name: str | None = None
+    source_output_index: int = 0
+    # Ancestor nodes of ``target_node_id`` (excluding ingest) that carry the document as deferred.
     pending_node_ids: list[str] = Field(default_factory=list)

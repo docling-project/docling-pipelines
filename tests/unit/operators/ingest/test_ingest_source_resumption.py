@@ -56,15 +56,25 @@ def operator(service, tmp_path):
     return op
 
 
-def _fail(service: ResumptionService, source: str, *, modified_time: int, times: int = 1):
+def _fail(
+    service: ResumptionService,
+    source: str,
+    *,
+    modified_time: int,
+    times: int = 1,
+    node_id: str = NODE_ID,
+    node_name: str = "embeddings",
+    job_run_id: str = "run-1",
+):
     doc_id = _doc_id(source)
     table = pa.table({"id": [doc_id], "name": [source], "modified_time": pa.array([modified_time], type=pa.int64())})
     record = None
     for _ in range(times):
         record = service.record_failure(
             job_id=JOB_ID,
-            node_id=NODE_ID,
-            node_name="embeddings",
+            job_run_id=job_run_id,
+            node_id=node_id,
+            node_name=node_name,
             input_table=table,
             doc_id=doc_id,
             doc_name=source,
@@ -87,8 +97,22 @@ class TestDeferredEmission:
         assert row is None
         assert [e["doc_id"] for e in operator._deferred_entries] == [_doc_id("a.txt")]
         assert operator._deferred_entries[0]["target_node_id"] == NODE_ID
+        assert operator._deferred_entries[0]["job_run_id"] == "run-1"
+        assert operator._deferred_entries[0]["error_message"] == "timeout"
+        assert "checkpoint_path" not in operator._deferred_entries[0]
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
         assert metadata[Metrics.External.SKIPPED_DOCS_COUNT] == 0
+
+    def test_document_failed_at_several_nodes_is_deferred_once_per_node(self, operator, service):
+        _fail(service, "a.txt", modified_time=100, node_id="branch-a", node_name="name-a", job_run_id="run-1")
+        _fail(service, "a.txt", modified_time=100, node_id="branch-b", node_name="name-b", job_run_id="run-2")
+        metadata = _metadata(operator)
+
+        row = operator.process_document(_document("a.txt", 100), 0, metadata)
+
+        assert row is None
+        entries = {e["target_node_id"]: e["job_run_id"] for e in operator._deferred_entries}
+        assert entries == {"branch-a": "run-1", "branch-b": "run-2"}
 
     def test_modified_source_is_ingested_fresh(self, operator, service):
         _fail(service, "a.txt", modified_time=100)
@@ -114,7 +138,9 @@ class TestDeferredEmission:
         assert row is None
         assert operator._deferred_entries == []
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
-        assert "Maximum retries exhausted" in metadata[Metrics.External.FAILED_DOCS][0]["reason"]
+        reason = metadata[Metrics.External.FAILED_DOCS][0]["reason"]
+        assert "Maximum retries exhausted" in reason
+        assert "timeout" in reason
 
     def test_force_ingest_bypasses_resumption(self, operator, service):
         _fail(service, "a.txt", modified_time=100)

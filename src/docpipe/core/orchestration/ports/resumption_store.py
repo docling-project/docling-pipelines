@@ -1,17 +1,19 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
-"""Port for persisting resumption records and per-document checkpoints."""
+"""Port for persisting resumption records."""
 
 from abc import ABC, abstractmethod
-
-import pyarrow as pa
 
 from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
 
 
 class ResumptionStore(ABC):
-    """Storage contract for node-level failure resumption state."""
+    """Storage contract for node-level failure resumption state.
+
+    Only failure records are stored. The data a document is resumed from is the intermediate node output that the
+    flow already writes when ``data_storage_type`` is not ``memory``.
+    """
 
     @abstractmethod
     def get_all_records(self, *, job_id: str) -> dict[str, ResumptionRecord]:
@@ -28,19 +30,3 @@ class ResumptionStore(ABC):
     @abstractmethod
     def delete_record(self, *, job_id: str, doc_id: str) -> None:
         """Delete the record of a document; no-op when absent."""
-
-    @abstractmethod
-    def write_checkpoint(self, *, job_id: str, node_id: str, doc_id: str, table: pa.Table) -> str:
-        """Persist a checkpoint table and return its store-relative path."""
-
-    @abstractmethod
-    def read_checkpoint(self, *, job_id: str, path: str) -> pa.Table | None:
-        """Read a checkpoint table; return ``None`` when it does not exist."""
-
-    @abstractmethod
-    def checkpoint_exists(self, *, job_id: str, path: str | None) -> bool:
-        """Return True when the checkpoint exists."""
-
-    @abstractmethod
-    def delete_checkpoint(self, *, job_id: str, path: str | None) -> None:
-        """Delete a checkpoint; no-op when absent."""

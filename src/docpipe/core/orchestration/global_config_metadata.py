@@ -119,8 +119,9 @@ class GlobalConfigMetadata:
             default=DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS,
             required=False,
             description=(
-                "Retries allowed for a document that failed at a node, resumed from the upstream checkpoint on "
-                "later runs (total attempts = 1 + max_retry_attempts). Requires local intermediate storage."
+                "Retries allowed for a document that failed at a node, resumed from the stored output of the "
+                "upstream node on later runs (total attempts = 1 + max_retry_attempts). Requires "
+                "data_storage_type other than memory."
             ),
             category=ORCHESTRATION,
         ),

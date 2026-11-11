@@ -1,15 +1,18 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for node-level failure resumption (ResumptionService and FilesystemResumptionStore)."""
+"""Unit tests for node-level failure resumption (ResumptionService, store and node output reader)."""
 
+from pathlib import Path
 from typing import ClassVar
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
+from docpipe.core.orchestration.adapters.local_node_output_reader import LocalNodeOutputReader
 from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
 from docpipe.core.orchestration.application.services.resumption_service import (
     RETRIES_EXHAUSTED_PREFIX,
@@ -17,8 +20,10 @@ from docpipe.core.orchestration.application.services.resumption_service import (
     ResumptionService,
     resumption_batch_key,
 )
+from docpipe.core.orchestration.models.resumption_plan import FailedNode, ResumptionRecord
 
 JOB_ID = "job-1"
+RUN_ID = "run-1"
 NODE_ID = "node-4"
 MAX_RETRIES = 3
 
@@ -50,32 +55,23 @@ def _fail(
     *,
     node_id: str = NODE_ID,
     node_name: str = "chunker",
+    job_run_id: str = RUN_ID,
     modified_time: int = 100,
+    reason: str = "boom",
 ):
     return service.record_failure(
         job_id=JOB_ID,
+        job_run_id=job_run_id,
         node_id=node_id,
         node_name=node_name,
         input_table=_input_table(doc_id, "other", modified_time=modified_time),
         doc_id=doc_id,
         doc_name="",
-        reason="boom",
+        reason=reason,
     )
 
 
 class TestFilesystemResumptionStore:
-    def test_checkpoint_roundtrip(self, store):
-        path = store.write_checkpoint(job_id=JOB_ID, node_id=NODE_ID, doc_id="d1", table=_input_table("d1"))
-
-        assert store.checkpoint_exists(job_id=JOB_ID, path=path)
-        assert store.read_checkpoint(job_id=JOB_ID, path=path).num_rows == 1
-        store.delete_checkpoint(job_id=JOB_ID, path=path)
-        assert not store.checkpoint_exists(job_id=JOB_ID, path=path)
-
-    def test_path_traversal_is_rejected(self, store):
-        assert store.read_checkpoint(job_id=JOB_ID, path="../../etc/passwd") is None
-        assert not store.checkpoint_exists(job_id=JOB_ID, path="../../etc/passwd")
-
     @pytest.mark.parametrize("job_id", ["../escape", "a/b", "", ".."])
     def test_invalid_job_id_is_rejected(self, store, job_id):
         with pytest.raises(ValueError, match="Invalid job_id"):
@@ -90,27 +86,41 @@ class TestFilesystemResumptionStore:
         assert store.get_all_records(job_id=JOB_ID) == {}
         assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
 
+    def test_only_records_are_persisted(self, service, tmp_path):
+        _fail(service)
+
+        files = [p for p in (tmp_path / JOB_ID / "resumption").rglob("*") if p.is_file()]
+
+        assert [p.parent.name for p in files] == ["records"]
+        assert all(p.suffix == ".json" for p in files)
+
 
 class TestFailureCounting:
-    def test_first_failure_writes_checkpoint_of_only_the_failed_row(self, service, store):
-        record = _fail(service)
+    def test_first_failure_stores_job_run_and_original_error(self, service):
+        record = _fail(service, reason="parser exploded")
 
-        assert record.failure_count == 1
-        assert record.exhausted is False
+        node = record.failed_node(node_id=NODE_ID)
+        assert (node.failure_count, node.exhausted) == (1, False)
+        assert node.job_run_id == RUN_ID
+        assert node.error_message == "parser exploded"
         assert record.modified_time == 100
-        checkpoint = store.read_checkpoint(job_id=JOB_ID, path=record.checkpoint_path)
-        assert checkpoint.column("id").to_pylist() == ["d1"]
+
+    def test_record_does_not_carry_a_checkpoint_path(self):
+        assert "checkpoint_path" not in ResumptionRecord.model_fields
+        assert "checkpoint_path" not in FailedNode.model_fields
 
     def test_consecutive_failures_at_same_node_accumulate(self, service):
-        counts = [_fail(service).failure_count for _ in range(3)]
+        counts = [_fail(service).failed_node(node_id=NODE_ID).failure_count for _ in range(3)]
 
         assert counts == [1, 2, 3]
 
-    def test_failure_at_different_node_resets_counter(self, service):
-        _fail(service)
-        _fail(service)
+    def test_repeated_failure_keeps_first_job_run_and_latest_error(self, service):
+        _fail(service, job_run_id="run-1", reason="first")
+        record = _fail(service, job_run_id="run-2", reason="second")
 
-        assert _fail(service, node_id="node-5", node_name="embed").failure_count == 1
+        node = record.failed_node(node_id=NODE_ID)
+        assert node.job_run_id == "run-1"
+        assert node.error_message == "second"
 
     def test_third_failure_is_still_within_threshold(self, service):
         # 1 initial attempt + 2 retries failed -> 3rd retry (4th attempt) is still allowed
@@ -129,17 +139,12 @@ class TestFailureCounting:
         assert record.exhausted is True
         decision, stored = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=100)
         assert decision == ResumptionDecision.EXHAUSTED
-        assert stored.failure_count == 4
-
-    def test_exhausted_checkpoint_is_retained(self, service, store):
-        for _ in range(4):
-            record = _fail(service)
-
-        assert store.checkpoint_exists(job_id=JOB_ID, path=record.checkpoint_path)
+        assert stored.failed_node(node_id=NODE_ID).failure_count == 4
 
     def test_document_missing_from_input_is_not_recorded(self, service):
         record = service.record_failure(
             job_id=JOB_ID,
+            job_run_id=RUN_ID,
             node_id=NODE_ID,
             node_name="chunker",
             input_table=_input_table("other"),
@@ -150,20 +155,118 @@ class TestFailureCounting:
 
         assert record is None
 
-    def test_exhausted_reason_names_node_and_error(self, service):
+    def test_exhausted_reason_names_node_and_original_error(self, service):
         for _ in range(4):
-            record = _fail(service)
+            record = _fail(service, reason="original failure text")
 
         reason = service.format_exhausted_reason(record=record)
 
         assert reason.startswith(RETRIES_EXHAUSTED_PREFIX)
         assert "chunker" in reason
-        assert "boom" in reason
+        assert "original failure text" in reason
 
     def test_zero_retries_exhausts_on_first_failure(self, store):
         service = ResumptionService(store=store, max_retry_attempts=0)
 
         assert _fail(service).exhausted is True
+
+    def test_same_node_name_with_new_node_id_keeps_counting(self, service):
+        _fail(service, node_id="run-1-id")
+
+        record = _fail(service, node_id="run-2-id")
+
+        assert len(record.failed_nodes) == 1
+        assert record.failed_node(node_id="run-2-id").failure_count == 2
+
+    def test_different_node_ids_and_names_are_counted_separately(self, service):
+        _fail(service, node_id="run-1-id", node_name="chunker")
+
+        record = _fail(service, node_id="run-2-id", node_name="embed")
+
+        assert record.failed_node(node_id="run-2-id", node_name="embed").failure_count == 1
+
+
+class TestMultipleFailedNodes:
+    def test_failures_at_different_nodes_are_all_stored(self, service, store):
+        _fail(service, node_id="branch-a", node_name="chunker_a", reason="err a")
+        _fail(service, node_id="branch-b", node_name="chunker_b", job_run_id="run-2", reason="err b")
+
+        record = store.get_record(job_id=JOB_ID, doc_id="d1")
+
+        assert {n.node_id for n in record.failed_nodes} == {"branch-a", "branch-b"}
+        assert record.failed_node(node_id="branch-a").error_message == "err a"
+        assert record.failed_node(node_id="branch-b").job_run_id == "run-2"
+
+    def test_failure_at_another_node_does_not_reset_counter(self, service):
+        _fail(service, node_id="branch-a", node_name="name-a")
+        _fail(service, node_id="branch-a", node_name="name-a")
+
+        record = _fail(service, node_id="branch-b", node_name="name-b")
+
+        assert record.failed_node(node_id="branch-a").failure_count == 2
+        assert record.failed_node(node_id="branch-b").failure_count == 1
+
+    def test_one_deferred_record_per_failed_node(self, service):
+        _fail(service, node_id="branch-a", node_name="name-a", reason="err a")
+        record = _fail(service, node_id="branch-b", node_name="name-b", job_run_id="run-2", reason="err b")
+
+        deferred = ResumptionService.to_deferred_records(record=record)
+
+        assert {(d.target_node_id, d.job_run_id, d.error_message) for d in deferred} == {
+            ("branch-a", RUN_ID, "err a"),
+            ("branch-b", "run-2", "err b"),
+        }
+
+    def test_exhausted_at_any_node_exhausts_document(self, service):
+        for _ in range(4):
+            _fail(service, node_id="branch-a", node_name="name-a")
+        _fail(service, node_id="branch-b", node_name="name-b")
+
+        decision, record = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=100)
+
+        assert decision == ResumptionDecision.EXHAUSTED
+        reason = service.format_exhausted_reason(record=record)
+        assert "name-a" in reason
+        assert "name-b" not in reason
+        assert reason.count(RETRIES_EXHAUSTED_PREFIX) == 1
+
+    def test_success_at_one_node_keeps_the_other_failure(self, service, store):
+        _fail(service, node_id="branch-a", node_name="name-a")
+        _fail(service, node_id="branch-b", node_name="name-b")
+
+        service.clear_node_success(job_id=JOB_ID, node_id="branch-a", node_name="name-a", doc_ids=["d1"])
+
+        record = store.get_record(job_id=JOB_ID, doc_id="d1")
+        assert [n.node_id for n in record.failed_nodes] == ["branch-b"]
+
+    def test_success_at_last_failed_node_deletes_record(self, service, store):
+        _fail(service, node_id="branch-a", node_name="name-a")
+
+        service.clear_node_success(job_id=JOB_ID, node_id="branch-a", node_name="name-a", doc_ids=["d1"])
+
+        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+
+    def test_exhausted_entry_survives_success_sweep(self, service, store):
+        for _ in range(4):
+            _fail(service)
+
+        service.clear_node_success(job_id=JOB_ID, node_id=NODE_ID, doc_ids=["d1"])
+
+        assert store.get_record(job_id=JOB_ID, doc_id="d1") is not None
+
+    def test_success_is_matched_by_name_when_node_id_changed(self, service, store):
+        _fail(service, node_id="old-id", node_name="chunker")
+
+        service.clear_node_success(job_id=JOB_ID, node_id="new-id", node_name="chunker", doc_ids=["d1"])
+
+        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+
+    def test_success_at_unrelated_node_changes_nothing(self, service, store):
+        _fail(service)
+
+        service.clear_node_success(job_id=JOB_ID, node_id="elsewhere", doc_ids=["d1", "unknown"])
+
+        assert store.get_record(job_id=JOB_ID, doc_id="d1") is not None
 
 
 class TestClassify:
@@ -178,15 +281,14 @@ class TestClassify:
         decision, record = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=100)
 
         assert decision == ResumptionDecision.DEFER
-        assert record.failed_node_id == NODE_ID
+        assert record.failed_nodes[0].node_id == NODE_ID
 
-    def test_newer_source_invalidates_checkpoint(self, service, store):
-        record = _fail(service, modified_time=100)
+    def test_newer_source_invalidates_failure_state(self, service, store):
+        _fail(service, modified_time=100)
 
         decision, stored = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=101)
 
         assert (decision, stored) == (ResumptionDecision.FRESH, None)
-        assert not store.checkpoint_exists(job_id=JOB_ID, path=record.checkpoint_path)
         assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
 
     def test_older_source_does_not_invalidate(self, service):
@@ -196,15 +298,6 @@ class TestClassify:
 
         assert decision == ResumptionDecision.DEFER
 
-    def test_missing_checkpoint_falls_back_to_root_ingestion(self, service, store):
-        record = _fail(service)
-        store.delete_checkpoint(job_id=JOB_ID, path=record.checkpoint_path)
-
-        decision, stored = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=100)
-
-        assert (decision, stored) == (ResumptionDecision.FRESH, None)
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
-
     def test_newer_source_invalidates_even_exhausted_document(self, service):
         for _ in range(4):
             _fail(service, modified_time=100)
@@ -213,50 +306,170 @@ class TestClassify:
 
         assert decision == ResumptionDecision.FRESH
 
+    def test_record_without_failed_nodes_is_fresh(self, service, store):
+        store.save_record(job_id=JOB_ID, record=ResumptionRecord(doc_id="d1"))
+
+        decision, _ = service.classify(job_id=JOB_ID, doc_id="d1", modified_time=None)
+
+        assert decision == ResumptionDecision.FRESH
+        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
+
+
+def _node(node_id: str, *, parents: list[str] | None = None, operator: str = "noop", **extra) -> dict:
+    node = {"id": node_id, "name": node_id, "operator": operator, **extra}
+    if parents is not None:
+        node["input_edges"] = [{"node_id_ref": p} for p in parents]
+    return node
+
 
 class TestPlanning:
-    NODES: ClassVar[list] = ["ingest", "extract", "chunker", "embed", "vdb"]
+    FLOW: ClassVar[list] = [_node(n) for n in ["ingest", "extract", "chunker", "embed", "vdb"]]
 
-    def _entry(self, doc_id: str, target: str) -> dict:
-        return {"doc_id": doc_id, "target_node_id": target, "checkpoint_path": f"c/{doc_id}"}
+    @staticmethod
+    def _entry(doc_id: str, target: str) -> dict:
+        return {"doc_id": doc_id, "target_node_id": target, "job_run_id": RUN_ID}
 
-    def test_plan_marks_ancestors_as_pending(self):
+    def test_plan_resolves_source_and_marks_ancestors_as_pending(self):
         plan, unresolved = ResumptionService.build_plan(
-            entries=[self._entry("d1", "embed")], node_ids=self.NODES, batch_keys=["b0"]
+            entries=[self._entry("d1", "embed")], op_flow=self.FLOW, batch_keys=["b0"]
         )
 
         assert unresolved == []
-        assert plan["b0"][0]["pending_node_ids"] == ["extract", "chunker"]
+        entry = plan["b0"][0]
+        assert entry["pending_node_ids"] == ["extract", "chunker"]
+        assert entry["source_node_name"] == "chunker"
+        assert entry["source_output_index"] == 0
 
     def test_entries_are_spread_across_batches(self):
         entries = [self._entry(f"d{i}", "embed") for i in range(5)]
 
-        plan, _ = ResumptionService.build_plan(entries=entries, node_ids=self.NODES, batch_keys=["b0", "b1"])
+        plan, _ = ResumptionService.build_plan(entries=entries, op_flow=self.FLOW, batch_keys=["b0", "b1"])
 
         assert [len(plan["b0"]), len(plan["b1"])] == [3, 2]
 
     def test_unknown_or_ingest_target_is_unresolved(self):
         entries = [self._entry("d1", "ghost"), self._entry("d2", "ingest")]
 
-        plan, unresolved = ResumptionService.build_plan(entries=entries, node_ids=self.NODES, batch_keys=["b0"])
+        plan, unresolved = ResumptionService.build_plan(entries=entries, op_flow=self.FLOW, batch_keys=["b0"])
 
         assert plan == {}
         assert {e["doc_id"] for e in unresolved} == {"d1", "d2"}
 
-    def test_target_node_is_remapped_by_name_when_ids_change_between_runs(self):
+    def test_target_id_is_preferred_over_name(self):
+        entry = {**self._entry("d1", "embed"), "target_node_name": "chunker"}
+
+        plan, _ = ResumptionService.build_plan(entries=[entry], op_flow=self.FLOW, batch_keys=["b0"])
+
+        assert plan["b0"][0]["target_node_id"] == "embed"
+
+    def test_target_is_found_by_name_when_id_changed_between_runs(self):
         entry = {**self._entry("d1", "old-embed-id"), "target_node_name": "embed"}
 
-        plan, unresolved = ResumptionService.build_plan(
-            entries=[entry], node_ids=self.NODES, batch_keys=["b0"], node_names=self.NODES
-        )
+        plan, unresolved = ResumptionService.build_plan(entries=[entry], op_flow=self.FLOW, batch_keys=["b0"])
 
         assert unresolved == []
         assert plan["b0"][0]["target_node_id"] == "embed"
         assert plan["b0"][0]["pending_node_ids"] == ["extract", "chunker"]
 
+    def test_unknown_id_without_matching_name_is_unresolved(self):
+        entry = {**self._entry("d1", "old-id"), "target_node_name": "ghost"}
+
+        plan, unresolved = ResumptionService.build_plan(entries=[entry], op_flow=self.FLOW, batch_keys=["b0"])
+
+        assert plan == {}
+        assert unresolved == [entry]
+
+    def test_ambiguous_node_name_is_unresolved(self):
+        flow = [_node("ingest"), _node("a", name="dup"), _node("b", name="dup")]
+        entry = {**self._entry("d1", "old-id"), "target_node_name": "dup"}
+
+        plan, unresolved = ResumptionService.build_plan(entries=[entry], op_flow=flow, batch_keys=["b0"])
+
+        assert plan == {}
+        assert unresolved == [entry]
+
+    def test_no_batches_leaves_everything_unresolved(self):
+        entries = [self._entry("d1", "embed")]
+
+        plan, unresolved = ResumptionService.build_plan(entries=entries, op_flow=self.FLOW, batch_keys=[])
+
+        assert (plan, unresolved) == ({}, entries)
+
+    def test_all_failed_nodes_of_a_document_go_to_the_same_batch(self):
+        entries = [self._entry("d1", "chunker"), self._entry("d1", "embed"), self._entry("d2", "embed")]
+
+        plan, unresolved = ResumptionService.build_plan(entries=entries, op_flow=self.FLOW, batch_keys=["b0", "b1"])
+
+        assert unresolved == []
+        assert [(e["doc_id"], e["target_node_id"]) for e in plan["b0"]] == [("d1", "chunker"), ("d1", "embed")]
+        assert [e["doc_id"] for e in plan["b1"]] == ["d2"]
+
+    def test_document_with_one_unresolvable_node_is_unresolved_entirely(self):
+        entries = [self._entry("d1", "embed"), self._entry("d1", "ghost")]
+
+        plan, unresolved = ResumptionService.build_plan(entries=entries, op_flow=self.FLOW, batch_keys=["b0"])
+
+        assert plan == {}
+        assert len(unresolved) == 2
+
+    def test_dag_source_follows_input_edges_and_skips_sibling_branches(self):
+        flow = [
+            _node("ingest"),
+            _node("extract", parents=["ingest"]),
+            _node("branch_a", parents=["extract"]),
+            _node("branch_b", parents=["extract"]),
+            _node("embed_b", parents=["branch_b"]),
+        ]
+
+        plan, _ = ResumptionService.build_plan(entries=[self._entry("d1", "embed_b")], op_flow=flow, batch_keys=["b0"])
+
+        entry = plan["b0"][0]
+        assert entry["source_node_name"] == "branch_b"
+        assert entry["pending_node_ids"] == ["extract", "branch_b"]
+
+    def test_branching_output_index_comes_from_link_id(self):
+        flow = [
+            _node("ingest"),
+            _node("extract", parents=["ingest"]),
+            _node(
+                "split",
+                parents=["extract"],
+                operator="branching",
+                config={"branch_criteria": [{"link_id": "left"}, {"link_id": "right"}]},
+            ),
+            _node("after_left", parents=["split"], link_id="left"),
+            _node("after_right", parents=["split"], link_id="right"),
+        ]
+
+        plan, unresolved = ResumptionService.build_plan(
+            entries=[self._entry("d1", "after_right"), self._entry("d2", "after_left")],
+            op_flow=flow,
+            batch_keys=["b0"],
+        )
+
+        assert unresolved == []
+        indexes = {e["target_node_id"]: e["source_output_index"] for e in plan["b0"]}
+        assert indexes == {"after_right": 1, "after_left": 0}
+        assert {e["source_node_name"] for e in plan["b0"]} == {"split"}
+
+    def test_node_with_several_inputs_is_unresolved(self):
+        flow = [
+            _node("ingest"),
+            _node("a", parents=["ingest"]),
+            _node("b", parents=["ingest"]),
+            _node("merge", parents=["a", "b"], operator="merge"),
+        ]
+
+        plan, unresolved = ResumptionService.build_plan(
+            entries=[self._entry("d1", "merge")], op_flow=flow, batch_keys=["b0"]
+        )
+
+        assert plan == {}
+        assert [e["doc_id"] for e in unresolved] == ["d1"]
+
     def test_entries_for_node_splits_inject_and_carry(self):
         plan, _ = ResumptionService.build_plan(
-            entries=[self._entry("d1", "embed")], node_ids=self.NODES, batch_keys=["b0"]
+            entries=[self._entry("d1", "embed")], op_flow=self.FLOW, batch_keys=["b0"]
         )
 
         inject_mid, carried_mid = ResumptionService.entries_for_node(plan=plan, batch_id="b0", node_id="chunker")
@@ -264,6 +477,16 @@ class TestPlanning:
 
         assert (inject_mid, [e["doc_id"] for e in carried_mid]) == ([], ["d1"])
         assert ([e["doc_id"] for e in inject_target], carried_target) == (["d1"], [])
+
+    def test_document_injected_at_a_node_is_not_carried_by_it(self):
+        plan, _ = ResumptionService.build_plan(
+            entries=[self._entry("d1", "chunker"), self._entry("d1", "embed")], op_flow=self.FLOW, batch_keys=["b0"]
+        )
+
+        inject, carried = ResumptionService.entries_for_node(plan=plan, batch_id="b0", node_id="chunker")
+
+        assert [e["target_node_id"] for e in inject] == ["chunker"]
+        assert carried == []
 
     def test_entries_for_node_without_plan_or_batch(self):
         assert ResumptionService.entries_for_node(plan=None, batch_id=None, node_id="x") == ([], [])
@@ -274,73 +497,175 @@ class TestPlanning:
         assert resumption_batch_key(batch_id="abc") == "abc"
 
 
-class TestInjection:
-    def test_checkpoint_rows_are_appended_to_input(self, service):
-        record = _fail(service)
-        entries = [{"doc_id": "d1", "checkpoint_path": record.checkpoint_path}]
+def _write_node_output(base: Path, run_id: str, folder: str, table: pa.Table, *, batch: str | None = None) -> None:
+    target = base / JOB_ID / run_id / "data" / folder
+    if batch:
+        target = target / batch
+    target.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, target / "output.parquet")
 
-        merged, injected, unavailable = service.inject_checkpoints(
-            job_id=JOB_ID, table=_input_table("fresh"), entries=entries
+
+@pytest.fixture
+def data_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "docpipe.core.data_access.data_access_utils.get_data_path",
+        lambda: str(tmp_path),
+        raising=False,
+    )
+    return tmp_path
+
+
+class TestNodeOutputReader:
+    @staticmethod
+    def _reader() -> LocalNodeOutputReader:
+        return LocalNodeOutputReader(config={DocpipeConstants.JOB_ID: JOB_ID, DocpipeConstants.JOB_RUN_ID: "current"})
+
+    def test_reads_requested_rows_of_a_previous_run(self, data_root):
+        _write_node_output(data_root, "run-1", "extract_0", _input_table("d1", "d2", "d3"))
+
+        rows = self._reader().read_rows(job_run_id="run-1", node_name="extract", output_index=0, doc_ids=["d2"])
+
+        assert rows.column("id").to_pylist() == ["d2"]
+
+    def test_reads_rows_spread_over_batch_subfolders(self, data_root):
+        _write_node_output(data_root, "run-1", "extract_0", _input_table("d1"), batch="0")
+        _write_node_output(data_root, "run-1", "extract_0", _input_table("d2"), batch="1")
+
+        rows = self._reader().read_rows(job_run_id="run-1", node_name="extract", output_index=0, doc_ids=["d1", "d2"])
+
+        assert sorted(rows.column("id").to_pylist()) == ["d1", "d2"]
+
+    def test_node_name_is_sanitized_like_the_writer(self, data_root):
+        _write_node_output(data_root, "run-1", "my_node_1", _input_table("d1"))
+
+        rows = self._reader().read_rows(job_run_id="run-1", node_name="my node", output_index=1, doc_ids=["d1"])
+
+        assert rows.column("id").to_pylist() == ["d1"]
+
+    def test_missing_output_returns_none(self, data_root):
+        assert self._reader().read_rows(job_run_id="run-9", node_name="x", output_index=0, doc_ids=["d1"]) is None
+
+    def test_unknown_document_returns_none(self, data_root):
+        _write_node_output(data_root, "run-1", "extract_0", _input_table("d1"))
+
+        assert self._reader().read_rows(job_run_id="run-1", node_name="extract", output_index=0, doc_ids=["zz"]) is None
+
+    @pytest.mark.parametrize("run_id", ["../x", "a/b", "..", ""])
+    def test_unsafe_job_run_id_is_rejected(self, data_root, run_id):
+        assert self._reader().read_rows(job_run_id=run_id, node_name="x", output_index=0, doc_ids=["d1"]) is None
+
+
+class _FakeReader:
+    def __init__(self, tables: dict[tuple[str, str, int], pa.Table]) -> None:
+        self._tables = tables
+        self.calls: list[tuple[str, str, int]] = []
+
+    def read_rows(self, *, job_run_id, node_name, output_index, doc_ids):
+        key = (job_run_id, node_name, output_index)
+        self.calls.append(key)
+        table = self._tables.get(key)
+        if table is None:
+            return None
+        mask = pa.array([i in doc_ids for i in table.column("id").to_pylist()])
+        return table.filter(mask)
+
+
+class TestInjection:
+    @staticmethod
+    def _entry(doc_id: str, *, run: str = RUN_ID, node: str = "chunker", index: int = 0) -> dict:
+        return {"doc_id": doc_id, "job_run_id": run, "source_node_name": node, "source_output_index": index}
+
+    @staticmethod
+    def _service(store, reader) -> ResumptionService:
+        return ResumptionService(store=store, max_retry_attempts=MAX_RETRIES, output_reader=reader)
+
+    def test_saved_rows_are_appended_to_input(self, store):
+        reader = _FakeReader({(RUN_ID, "chunker", 0): _input_table("d1", "d2")})
+
+        merged, injected, unavailable = self._service(store, reader).inject_saved_rows(
+            table=_input_table("fresh"), entries=[self._entry("d1")]
         )
 
         assert merged.column("id").to_pylist() == ["fresh", "d1"]
-        assert injected == ["d1"]
-        assert unavailable == []
+        assert (injected, unavailable) == (["d1"], [])
 
-    def test_injection_into_empty_input(self, service):
-        record = _fail(service)
-        entries = [{"doc_id": "d1", "checkpoint_path": record.checkpoint_path}]
+    def test_injection_into_empty_input(self, store):
+        reader = _FakeReader({(RUN_ID, "chunker", 0): _input_table("d1")})
 
-        merged, injected, _ = service.inject_checkpoints(job_id=JOB_ID, table=_input_table(), entries=entries)
+        merged, injected, _ = self._service(store, reader).inject_saved_rows(table=None, entries=[self._entry("d1")])
 
         assert merged.column("id").to_pylist() == ["d1"]
         assert injected == ["d1"]
 
-    def test_missing_checkpoint_is_reported_unavailable(self, service):
-        entries = [{"doc_id": "d1", "checkpoint_path": "checkpoints/x/y.parquet"}]
+    def test_missing_output_is_reported_unavailable(self, store):
         base = _input_table("fresh")
 
-        merged, injected, unavailable = service.inject_checkpoints(job_id=JOB_ID, table=base, entries=entries)
+        merged, injected, unavailable = self._service(store, _FakeReader({})).inject_saved_rows(
+            table=base, entries=[self._entry("d1")]
+        )
 
         assert merged is base
         assert injected == []
         assert [e["doc_id"] for e in unavailable] == ["d1"]
 
+    def test_without_reader_everything_is_unavailable(self, store):
+        entries = [self._entry("d1")]
 
-class TestCompletion:
-    def test_completed_document_state_is_cleared(self, service, store):
-        record = _fail(service)
+        _, injected, unavailable = self._service(store, None).inject_saved_rows(table=None, entries=entries)
 
-        service.clear_completed(job_id=JOB_ID, doc_ids=["d1"])
+        assert (injected, unavailable) == ([], entries)
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is None
-        assert not store.checkpoint_exists(job_id=JOB_ID, path=record.checkpoint_path)
+    def test_entries_are_read_per_job_run_and_output(self, store):
+        reader = _FakeReader(
+            {
+                ("run-1", "chunker", 0): _input_table("d1"),
+                ("run-2", "split", 1): _input_table("d2"),
+            }
+        )
+        entries = [self._entry("d1", run="run-1"), self._entry("d2", run="run-2", node="split", index=1)]
 
-    def test_exhausted_state_survives_completion_sweep(self, service, store):
-        for _ in range(4):
-            record = _fail(service)
+        merged, injected, unavailable = self._service(store, reader).inject_saved_rows(table=None, entries=entries)
 
-        service.clear_completed(job_id=JOB_ID, doc_ids=["d1"])
+        assert sorted(merged.column("id").to_pylist()) == ["d1", "d2"]
+        assert sorted(injected) == ["d1", "d2"]
+        assert unavailable == []
+        assert sorted(reader.calls) == [("run-1", "chunker", 0), ("run-2", "split", 1)]
 
-        assert store.get_record(job_id=JOB_ID, doc_id="d1") is not None
-        assert store.checkpoint_exists(job_id=JOB_ID, path=record.checkpoint_path)
+    def test_document_failed_at_two_nodes_is_injected_for_each_entry(self, store):
+        reader = _FakeReader({(RUN_ID, "split", 0): _input_table("d1"), (RUN_ID, "split", 1): _input_table("d1")})
+        entries = [self._entry("d1", node="split", index=0), self._entry("d1", node="split", index=1)]
 
+        merged, injected, unavailable = self._service(store, reader).inject_saved_rows(table=None, entries=entries)
+
+        assert merged.num_rows == 2
+        assert injected == ["d1", "d1"]
+        assert unavailable == []
+
+
+class TestDiscard:
     def test_discard_all_removes_everything(self, service, store):
         for _ in range(4):
-            record = _fail(service)
+            _fail(service)
 
         service.discard_all(job_id=JOB_ID)
 
         assert store.get_all_records(job_id=JOB_ID) == {}
-        assert not store.checkpoint_exists(job_id=JOB_ID, path=record.checkpoint_path)
+
+    def test_discard_all_for_ids_only_removes_listed_documents(self, service, store):
+        _fail(service, "d1")
+        _fail(service, "d2")
+
+        service.discard_all_for_ids(job_id=JOB_ID, doc_ids=["d1", "never-failed"])
+
+        assert set(store.get_all_records(job_id=JOB_ID)) == {"d2"}
 
 
 class TestFactory:
-    def test_disabled_without_local_storage(self):
+    def test_disabled_for_memory_storage(self):
         assert create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "memory"}) is None
         assert create_resumption_service(config={}) is None
 
-    def test_enabled_with_local_storage_and_default_retries(self):
+    def test_enabled_for_local_storage_with_default_retries(self):
         service = create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "local"})
 
         assert service.max_retry_attempts == DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS
@@ -351,11 +676,3 @@ class TestFactory:
         )
 
         assert service.max_retry_attempts == 5
-
-
-class TestFailureCountAcrossRuns:
-    def test_same_node_name_with_new_node_id_keeps_counting(self, tmp_path):
-        service = ResumptionService(store=FilesystemResumptionStore(root=str(tmp_path)), max_retry_attempts=3)
-        _fail(service, node_id="run-1-id")
-
-        assert _fail(service, node_id="run-2-id").failure_count == 2

@@ -27,7 +27,6 @@ from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, 
 from docpipe.core.constants.operator_constants import OperatorConstants  # noqa: E402
 from docpipe.core.incremental_metadata import get_incremental_update_service  # noqa: E402
 from docpipe.core.models.session_info import get_session_info  # noqa: E402
-from docpipe.core.operators.operator_utils import OperatorUtils  # noqa: E402
 from docpipe.core.orchestration.futured_list import FuturedList  # noqa: E402
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults, FlowEnginePort  # noqa: E402
 from docpipe.core.orchestration.prefect.ports.batch_execution_port import (  # noqa: E402
@@ -726,27 +725,11 @@ class PrefectEngine(FlowEnginePort):
             failed_doc_ids=failed_doc_ids,
             non_recoverable_docs_table=non_recoverable_docs_table,
         )
-
-        self.__clear_resumption_state(global_config=global_config, tables=tables)
-
         # Reset non-recoverable docs for micro-batching support
         self.orchestrator._reset_non_recoverable_docs_for_batch(
             global_config=global_config, common_log_arguments=self.common_log_arguments
         )
         return None
-
-    def __clear_resumption_state(self, *, global_config: dict, tables: list) -> None:
-        """Drop failure records and checkpoints of documents that reached the end of the flow."""
-        try:
-            from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
-
-            service = create_resumption_service(config=global_config)
-            if service is None:
-                return
-            doc_ids = OperatorUtils.get_unique_ids(tables=[t for t in tables if t is not None])
-            service.clear_completed(job_id=self.orchestrator.context_id, doc_ids=doc_ids)
-        except Exception as exc:
-            logger.warning("Failed to clear resumption state: %s", type(exc).__name__)
 
     def __non_execute_inner_flow(
         self,

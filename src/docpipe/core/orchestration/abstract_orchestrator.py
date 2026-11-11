@@ -1447,6 +1447,7 @@ class AbstractOrchestrator(ABC):
 
         Batches that only hold deferred documents are created when no fresh documents exist. Deferred entries whose
         target node is not part of the flow fall back to root ingestion on the next run (their records are dropped).
+        All entries of a document that failed at several nodes are placed in the same batch.
         """
         from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
         from docpipe.core.orchestration.application.services.resumption_service import (
@@ -1454,8 +1455,6 @@ class AbstractOrchestrator(ABC):
             resumption_batch_key,
         )
 
-        node_ids = [str(node[OperatorConstants.Columns.ID]) for node in op_flow]
-        node_names = [str(node.get(OperatorConstants.Columns.NAME, "")) for node in op_flow]
         if not batches:
             batch_id = str(uuid.uuid4())
             batches = [BatchInfo(batch_id=batch_id, batch_num=0, table=ingested_table.slice(0, 0))]
@@ -1468,7 +1467,7 @@ class AbstractOrchestrator(ABC):
             for batch in batches
         ]
         plan, unresolved = ResumptionService.build_plan(
-            entries=deferred_entries, node_ids=node_ids, batch_keys=batch_keys, node_names=node_names
+            entries=deferred_entries, op_flow=op_flow, batch_keys=batch_keys
         )
         if unresolved:
             service = create_resumption_service(config=global_config)
@@ -1477,7 +1476,7 @@ class AbstractOrchestrator(ABC):
                     job_id=self.context_id or self.job_id or "", doc_ids=[e["doc_id"] for e in unresolved]
                 )
             self.logger.warning(
-                "%s deferred documents target a node that is not in the flow; they will be re-ingested next run",
+                "%s deferred entries cannot be resumed in this flow; their documents will be re-ingested next run",
                 len(unresolved),
                 extra=self.common_log_arguments,
             )

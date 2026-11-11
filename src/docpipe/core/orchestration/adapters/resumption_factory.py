@@ -8,12 +8,14 @@ from typing import Any
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.data_access.data_access_utils import DataAccessConstants
 from docpipe.core.orchestration.adapters.filesystem_resumption_store import FilesystemResumptionStore
+from docpipe.core.orchestration.adapters.local_node_output_reader import LocalNodeOutputReader
 from docpipe.core.orchestration.application.services.resumption_service import ResumptionService
 
 
 def is_resumption_enabled(*, config: dict[str, Any]) -> bool:
-    """Resumption needs durable checkpoints, so it is only active with local intermediate storage."""
-    return config.get(DocpipeConstants.DATA_STORAGE_TYPE, "") == DataAccessConstants.LOCAL
+    """Resumption reads the intermediate node output, so it is inactive when that output only lives in memory."""
+    storage_type = config.get(DocpipeConstants.DATA_STORAGE_TYPE, "")
+    return bool(storage_type) and storage_type != DataAccessConstants.MEMORY
 
 
 def create_resumption_service(*, config: dict[str, Any]) -> ResumptionService | None:
@@ -22,6 +24,7 @@ def create_resumption_service(*, config: dict[str, Any]) -> ResumptionService | 
         return None
     return ResumptionService(
         store=FilesystemResumptionStore(),
+        output_reader=LocalNodeOutputReader(config=config),
         max_retry_attempts=int(
             config.get(DocpipeConstants.MAX_RETRY_ATTEMPTS, DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS)
         ),

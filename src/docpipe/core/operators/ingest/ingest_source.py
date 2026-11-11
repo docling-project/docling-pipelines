@@ -469,7 +469,7 @@ class IngestSourceOperator(AbstractOperator):
         self._deferred_entries = []
         self._resumption_service = create_resumption_service(config=self.config)
         if self._resumption_service is not None and self.force_ingest:
-            # Force ingest discards all saved failure state, including exhausted records and checkpoints
+            # Force ingest discards all saved failure state, including exhausted records
             self._resumption_service.discard_all(job_id=job_id_for_tracking)
 
         self.previously_processed_docs_dict = (
@@ -512,7 +512,8 @@ class IngestSourceOperator(AbstractOperator):
             )
 
         # Update metadata: documents_in_scope = fresh + deferred + failed + skipped
-        deferred_ids = [entry["doc_id"] for entry in self._deferred_entries]
+        # A document deferred to several nodes is one document in scope
+        deferred_ids = list(dict.fromkeys(entry["doc_id"] for entry in self._deferred_entries))
         metadata[Metrics.External.TOTAL_DOCS] = (
             len(doc_data)
             + len(deferred_ids)
@@ -907,18 +908,19 @@ class IngestSourceOperator(AbstractOperator):
             doc_id=doc_id,
             modified_time=modified_time if isinstance(modified_time, int) else None,
         )
-        if decision == ResumptionDecision.DEFER and record is not None and record.checkpoint_path:
-            self._deferred_entries.append(
-                {
-                    "doc_id": doc_id,
-                    "doc_name": doc_name,
-                    "target_node_id": record.failed_node_id,
-                    "target_node_name": record.failed_node_name,
-                    "checkpoint_path": record.checkpoint_path,
-                    "failure_count": record.failure_count,
-                }
+        if decision == ResumptionDecision.DEFER and record is not None:
+            # A document that failed at several nodes is deferred once per failed node
+            deferred = [
+                {**item.model_dump(), "doc_name": doc_name}
+                for item in ResumptionService.to_deferred_records(record=record)
+            ]
+            self._deferred_entries.extend(deferred)
+            logger.info(
+                "Deferring previously failed document %s to %s failed node(s): %s",
+                source,
+                len(record.failed_nodes),
+                ", ".join(node.node_name for node in record.failed_nodes),
             )
-            logger.info("Deferring previously failed document %s to node %s", source, record.failed_node_name)
             return True
         if decision == ResumptionDecision.EXHAUSTED and record is not None:
             self.record_failed_document(

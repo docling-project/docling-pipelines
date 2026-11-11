@@ -63,6 +63,7 @@ class AbstractOperatorExecutor:
         self._job_stats_service = job_stats_service
         # Node-level failure resumption state, populated per execution
         self._carried_deferred_ids: list[str] = []
+        self._injected_resumed_ids: list[str] = []
         self._unavailable_resumed_entries: list[dict[str, Any]] = []
         self._resumption_input: pa.Table | None = None
         job_id: str = str(self._params.get(DocpipeConstants.JOB_ID))
@@ -337,22 +338,28 @@ class AbstractOperatorExecutor:
         return bool(inject)
 
     def _inject_resumed_documents(self, *, tables):
-        """Append upstream checkpoint rows of deferred documents when this node is their resumption target."""
+        """Append the saved input rows of deferred documents when this node is their resumption target.
+
+        The rows are read from the intermediate output that the predecessor node saved in the job run where the
+        document failed.
+        """
         inject, carried = self._resumption_entries()
-        self._carried_deferred_ids = [entry["doc_id"] for entry in carried]
+        self._carried_deferred_ids = list(dict.fromkeys(entry["doc_id"] for entry in carried))
         if not inject:
             return tables
         service = create_resumption_service(config=self._params)
         if service is None or not isinstance(tables, pa.Table):
             self._unavailable_resumed_entries = inject
             return tables
-        job_id = self._resumption_job_id()
-        merged, injected_ids, unavailable = service.inject_checkpoints(job_id=job_id, table=tables, entries=inject)
+        merged, injected_ids, unavailable = service.inject_saved_rows(table=tables, entries=inject)
+        self._injected_resumed_ids = injected_ids
         self._unavailable_resumed_entries = unavailable
         if unavailable:
-            service.discard_all_for_ids(job_id=job_id, doc_ids=[entry["doc_id"] for entry in unavailable])
+            service.discard_all_for_ids(
+                job_id=self._resumption_job_id(), doc_ids=[entry["doc_id"] for entry in unavailable]
+            )
         logger.info(
-            "Resumed %s deferred documents at node '%s' (%s without a usable checkpoint)",
+            "Resumed %s deferred documents at node '%s' (%s without a usable saved input)",
             len(injected_ids),
             self._name,
             len(unavailable),
@@ -371,13 +378,18 @@ class AbstractOperatorExecutor:
         try:
             if self._resumption_input is not None:
                 self._record_failures_from_metadata(metadata=metadata)
+            self._clear_resumed_successes(metadata=metadata)
             for entry in self._unavailable_resumed_entries:
                 if Metrics.External.FAILED_DOCS_COUNT in metadata:
                     AbstractOperator.record_failed_document(
                         metadata=metadata,
                         doc_id=entry["doc_id"],
                         doc_name=entry.get("doc_name", ""),
-                        reason="Checkpoint unavailable for resumption; the document will be re-ingested on the next run",
+                        reason=(
+                            "Saved output of the previous node is unavailable for resumption "
+                            f"(failed in job run {entry.get('job_run_id', '')}: {entry.get('error_message', '')}); "
+                            "the document will be re-ingested on the next run"
+                        ),
                     )
             extra_total = len(self._carried_deferred_ids) + len(self._unavailable_resumed_entries)
             if self._carried_deferred_ids:
@@ -390,8 +402,24 @@ class AbstractOperatorExecutor:
         except Exception as exc:
             logger.warning("Failed to apply resumption accounting for node '%s': %s", self._name, type(exc).__name__)
 
+    def _clear_resumed_successes(self, *, metadata: dict[str, Any]) -> None:
+        """Drop the failure entry of this node for resumed documents that did not fail again."""
+        if not self._injected_resumed_ids:
+            return
+        service = create_resumption_service(config=self._params)
+        if service is None:
+            return
+        failed_docs = metadata.get(Metrics.External.FAILED_DOCS, []) or []
+        failed_ids = {doc.get("id") for doc in failed_docs if isinstance(doc, dict)}
+        service.clear_node_success(
+            job_id=self._resumption_job_id(),
+            node_id=self._params[OperatorConstants.Columns.ID],
+            node_name=self._name,
+            doc_ids=[doc_id for doc_id in self._injected_resumed_ids if doc_id not in failed_ids],
+        )
+
     def _record_failures_from_metadata(self, *, metadata: dict[str, Any]) -> None:
-        """Persist a checkpoint for every document the operator reported as failed (recoverable failures only)."""
+        """Record every document the operator reported as failed, with its error (recoverable failures only)."""
         service = create_resumption_service(config=self._params)
         if service is None or self._resumption_input is None:
             return
@@ -409,6 +437,7 @@ class AbstractOperatorExecutor:
                 continue
             record = service.record_failure(
                 job_id=job_id,
+                job_run_id=str(self._params.get(DocpipeConstants.JOB_RUN_ID)),
                 node_id=node_id,
                 node_name=self._name,
                 input_table=self._resumption_input,
@@ -436,6 +465,7 @@ class AbstractOperatorExecutor:
             for doc_id in OperatorUtils.get_unique_ids(tables=self._resumption_input):
                 record = service.record_failure(
                     job_id=job_id,
+                    job_run_id=str(self._params.get(DocpipeConstants.JOB_RUN_ID)),
                     node_id=node_id,
                     node_name=self._name,
                     input_table=self._resumption_input,
@@ -452,7 +482,7 @@ class AbstractOperatorExecutor:
     def _persist_exhausted(self, *, records: list[ResumptionRecord]) -> None:
         """Persist retry-exhausted documents as non-recoverable so they are never scheduled automatically again.
 
-        Their checkpoints are retained in the resumption store."""
+        Their resumption records are retained."""
         if not records:
             return
         from docpipe.core.incremental_metadata import get_incremental_update_service
