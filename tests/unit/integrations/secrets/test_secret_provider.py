@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for SecretProvider base, reference parsing, and resolve_value."""
 
 from typing import Any

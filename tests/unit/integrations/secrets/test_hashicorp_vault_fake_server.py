@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """HashiCorpVaultProvider tests against an in-process fake of the Vault HTTP API.
 
 The provider talks to Vault through a real ``requests.Session``. These tests mount a
