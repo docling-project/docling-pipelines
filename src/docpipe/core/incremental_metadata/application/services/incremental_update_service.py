@@ -327,7 +327,9 @@ class IncrementalUpdateService:
         Mark documents as soft-deleted for a given job.
 
         Documents that were previously processed but are not in doc_ids
-        will be marked as deleted.
+        will be marked as deleted. Existing soft-deleted records are left untouched:
+        they are removed by ``purge_soft_deleted_docs`` only after the flow completes
+        and the downstream vector store cleanup has succeeded.
 
         Args:
             job_id: Job identifier
@@ -340,8 +342,6 @@ class IncrementalUpdateService:
             FlowExecutionFailedException: If marking fails
         """
         try:
-            previously_soft_deleted_doc_ids = self.get_soft_deleted_doc_ids(job_id=job_id)
-            self.delete_docs_for_ids(doc_ids=list(previously_soft_deleted_doc_ids), job_id=job_id)
             return self.store.mark_missing_docs_as_deleted(job_id=job_id, doc_ids=doc_ids)
         except Exception as exc:
             raise FlowExecutionFailedException(

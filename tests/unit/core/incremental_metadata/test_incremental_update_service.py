@@ -155,6 +155,17 @@ class TestIncrementalUpdateService:
             "doc-3": {"modified_time": 3, "job_run_id": "run-1"},
         }
 
+    def test_mark_soft_deleted_docs_keeps_existing_soft_deleted(self, *, service):
+        """Previously soft-deleted docs stay until purged so vector cleanup can still resolve them."""
+        table = _build_table(ids=["doc-1", "doc-2", "doc-3"], names=["a", "b", "c"], modified_times=[1, 2, 3])
+        service.save_metadata_for_incremental_update(job_id="job-1", job_run_id="run-1", tables=[table])
+        service.mark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1", "doc-3"])
+        assert service.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2"}
+
+        service.mark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1"])
+
+        assert service.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2", "doc-3"}
+
     def test_process_ingested_docs_with_force_ingest(self, *, service):
         """Test process_ingested_docs with force_ingest clears metadata."""
         table = _build_table(ids=["doc-1"], names=["a"], modified_times=[1])
@@ -238,7 +249,7 @@ class TestIncrementalUpdateService:
         """Test exception handling in mark_soft_deleted_docs."""
         from unittest.mock import patch
 
-        with patch.object(service.store, "get_soft_deleted_doc_ids", side_effect=Exception("Mark failure")):
+        with patch.object(service.store, "mark_missing_docs_as_deleted", side_effect=Exception("Mark failure")):
             with pytest.raises(FlowExecutionFailedException, match="Mark failure"):
                 service.mark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1"])
 
