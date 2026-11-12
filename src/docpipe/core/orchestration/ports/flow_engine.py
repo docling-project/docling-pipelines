@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Flow Engine Port - Abstract interface for flow execution engines.
 
@@ -114,6 +117,3 @@ class FlowEnginePort(ABC):
             Execution results (implementation-specific)
         """
         ...
-
-
-# Made with Bob

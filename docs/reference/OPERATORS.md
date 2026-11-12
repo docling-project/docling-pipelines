@@ -1295,7 +1295,7 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 
 #### PIIAndHAPAnnotator
 
-**Purpose:** Detect Personally Identifiable Information (PII) and Hate, Abuse, and Profanity (HAP) content, with optional redaction. PII and HAP can use different providers: `litellm` and `watsonx` support both, `presidio` supports PII only.
+**Purpose:** Detect Personally Identifiable Information (PII) and Hate, Abuse, and Profanity (HAP) content, with optional redaction. PII and HAP can use different providers: `litellm` and `watsonx` support both, `presidio` supports PII only, `huggingface` supports HAP only (local classifier).
 
 **Category:** Quality
 
@@ -1305,11 +1305,11 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 
 | Parameter | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `provider` | string | No | `litellm` | Provider for every expected redaction without its own `pii_provider` / `hap_provider`: `litellm`, `watsonx`, `presidio` (PII only) |
+| `provider` | string | No | `litellm` | Provider for every expected redaction without its own `pii_provider` / `hap_provider`: `litellm`, `watsonx`, `presidio` (PII only), `huggingface` (HAP only) |
 | `provider_config` | object | No | `{}` | Provider-specific configuration (see below); shared with `pii_provider` / `hap_provider` when they name the same provider or `provider` is unset |
 | `pii_provider` | string | No | — | Provider for PII only: `litellm`, `watsonx`, `presidio` |
 | `pii_provider_config` | object | No | `{}` | Configuration for `pii_provider` (falls back to `provider_config` as above) |
-| `hap_provider` | string | No | — | Provider for HAP only: `litellm`, `watsonx` |
+| `hap_provider` | string | No | — | Provider for HAP only: `litellm`, `watsonx`, `huggingface` |
 | `hap_provider_config` | object | No | `{}` | Configuration for `hap_provider` (falls back to `provider_config` as above) |
 | `doc_column` | string | No | `content` | Input text column |
 | `expected_redactions` | list | No | `["pii","hap"]` | Detection types to run: any subset of `["pii","hap"]` |
@@ -1337,9 +1337,9 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 | `model_id` | string | Yes | WatsonX model identifier |
 | `api_key` | string | Yes | IBM Cloud API key |
 | `url` | string | Yes | WatsonX endpoint URL |
-| `container_kind` | string | Yes | `"project"` or `"space"` |
+| `container_kind` | string | No | `"project"` or `"space"` (default: `"project"`) |
 | `container_id` | string | Yes | Project or space UUID |
-| `timeout` | integer | No | Request timeout in seconds (default: `300`) |
+| `timeout` | integer | No | Request timeout in seconds (default: `120`) |
 
 **`provider_config` — Presidio (PII only; requires `pip install "docling-pipelines[presidio]"` and a spaCy model):**
 
@@ -1349,7 +1349,24 @@ The ExtractOperator uses hexagonal architecture (ports and adapters pattern) wit
 | `spacy_model` | string | No | spaCy NER model (default: `en_core_web_lg`) |
 | `entity_mapping` | object | No | Presidio entity type to PII type overrides (e.g. `{"DATE_TIME": "DateOfBirth"}`) |
 
-A provider selected for a capability it does not support (e.g. `hap_provider: "presidio"`) fails validation before any document is processed.
+**`hap_provider_config` — Hugging Face (HAP only; local sequence classifier, no extra install):**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `model_id` | string | No | Classifier on the Hugging Face Hub (default: `ibm-granite/granite-guardian-hap-38m`) |
+| `revision` | string | No | Model commit, tag or branch (default: a pinned commit for the default model; the Hub default branch otherwise) |
+| `toxic_labels` | list | Required for a non-default `model_id` | Labels whose highest probability is a sentence's HAP score (default model: `["LABEL_1"]`) |
+| `activation` | string | No | `softmax`, `sigmoid` or `auto` (default: `auto`) |
+| `max_length` | integer | No | Maximum model tokens per scored window (default: `512`) |
+| `batch_size` | integer | No | Sentence windows per forward pass (default: `32`) |
+| `device` | string | No | `auto`, `cpu`, `cuda` or `mps` (default: auto) |
+| `local_files_only` | boolean | No | Load only from the local Hugging Face cache (default: `false`) |
+
+Unknown `huggingface` keys are rejected by flow validation. Detections are sentence spans with exact offsets; see the
+[PII and HAP documentation](../operators/quality/pii_and_hap_readme.md#hugging-face-provider_config) for choosing
+`toxic_labels`.
+
+A provider selected for a capability it does not support (e.g. `hap_provider: "presidio"` or `pii_provider: "huggingface"`) fails validation before any document is processed.
 
 **Output Schema:**
 
@@ -2244,11 +2261,15 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 - **password**: Authentication password/API key (optional for `standalone`, required for `grpc` - should be API key)
 - `database`: Database name (default: "default")
 - `secure` : Required for IBM watsonx.data MilvusDB for https connection and is set to true in this case.
-- `index_type`: Index algorithm (HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX for dense; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). Milvus Lite supports only FLAT
-- `metric_type`: Distance metric (L2, IP, COSINE for dense; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode)
-- `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW)
+- `vector_mode`: `dense` (default), `sparse`, `binary` or `gpu`. If omitted, it is `sparse` when `add_sparse_vector: true`, otherwise inferred from `index_type` (`BIN_*` gives `binary`, `GPU_*` gives `gpu`, anything else `dense`). An `index_type` that does not belong to the mode is rejected
+- `index_type`: Index algorithm (HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX for dense; GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for `gpu` mode; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). GPU types are sent to the Milvus server as configured. Milvus Lite supports only FLAT
+- `metric_type`: Distance metric (L2, IP, COSINE for dense; L2 and IP only for `gpu` mode; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode)
+- `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW). For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree`
+- `add_sparse_vector`: Kept for backward compatibility. `true` is equivalent to `vector_mode: "sparse"`; combining it with another `vector_mode` is rejected
 - `batch_size`: Batch size for bulk operations (default: 100)
 - `primary_key_field`: Name of the primary key field in Milvus collection (default: "pk")
+
+See [Milvus GPU indexes](../operators/vectordb/milvus.md#gpu-indexes) for setup and tuning guidance.
 
 **Milvus Authentication Types:**
 

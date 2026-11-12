@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 maintainers = [
     { name = "Jojo Joseph", email = "jo-in@ibm.com" },
     { name = "Aditya Rohan Singh", email = "adityars@ibm.com" },
-    { name = "Nipun Bayas", email = "nsbayas@ibm.com" },
+    { name = "Nipun Bayas", email = "nipun.bayas@ibm.com" },
     { name = "Paul Baby", email = "paulbaby@ibm.com" },
     { name = "Docling Pipeline Team", email = "docling_pipeline_team-dg@ibm.com"},
 ]
@@ -225,8 +225,8 @@ exclude = [
 
 [tool.uv]
 override-dependencies = [
-    # Dependabot: bump oauthlib to 4.0.0 (transitive via requests-oauthlib).
-    "oauthlib==4.0.0",
+    # Dependabot: bump oauthlib to 4.0.1 (transitive via requests-oauthlib).
+    "oauthlib==4.0.1",
     # Dependabot: anyio < 4.14.2 — TLS spoofing (critical), process group leak (high), stderr deadlock (medium).
     "anyio>=4.14.2",
     # litellm 1.104.0+ (CVE-2026-114612 fix) caps filelock<4; filelock==4.2.1 is required by this project.

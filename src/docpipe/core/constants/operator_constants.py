@@ -320,6 +320,14 @@ class OperatorConstants:
         MODEL_ID: Final[str] = "model_id"
         MODEL_NAME: Final[str] = "model_name"
 
+        # Local Hugging Face classifier configuration (hap_provider_config of the huggingface provider)
+        ACTIVATION: Final[str] = "activation"
+        DEVICE: Final[str] = "device"
+        LOCAL_FILES_ONLY: Final[str] = "local_files_only"
+        MAX_LENGTH: Final[str] = "max_length"
+        REVISION: Final[str] = "revision"
+        TOXIC_LABELS: Final[str] = "toxic_labels"
+
         # Classification Configuration
         API_BASE: Final[str] = "api_base"
         DOCUMENT_TYPES: Final[str] = "document_types"
@@ -419,6 +427,8 @@ class OperatorConstants:
         # Vector Configuration
         ADD_SPARSE_VECTOR: Final[str] = "add_sparse_vector"
         ADD_SPARSE_VECTOR_DEFAULT: Final[bool] = False
+        VECTOR_MODE: Final[str] = "vector_mode"
+        VECTOR_MODE_DEFAULT: Final[str] = "dense"
         SPARSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "sparse_embeddings"
         DENSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "dense_embeddings"
         # Milvus field names (mapped names in collection schema)
@@ -882,6 +892,27 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Payload field constants
         INPUT_FIELD: Final[str] = "input"
         DETECTIONS_FIELD: Final[str] = "detections"
+        DETECTORS_FIELD: Final[str] = "detectors"
+        THRESHOLD_FIELD: Final[str] = "threshold"
+
+        # TextDetectionPort result keys: {"success", "detections", "error"}
+        SUCCESS_FIELD: Final[str] = "success"
+        ERROR_FIELD: Final[str] = "error"
+
+        # Detection record keys (see domain.models.convert_detection_dicts_to_results)
+        DETECTION_FIELD: Final[str] = "detection"
+        DETECTION_TYPE_FIELD: Final[str] = "detection_type"
+        SCORE_FIELD: Final[str] = "score"
+        START_FIELD: Final[str] = "start"
+        END_FIELD: Final[str] = "end"
+        TEXT_FIELD: Final[str] = "text"
+        EVIDENCES_FIELD: Final[str] = "evidences"
+        EVIDENCE_SOURCE_FIELD: Final[str] = "source"
+        EVIDENCE_MODEL_ID_FIELD: Final[str] = "model_id"
+        EVIDENCE_LABEL_FIELD: Final[str] = "label"
+
+        # Detection label reported for a HAP span
+        HAS_HAP_LABEL: Final[str] = "has_HAP"
         DEFAULT_MODEL_NAME: Final[str] = "granite4"
 
         # PII Configuration

@@ -22,14 +22,22 @@ The operator SHALL accept `huggingface` as `hap_provider`. It SHALL reject `hugg
 - **THEN** HAP detection uses `huggingface` and no PII provider is required
 
 ### Requirement: Default HAP model
-When `hap_provider_config` is absent or empty, the `huggingface` provider SHALL use the `ibm-granite/granite-guardian-hap-38m` model, treat the `LABEL_1` class as toxic, and score with softmax. No `model_id` or other provider setting SHALL be required.
+When `hap_provider_config` is absent or empty, the `huggingface` provider SHALL use the `ibm-granite/granite-guardian-hap-38m` model at a fixed, pinned revision, treat the `LABEL_1` class as toxic, and score with softmax. No `model_id` or other provider setting SHALL be required. The pinned revision SHALL apply only to the default model and only when `revision` is not set; an explicit `revision` SHALL take precedence.
 
 #### Scenario: No provider config
 - **WHEN** a flow sets `hap_provider: "huggingface"` without `hap_provider_config`
-- **THEN** flow validation succeeds and HAP detection runs with `ibm-granite/granite-guardian-hap-38m`
+- **THEN** flow validation succeeds and HAP detection runs with `ibm-granite/granite-guardian-hap-38m` at the pinned revision
+
+#### Scenario: Default model scores are reproducible
+- **WHEN** the default model's repository receives new commits on its default branch after a release
+- **THEN** a flow with an empty `hap_provider_config` still loads the pinned revision and its scores do not change
+
+#### Scenario: Default model unavailable
+- **WHEN** the default model cannot be loaded (for example, the repository was removed or is not reachable)
+- **THEN** the operator fails at startup with an error naming the model and stating that another classifier can be configured with `model_id` and `toxic_labels`
 
 ### Requirement: Configurable classifier
-The `huggingface` provider SHALL read these optional `hap_provider_config` keys: `model_id`, `revision`, `toxic_labels`, `activation` (`softmax`, `sigmoid` or `auto`), `max_length`, `batch_size`, `device` and `local_files_only`. Any Hugging Face sequence-classification model that has a fast tokenizer and needs no custom code SHALL work through these keys alone. Unknown keys SHALL be ignored.
+The `huggingface` provider SHALL read these optional `hap_provider_config` keys: `model_id`, `revision`, `toxic_labels`, `activation` (`softmax`, `sigmoid` or `auto`), `max_length`, `batch_size`, `device` and `local_files_only`. Any Hugging Face sequence-classification model that has a fast tokenizer and needs no custom code SHALL work through these keys alone.
 
 #### Scenario: Multi-label model through config
 - **WHEN** `hap_provider_config` is `{"model_id": "unitary/unbiased-toxic-roberta", "toxic_labels": ["toxicity", "severe_toxicity", "insult"], "activation": "sigmoid"}`
@@ -42,6 +50,17 @@ The `huggingface` provider SHALL read these optional `hap_provider_config` keys:
 #### Scenario: Pinned revision
 - **WHEN** `revision` names a model commit, tag or branch
 - **THEN** the model and tokenizer are loaded at that revision
+
+### Requirement: Unknown configuration keys rejected
+The `huggingface` provider SHALL reject any `hap_provider_config` key other than the documented ones. Flow validation SHALL report the unknown keys and list the accepted keys, without loading a model, so that a misspelled setting cannot silently change behavior.
+
+#### Scenario: Misspelled key
+- **WHEN** `hap_provider_config` contains `"local_file_only": true`
+- **THEN** flow validation fails with an error naming `local_file_only` as unknown and listing the accepted keys, and no model is loaded
+
+#### Scenario: Shared legacy config with another provider's keys
+- **WHEN** `provider` is unset, `pii_provider` is `watsonx`, `hap_provider` is `huggingface`, and only the shared `provider_config` is set, containing watsonx keys
+- **THEN** flow validation fails for `huggingface` with an error naming the unknown keys and suggesting `hap_provider_config` to configure `huggingface` separately
 
 ### Requirement: Explicit toxic labels for non-default models
 When `model_id` names a model other than the default, `toxic_labels` SHALL be a non-empty list of that model's class label names. Omitting it SHALL be a configuration error, because generic labels such as `LABEL_1` do not mean "toxic" for every model.
