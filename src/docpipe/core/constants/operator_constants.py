@@ -445,7 +445,23 @@ class OperatorConstants:
         # Vector DB General
         OPENSEARCH: Final[str] = "opensearch"
         MILVUS: Final[str] = "milvus"
+        WEAVIATE: Final[str] = "weaviate"
         VECTOR_DB_NAME: Final[str] = "vector_db_name"
+
+        # Weaviate-specific Configuration
+        CONNECTION_TYPE: Final[str] = "connection_type"
+        CONNECTION_TYPE_ON_PREM: Final[str] = "on-prem"
+        CONNECTION_TYPE_CLOUD: Final[str] = "cloud"
+        GRPC_HOST: Final[str] = "grpc_host"
+        GRPC_PORT: Final[str] = "grpc_port"
+        GRPC_SECURE: Final[str] = "grpc_secure"
+        CLUSTER_URL: Final[str] = "cluster_url"
+        BEARER_TOKEN: Final[str] = "bearer_token"  # pragma: allowlist secret
+        DISTANCE_METRIC: Final[str] = "distance_metric"
+        TIMEOUT_INIT: Final[str] = "timeout_init"
+        TIMEOUT_QUERY: Final[str] = "timeout_query"
+        TIMEOUT_INSERT: Final[str] = "timeout_insert"
+        SKIP_INIT_CHECKS: Final[str] = "skip_init_checks"
 
         # Default target field names — adapter-agnostic names used in feature mappings
         DEFAULT_PRIMARY_KEY_FIELD: Final[str] = "pk"

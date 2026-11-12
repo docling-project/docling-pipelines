@@ -139,6 +139,18 @@ class VectorStorePort(ABC):
         """
         return
 
+    def validate_configuration(self, *, errors: list[str], warnings: list[str]) -> None:
+        """Report provider-specific configuration problems during operator validation.
+
+        Called from ``VectorDBOperator.validate()`` after the provider's config schema check, so the user sees
+        every problem as a message. The default implementation reports nothing.
+
+        Args:
+            errors: List to append blocking problems to.
+            warnings: List to append non-blocking notices to.
+        """
+        return
+
     @abstractmethod
     def index_exists(self) -> bool:
         """Check if the vector database index already exists.
