@@ -235,6 +235,15 @@ class TestSecretReads:
 
         assert isinstance(exc.value.__cause__, requests.exceptions.ReadTimeout)
 
+    def test_reading_without_a_session_raises_before_any_request(self, fake_vault: FakeVault) -> None:
+        # get_secret() always authenticates first, so only a direct call reaches this guard.
+        provider = HashiCorpVaultProvider()
+
+        with pytest.raises(RuntimeError, match=r"authenticate\(\) must be called before reading secrets"):
+            provider._read_secret_data(path="database/postgres")
+
+        assert fake_vault.requests == []
+
 
 class TestAppRoleLogin:
     """Failures while logging in with role_id / secret_id."""
