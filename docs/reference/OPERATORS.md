@@ -2050,7 +2050,7 @@ Schemas are defined with `target_tables` specifying field mappings and transform
 
 | Parameter            | Type   | Required | Default       | Description                                                                 |
 | -------------------- | ------ | -------: | ------------- | --------------------------------------------------------------------------- |
-| `provider`           | string |      Yes | -             | VectorDB backend (`opensearch` or `milvus`)                                 |
+| `provider`           | string |      Yes | -             | VectorDB backend (`opensearch`, `milvus`, or `weaviate`)                    |
 | `doc_id_column`      | string |       No | `doc_id_hash` | Primary document id column                                                  |
 | `provider_config`    | object |      Yes | -             | Connection parameters and resource name for the backend (see examples below)|
 | `available_features` | object |       No | -             | Feature definitions for vector DB schema                                    |
@@ -2073,6 +2073,8 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
   - Additional vector columns in the table are stored as metadata but not indexed as vectors
   - Multi-model support planned for future update
   - For multi-model scenarios with Milvus, use separate collections per embedding model
+- **Weaviate**: Full multi-model support
+  - Each dense vector column becomes its own named vector, with its dimension auto-detected from the data
 
 **Supported Vector Databases:**
 
@@ -2103,6 +2105,14 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
      - Configurable index parameters (M, efConstruction for HNSW)
      - Batch processing with configurable batch sizes
      - SSL/TLS support for secure connections
+
+3. **Weaviate** (`provider: "weaviate"`)
+   - Self-hosted (`connection_type: "on-prem"`) or Weaviate Cloud (`connection_type: "cloud"`)
+   - Index types: `hnsw` (default), `flat`, `dynamic` (needs a server with `ASYNC_INDEXING=true`)
+   - Distance metrics: cosine (default), dot, l2-squared, manhattan, hamming
+   - Authentication: none, API key, bearer token, or client password (credentials require TLS)
+   - BM25 keyword search through `add_sparse_vector`; no stored sparse vector
+   - The primary feature is mapped to the `pk` property; access control (`allowed_users`) is not supported
 
 **OpenSearch Configuration Example:**
 
@@ -2239,6 +2249,32 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 }
 ```
 
+**Weaviate Configuration Example:**
+
+```json
+{
+  "operator": "vectordb",
+  "config": {
+    "provider": "weaviate",
+    "add_sparse_vector": false,
+    "provider_config": {
+      "collection_name": "DocpipeChunks",
+      "host": "localhost",
+      "port": 8080,
+      "grpc_port": 50051,
+      "distance_metric": "cosine",
+      "index_type": "hnsw",
+      "batch_size": 100
+    },
+    "feature_mappings": [
+      { "feature_name": "doc_id_hash", "mapped_column_name": "pk" },
+      { "feature_name": "content", "mapped_column_name": "text" },
+      { "feature_name": "embeddings", "mapped_column_name": "vector_embeddings" }
+    ]
+  }
+}
+```
+
 **Provider Config Parameters:**
 
 **OpenSearch:**
@@ -2270,6 +2306,17 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 - `primary_key_field`: Name of the primary key field in Milvus collection (default: "pk")
 
 See [Milvus GPU indexes](../operators/vectordb/milvus.md#gpu-indexes) for setup and tuning guidance.
+
+**Weaviate:**
+
+- `collection_name`: **Required** - Collection name; starts with an upper-case ASCII letter
+- `connection_type`: `on-prem` (default) or `cloud`; `cloud` requires `cluster_url`
+- `host`, `port`, `secure`: HTTP connection (defaults: `localhost`, 8080, `false`)
+- `grpc_host`, `grpc_port`, `grpc_secure`: gRPC connection (defaults: `host`, 50051, `secure`)
+- `auth_type`: `none` (default), `api_key`, `bearer_token`, or `client_password`
+- `index_type`, `distance_metric`, `index_parameters`, `batch_size`: index and write settings
+
+See [`VectorDB Operator README`](../operators/vectordb/vectordb_readme.md#weaviate-provider_config-fields) for the full field list, credential handling, sparse (BM25) mode, and troubleshooting.
 
 **Milvus Authentication Types:**
 
