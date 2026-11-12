@@ -85,8 +85,8 @@ class MilvusBatchProcessor:
         Handles both dense and sparse vector modes.
 
         Only fields explicitly listed in feature_mappings will be included in the
-        indexed document. This ensures predictable behavior and matches the
-        documented configuration pattern.
+        indexed document, plus the collection's content field: when no mapping
+        targets it, it is filled from the row's ``content`` value.
 
         Args:
             row_data: Raw row data from PyArrow table
@@ -144,7 +144,31 @@ class MilvusBatchProcessor:
 
             doc[mapped_name] = value
 
+        self._fill_unmapped_content_field(doc=doc, row_data=row_data)
         return doc
+
+    def _fill_unmapped_content_field(self, *, doc: dict[str, Any], row_data: dict[str, Any]) -> None:
+        """Write the chunk text into the collection's content field when no mapping covers it.
+
+        MilvusIndexManager always declares a content field, named by the ``content`` feature
+        mapping or ``text`` by default. Default feature mappings only map ``content`` in sparse
+        mode, so without this fallback dense-mode rows are inserted with an empty content field.
+
+        An explicit mapping always wins: if any feature is mapped to the content field, the
+        fallback is skipped, even when that feature's value is missing for this row.
+        """
+        content_field_name: str = self._mapping_dict.get(
+            OperatorConstants.Columns.DOC_COLUMN_DEFAULT,
+            OperatorConstants.VectorDB.DEFAULT_TEXT_FIELD_NAME,
+        )
+        if content_field_name in self._mapping_dict.values():
+            return
+        content_config: dict[str, Any] = self.available_features.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT, {})
+        if not content_config.get(OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB, True):
+            return
+        content_value: Any = row_data.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT)
+        if isinstance(content_value, str):
+            doc[content_field_name] = content_value
 
     def create_batches(self, *, documents: list[tuple[str, dict[str, Any]]]) -> list[list[dict[str, Any]]]:
         """

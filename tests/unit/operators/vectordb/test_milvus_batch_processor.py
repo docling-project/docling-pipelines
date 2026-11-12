@@ -518,6 +518,116 @@ class TestDocumentPreparationEdgeCases:
         assert "text" not in doc
 
 
+class TestUnmappedContentFallback:
+    """The collection's content field is filled from ``content`` when no mapping targets it."""
+
+    @staticmethod
+    def _dense_features() -> dict:
+        return {
+            "id": {"available_for_vector_db": True, "type": "string"},
+            "name": {"available_for_vector_db": True, "type": "string"},
+            "content": {"available_for_vector_db": True, "type": "string"},
+            "embeddings": {"available_for_vector_db": True, "type": "vector"},
+        }
+
+    def test_default_dense_mappings_write_content_to_text(self, mock_client):
+        """With the computed dense-mode defaults (no content mapping), the chunk text lands in ``text``."""
+        from docpipe.core.operators.vectordb.metadata_fetcher import compute_default_feature_mappings
+
+        features = self._dense_features()
+        mappings = compute_default_feature_mappings(features, add_sparse_vector=False)
+        assert "content" not in {m["feature_name"] for m in mappings}
+
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=features,
+            feature_mappings=mappings,
+        )
+        doc = processor.prepare_document(
+            row_data={"id": "f1", "name": "a.pdf", "content": "chunk text", "embeddings": [0.1, 0.2]}
+        )
+
+        assert doc["text"] == "chunk text"
+        assert doc["document_id"] == "f1"
+        assert doc["document_name"] == "a.pdf"
+        assert doc["vector_embeddings"] == [0.1, 0.2]
+
+    def test_create_batches_includes_text_with_dense_defaults(self, mock_client):
+        """Rows built by create_batches carry ``text`` alongside the vector and pk."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+            feature_mappings=[{"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"}],
+        )
+        batches = processor.create_batches(documents=[("pk1", {"content": "hello", "embeddings": [0.1]})])
+
+        assert batches[0][0] == {"vector_embeddings": [0.1], "text": "hello", "pk": "pk1"}
+
+    def test_explicit_custom_content_mapping_is_respected(self, mock_client):
+        """A mapping of ``content`` to a custom field writes only that field, not ``text``."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+            feature_mappings=[{"feature_name": "content", "mapped_column_name": "body"}],
+        )
+        doc = processor.prepare_document(row_data={"content": "chunk text"})
+
+        assert doc == {"body": "chunk text"}
+
+    def test_other_feature_mapped_to_text_is_not_overwritten(self, mock_client):
+        """When another feature is mapped to ``text``, its value is kept."""
+        features = {**self._dense_features(), "summary": {"available_for_vector_db": True, "type": "string"}}
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=features,
+            feature_mappings=[{"feature_name": "summary", "mapped_column_name": "text"}],
+        )
+        doc = processor.prepare_document(row_data={"summary": "short summary", "content": "chunk text"})
+
+        assert doc == {"text": "short summary"}
+
+    def test_other_feature_mapped_to_text_with_missing_value_skips_fallback(self, mock_client):
+        """An explicit mapping to ``text`` blocks the fallback even when that feature is absent on the row."""
+        features = {**self._dense_features(), "summary": {"available_for_vector_db": True, "type": "string"}}
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=features,
+            feature_mappings=[{"feature_name": "summary", "mapped_column_name": "text"}],
+        )
+        doc = processor.prepare_document(row_data={"content": "chunk text"})
+
+        assert "text" not in doc
+
+    @pytest.mark.parametrize("content_value", [None, b"raw", 123, ["a"]])
+    def test_fallback_skipped_for_absent_or_non_string_content(self, mock_client, content_value):
+        """No ``text`` is written when ``content`` is missing or not a string."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+        )
+        row_data = {} if content_value is None else {"content": content_value}
+
+        assert "text" not in processor.prepare_document(row_data=row_data)
+
+    def test_fallback_skipped_when_content_unavailable_for_vector_db(self, mock_client):
+        """``content`` marked ``available_for_vector_db: false`` is never written."""
+        features = self._dense_features()
+        features["content"]["available_for_vector_db"] = False
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=features,
+        )
+
+        assert "text" not in processor.prepare_document(row_data={"content": "chunk text"})
+
+
 class TestProcessBatchesEdgeCases:
     """Branches in process_batches not previously exercised."""
 
