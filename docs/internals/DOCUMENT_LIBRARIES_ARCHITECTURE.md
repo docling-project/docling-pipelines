@@ -39,7 +39,7 @@ The Document Libraries module provides metadata management for organizing collec
 │  (Generic implementations in core/assets/common/)           │
 │  - DuckDBAssetRepository[DocumentLibrary]                   │
 │  - LocalAssetRepository[DocumentLibrary]                    │
-│  Created by RepositoryFactory.create_repository()           │
+│  Created by AssetRepositoryFactory.create_repository()      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -106,7 +106,7 @@ Document libraries do not have their own repository class. They use the generic
   the library's `document_set_ids`, so no separate junction table is needed.
 - `LocalAssetRepository[DocumentLibrary]` stores the same records as JSON files.
 
-`RepositoryFactory.create_repository(asset_type=DocumentLibrary)` selects the implementation
+`AssetRepositoryFactory.create_repository(asset_type=DocumentLibrary)` selects the implementation
 from the `assets_management` section of `docling-pipelines-config.yaml` or from environment
 variables. The API gets the repository through `get_document_library_repository()` in
 `api/dependencies.py`.
@@ -219,12 +219,12 @@ uv run pytest tests/unit/core/assets/document_libraries/ --cov=src/docpipe/core/
 ### Creating a Library
 
 ```python
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory
 from docpipe.core.assets.document_libraries.application.services.document_library_service import DocumentLibraryService
 from docpipe.core.assets.document_libraries.domain.models.document_library import DocumentLibrary
 
 # Create the configured repository (DuckDB or local, from docling-pipelines-config.yaml)
-repository = RepositoryFactory.create_repository(asset_type=DocumentLibrary)
+repository = AssetRepositoryFactory.create_repository(asset_type=DocumentLibrary)
 
 # Create service
 service = DocumentLibraryService(repository=repository)

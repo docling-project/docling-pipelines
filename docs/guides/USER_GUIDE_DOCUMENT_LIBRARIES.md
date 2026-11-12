@@ -26,7 +26,7 @@ Document Libraries use the same generic asset storage as Document Sets and Flows
   `KeyValueStoragePort` interface (DuckDB by default).
 - The record contains the library's `document_set_ids`, so adding or removing document sets
   updates that one record. There is no separate relationship table.
-- The repository is `DuckDBAssetRepository[DocumentLibrary]`, created by `RepositoryFactory`.
+- The repository is `DuckDBAssetRepository[DocumentLibrary]`, created by `AssetRepositoryFactory`.
 
 ## Prerequisites
 
@@ -570,7 +570,7 @@ The Document Library implementation follows hexagonal architecture (ports & adap
 
 - **Domain Layer**: Pure Python business logic (DocumentLibrary model)
 - **Ports**: Generic repository interface (`AssetRepository[DocumentLibrary]`)
-- **Adapters**: Generic DuckDB implementation (`DuckDBAssetRepository[DocumentLibrary]`), created by `RepositoryFactory`
+- **Adapters**: Generic DuckDB implementation (`DuckDBAssetRepository[DocumentLibrary]`), created by `AssetRepositoryFactory`
 - **Application Layer**: Service orchestration (DocumentLibraryService)
 - **API Layer**: FastAPI routes and DTOs
 

@@ -130,7 +130,7 @@
 │                        FACTORY LAYER                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-   RepositoryFactory
+   AssetRepositoryFactory
    (core/assets/common/factories/)
   ┌──────────────────────────────────┐
   │  create_repository(              │
@@ -299,13 +299,13 @@ DocumentSet has two storage concerns, each with its own factory:
 
 | Factory | Creates | Purpose |
 |---|---|---|
-| `RepositoryFactory` | `DuckDBAssetRepository[DocumentSet]` | Stores `DocumentSet` domain object (name, description, stats) |
+| `AssetRepositoryFactory` | `DuckDBAssetRepository[DocumentSet]` | Stores `DocumentSet` domain object (name, description, stats) |
 | `DataStoreFactory` | `DuckDBDocumentSetStorage` | Stores the actual PyArrow document table data |
 
 ### Decorator vs hardcoded registration
 | Factory | Registration pattern | Why |
 |---|---|---|
-| `RepositoryFactory` | `get_available_repository_types()` mapping | Built-in `local` and `duckdb`; a new backend is added to `RepositoryType` and this mapping (callers use `RepositoryFactory` directly, so there is no registration hook) |
+| `AssetRepositoryFactory` | `get_available_repository_types()` mapping | Built-in `local`, `duckdb` and `postgres`; a new backend is added to `RepositoryType` and this mapping (callers use `AssetRepositoryFactory` directly, so there is no registration hook) |
 | `DataStoreFactory` | `@DataStoreFactory.register(name="duckdb")` decorator on `DuckDBDocumentSetStorage` | Adapter registers itself on import; enterprise adds same way |
 
 `DataStoreFactory` requires the adapter module to be imported before `create()` is called.

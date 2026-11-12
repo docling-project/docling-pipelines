@@ -3374,9 +3374,9 @@ def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueSto
 3. **Implement Document Set Adapters**:
 
 Document set metadata is stored through the generic `AssetRepository[DocumentSet]` port, which
-`RepositoryFactory` creates. To add a metadata backend, implement `AssetRepository`, add a value to
-`RepositoryType` and map it in `RepositoryFactory.get_available_repository_types()`. `DocumentSetOperator`
-and the API call `RepositoryFactory.create_repository()` directly, so there is currently no registration
+`AssetRepositoryFactory` creates. To add a metadata backend, implement `AssetRepository`, add a value to
+`RepositoryType` and map it in `AssetRepositoryFactory.get_available_repository_types()`. `DocumentSetOperator`
+and the API call `AssetRepositoryFactory.create_repository()` directly, so there is currently no registration
 hook for metadata backends. The data plane uses its own factory:
 
 ```python
@@ -3458,7 +3458,7 @@ And the flow JSON:
 ```
 Ingest → Extract → [Other Operators] → DocumentSetOperator → [Downstream Operators]
                                               │
-                                              ├─> RepositoryFactory           → DuckDBAssetRepository → KeyValueStoragePort
+                                              ├─> AssetRepositoryFactory      → DuckDBAssetRepository → KeyValueStoragePort
                                               ├─> DataStoreFactory            → DuckDB adapter → TableStoragePort
                                               ├─> AttachmentRepositoryFactory → DuckDB adapter → KeyValueStoragePort
                                               └─> Original table (pass-through)
@@ -4499,7 +4499,7 @@ Hexagonal architecture implementation for document set management:
 - **DuckDB Adapters** (`adapters/duckdb/`):
   - **DuckDBDocumentSetStorage**: Data persistence using TableStoragePort
   - Registered via factory decorator for automatic discovery
-- Metadata is persisted by the generic `DuckDBAssetRepository[DocumentSet]` (`core/assets/common/`), created by `RepositoryFactory`
+- Metadata is persisted by the generic `DuckDBAssetRepository[DocumentSet]` (`core/assets/common/`), created by `AssetRepositoryFactory`
 
 **Factory Layer** (`factories/`):
 
@@ -4626,7 +4626,7 @@ The Assets Management module provides metadata management for document collectio
   - **Exceptions**: DocumentLibraryNotFoundError, DocumentLibraryAlreadyExistsError, InvalidDocumentLibraryError
 
 - **Persistence**:
-  - `DuckDBAssetRepository[DocumentLibrary]` (`core/assets/common/`), created by `RepositoryFactory`
+  - `DuckDBAssetRepository[DocumentLibrary]` (`core/assets/common/`), created by `AssetRepositoryFactory`
     - Stores each library as one JSON record in the `document_libraries` collection, including its `document_set_ids`
 
 - **Application Layer** (`application/services/`):
