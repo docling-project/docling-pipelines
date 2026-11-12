@@ -24,4 +24,4 @@
 - [x] 4.3 [frontend] Run `npm run build:bff`.
 - [x] 4.4 [frontend] Run `npx vitest run` for the whole frontend suite.
 - [x] 4.5 [frontend] Run `openspec validate standardise-bff-proxy --strict`.
-- [ ] 4.6 [frontend] After review and merge, run `openspec archive standardise-bff-proxy`.
+- [x] 4.6 [frontend] After review and merge, run `openspec archive standardise-bff-proxy`.
