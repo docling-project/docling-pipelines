@@ -13,6 +13,7 @@ import pyarrow as pa
 from data_processing.data_access import DataAccess, DataAccessFactory
 
 from docpipe.core.constants.constants import (
+    COMPLETED_JOB_STATUSES,
     TERMINAL_JOB_STATUSES,
     DocpipeConstants,
     ExecutionStatus,
@@ -673,17 +674,8 @@ class AbstractOrchestrator(ABC):
         if executor.get_operator().category != OperatorCategory.Ingest:
             # Special case to delete the data from vector store when input documents are deleted,
             # and no new documents are added for this flow execution
-            if executor.get_operator().category == OperatorCategory.VectorDB:
-                if deleted_docs_count > 0:
-                    return False
-                if self.job_id:
-                    try:
-                        from docpipe.core.incremental_metadata import get_incremental_update_service
-
-                        if get_incremental_update_service().get_soft_deleted_doc_ids(job_id=self.job_id):
-                            return False
-                    except Exception as e:
-                        self.logger.debug("Failed to retrieve soft-deleted doc IDs during skip evaluation: %s", e)
+            if executor.get_operator().category == OperatorCategory.VectorDB and deleted_docs_count > 0:
+                return False
             if all_tables_are_empty():
                 return True
         return False
@@ -1126,16 +1118,7 @@ class AbstractOrchestrator(ABC):
         job_run_id = self.job_run_id or ""
         flow_id = self.flow_id or ""
 
-        if (
-            self.job_status
-            not in (
-                ExecutionStatus.CANCELING,
-                ExecutionStatus.CANCELED,
-                ExecutionStatus.FAILING,
-                ExecutionStatus.FAILED,
-            )
-            and self.job_id
-        ):
+        if self.job_status in COMPLETED_JOB_STATUSES and self.job_id:
             try:
                 incremental_service = get_incremental_update_service()
                 incremental_service.purge_soft_deleted_docs(job_id=self.job_id)
@@ -1375,13 +1358,7 @@ class AbstractOrchestrator(ABC):
 
         # Check if table is empty
         if ingested_table.num_rows == 0:
-            soft_deleted_docs: set[str] = set()
-            try:
-                soft_deleted_docs = incremental_service.get_soft_deleted_doc_ids(job_id=self.job_id)
-            except Exception as e:
-                self.logger.debug("Could not retrieve soft-deleted docs: %s", e)
-
-            if not soft_deleted_docs:
+            if not deleted_doc_ids:
                 self.logger.info(
                     ">>> No documents ingested and no soft-deleted documents — marking downstream nodes as skipped and exiting early",
                     extra=self.common_log_arguments,
@@ -1411,7 +1388,7 @@ class AbstractOrchestrator(ABC):
                 return
             self.logger.info(
                 ">>> No documents ingested, but %s soft-deleted documents found — proceeding to downstream nodes for target cleanup",
-                len(soft_deleted_docs),
+                deleted_docs_count,
                 extra=self.common_log_arguments,
             )
 

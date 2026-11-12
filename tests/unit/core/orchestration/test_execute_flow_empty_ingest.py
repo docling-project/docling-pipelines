@@ -77,7 +77,10 @@ def _run_execute_flow(orchestrator, op_flow, global_config, ingest_result):
         patch.object(PythonOrchestrator, "_get_ingest_summary_message", return_value=""),
         patch(
             "docpipe.core.orchestration.abstract_orchestrator.get_incremental_update_service",
-            return_value=MagicMock(get_soft_deleted_doc_ids=MagicMock(return_value=set())),
+            return_value=MagicMock(
+                get_soft_deleted_doc_ids=MagicMock(return_value=set()),
+                process_ingested_docs=MagicMock(return_value=set()),
+            ),
         ),
         patch("docpipe.core.orchestration.abstract_orchestrator.clean_up_prefect_home") as mock_cleanup,
         patch.object(PythonOrchestrator, "_finalize_dag_flow") as mock_finalize,

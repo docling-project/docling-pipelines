@@ -683,6 +683,14 @@ TERMINAL_JOB_STATUSES = frozenset(
     ]
 )
 
+COMPLETED_JOB_STATUSES = frozenset(
+    [
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.COMPLETED_WITH_ERRORS,
+        ExecutionStatus.COMPLETED_WITH_WARNINGS,
+    ]
+)
+
 TERMINAL_NODE_STATES = frozenset(TERMINAL_JOB_STATUSES | {ExecutionStatus.SKIPPED})
 
 # Visual status indicators for batch execution summary (mirrors Enterprise NodeExecutionLogConstants)
