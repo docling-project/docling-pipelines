@@ -14,6 +14,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.milvus.batch_processor im
     DEFAULT_BATCH_SIZE,
     MilvusBatchProcessor,
 )
+from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import VARCHAR_MAX_LENGTH
 
 
 @pytest.fixture
@@ -369,7 +370,7 @@ class TestBatchCreation:
             ("doc3", {"doc_id": "doc3", "content": "text3", "embeddings": [0.5, 0.6]}),
         ]
 
-        batches = processor.create_batches(documents=documents)
+        batches, _ = processor.create_batches(documents=documents)
 
         assert len(batches) == 2
         assert len(batches[0]) == 2
@@ -390,7 +391,7 @@ class TestBatchCreation:
             ("doc2", {"doc_id": "doc2", "content": "text2", "embeddings": [0.3, 0.4]}),
         ]
 
-        batches = processor.create_batches(documents=documents)
+        batches, _ = processor.create_batches(documents=documents)
 
         assert len(batches) == 1
         assert len(batches[0]) == 2
@@ -402,9 +403,10 @@ class TestBatchCreation:
             collection_name="test_collection",
         )
 
-        batches = processor.create_batches(documents=[])
+        batches, failed_items = processor.create_batches(documents=[])
 
         assert len(batches) == 0
+        assert failed_items == []
 
 
 class TestBulkOperations:
@@ -561,7 +563,7 @@ class TestUnmappedContentFallback:
             available_features=self._dense_features(),
             feature_mappings=[{"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"}],
         )
-        batches = processor.create_batches(documents=[("pk1", {"content": "hello", "embeddings": [0.1]})])
+        batches, _ = processor.create_batches(documents=[("pk1", {"content": "hello", "embeddings": [0.1]})])
 
         assert batches[0][0] == {"vector_embeddings": [0.1], "text": "hello", "pk": "pk1"}
 
@@ -628,6 +630,122 @@ class TestUnmappedContentFallback:
         assert "text" not in processor.prepare_document(row_data={"content": "chunk text"})
 
 
+class TestVarcharLengthLimit:
+    """Values over the Milvus VARCHAR limit (counted in UTF-8 bytes) never fail a whole batch."""
+
+    @staticmethod
+    def _dense_features() -> dict:
+        return {
+            "content": {"available_for_vector_db": True, "type": "string"},
+            "title": {"available_for_vector_db": True, "type": "string"},
+            "embeddings": {"available_for_vector_db": True, "type": "vector"},
+        }
+
+    def test_fallback_writes_text_at_exact_limit(self, mock_client):
+        """Content of exactly VARCHAR_MAX_LENGTH bytes still fits and is written."""
+        processor = MilvusBatchProcessor(
+            client=mock_client, collection_name="test_collection", available_features=self._dense_features()
+        )
+        text = "a" * VARCHAR_MAX_LENGTH
+
+        assert processor.prepare_document(row_data={"content": text})["text"] == text
+
+    def test_fallback_leaves_text_empty_over_limit_and_keeps_row(self, mock_client):
+        """Over-limit content leaves ``text`` empty, but the row is still batched with its vector."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+            feature_mappings=[{"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"}],
+        )
+        documents = [("pk1", {"content": "a" * (VARCHAR_MAX_LENGTH + 1), "embeddings": [0.1]})]
+
+        batches, failed_items = processor.create_batches(documents=documents)
+
+        assert failed_items == []
+        assert batches == [[{"vector_embeddings": [0.1], "pk": "pk1"}]]
+
+    def test_fallback_counts_utf8_bytes_not_characters(self, mock_client):
+        """Multi-byte text under the limit in characters but over it in bytes is not written."""
+        processor = MilvusBatchProcessor(
+            client=mock_client, collection_name="test_collection", available_features=self._dense_features()
+        )
+        text = "中" * (VARCHAR_MAX_LENGTH // 3 + 1)  # 3 UTF-8 bytes per character
+        assert len(text) < VARCHAR_MAX_LENGTH < len(text.encode("utf-8"))
+
+        assert "text" not in processor.prepare_document(row_data={"content": text})
+
+    def test_explicit_content_mapping_over_limit_rejects_only_that_row(self, mock_client):
+        """An explicitly mapped over-limit value fails its row; the other rows are still batched."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+            feature_mappings=[{"feature_name": "content", "mapped_column_name": "text"}],
+        )
+        documents = [
+            ("ok1", {"content": "fine"}),
+            ("bad", {"content": "a" * (VARCHAR_MAX_LENGTH + 1)}),
+            ("ok2", {"content": "also fine"}),
+        ]
+
+        batches, failed_items = processor.create_batches(documents=documents)
+
+        assert [doc["pk"] for batch in batches for doc in batch] == ["ok1", "ok2"]
+        assert len(failed_items) == 1
+        assert failed_items[0]["index"]["_id"] == "bad"
+        reason = failed_items[0]["index"]["error"]["reason"]
+        assert "'text'" in reason
+        assert str(VARCHAR_MAX_LENGTH + 1) in reason
+
+    def test_explicit_mapping_rejection_counts_utf8_bytes(self, mock_client):
+        """Row-level rejection also measures UTF-8 bytes, matching the Milvus server."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+            feature_mappings=[{"feature_name": "content", "mapped_column_name": "text"}],
+        )
+        text = "中" * (VARCHAR_MAX_LENGTH // 3 + 1)
+
+        batches, failed_items = processor.create_batches(documents=[("bad", {"content": text})])
+
+        assert batches == []
+        assert [item["index"]["_id"] for item in failed_items] == ["bad"]
+
+    def test_other_varchar_field_over_limit_is_rejected(self, mock_client):
+        """Any mapped VARCHAR-typed feature is checked, not only the content field."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features=self._dense_features(),
+            feature_mappings=[{"feature_name": "title", "mapped_column_name": "doc_title"}],
+        )
+
+        batches, failed_items = processor.create_batches(
+            documents=[("bad", {"title": "t" * (VARCHAR_MAX_LENGTH + 1), "content": "short"})]
+        )
+
+        assert batches == []
+        assert "'doc_title'" in failed_items[0]["index"]["error"]["reason"]
+
+    def test_non_varchar_fields_are_not_length_checked(self, mock_client):
+        """JSON-typed fields are not VARCHAR, so large string values in them are not rejected."""
+        processor = MilvusBatchProcessor(
+            client=mock_client,
+            collection_name="test_collection",
+            available_features={"metadata": {"available_for_vector_db": True, "type": "json"}},
+            feature_mappings=[{"feature_name": "metadata", "mapped_column_name": "meta"}],
+        )
+
+        batches, failed_items = processor.create_batches(
+            documents=[("pk1", {"metadata": "x" * (VARCHAR_MAX_LENGTH + 1)})]
+        )
+
+        assert failed_items == []
+        assert len(batches) == 1
+
+
 class TestProcessBatchesEdgeCases:
     """Branches in process_batches not previously exercised."""
 
@@ -657,8 +775,7 @@ class TestProcessBatchesEdgeCases:
         success, failed = processor.process_batches(batches=[batch])
 
         assert success == 0
-        assert len(failed) == 3
-        assert all("error" in item for item in failed)
+        assert failed == [{"index": {"_id": pk, "error": {"reason": "connection lost"}}} for pk in ("a", "b", "c")]
 
     def test_process_batches_empty_batches_returns_zero(self, mock_client):
         """No batches → success=0, failed=[]."""
@@ -754,10 +871,11 @@ class TestQueryAndDeleteEdgeCases:
         """Batch is flushed when accumulated size exceeds MAX_BATCH_SIZE_MB."""
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.batch_processor import MAX_BATCH_SIZE_MB
 
-        # Build a document large enough that 2 of them exceed the byte limit
+        # Build a document large enough that 2 of them exceed the byte limit. The payload goes in a JSON
+        # field, because a VARCHAR value this large would be rejected by the VARCHAR length check.
         big_text = "x" * (MAX_BATCH_SIZE_MB * 1024 * 1024 // 2 + 1)
-        features = {"content": {"available_for_vector_db": True, "type": "string"}}
-        mappings = [{"feature_name": "content", "mapped_column_name": "text"}]
+        features = {"metadata": {"available_for_vector_db": True, "type": "json"}}
+        mappings = [{"feature_name": "metadata", "mapped_column_name": "meta"}]
         processor = MilvusBatchProcessor(
             client=mock_client,
             collection_name="test_collection",
@@ -766,13 +884,14 @@ class TestQueryAndDeleteEdgeCases:
             feature_mappings=mappings,
         )
         documents = [
-            ("d1", {"content": big_text}),
-            ("d2", {"content": big_text}),
-            ("d3", {"content": big_text}),
+            ("d1", {"metadata": {"blob": big_text}}),
+            ("d2", {"metadata": {"blob": big_text}}),
+            ("d3", {"metadata": {"blob": big_text}}),
         ]
-        batches = processor.create_batches(documents=documents)
+        batches, failed_items = processor.create_batches(documents=documents)
         # Each oversized doc should be in its own batch
         assert len(batches) >= 2
+        assert failed_items == []
 
     def test_create_batches_size_split_with_binary_vectors(self, mock_client):
         """Binary vector payloads count toward the batch size limit and force a split."""
@@ -797,7 +916,7 @@ class TestQueryAndDeleteEdgeCases:
         )
         documents = [(f"d{i}", {"doc_id": f"d{i}", "binary_embeddings": vector_bytes}) for i in range(3)]
 
-        batches = processor.create_batches(documents=documents)
+        batches, _ = processor.create_batches(documents=documents)
 
         assert len(batches) >= 2
         assert sum(len(batch) for batch in batches) == 3
