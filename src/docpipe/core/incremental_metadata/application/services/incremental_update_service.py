@@ -336,13 +336,15 @@ class IncrementalUpdateService:
             doc_ids: List of currently existing document IDs
 
         Returns:
-            Set of document IDs marked as soft-deleted
+            Set of all soft-deleted document IDs for the job, including records
+            left over from an earlier run that did not complete
 
         Raises:
             FlowExecutionFailedException: If marking fails
         """
         try:
-            return self.store.mark_missing_docs_as_deleted(job_id=job_id, doc_ids=doc_ids)
+            self.store.mark_missing_docs_as_deleted(job_id=job_id, doc_ids=doc_ids)
+            return self.store.get_soft_deleted_doc_ids(job_id=job_id)
         except Exception as exc:
             raise FlowExecutionFailedException(
                 f"Failed to mark soft-deleted document IDs for job_id={job_id}. Error: {exc!s}"
