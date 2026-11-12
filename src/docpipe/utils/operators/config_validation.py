@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Generic configuration validation utilities for operators.
 
 This module provides metadata-driven validation functions that introspect
@@ -7,7 +10,7 @@ operator ATTRIBUTES structures to validate configurations.
 from docpipe.core.constants import AttributeDataTypes, OperatorConstants
 
 
-def _validate_provider_config_keys(
+def validate_provider_config_keys(
     *,
     provider_config: dict,
     provider_schemas: dict,
@@ -108,7 +111,7 @@ def validate_config_from_metadata(config: dict, attributes: dict, errors: list[s
                     OperatorConstants.Config.PROVIDER
                 )
                 if active_provider:
-                    _validate_provider_config_keys(
+                    validate_provider_config_keys(
                         provider_config=attr_value,
                         provider_schemas=provider_schemas,
                         active_provider=active_provider,
