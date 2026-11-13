@@ -1,6 +1,6 @@
 {
-  "flow_name": "LiteLLM Schema-Free Entity Extraction",
-  "description": "Entity extraction using LiteLLM without predefined schema - auto-discovers entities from documents",
+  "flow_name": "LiteLLM Entity Extraction and Translation",
+  "description": "Classify documents, extract entities, and translate document text into French using LiteLLM",
   "global_config": {
     "doc_column": "content",
     "disable_validation": false,
@@ -67,6 +67,27 @@
       },
       "depends_on": [
         "classify"
+      ]
+    },
+    {
+      "name": "translate",
+      "type": "translation",
+      "config": {
+        "provider": "litellm",
+        "provider_config": {
+          "model_id": "openai/granite4:latest",
+          "api_base": "http://localhost:11434/v1",
+          "api_key": "${OLLAMA_API_KEY}"
+        },
+        "doc_column": "content",
+        "output_column": "translated_content",
+        "source_language": "auto",
+        "target_language": "French",
+        "preserve_markdown": true,
+        "max_input_tokens": 4096
+      },
+      "depends_on": [
+        "extract"
       ]
     }
   ]
