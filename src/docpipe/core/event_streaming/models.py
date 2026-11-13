@@ -1,10 +1,10 @@
-"""Domain models for file events and routing mappings."""
+"""Models for file events, progress notifications, and routing mappings."""
 
 from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 ROUTING_KEY_PATTERN = r"^[A-Za-z0-9_-]+$"
 
@@ -29,6 +29,26 @@ class InputEvent(BaseModel):
     )
     operation: InputEventOperation
     file_reference: str = Field(min_length=1, description="Reference to the source file")
+
+
+class NotificationStatus(StrEnum):
+    """Lifecycle points reported by progress notifications."""
+
+    RECEIVED = "Received"
+    STARTED = "Started"
+    COMPLETED = "Completed"
+
+
+class Notification(BaseModel):
+    """Timestamped progress marker for a flow stage or operator node."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: UUID = Field(description="UUID of the input event that caused this notification")
+    operation: str = Field(min_length=1, description="Flow stage or operator node associated with this notification")
+    status: NotificationStatus
+    timestamp: AwareDatetime = Field(description="Time when this lifecycle point was reached, including its timezone")
+    pages_processed: int | None = Field(default=None, ge=0, description="Page count available after extraction")
 
 
 class EventMapping(BaseModel):
