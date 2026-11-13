@@ -2,7 +2,7 @@
 """
 Milvus Integration Example
 Demonstrates end-to-end usage of the Milvus operator with real data.
-Uses environment variables from .env file for configuration.
+Uses exported environment variables or a repository .env file for configuration.
 """
 
 import sys
@@ -18,15 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb import VectorDBOperator
 from docpipe.utils.infrastructure.config import get_milvus_config
-
-# Check if .env file exists
-env_file = Path(__file__).parent.parent / ".env"
-if not env_file.exists():
-    print(".env file not found!")
-    print("This example requires Milvus configuration in a .env file.")
-    print(f"Please create {env_file} based on .env.example")
-    print("\nSkipping example execution.")
-    sys.exit(0)
 
 
 def create_sample_documents(num_docs=10, vector_dim=384):
