@@ -279,8 +279,9 @@ For end-to-end setup instructions, AppRole configuration walkthroughs, and secur
 
 | Symptom | Cause | Solution |
 |---|---|---|
-| `Cannot connect to Vault at http://127.0.0.1:8200` | Vault service is stopped or unreachable | Check if Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
+| `Vault AppRole login failed: connection failed` (or `Vault secret read failed (kv2): connection failed`) | Vault service is stopped or unreachable. Messages name a category only and omit the address | Check if Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
+| `Vault provider will not be registered - unsafe transport configuration` | Plaintext `http` to a non-loopback host, or `VAULT_TLS_SKIP_VERIFY` with a non-loopback host | Use an `https` `VAULT_ADDR`; reserve `VAULT_TLS_SKIP_VERIFY` for loopback development |
 | `Key 'api_key' not found at vault path 'docpipe/embeddings'` | Secret key mismatch or secret not written | Check secret path in Vault: `vault kv get secret/docpipe/embeddings` |
-| `VAULT_URI_MALFORMED` | URI does not follow `vault://<provider>/<path>#<key>` | Ensure URI has valid provider and includes `#field_key` suffix |
+| `VAULT_URI_MALFORMED` / `malformed reference` | The value contains `vault://` but is not exactly one valid reference (truncated, embedded, `..` segment, whitespace, over 1024 characters). It is rejected and never used as a literal | Use the whole value `vault://<provider>/<path>[#<key>]` |
 | `Unregistered vault provider 'hashicorp'` | Vault provider is not initialized | Ensure `VAULT_ENABLED=true` or configure `secrets.vault` in config YAML |
 | `'str' object is not a mapping` | Complex credential field expected dictionary | Use Pattern B: ensure Vault contains valid JSON string or dictionary |
