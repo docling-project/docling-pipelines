@@ -419,6 +419,22 @@ class InMemoryJobStatsStore(JobStatsStore):
         with self._global_lock:
             return list(self._job_stats.keys())
 
+    @staticmethod
+    def _matches_job_run_filters(
+        job_stats: JobStats,
+        *,
+        job_id: str | None,
+        job_ids_set: set[str] | None,
+        status: ExecutionStatus | str | None,
+    ) -> bool:
+        if job_id and job_stats.job_id != job_id:
+            return False
+        if job_ids_set and job_stats.job_id not in job_ids_set:
+            return False
+        if status and job_stats.status != status:
+            return False
+        return True
+
     def list_job_runs(
         self,
         job_id: str | None = None,
@@ -446,12 +462,7 @@ class InMemoryJobStatsStore(JobStatsStore):
             result = []
 
             for job_stats in self._job_stats.values():
-                # Apply filters
-                if job_id and job_stats.job_id != job_id:
-                    continue
-                if job_ids_set and job_stats.job_id not in job_ids_set:
-                    continue
-                if status and job_stats.status != status:
+                if not self._matches_job_run_filters(job_stats, job_id=job_id, job_ids_set=job_ids_set, status=status):
                     continue
 
                 # Deep copy to prevent external mutations
@@ -462,3 +473,30 @@ class InMemoryJobStatsStore(JobStatsStore):
 
             # Apply limit
             return result[:limit]
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+        """
+        job_ids_set = set(job_ids) if job_ids else None
+
+        with self._global_lock:
+            return sum(
+                1
+                for job_stats in self._job_stats.values()
+                if self._matches_job_run_filters(job_stats, job_id=job_id, job_ids_set=job_ids_set, status=status)
+            )
