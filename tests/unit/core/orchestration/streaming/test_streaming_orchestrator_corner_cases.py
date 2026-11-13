@@ -4,7 +4,9 @@
 """StreamingOrchestrator corner cases: empty inputs and unknown operators."""
 
 import re
+from copy import deepcopy
 from typing import Any
+from unittest.mock import call
 from uuid import UUID
 
 import pyarrow as pa
@@ -12,6 +14,7 @@ import pytest
 
 from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.event_streaming.models import InputEvent
 from docpipe.core.operators.functional.branching_operator import BranchingOperator
 from docpipe.core.operators.functional.chunker import ChunkerOperator
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
@@ -19,6 +22,7 @@ from docpipe.core.orchestration.streaming.graph.execution_engine import GraphExe
 from docpipe.core.orchestration.streaming.graph.flow_model import FlowGraph, Node
 from docpipe.core.orchestration.streaming.graph.output_buffer import OperatorOutput
 from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
+from docpipe.integrations.secrets import secret_provider
 
 INGEST_ID = UUID("00000000-0000-0000-0000-000000000001")
 NEXT_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -46,6 +50,99 @@ def _empty_ingest(self, table, *args, **kwargs):
     """Mimic ``IngestSourceOperator`` finding no documents: an empty table with the ingest columns."""
     schema = pa.schema([("id", pa.string()), ("name", pa.string()), ("document_format", pa.string())])
     return [schema.empty_table()], {}
+
+
+@pytest.mark.parametrize("file_reference", ["vault://regression/event#private", "/documents/report.pdf"])
+def test_streaming_resolves_config_secrets_without_resolving_event(*, mocker, monkeypatch, file_reference):
+    """Resolve stored credentials while passing runtime event data unchanged to ingest."""
+    provider = mocker.Mock(spec=secret_provider.SecretProvider)
+    provider.get_secret.side_effect = lambda **kwargs: {
+        ("global", "extensions"): "pdf",
+        ("node", "path"): "/documents",
+    }[(kwargs["path"], kwargs["key"])]
+    monkeypatch.setattr(secret_provider, "_providers", {"regression": provider})
+    event = InputEvent.model_validate(
+        {
+            "event_id": "00000000-0000-0000-0000-000000000004",
+            "event_timestamp": "2026-11-11T00:00:00Z",
+            "routing_key": "documents",
+            "operation": "create",
+            "file_reference": file_reference,
+        }
+    )
+    flow = {
+        "name": "event-secrets-flow",
+        "global_config": {"include_filter": "vault://regression/global#extensions", "max_files": 1},
+        "dag": [
+            _node(
+                INGEST_ID,
+                "source",
+                "ingest_source",
+                {
+                    "provider": "filesystem",
+                    "provider_config": {"paths": ["vault://regression/node#path"]},
+                    "max_files": 2,
+                },
+                [],
+                [],
+            ),
+        ],
+    }
+    params = {"input_event": event.model_dump(mode="json"), "max_files": 3}
+    original_flow, original_params = deepcopy(flow), deepcopy(params)
+
+    def capture_ingest(self, table):
+        assert self.input_event == event
+        assert self.config["input_event"] == original_params["input_event"]
+        assert self.config["provider_config"]["paths"] == ["/documents"]
+        assert self.config["include_filter"] == "pdf"
+        assert self.config["max_files"] == 3
+        return [pa.table({})], {}
+
+    transform = mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=capture_ingest)
+
+    StreamingOrchestrator().execute(flow=flow, params=params)
+
+    transform.assert_called_once()
+    assert provider.get_secret.call_args_list == [call(path="global", key="extensions"), call(path="node", key="path")]
+    assert flow == original_flow
+    assert params == original_params
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_max_files"),
+    [
+        ({}, 99),
+        ({"ingest_source": {"max_files": 3}}, 3),
+        ({str(INGEST_ID): {"max_files": 2}, "ingest_source": {"max_files": 3}}, 2),
+        ({"source": {"max_files": 1}, str(INGEST_ID): {"max_files": 2}, "ingest_source": {"max_files": 3}}, 1),
+        ({"source": {}, str(INGEST_ID): {"max_files": 2}, "ingest_source": {"max_files": 3}}, 99),
+    ],
+    ids=["node-config", "type", "id-before-type", "name-before-id", "empty-name-override"],
+)
+@pytest.mark.parametrize("runtime_max_files", [None, 4], ids=["saved-config", "runtime-override"])
+def test_streaming_applies_operator_overrides(*, mocker, overrides, expected_max_files, runtime_max_files):
+    """Apply saved overrides by name, ID, or type before runtime parameters without mutating the flow."""
+    flow = {
+        "name": "operator-overrides-flow",
+        "global_config": {"max_files": 10, **overrides},
+        "dag": [_node(INGEST_ID, "source", "ingest_source", {**INGEST_CONFIG, "max_files": 99}, [], [])],
+    }
+    params = {} if runtime_max_files is None else {"max_files": runtime_max_files}
+    original_flow, original_params = deepcopy(flow), deepcopy(params)
+
+    def capture_ingest(self, table):
+        expected = expected_max_files if runtime_max_files is None else runtime_max_files
+        assert self.config["max_files"] == expected
+        return [pa.table({})], {}
+
+    transform = mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=capture_ingest)
+
+    StreamingOrchestrator().execute(flow=flow, params=params)
+
+    transform.assert_called_once()
+    assert flow == original_flow
+    assert params == original_params
 
 
 def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
