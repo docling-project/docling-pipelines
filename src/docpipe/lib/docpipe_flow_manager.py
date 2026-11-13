@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Programmatic DocpipeFlowManager for embedding docpipe in notebooks and applications.
 
@@ -76,7 +79,7 @@ class DocpipeFlowManager:
             job_id: Unique job identifier (priority: parameter > flow_def > UUID)
             job_run_id: Unique job run identifier (defaults to job_id if not provided)
             flow_id: Flow identifier (priority: parameter > flow_def > job_id)
-            enable_custom_operators: Whether to enable custom operators (default: from env or True)
+            enable_custom_operators: Whether to enable custom operators (default: from env, else disabled)
             enable_execution_reporter: Whether to enable user-friendly console output (default: True)
             configure_logging: When True (default), installs handlers and formatters on the
                                root docpipe logger. Set to False when the calling application
@@ -244,11 +247,9 @@ class DocpipeFlowManager:
 
     def _initialize_execution_environment(self) -> None:
         """Initialize orchestrator and session for execution."""
-        # Create orchestrator with custom operator settings
-        # Default to True if enable_custom_operators is None
-        enable_custom = self.enable_custom_operators if self.enable_custom_operators is not None else True
+        # Create orchestrator with custom operator settings; None resolves to env, else disabled
         self.orchestrator = OrchestratorFactory.create_orchestrator(
-            enable_custom_operators=enable_custom,
+            enable_custom_operators=self.enable_custom_operators,
             custom_operator_packages=self.custom_operator_packages if self.custom_operator_packages else None,
             execution_reporter=self.execution_reporter,
         )
@@ -294,11 +295,10 @@ class DocpipeFlowManager:
 
         try:
             # Create orchestrator with custom operator settings
-            enable_custom = self.enable_custom_operators if self.enable_custom_operators is not None else True
             custom_packages = self.custom_operator_packages if len(self.custom_operator_packages) > 0 else None
 
             temp_orchestrator = OrchestratorFactory.create_orchestrator(
-                enable_custom_operators=enable_custom,
+                enable_custom_operators=self.enable_custom_operators,
                 custom_operator_packages=custom_packages,
             )
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pure-Python operator executor for in-process flow orchestration."""
 
 import copy
@@ -35,7 +38,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
         operator: str,
         params: dict,
         job_stats_service: JobStatsService | None = None,
-        enable_custom_operators: bool = True,
+        enable_custom_operators: bool | None = None,
         custom_operator_packages: list[str] | None = None,
     ):
         """Initialise the executor and build the operator factory.
@@ -105,7 +108,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
             self.set_default_node_stats(tables=tables)
             is_merge_operator = isinstance(tables, dict)
             if is_merge_operator:
-                logger.info(f"Invoking the transform method with multiple tables for the {op.short_name} operator...")
+                logger.info("Invoking the transform method with multiple tables for the %s operator...", op.short_name)
                 result = op.transform(table=pa.table({}), tables=tables)
             else:
                 result = op.transform(tables)
@@ -166,7 +169,9 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
 
         # Log error with transaction id
         logger.error(
-            f"Error during transformation in node id: {node_id} transaction_ID: {get_session_info().transaction_id!s}",
+            "Error during transformation in node id: %s transaction_ID: %s",
+            node_id,
+            get_session_info().transaction_id,
             stack_info=True,
             exc_info=True,
         )
@@ -240,7 +245,7 @@ class PythonOperatorExecutor(AbstractOperatorExecutor):
         Idempotent, and never raises.
         """
         op, self._operator_instance = self._operator_instance, None
-        if op is None or not hasattr(op, "cleanup"):
+        if op is None:
             return
         try:
             op.cleanup()

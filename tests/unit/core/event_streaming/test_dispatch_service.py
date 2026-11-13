@@ -1,11 +1,14 @@
-"""Unit tests for event dispatch requests."""
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
+"""Unit tests for synchronous in-process event dispatch."""
+
+from copy import deepcopy
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
 
-from docpipe.core.constants.constants import EnvironmentVariables
+from docpipe.core.assets.flows.domain.models.flow import Flow
 from docpipe.core.event_streaming.dispatch_service import EventDispatchService
 from docpipe.core.event_streaming.models import EventMapping, InputEvent
 
@@ -22,65 +25,81 @@ def _event() -> InputEvent:
     )
 
 
-def test_dispatch_submits_mapped_flow_run(*, monkeypatch, mocker) -> None:
-    """Resolve the routing key and forward the event as a job-run request."""
-    monkeypatch.setenv(EnvironmentVariables.DOCPIPE_API_BASE_URL, "https://docpipe.example/")
+@pytest.fixture
+def dispatch_services():
+    """Provide a saved authoring flow and isolated dispatch dependencies."""
     mapping_service = MagicMock()
     mapping_service.get_mapping.return_value = EventMapping(key="invoices", flow_id="saved-flow")
-    response = MagicMock()
-    response.json.return_value = {"job_run_id": "run-123"}
-    post = mocker.patch("docpipe.core.event_streaming.dispatch_service.httpx.post", return_value=response)
-    event = _event()
-
-    result = EventDispatchService(mapping_service=mapping_service).dispatch(event=event)
-
-    assert result == {"job_run_id": "run-123"}
-    mapping_service.get_mapping.assert_called_once_with(key="invoices")
-    post.assert_called_once_with(
-        "https://docpipe.example/api/v1/job_runs",
-        json={
-            "entity": {
-                "job": {"asset_ref": "saved-flow"},
-                "job_run": {
-                    "configuration": {
-                        "input_event": event.model_dump(mode="json"),
-                        "metadata": {
-                            "event_id": "550e8400-e29b-41d4-a716-446655440000",
-                            "event_timestamp": "2026-10-12T12:00:00+00:00",
-                            "routing_key": "invoices",
-                            "operation": "create",
-                        },
-                    }
-                },
-            }
+    flow_service = MagicMock()
+    flow_service.get_flow.return_value = Flow(
+        asset_id="saved-flow",
+        name="invoices",
+        definition={
+            "flow_name": "invoices",
+            "flow": [
+                {
+                    "type": "ingest_source",
+                    "name": "source",
+                    "config": {"provider": "filesystem", "provider_config": {"paths": ["/documents"]}},
+                }
+            ],
         },
-        headers={"X-Global-Transaction-Id": "550e8400-e29b-41d4-a716-446655440000"},
-        timeout=30.0,
     )
-    response.raise_for_status.assert_called_once_with()
-
-
-def test_dispatch_propagates_api_failure(*, mocker) -> None:
-    """Propagate an unsuccessful job-run API response to the listener."""
-    mapping_service = MagicMock()
-    mapping_service.get_mapping.return_value = EventMapping(key="invoices", flow_id="saved-flow")
-    response = MagicMock()
-    response.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "API unavailable", request=MagicMock(), response=MagicMock()
+    orchestrator = MagicMock()
+    service = EventDispatchService(
+        mapping_service=mapping_service, flow_service=flow_service, orchestrator=orchestrator
     )
-    mocker.patch("docpipe.core.event_streaming.dispatch_service.httpx.post", return_value=response)
-
-    with pytest.raises(httpx.HTTPStatusError, match="API unavailable"):
-        EventDispatchService(mapping_service=mapping_service).dispatch(event=_event())
+    return service, mapping_service, flow_service, orchestrator
 
 
-def test_dispatch_does_not_call_api_when_mapping_is_missing(*, mocker) -> None:
-    """Do not submit a job run when the routing key cannot be resolved."""
-    mapping_service = MagicMock()
+def test_dispatch_executes_mapped_flow_in_process(*, dispatch_services) -> None:
+    """Compile the saved flow and execute it directly with the input event."""
+    service, mapping_service, flow_service, orchestrator = dispatch_services
+    event = _event()
+    original_definition = deepcopy(flow_service.get_flow.return_value.definition)
+
+    result = service.dispatch(event=event)
+
+    assert result is None
+    mapping_service.get_mapping.assert_called_once_with(key="invoices")
+    flow_service.get_flow.assert_called_once_with(flow_id="saved-flow")
+    orchestrator.execute.assert_called_once()
+    execution = orchestrator.execute.call_args.kwargs
+    assert execution["params"] == {"input_event": event.model_dump(mode="json")}
+    assert execution["flow"]["name"] == "invoices"
+    assert execution["flow"]["dag"][0]["operator"] == "ingest_source"
+    assert execution["flow"]["dag"][0]["config"] == original_definition["flow"][0]["config"]
+    assert flow_service.get_flow.return_value.definition == original_definition
+
+
+def test_dispatch_propagates_execution_failure(*, dispatch_services) -> None:
+    """Propagate a streaming execution failure to the listener."""
+    service, _, _, orchestrator = dispatch_services
+    orchestrator.execute.side_effect = RuntimeError("sink unavailable")
+
+    with pytest.raises(RuntimeError, match="sink unavailable"):
+        service.dispatch(event=_event())
+
+
+def test_dispatch_does_not_execute_when_mapping_is_missing(*, dispatch_services) -> None:
+    """Do not load or execute a flow when its routing key cannot be resolved."""
+    service, mapping_service, flow_service, orchestrator = dispatch_services
     mapping_service.get_mapping.side_effect = LookupError("unknown routing key")
-    post = mocker.patch("docpipe.core.event_streaming.dispatch_service.httpx.post")
 
-    with pytest.raises(LookupError, match="unknown routing key"):
-        EventDispatchService(mapping_service=mapping_service).dispatch(event=_event())
+    with pytest.raises(LookupError, match="unknown routing key") as error:
+        service.dispatch(event=_event())
 
-    post.assert_not_called()
+    assert "unknown routing key" in str(error.value)
+    assert error.value is mapping_service.get_mapping.side_effect
+
+    flow_service.get_flow.assert_not_called()
+    orchestrator.execute.assert_not_called()
+
+
+def test_dispatch_propagates_failed_flow_load(*, dispatch_services) -> None:
+    """The original loading error reaches the listener unchanged."""
+    service, _, flow_service, _ = dispatch_services
+    flow_service.get_flow.side_effect = LookupError("flow deleted")
+    with pytest.raises(LookupError, match="flow deleted") as error:
+        service.dispatch(event=_event())
+    assert error.value is flow_service.get_flow.side_effect

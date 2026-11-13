@@ -61,6 +61,7 @@ class DocpipeConstants:
     DATA_FOLDER = "data_folder"
     OPERAND_NAMESPACE = "OPERAND_NAMESPACE"
     DAG = "dag"
+    VAULT_PLACEHOLDER = "__vault_placeholder__"
     DEFINITION = "definition"
     DESCRIPTION = "description"
     FLOW = "flow"
@@ -129,7 +130,7 @@ class DocpipeConstants:
 
     # Custom Operator Control
     ENABLE_CUSTOM_OPERATORS = "enable_custom_operators"
-    ENABLE_CUSTOM_OPERATORS_DEFAULT = True
+    ENABLE_CUSTOM_OPERATORS_DEFAULT = False
 
     # Operator Ownership Tiers
     OWNER_DOCPIPE = "docpipe"
@@ -355,8 +356,11 @@ class EnvironmentVariables:
     DOCPIPE_LINEAGE_PRODUCER = "DOCPIPE_LINEAGE_PRODUCER"
     DOCPIPE_LINEAGE_STRICT = "DOCPIPE_LINEAGE_STRICT"
 
+    # Hugging Face offline mode (read natively by huggingface_hub / transformers)
+    HF_HUB_OFFLINE = "HF_HUB_OFFLINE"
+    TRANSFORMERS_OFFLINE = "TRANSFORMERS_OFFLINE"
+
     DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
-    DOCPIPE_API_BASE_URL = "DOCPIPE_API_BASE_URL"
     KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
     KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
     KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
@@ -452,6 +456,44 @@ class ServiceConstants:
     # a per-instance limit of 8 req/s, so concurrency stays opt-in).
     DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
     DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
+    # watsonx.ai request timeout (seconds) applied by every watsonx path (inference, embeddings,
+    # text detection).
+    DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
+
+    # Hugging Face local HAP text classification (text_detection capability).
+    # Model id, revision and toxic labels are one unit: change them together, in a release.
+    # The pinned revision and default labels apply only to the default model; any other
+    # model must name its toxic labels explicitly, because generic labels do not mean
+    # "toxic" for every model.
+    DEFAULT_HUGGINGFACE_HAP_MODEL_ID = "ibm-granite/granite-guardian-hap-38m"
+    DEFAULT_HUGGINGFACE_HAP_REVISION = "faf9291163c7363d4a7ba7fc1dc72243214af931"  # pragma: allowlist secret
+    DEFAULT_HUGGINGFACE_HAP_TOXIC_LABELS: tuple[str, ...] = ("LABEL_1",)
+    DEFAULT_HUGGINGFACE_HAP_MAX_LENGTH = 512  # model tokens per scored window
+    DEFAULT_HUGGINGFACE_HAP_BATCH_SIZE = 32  # spans per forward pass
+    DEFAULT_HUGGINGFACE_HAP_THRESHOLD = 0.8
+    HUGGINGFACE_HAP_TOXIC_LABELS_HINT = (
+        "Check the model's config.json id2label on Hugging Face for available label names."
+    )
+
+    # Local Hugging Face sequence-classification option values
+    HUGGINGFACE_ACTIVATION_SOFTMAX = "softmax"
+    HUGGINGFACE_ACTIVATION_SIGMOID = "sigmoid"
+    HUGGINGFACE_ACTIVATION_AUTO = "auto"  # sigmoid for multi-label models, softmax otherwise
+    HUGGINGFACE_ACTIVATIONS: tuple[str, ...] = (
+        HUGGINGFACE_ACTIVATION_SOFTMAX,
+        HUGGINGFACE_ACTIVATION_SIGMOID,
+        HUGGINGFACE_ACTIVATION_AUTO,
+    )
+    HUGGINGFACE_DEVICE_AUTO = "auto"  # cuda when available, cpu otherwise
+    HUGGINGFACE_DEVICE_CPU = "cpu"
+    HUGGINGFACE_DEVICE_CUDA = "cuda"
+    HUGGINGFACE_DEVICE_MPS = "mps"
+    HUGGINGFACE_DEVICES: tuple[str, ...] = (
+        HUGGINGFACE_DEVICE_AUTO,
+        HUGGINGFACE_DEVICE_CPU,
+        HUGGINGFACE_DEVICE_CUDA,
+        HUGGINGFACE_DEVICE_MPS,
+    )
 
 
 class ProviderConstants:
@@ -467,6 +509,7 @@ class ProviderConstants:
 
     OLLAMA: Final[str] = "ollama"
     WATSONX: Final[str] = "watsonx"
+    HUGGINGFACE: Final[str] = "huggingface"
 
 
 class DoclingClientConstants:

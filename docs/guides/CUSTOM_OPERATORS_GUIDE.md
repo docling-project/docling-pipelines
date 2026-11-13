@@ -93,15 +93,20 @@ cp examples/custom_operators/hello_operator.py ~/my_custom_operators/hello_opera
 
 ### Step 2: Register the Operator
 
-Point `DOCPIPE_CUSTOM_OPERATORS` at a file or a directory:
+Custom operators are **disabled by default**. Enable them, then point `DOCPIPE_CUSTOM_OPERATORS` at a file or a directory:
 
 ```bash
+# Required: custom operators are off unless enabled
+export DOCPIPE_ENABLE_CUSTOM_OPERATORS=true
+
 # Single file
 export DOCPIPE_CUSTOM_OPERATORS="./examples/custom_operators/hello_operator.py"
 
 # Directory (scans recursively for .py files)
 export DOCPIPE_CUSTOM_OPERATORS="$HOME/my_custom_operators"
 ```
+
+Custom operators run arbitrary Python inside the pipeline process, so enable them only where the operator sources are trusted. The `/api/v1/custom_operators` routes additionally require a bearer token, and every token holder can run code on the server once loading is enabled (see [Security Best Practices](SECURITY_BEST_PRACTICES.md#validate-custom-operators-before-use)). While loading is disabled, an upload or a script replacement returns 409 and nothing is stored.
 
 ### Step 3: Use in a Flow
 
@@ -389,9 +394,12 @@ Choose based on your use case:
 
 ### Method 1: Environment Variable (Recommended)
 
-Set the `DOCPIPE_CUSTOM_OPERATORS` environment variable to point to your operators directory:
+Enable custom operators and set the `DOCPIPE_CUSTOM_OPERATORS` environment variable to point to your operators directory:
 
 ```bash
+# Custom operators are disabled by default
+export DOCPIPE_ENABLE_CUSTOM_OPERATORS=true
+
 # Single directory
 export DOCPIPE_CUSTOM_OPERATORS="/path/to/custom_operators"
 
@@ -1275,6 +1283,7 @@ export DOCPIPE_CUSTOM_OPERATORS="/local/path:s3://bucket/path"
 ## Troubleshooting
 
 **Operator not found:**
+- ✅ Verify `DOCPIPE_ENABLE_CUSTOM_OPERATORS=true` is set (custom operators are disabled by default)
 - ✅ Verify `DOCPIPE_CUSTOM_OPERATORS` is set correctly
 - ✅ Check that the directory path exists and contains `.py` files
 - ✅ Ensure the operator class inherits from `AbstractOperator`

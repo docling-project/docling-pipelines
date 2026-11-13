@@ -1,59 +1,52 @@
-"""Resolve events and submit mapped flow runs through the job-run API."""
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
-import json
-import os
-from typing import Any
+"""Resolve events and execute mapped flows in process."""
 
-import httpx
-
-from docpipe.core.constants.constants import EnvironmentVariables
+from docpipe.core.assets.flows.application.services import AuthoringCompiler, FlowService
+from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
+from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.event_streaming.mapping_service import EventMappingService
 from docpipe.core.event_streaming.models import InputEvent
+from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
+from docpipe.exceptions.docpipe_exceptions import FlowInvalidDataException
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.orchestration.elyra_converter import ElyraConstants, ElyraConverter
 
 logger = get_logger()
 
 
 class EventDispatchService:
-    """Dispatch validated events to their mapped flows through REST."""
+    """Dispatch validated events to their mapped streaming flows."""
 
-    def __init__(self, *, mapping_service: EventMappingService) -> None:
+    def __init__(
+        self, *, mapping_service: EventMappingService, flow_service: FlowService, orchestrator: StreamingOrchestrator
+    ) -> None:
         self._mapping_service = mapping_service
-        self._api_base_url = os.environ.get(EnvironmentVariables.DOCPIPE_API_BASE_URL, "http://127.0.0.1:8080").rstrip(
-            "/"
-        )
+        self._flow_service = flow_service
+        self._orchestrator = orchestrator
 
-    def dispatch(self, *, event: InputEvent) -> dict[str, Any]:
-        """Resolve the event routing key and submit an asynchronous job run."""
+    def dispatch(self, *, event: InputEvent) -> None:
+        """Resolve the saved flow and wait for streaming execution to complete."""
         mapping = self._mapping_service.get_mapping(key=event.routing_key)
-        event_payload = event.model_dump(mode="json")
-        event_metadata = {
-            "event_id": str(event.event_id),
-            "event_timestamp": event.event_timestamp.isoformat(),
-            "routing_key": event.routing_key,
-            "operation": event.operation.value,
-        }
-        request_payload = {
-            "entity": {
-                "job": {"asset_ref": mapping.flow_id},
-                "job_run": {
-                    "configuration": {
-                        "input_event": event_payload,
-                        "metadata": event_metadata,
-                    }
-                },
-            }
-        }
-        response = httpx.post(
-            f"{self._api_base_url}/api/v1/job_runs",
-            json=request_payload,
-            headers={"X-Global-Transaction-Id": event_metadata["event_id"]},
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        result = response.json()
+        flow_definition = self._flow_service.get_flow(flow_id=mapping.flow_id).definition
+        if DocpipeConstants.FLOW_NAME in flow_definition:
+            authoring_flow = AuthoringFlow.from_dict(data=flow_definition)
+            runtime_flow = AuthoringCompiler().compile(authoring_flow=authoring_flow)
+        elif ElyraConstants.DOC_TYPE in flow_definition:
+            runtime_flow = ElyraConverter().transform_elyra_to_internal(
+                elyra_json=flow_definition, flow_id=mapping.flow_id
+            )[DocpipeConstants.FLOW]
+        else:
+            raise FlowInvalidDataException(
+                message=f"Flow {mapping.flow_id} has unknown format.", field_name="definition"
+            )
+
+        self._orchestrator.execute(flow=runtime_flow, params={"input_event": event.model_dump(mode="json")})
         logger.info(
-            "Event job run submitted: %s",
-            json.dumps({**event_metadata, "job_run_id": result.get("job_run_id")}),
+            "Event processing completed event_id=%s flow_id=%s routing_key=%s operation=%s",
+            event.event_id,
+            mapping.flow_id,
+            event.routing_key,
+            event.operation.value,
         )
-        return result

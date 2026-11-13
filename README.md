@@ -15,6 +15,20 @@ Docling pipelines is an enterprise-grade document curation pipeline for Retrieva
 
 It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, Box, and more) and extracts content and entities from PDF, DOCX, HTML, images, and other formats using [Docling](https://github.com/docling-project/docling). Extracted content is curated for LLMs, converted into chunks and embeddings, and stored in a vector database such as Milvus or OpenSearch.
 
+## What's new in 2.1.0
+
+- **[Event-driven pipelines](docs/guides/EVENT_STREAMING_GUIDE.md)** — route Kafka events to saved flows, with file event support for Box, Dropbox, Google Drive, OneDrive, and SharePoint.
+- **[Entity storage](docs/operators/storage/entity_store_operator_readme.md)** — store curated entities in DuckDB or PostgreSQL with upserts and automatic schema evolution.
+- **[Local PII detection](docs/operators/quality/pii_and_hap_readme.md)** — use Microsoft Presidio as a local PII detection provider.
+- **[Distributed deduplication](docs/operators/quality/ededup_readme.md)** — deduplicate content across batches and workers using a shared registry.
+- **[Local archive ingestion](docs/operators/ingest/ingest_source_readme.md)** — process files from ZIP, TAR, TAR.GZ, TGZ, and GZ archives.
+- **[PostgreSQL asset repositories](docs/guides/ADVANCED_CONFIGURATION.md)** — store document library and document set assets in PostgreSQL.
+- **Faster processing** — improve embedding throughput with [cross-document batching](docs/operators/functional/embeddings_readme.md) and reuse [Docling converters](docs/operators/extract/extract_operator_readme.md) across extraction tasks.
+- **[CPU and GPU containers](docs/deployment/DOCKER_COMPOSE.md)** — build Docker images for the desired compute backend.
+- **[Automatic vector index management](docs/operators/vectordb/vectordb_readme.md)** — create missing indexes and validate existing schemas automatically.
+
+**Upgrade note:** The VectorDB `create_index` option is ignored with a warning. Index management is now automatic. See the [changelog](CHANGELOG.md#210---2026-11-04) for more details.
+
 ## Features
 
 - 📥 **[Multi-source ingestion](docs/operators/ingest/ingest_source_readme.md)** — local filesystem, Amazon S3, IBM COS, SharePoint, OneDrive, Google Drive, Box, Dropbox, and web pages
@@ -23,7 +37,7 @@ It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, B
 - ✂️ **[Chunking](docs/operators/functional/chunker_readme.md)** — Docling-native and semantic chunking strategies
 - 🔢 **[Embeddings](docs/operators/functional/embeddings_readme.md)** — vector embedding generation for any downstream vector store
 - 🔍 **[Quality operators](docs/reference/OPERATORS.md)** — language detection, readability scoring, PII/HAP detection, deduplication, redaction, SQL filtering, document classification, and ML enrichment
-- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch or Milvus (including container-free Milvus Lite), or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
+- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch, Milvus (including container-free Milvus Lite), or Weaviate, or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
 - 🔀 **[DAG-based flows](docs/guides/FLOW_AUTHORING_FORMAT.md) & [micro-batching](docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md)** — define pipelines as JSON with automatic dependency resolution, parallel micro-batching, and distributed execution via Prefect (thread pools, process pools, or Docker work pools)
 - 🔄 **[Incremental processing](docs/reference/GLOBAL_CONFIG.md#incremental-processing)** — stateful delta runs (backed by Parquet or PostgreSQL) that track document changes, skip unchanged files, and optionally synchronize source deletions
 - ⚡ **[Event-driven streaming](docs/guides/EVENT_STREAMING_GUIDE.md)** — real-time Kafka event consumption with Schema Registry support and routing-key-to-flow mappings for automated create/update/delete triggers
@@ -175,7 +189,7 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 | **Extract** | Document Extractor (`extract_operator`), ACL Extraction (`acl_operator`) |
 | **Functional** | Chunking (`chunker`), Embeddings (`embeddings`), Branching Operator (`branching`), Merge Operator (`merge`), Document ID Hash (`doc_id_hash`), Entity Curation (`entity_curation`), No-op (`noop`) |
 | **Quality** | Language Annotator (`lang_detect`), Readability Operator (`readability`), PII and HAP Annotator (`pii_and_hap`), Document Classifier (`document_classifier`), Annotation Filter (`sql_filter`), Redaction (`redaction`), De-duplicator (`ededup`), ML Text Enrichment (`ml_enrichment`), Document Quality (`doc_quality`) |
-| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, and Milvus Lite |
+| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, Milvus Lite, and Weaviate |
 | **Storage** | Document Set (`document_set`) — DuckDB/PostgreSQL-backed document collections, Storage Output (`storage_output`) — write pipeline output to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive |
 
 For per-operator configuration guides, see [Operator Configuration Guides](docs/reference/OPERATORS.md).

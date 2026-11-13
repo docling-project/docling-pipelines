@@ -215,7 +215,7 @@ Before starting, you'll need:
 - **Ollama** - Local LLM server for embeddings
 - **Podman or Docker** - For running OpenSearch
 - **Basic command-line knowledge** - For running commands
-- **ffmpeg** - Required for audio/video processing (M4A, AAC, OGG, FLAC, MP4, AVI, MOV formats)
+- **ffmpeg** - Required for audio/video processing (M4A, AAC, OGG, FLAC, MP4, AVI, MOV, MKV, WebM formats)
 
 ---
 
@@ -263,7 +263,7 @@ uv --version
 
 ### Installing ffmpeg (Required for Audio/Video Processing)
 
-ffmpeg is required for processing audio formats (M4A, AAC, OGG, FLAC) and all video formats (MP4, AVI, MOV) with Docling ASR.
+ffmpeg is required for processing audio formats (M4A, AAC, OGG, FLAC) and all video formats (MP4, AVI, MOV, MKV, WebM) with Docling ASR.
 
 **macOS (using Homebrew):**
 
@@ -325,7 +325,7 @@ This command:
 > If you intend to use VLM-based text extraction (`text_extraction.provider_config.vlm_pipeline`),
 > ASR transcription (`text_extraction.provider_config.asr_pipeline`), or Docling template-based
 > entity extraction (`entity_extraction.provider: "docling"`), install the `vlm_asr` optional
-> dependency group which provides `docling[vlm,asr]`:
+> dependency group which provides `docling[vlm,asr]` and the separate video dependencies:
 >
 > ```bash
 > uv sync --extra vlm_asr
@@ -602,6 +602,43 @@ podman-compose -f docker/docker-compose.opensearch.yml down -v
 
 ```bash
 podman-compose -f docker/docker-compose.opensearch.yml logs
+```
+
+### Alternative: Weaviate Server with Docker
+
+Weaviate is an alternative vector store for the `vectordb` operator (`"provider": "weaviate"`). Skip this section if you use OpenSearch.
+
+> **Note:** `docker/docker-compose.weaviate.yml` is a **test-only** setup. It enables anonymous access, binds ports to `127.0.0.1`, and pulls the image from the upstream registry. Do not use it to deploy Weaviate.
+
+**Start Weaviate:**
+
+```bash
+# From project root
+docker compose -f docker/docker-compose.weaviate.yml up -d
+```
+
+Weaviate listens on HTTP port `8080` and gRPC port `50051`. The Python client needs both ports.
+
+**Check that Weaviate is ready:**
+
+```bash
+curl http://localhost:8080/v1/.well-known/ready
+# Expected: HTTP 200 with an empty body
+```
+
+**Point a flow at it:** use `"connection_type": "on-prem"`, `"host": "localhost"`, `"port": 8080`, `"grpc_port": 50051`, `"auth_type": "none"`, and a `collection_name` that starts with an uppercase letter (for example `DocpipeChunks`). A complete flow is in [`sample_flows/vectordb/weaviate_integration.json`](sample_flows/vectordb/weaviate_integration.json):
+
+```bash
+docling-pipelines --flow-file sample_flows/vectordb/weaviate_integration.json --validate
+docling-pipelines --flow-file sample_flows/vectordb/weaviate_integration.json
+```
+
+See the [VectorDB operator README](docs/operators/vectordb/vectordb_readme.md) for every `provider_config` field and TLS and API key setups.
+
+**Stop Weaviate (add `-v` to delete the data):**
+
+```bash
+docker compose -f docker/docker-compose.weaviate.yml down
 ```
 
 ---
@@ -911,7 +948,7 @@ docling-pipelines --list-operators --verbose
 - **Extract**: ExtractOperator (with multiple extraction providers)
 - **Quality**: DocumentClassifier, LanguageDetect, Redaction, Dedup
 - **Functional**: Chunker, Embeddings, Branching, Merge, NOOP
-- **VectorDB**: VectorDBOperator (OpenSearch, Milvus)
+- **VectorDB**: VectorDBOperator (OpenSearch, Milvus, Weaviate)
 - **Storage**: DocumentSetOperator
 
 See **[Operator Reference](docs/reference/OPERATORS.md)** for complete specifications.

@@ -105,6 +105,7 @@ Real-world scenarios showing practical applications.
 | `s3_to_opensearch.json` | Cloud Integration | Ingest from AWS S3, process, and store in OpenSearch |
 | `audio_video_extraction.json` | Audio/Video Transcription | ASR transcription → chunking → embeddings → vector storage |
 | `document_set_management.json` | Document Sets | Demonstrates document_set operator for managing document collections |
+| [local_redacted_indexing.json](use_cases/local_redacted_indexing.json) | Local Redacted Indexing | Redacts PII (Presidio) and HAP (local Hugging Face classifier) before chunking, local embeddings and Milvus Lite, so neither reaches the vector store; no external services. Needs the `presidio` extra and the spaCy model `en_core_web_sm` |
 
 **Start here if:** You want to see how docling-pipelines solves real problems.
 
@@ -136,6 +137,7 @@ Complete pipelines demonstrating vector database integrations.
 |------|----------|-------------|
 | `opensearch_integration.json` | OpenSearch | Full pipeline with OpenSearch vector storage |
 | `milvus_integration.json` | Milvus | Full pipeline with Milvus vector storage |
+| `weaviate_integration.json` | Weaviate | Full pipeline with Weaviate vector storage (self-hosted, local server) |
 
 **Start here if:** You're setting up vector search or RAG systems.
 
@@ -349,7 +351,7 @@ All flows follow this JSON structure:
   "name": "vectordb",
   "type": "vectordb",
   "config": {
-    "provider": "milvus",  // Options: opensearch, milvus
+    "provider": "milvus",  // Options: opensearch, milvus, weaviate
     "index_name": "my_collection",
     // Provider-specific config...
   }
@@ -467,6 +469,7 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | Complex pipeline | `advanced/multi_stage_enrichment.json` |
 | Use OpenSearch | `vectordb/opensearch_integration.json` |
 | Use Milvus | `vectordb/milvus_integration.json` |
+| Use Weaviate | `vectordb/weaviate_integration.json` |
 | Use serverless Milvus Lite | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
 | Export original files to Box | [storage_output/comprehensive_export_box.json](storage_output/comprehensive_export_box.json) |
 | Export original files to Google Drive | [storage_output/comprehensive_export_google_drive.json](storage_output/comprehensive_export_google_drive.json) |

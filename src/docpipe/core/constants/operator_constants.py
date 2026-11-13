@@ -320,6 +320,14 @@ class OperatorConstants:
         MODEL_ID: Final[str] = "model_id"
         MODEL_NAME: Final[str] = "model_name"
 
+        # Local Hugging Face classifier configuration (hap_provider_config of the huggingface provider)
+        ACTIVATION: Final[str] = "activation"
+        DEVICE: Final[str] = "device"
+        LOCAL_FILES_ONLY: Final[str] = "local_files_only"
+        MAX_LENGTH: Final[str] = "max_length"
+        REVISION: Final[str] = "revision"
+        TOXIC_LABELS: Final[str] = "toxic_labels"
+
         # Classification Configuration
         API_BASE: Final[str] = "api_base"
         DOCUMENT_TYPES: Final[str] = "document_types"
@@ -419,6 +427,8 @@ class OperatorConstants:
         # Vector Configuration
         ADD_SPARSE_VECTOR: Final[str] = "add_sparse_vector"
         ADD_SPARSE_VECTOR_DEFAULT: Final[bool] = False
+        VECTOR_MODE: Final[str] = "vector_mode"
+        VECTOR_MODE_DEFAULT: Final[str] = "dense"
         SPARSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "sparse_embeddings"
         DENSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "dense_embeddings"
         # Milvus field names (mapped names in collection schema)
@@ -435,7 +445,23 @@ class OperatorConstants:
         # Vector DB General
         OPENSEARCH: Final[str] = "opensearch"
         MILVUS: Final[str] = "milvus"
+        WEAVIATE: Final[str] = "weaviate"
         VECTOR_DB_NAME: Final[str] = "vector_db_name"
+
+        # Weaviate-specific Configuration
+        CONNECTION_TYPE: Final[str] = "connection_type"
+        CONNECTION_TYPE_ON_PREM: Final[str] = "on-prem"
+        CONNECTION_TYPE_CLOUD: Final[str] = "cloud"
+        GRPC_HOST: Final[str] = "grpc_host"
+        GRPC_PORT: Final[str] = "grpc_port"
+        GRPC_SECURE: Final[str] = "grpc_secure"
+        CLUSTER_URL: Final[str] = "cluster_url"
+        BEARER_TOKEN: Final[str] = "bearer_token"  # pragma: allowlist secret
+        DISTANCE_METRIC: Final[str] = "distance_metric"
+        TIMEOUT_INIT: Final[str] = "timeout_init"
+        TIMEOUT_QUERY: Final[str] = "timeout_query"
+        TIMEOUT_INSERT: Final[str] = "timeout_insert"
+        SKIP_INIT_CHECKS: Final[str] = "skip_init_checks"
 
         # Default target field names — adapter-agnostic names used in feature mappings
         DEFAULT_PRIMARY_KEY_FIELD: Final[str] = "pk"
@@ -546,6 +572,30 @@ class OperatorConstants:
         EXT_TXT: Final[str] = ".txt"
         EXT_HTML: Final[str] = ".html"
 
+        # Additional document formats
+        EXT_CSV: Final[str] = ".csv"
+        EXT_EPUB: Final[str] = ".epub"
+        EXT_EML: Final[str] = ".eml"
+        EXT_MSG: Final[str] = ".msg"
+        EXT_TEX: Final[str] = ".tex"
+        EXT_LATEX: Final[str] = ".latex"
+        EXT_ADOC: Final[str] = ".adoc"
+        EXT_ASCIIDOC: Final[str] = ".asciidoc"
+        EXT_ASC: Final[str] = ".asc"
+        EXT_VTT: Final[str] = ".vtt"
+        EXT_HTM: Final[str] = ".htm"
+        EXT_XHTML: Final[str] = ".xhtml"
+        EXT_MHTML: Final[str] = ".mhtml"
+        EXT_MHT: Final[str] = ".mht"
+        EXT_MARKDOWN: Final[str] = ".markdown"
+        EXT_TEXT: Final[str] = ".text"
+        EXT_QMD: Final[str] = ".qmd"
+        EXT_RMD: Final[str] = ".rmd"
+        EXT_PPTM: Final[str] = ".pptm"
+        EXT_XLSM: Final[str] = ".xlsm"
+        EXT_XLTX: Final[str] = ".xltx"
+        EXT_XLTM: Final[str] = ".xltm"
+
         # Image formats
         EXT_PNG: Final[str] = ".png"
         EXT_JPEG: Final[str] = ".jpeg"
@@ -569,6 +619,8 @@ class OperatorConstants:
         EXT_MP4: Final[str] = ".mp4"
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
+        EXT_MKV: Final[str] = ".mkv"
+        EXT_WEBM: Final[str] = ".webm"
 
         # Archive formats (filesystem ingest only)
         ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
@@ -590,25 +642,71 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_MARKDOWN,
+            EXT_TEXT,
+            EXT_QMD,
+            EXT_RMD,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
-        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [
+        AUDIO_EXTENSIONS: Final[list[str]] = [
             EXT_WAV,
             EXT_MP3,
             EXT_M4A,
             EXT_AAC,
             EXT_OGG,
             EXT_FLAC,
+        ]
+
+        VIDEO_EXTENSIONS: Final[list[str]] = [
             EXT_MP4,
             EXT_AVI,
             EXT_MOV,
+            EXT_MKV,
+            EXT_WEBM,
         ]
+
+        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_EXTENSIONS, *VIDEO_EXTENSIONS]
 
         DOCLING_LIBRARY_BASE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
 
         DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_VIDEO_EXTENSIONS]
 
-        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
+        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [
+            EXT_PDF,
+            EXT_DOCX,
+            EXT_PPTX,
+            EXT_XLSX,
+            EXT_MD,
+            EXT_TXT,
+            EXT_HTML,
+            EXT_PNG,
+            EXT_JPEG,
+            EXT_JPG,
+            EXT_TIFF,
+            EXT_TIF,
+            EXT_BMP,
+            EXT_WEBP,
+            EXT_GIF,
+            EXT_JFIF,
+        ]
 
         DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY: Final[list[str]] = [
             EXT_PDF,  # .pdf  → InputFormat.PDF
@@ -637,6 +735,24 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
     class Extraction:
@@ -792,6 +908,27 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Payload field constants
         INPUT_FIELD: Final[str] = "input"
         DETECTIONS_FIELD: Final[str] = "detections"
+        DETECTORS_FIELD: Final[str] = "detectors"
+        THRESHOLD_FIELD: Final[str] = "threshold"
+
+        # TextDetectionPort result keys: {"success", "detections", "error"}
+        SUCCESS_FIELD: Final[str] = "success"
+        ERROR_FIELD: Final[str] = "error"
+
+        # Detection record keys (see domain.models.convert_detection_dicts_to_results)
+        DETECTION_FIELD: Final[str] = "detection"
+        DETECTION_TYPE_FIELD: Final[str] = "detection_type"
+        SCORE_FIELD: Final[str] = "score"
+        START_FIELD: Final[str] = "start"
+        END_FIELD: Final[str] = "end"
+        TEXT_FIELD: Final[str] = "text"
+        EVIDENCES_FIELD: Final[str] = "evidences"
+        EVIDENCE_SOURCE_FIELD: Final[str] = "source"
+        EVIDENCE_MODEL_ID_FIELD: Final[str] = "model_id"
+        EVIDENCE_LABEL_FIELD: Final[str] = "label"
+
+        # Detection label reported for a HAP span
+        HAS_HAP_LABEL: Final[str] = "has_HAP"
         DEFAULT_MODEL_NAME: Final[str] = "granite4"
 
         # PII Configuration
@@ -1034,6 +1171,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         NORMALIZED_VALUE: Final[str] = "normalized_value"
         OLD_FEATURE: Final[str] = "old_feature"
         ORIGINAL_FEATURE: Final[str] = "original_feature"
+        RESULT_INDEX: Final[str] = "result_index"
         TRANSFORM: Final[str] = "transform"
         TYPE: Final[str] = "type"
         USER_CODE: Final[str] = "user_code"
@@ -1120,6 +1258,8 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         PDF: Final[str] = "application/pdf"
         HTML: Final[str] = "text/html"
         PLAIN: Final[str] = "text/plain"
+        CSV: Final[str] = "text/csv"
+        EML: Final[str] = "message/rfc822"
 
         # Google Workspace Document Types
         GOOGLE_APPS_PREFIX: Final[str] = "application/vnd.google-apps."

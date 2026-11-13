@@ -140,7 +140,7 @@ export const OPERATOR_SUCCESSORS: Record<string, string[]> = {
 
   // ── Terminal — no successors ──────────────────────────────────────────────
 
-  // Requires: embeddings, doc_id_hash. Indexes in OpenSearch / Milvus.
+  // Requires: embeddings, doc_id_hash. Indexes in OpenSearch / Milvus / Weaviate.
   [NodeOperator.VECTORDB]: [],
 
   // Requires: id. Saves to document set.
