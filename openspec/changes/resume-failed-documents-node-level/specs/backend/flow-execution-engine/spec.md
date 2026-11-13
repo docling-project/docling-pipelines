@@ -46,6 +46,14 @@ The engine SHALL resume failed documents only when `global_config.data_storage_t
 ### Requirement: Failure record content
 For each failed document the engine SHALL store the source `modification_time` and, per failed node, the node identity, `job_run_id`, `batch_num`, failure count and original error message. The engine SHALL NOT store any intermediate data location; it is derived from `job_id`, `job_run_id` and `batch_num`.
 
+#### Scenario: Failure state is stored per job and survives job runs
+- **WHEN** a document fails in job run $R_1$ and the same job is executed again as job run $R_2$
+- **THEN** the failure record written in $R_1$ (source `modification_time`, failure count, original error) is read in $R_2$, because it is stored per `job_id` and not in the per-run job statistics
+
+#### Scenario: Failure count accumulates across job runs
+- **WHEN** a document fails at Node 4 in job run $R_1$ and again at Node 4 in job run $R_2$
+- **THEN** the single record of the document holds a failure count of 2 for Node 4
+
 #### Scenario: Deferred record carries the run and batch
 - **WHEN** a failed document is scheduled for resumption
 - **THEN** its deferred record carries the `job_run_id` and `batch_num` stored for the failed node
@@ -75,6 +83,10 @@ When a document fails, the engine SHALL record its source `modification_time`. D
 #### Scenario: Newer file version discards failure state and re-ingests fresh
 - **WHEN** a failed document has saved source modification timestamp $T_1$ but the current source file reports modified timestamp $T_2 > T_1$
 - **THEN** the failure record is discarded, the document is ingested as a fresh document at Node 1, and it is not categorized as deferred
+
+#### Scenario: Modified document that exhausted its retries is processed again
+- **WHEN** a document has exhausted its retries at Node 4 and its source file is then modified
+- **THEN** the failure record is discarded and the document is ingested as a fresh document at Node 1
 
 #### Scenario: Unmodified file retains failure state and is deferred
 - **WHEN** a failed document has current source modified timestamp equal to its saved source modification timestamp $T_1$

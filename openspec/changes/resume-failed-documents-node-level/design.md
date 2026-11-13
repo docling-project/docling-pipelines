@@ -2,9 +2,29 @@
 
 ## Context
 
-See `proposal.md` for motivation. In Docling Pipelines, pipeline execution produces intermediate Parquet files per operator when configured with local or object data access (`DocpipeDataAccessLocal`). Document status and failure details per node are captured in `JobStatsStore`. However, on subsequent incremental executions, all un-finalized documents are evaluated from the root Ingest operator.
+See `proposal.md` for motivation. In Docling Pipelines, pipeline execution produces intermediate Parquet files per operator when configured with local or object data access (`DocpipeDataAccessLocal`). Document status and failure details per node are captured in `JobStatsStore`, but only as per-run document IDs (`NodeStats.failed_docs: list[str]`), and every run has its own rows. Neither the source `modification_time` nor a failure count that spans runs is available there. On subsequent incremental executions, all un-finalized documents are evaluated from the root Ingest operator.
 
 This design introduces a pre-execution **Resumption Planner** that identifies failed documents whose upstream node output is stored, tracks them as `deferred_execution_docs` through upstream nodes, and injects the stored rows directly at every node where they failed. No checkpoint copy is written: the rows are read from the intermediate node output that the executors already persist when `data_storage_type` is not `memory`.
+
+### Where the failure state is stored
+
+The stale-file check and the `max_retry_attempts` limit need values that must outlive a single job run. They are **not** read from `JobStatsStore` or `IncrementalMetadataStore`:
+
+| Value | Stored in | Model / field | Scope |
+|---|---|---|---|
+| Source `modification_time` at failure | `ResumptionRecord` | `ResumptionRecord.modified_time` (taken from the failed input row's `modified_time`; `None` when absent) | per document |
+| Consecutive failure count | `ResumptionRecord` | `FailedNode.failure_count` | per document and failed node |
+| `exhausted` flag | `ResumptionRecord` | `FailedNode.exhausted` (`failure_count > max_retry_attempts`) | per document and failed node |
+| Original error | `ResumptionRecord` | `FailedNode.error_message` | per document and failed node |
+
+`ResumptionRecord` is persisted through `KeyValueStoragePort` (adapter `KeyValueFileSystemStorage`) as one JSON file per document: `<data path>/<job_id>/resumption/<sha256(doc_id)>.json`. The collection is keyed by `job_id` only, never by `job_run_id`, so the failure count accumulates across runs while each run still has its own `NodeStats` rows. `ResumptionService.record_failure` reads the existing record, increments the node's `failure_count` and writes it back.
+
+Why not the existing stores:
+
+- `NodeStats.failed_docs` holds IDs only, and `NodeStats` rows belong to one run, so neither a time stamp nor a cross-run count fits there without a new per-document table.
+- `IncrementalMetadataStore` has `modified_time`, but recoverable failed documents are removed from it (`incremental_update_service.py`), so it is not a source for failures. It is used only to persist retry-exhausted documents as non-recoverable.
+
+**Stale-file check.** At ingest, `ResumptionService.classify` compares the source's current `modified_time` with `ResumptionRecord.modified_time`. If the source is strictly newer, the record is deleted and the document is ingested fresh from the first operator; otherwise it is deferred. The check is skipped (document stays deferred) when either value is unknown.
 
 ### Where the earlier run's output is found
 
@@ -74,7 +94,6 @@ graph TD
         TB[TableFileSystemStorage]
     end
 
-    RS --> JS
     RS --> KV
     RS --> TB
     FE --> RS
@@ -85,7 +104,7 @@ graph TD
 ```
 
 ### 1. Domain Layer (`src/docpipe/core/job_management/domain/` & `src/docpipe/core/orchestration/{models,ports}/`)
-- `NodeStats`: Updated to include `deferred_execution_docs: list[str] = Field(default_factory=list)`.
+- `NodeStats`: Updated to include `deferred_execution_docs: list[str] = Field(default_factory=list)`. This is the only change to the job statistics models; it carries the in-scope accounting of a run and holds no failure state.
 - `ResumptionRecord`: per-document failure state, stored through the existing `KeyValueStoragePort` (adapter `KeyValueFileSystemStorage`, collection `<job_id>/resumption`):
   - `doc_id`, `doc_name`, `modified_time`
   - `failed_nodes: list[FailedNode]`, one entry per node where the document failed (a document processed by several branches can fail at several nodes). Each `FailedNode` holds `node_id`, `node_name`, `job_run_id` (the run in which it failed), `batch_num` (the micro-batch of that run, `None` when not micro-batched), `failure_count`, `error_message` (the original error) and `exhausted`.
@@ -153,5 +172,14 @@ graph TD
 
 ## Migration Plan
 
-1. Non-breaking database schema migration: Add nullable `deferred_execution_docs` JSON column to `node_stats` table in DuckDB and PostgreSQL.
+Only the `deferred_execution_docs` accounting field changes the job statistics schema. `modified_time`, `failure_count` and the other failure details live in `ResumptionRecord`, which has no database schema.
+
+| Store | Change for `deferred_execution_docs` | Existing data |
+|---|---|---|
+| DuckDB (`duckdb_job_stats_store.py`) | New databases create `node_stats.deferred_execution_docs JSON`; existing databases run `ALTER TABLE node_stats ADD COLUMN IF NOT EXISTS deferred_execution_docs JSON` at startup | Old rows read as `NULL`, which `NodeStats` turns into `[]` |
+| PostgreSQL (`postgres/models.py`, Alembic `20261109_004_add_deferred_execution_docs`) | Adds nullable `node_stats.deferred_execution_docs` (`ARRAY(String)`); the migration checks for the column first, so it can be re-run, and `downgrade` drops it | Old rows read as `NULL`, mapped to `[]` |
+| JSON (`json_job_stats_store.py`) | No migration: `NodeStats.model_dump` writes the new key and `NodeStats(**data)` applies the default `[]` when it is missing | Old files load with `[]` |
+| `ResumptionRecord` (`KeyValueFileSystemStorage`) | No schema: pydantic defaults apply to missing keys (for example `batch_num = None`) | Absent for documents that failed before the feature; they have no record and are ingested fresh, as before |
+
+1. Non-breaking schema migration for `node_stats` as listed above (DuckDB, PostgreSQL); no migration for the JSON store or for `ResumptionRecord`.
 2. Backwards compatible: Flows without failure records or existing runs without `deferred_execution_docs` execute with empty lists.

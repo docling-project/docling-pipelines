@@ -9,7 +9,7 @@
 ## 2. Resumption Service & Stored Node Output
 
 - [x] 2.1 [backend] Create `ResumptionPlan` domain model in `src/docpipe/core/orchestration/models/resumption_plan.py` to hold per-node deferred document injection descriptors.
-- [x] 2.2 [backend] Implement `ResumptionService` in `src/docpipe/core/orchestration/application/services/resumption_service.py` to query past failures and saved `modification_time` from `JobStatsStore`, check `max_retry_attempts` (allowing `max_retry_attempts + 1` total attempts), and locate the upstream node output saved for the failing `job_run_id`. Failure records hold `job_run_id`, per-node failure entries and the original error message, but no checkpoint data.
+- [x] 2.2 [backend] Implement `ResumptionService` in `src/docpipe/core/orchestration/application/services/resumption_service.py` to query past failures and saved `modification_time` from the per-document `ResumptionRecord` (kept in a `KeyValueStoragePort` under `<job_id>/resumption`, not in `JobStatsStore`), check `max_retry_attempts` (allowing `max_retry_attempts + 1` total attempts), and locate the upstream node output saved for the failing `job_run_id`. Failure records hold `job_run_id`, per-node failure entries and the original error message, but no checkpoint data.
 - [x] 2.3 [backend] Add unit tests for `ResumptionService` in `tests/unit/core/orchestration/test_resumption_service.py` covering retry thresholds, multi-node failures, error message persistence and missing stored output fallbacks. Verify with `pytest tests/unit/core/orchestration/test_resumption_service.py`.
 
 ## 3. Ingest Source & Unified Batching
