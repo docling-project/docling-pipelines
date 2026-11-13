@@ -1,8 +1,10 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DuckDB adapters implementing hexagonal architecture ports."""
 
-import types
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
@@ -183,6 +185,38 @@ class TestDuckDBMetadataRepository:
             result = metadata_repository.list_all()
 
         assert len(result) == 2
+
+    def test_find_all_sorted_newest_first(self, *, metadata_repository):
+        """find_all returns stored assets ordered by created_at descending."""
+        for asset_id, name, created_at in [
+            ("find-1", "Oldest", datetime(2024, 1, 1, tzinfo=UTC)),
+            ("find-2", "Newest", datetime(2024, 6, 1, tzinfo=UTC)),
+            ("find-3", "Middle", datetime(2024, 3, 1, tzinfo=UTC)),
+        ]:
+            metadata_repository.save(asset=DocumentSet(asset_id=asset_id, name=name, created_at=created_at))
+
+        result = metadata_repository.find_all()
+
+        assert [r.name for r in result] == ["Newest", "Middle", "Oldest"]
+
+    def test_find_all_sorts_assets_without_created_at_last(self, *, metadata_repository):
+        """find_all must not raise when timezone-aware and missing created_at values are mixed.
+
+        Missing values sort as datetime.min in UTC, so they come last. A naive datetime.min
+        would raise TypeError when compared with the aware timestamps.
+        """
+        metadata_repository.save(
+            asset=DocumentSet(asset_id="mixed-1", name="With Date", created_at=datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        metadata_repository.save(asset=DocumentSet(asset_id="mixed-2", name="No Date"))
+
+        def created_at_or_none(asset: DocumentSet) -> datetime | None:
+            return None if asset.name == "No Date" else asset.created_at
+
+        with patch.object(DocumentSet, "get_created_at", autospec=True, side_effect=created_at_or_none):
+            result = metadata_repository.find_all()
+
+        assert [r.name for r in result] == ["With Date", "No Date"]
 
     def test_update_document_set(self, *, metadata_repository):
         """Test updating document set metadata."""
@@ -451,57 +485,3 @@ class TestSanitizeTableName:
     def test_sanitize_table_name(self, name: str, expected: str) -> None:
         """Test table name sanitization produces correct output."""
         assert sanitize_table_name(name) == expected
-
-
-class TestDuckDBDocumentSetMetadataRepositorySorting:
-    """Regression tests for the datetime.min -> datetime.min.replace(tzinfo=UTC) fix
-    in DuckDBDocumentSetMetadataRepository.list_all() (DTZ001).
-
-    Targets adapters/duckdb/metadata_repository.py directly, not the generic
-    DuckDBAssetRepository, since that is the class whose sort line was changed.
-
-    _dict_to_document_set uses a legacy DocumentSet constructor signature that no
-    longer matches the current model, so it is patched to return controlled objects.
-    The tests focus purely on the sort logic at metadata_repository.py:289.
-    """
-
-    @pytest.fixture
-    def mock_storage(self) -> MagicMock:
-        storage = MagicMock()
-        storage.collection_exists.return_value = True
-        return storage
-
-    @pytest.fixture
-    def ds_repo(self, mock_storage: MagicMock):
-        from docpipe.core.assets.document_sets.adapters.duckdb.metadata_repository import (
-            DuckDBDocumentSetMetadataRepository,
-        )
-
-        return DuckDBDocumentSetMetadataRepository(key_value_storage=mock_storage, database_path="data/test.duckdb")
-
-    def test_list_all_sorted_newest_first(self, ds_repo, mock_storage: MagicMock) -> None:
-        """list_all must return records sorted by created_at descending."""
-        ds_oldest = types.SimpleNamespace(name="Oldest", created_at=datetime(2024, 1, 1, tzinfo=UTC))
-        ds_newest = types.SimpleNamespace(name="Newest", created_at=datetime(2024, 6, 1, tzinfo=UTC))
-        ds_middle = types.SimpleNamespace(name="Middle", created_at=datetime(2024, 3, 1, tzinfo=UTC))
-
-        mock_storage.list_records.return_value = [{}, {}, {}]
-        with patch.object(ds_repo, "_dict_to_document_set", side_effect=[ds_oldest, ds_newest, ds_middle]):
-            result = ds_repo.list_all()
-
-        assert [ds.name for ds in result] == ["Newest", "Middle", "Oldest"]
-
-    def test_list_all_none_created_at_does_not_raise(self, ds_repo, mock_storage: MagicMock) -> None:
-        """A record with created_at=None must not raise TypeError — the
-        datetime.min.replace(tzinfo=UTC) sentinel allows comparison against
-        timezone-aware datetimes without error."""
-        ds_with = types.SimpleNamespace(name="With Date", created_at=datetime(2024, 1, 1, tzinfo=UTC))
-        ds_none = types.SimpleNamespace(name="No Date", created_at=None)
-
-        mock_storage.list_records.return_value = [{}, {}]
-        with patch.object(ds_repo, "_dict_to_document_set", side_effect=[ds_with, ds_none]):
-            result = ds_repo.list_all()
-
-        assert len(result) == 2
-        assert result[0].name == "With Date"
-        assert result[1].name == "No Date"
