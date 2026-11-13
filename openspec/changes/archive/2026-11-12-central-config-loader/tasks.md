@@ -18,5 +18,5 @@
 ## 4. Validation
 
 - [x] 4.1 [backend] Run `ruff format --check`, `ruff check` and `mypy` on touched files.
-- [ ] 4.2 [backend] Run `openspec validate central-config-loader --strict`.
-- [ ] 4.3 [backend] After review and merge, run `openspec archive central-config-loader`.
+- [x] 4.2 [backend] Run `openspec validate central-config-loader --strict`.
+- [x] 4.3 [backend] After review and merge, run `openspec archive central-config-loader`.
