@@ -196,6 +196,17 @@ The Milvus adapter SHALL reject binary vector field creation and binary index ty
 - **WHEN** `auth_type="lite"` is configured with `FLAT` and an upstream embeddings operator sets `quantization` to `binary` or `ubinary`
 - **THEN** flow validation fails with an invalid configuration exception stating that binary vector features are not supported by Milvus Lite
 
+### Requirement: Soft-deleted document chunk cleanup
+When running in an incremental flow with soft-deleted documents present in the incremental metadata repository, the VectorDB operator SHALL resolve all soft-deleted source document IDs to their stored chunk primary keys across configured vector backends (OpenSearch, Milvus) and delete those chunks. If chunk deletion fails, the operator SHALL unmark the soft-deleted records in the incremental repository and fail the operator execution step.
+
+#### Scenario: Soft-deleted source documents chunks removed from vector store
+- **WHEN** the VectorDB operator executes and soft-deleted document IDs are present in the incremental repository
+- **THEN** all stored chunk primary keys corresponding to those source document IDs are identified and deleted from the vector store
+
+#### Scenario: VectorDB deletion failure triggers unmark rollback
+- **WHEN** deleting chunks for soft-deleted documents fails in the vector store
+- **THEN** the operator unmarks the soft-deleted records in the incremental metadata repository and raises an exception marking the node status as `FAILED`
+
 ### Requirement: Milvus vector mode
 
 The Milvus adapter SHALL accept `vector_mode` with the values `dense`, `sparse`, `binary` and `gpu`. When `vector_mode` is not provided, the adapter SHALL resolve it from `add_sparse_vector` (`true` -> `sparse`), then from `index_type` (`BIN_*` -> `binary`, `GPU_*` -> `gpu`), and otherwise use `dense`.

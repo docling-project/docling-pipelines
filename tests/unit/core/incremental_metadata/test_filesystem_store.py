@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for Filesystem-based incremental metadata store."""
 
 import pyarrow.parquet as pq
@@ -291,3 +294,66 @@ class TestFilesystemIncrementalMetadataStore:
             "doc-2": {"modified_time": 2000, "job_run_id": "run-1"},
         }
         assert len(store.get_soft_deleted_doc_ids(job_id="job-1")) == 7
+
+    def test_unmark_soft_deleted_docs(self, *, store):
+        """Test unmarking soft-deleted documents."""
+        records = [
+            IncrementalMetadataRecord(
+                job_id="job-1",
+                doc_id="doc-1",
+                name="document1.pdf",
+                modified_time=1000,
+                job_run_id="run-1",
+                deleted=False,
+            ),
+            IncrementalMetadataRecord(
+                job_id="job-1",
+                doc_id="doc-2",
+                name="document2.pdf",
+                modified_time=2000,
+                job_run_id="run-1",
+                deleted=False,
+            ),
+        ]
+        store.upsert_records(job_id="job-1", job_run_id="run-1", records=records)
+        store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
+        assert store.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2"}
+
+        # Unmark specific doc
+        store.unmark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-2"])
+        assert store.get_soft_deleted_doc_ids(job_id="job-1") == set()
+        assert "doc-2" in store.get_processed_docs(job_id="job-1")
+
+        # Re-mark and unmark all
+        store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
+        assert store.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2"}
+        store.unmark_soft_deleted_docs(job_id="job-1", doc_ids=None)
+        assert store.get_soft_deleted_doc_ids(job_id="job-1") == set()
+
+    def test_purge_soft_deleted_docs(self, *, store):
+        """Test purging soft-deleted records."""
+        records = [
+            IncrementalMetadataRecord(
+                job_id="job-1",
+                doc_id="doc-1",
+                name="document1.pdf",
+                modified_time=1000,
+                job_run_id="run-1",
+                deleted=False,
+            ),
+            IncrementalMetadataRecord(
+                job_id="job-1",
+                doc_id="doc-2",
+                name="document2.pdf",
+                modified_time=2000,
+                job_run_id="run-1",
+                deleted=False,
+            ),
+        ]
+        store.upsert_records(job_id="job-1", job_run_id="run-1", records=records)
+        store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
+        assert store.get_soft_deleted_doc_ids(job_id="job-1") == {"doc-2"}
+
+        store.purge_soft_deleted_docs(job_id="job-1")
+        assert store.get_soft_deleted_doc_ids(job_id="job-1") == set()
+        assert store.get_processed_docs(job_id="job-1") == {"doc-1": {"modified_time": 1000, "job_run_id": "run-1"}}

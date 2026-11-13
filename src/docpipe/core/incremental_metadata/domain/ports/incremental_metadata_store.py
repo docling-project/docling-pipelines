@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Port interface for incremental metadata storage.
 
@@ -90,6 +93,35 @@ class IncrementalMetadataStore(ABC):
 
         Raises:
             Exception: If marking operation fails
+        """
+        ...
+
+    @abstractmethod
+    def unmark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str] | None = None) -> None:
+        """
+        Unmark soft-deleted documents, setting deleted flag back to False.
+
+        If doc_ids is None, all soft-deleted documents for the job are unmarked.
+
+        Args:
+            job_id: Unique identifier for the job
+            doc_ids: Optional list of document IDs to unmark. If None, unmarks all for job.
+
+        Raises:
+            Exception: If unmark operation fails
+        """
+        ...
+
+    @abstractmethod
+    def purge_soft_deleted_docs(self, *, job_id: str) -> None:
+        """
+        Permanently delete all soft-deleted records for a given job.
+
+        Args:
+            job_id: Unique identifier for the job
+
+        Raises:
+            Exception: If purge operation fails
         """
         ...
 

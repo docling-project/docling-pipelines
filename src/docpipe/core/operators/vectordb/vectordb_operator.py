@@ -16,7 +16,7 @@ from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorC
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.core.memmap_file_utils import (
     read_embedding_metadata,
@@ -287,11 +287,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=total_unique_docs)
         metadata[NUMBER_OF_BATCHES_KEY] = 0
 
-        if table.num_rows == 0:
-            logger.warning("Empty table provided", extra=self.common_log_arguments)
-            return [table], metadata
-
         try:
+            self._cleanup_soft_deleted_documents()
+
+            if table.num_rows == 0:
+                logger.warning("Empty table provided", extra=self.common_log_arguments)
+                return [table], metadata
+
             return self._transform_internal(
                 table=table,
                 unique_doc_ids=unique_doc_ids,
@@ -300,6 +302,9 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 file_ids=file_ids,
                 metadata=metadata,
             )
+        except FlowExecutionFailedException:
+            metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
+            raise
         finally:
             try:
                 self.adapter.close()
@@ -871,6 +876,63 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 e,
                 extra=self.common_log_arguments,
             )
+
+    def _cleanup_soft_deleted_documents(self) -> None:
+        """Delete chunks for soft-deleted documents from the vector store."""
+        job_id = self.job_id
+        if not job_id:
+            return
+
+        try:
+            from docpipe.core.incremental_metadata import get_incremental_update_service
+
+            incremental_service = get_incremental_update_service()
+            soft_deleted_doc_ids = incremental_service.get_soft_deleted_doc_ids(job_id=job_id)
+            if not soft_deleted_doc_ids:
+                return
+
+            logger.info(
+                "Cleaning up %s soft-deleted documents in vector store",
+                len(soft_deleted_doc_ids),
+                extra=self.common_log_arguments,
+            )
+
+            existing_pks_by_file = self.adapter.get_chunk_ids_for_documents(list(soft_deleted_doc_ids))
+            chunks_to_delete: list[str] = []
+            for file_id_pks in existing_pks_by_file.values():
+                chunks_to_delete.extend(file_id_pks)
+
+            if chunks_to_delete:
+                logger.info(
+                    "Deleting %s chunk(s) for soft-deleted documents from vector store",
+                    len(chunks_to_delete),
+                    extra=self.common_log_arguments,
+                )
+                self.adapter.delete_documents_by_ids(chunks_to_delete)
+
+        except Exception as e:
+            logger.error(
+                "Failed to clean up soft-deleted documents in vector store: %s",
+                e,
+                extra=self.common_log_arguments,
+            )
+            try:
+                from docpipe.core.incremental_metadata import get_incremental_update_service
+
+                incremental_service = get_incremental_update_service()
+                incremental_service.unmark_soft_deleted_docs(job_id=job_id)
+                logger.info(
+                    "Rolled back soft-deleted documents in incremental metadata store for job_id=%s",
+                    job_id,
+                    extra=self.common_log_arguments,
+                )
+            except Exception as rollback_err:
+                logger.error(
+                    "Failed to unmark soft-deleted docs during rollback: %s",
+                    rollback_err,
+                    extra=self.common_log_arguments,
+                )
+            raise FlowExecutionFailedException(f"Failed to clean up soft-deleted documents in vector store: {e}") from e
 
     def _index_and_record_results(
         self,
