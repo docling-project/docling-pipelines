@@ -223,7 +223,28 @@ Configuration rules:
 
 ### Scope
 
-The `postgres` backend covers asset metadata and attachment references. The document set data tables (the stored PyArrow rows) are still written by the data store selected with the `document_set` operator option `data_backend` (DuckDB by default) at `database_path`. DuckDB lets only one process open a database file for writing, so in multi-replica deployments plan which process writes each data store file.
+The `postgres` backend covers asset metadata and attachment references. The document set data tables (the stored PyArrow rows) are written by the data store selected with the `document_set` operator option `data_backend` (DuckDB by default, at `database_path`). DuckDB lets only one process open a database file for writing, so in multi-replica deployments plan which process writes each data store file, or keep the data tables in PostgreSQL too.
+
+### Document Set Data Tables in PostgreSQL
+
+With `data_backend: postgres` on the `document_set` operator, the data tables are written to PostgreSQL. The REST API reads them through the data store named by `storage_adapter`, so set it to `postgres` as well:
+
+```yaml
+assets_management:
+  documentset_repository:
+    type: postgres
+    config:
+      storage_adapter: postgres        # data store used by the REST API
+      content_schema: docpipe_document_sets
+      postgres:
+        host: localhost
+        database: docpipe
+        user: docpipe_user
+        schema: docpipe_assets         # metadata tables
+```
+
+- The data tables live in `content_schema` (default `docpipe_document_sets`), one table per document set, named after the document set. They are kept apart from the metadata tables in `postgres.schema`, so a document set name never clashes with a metadata table.
+- The connection settings are the `postgres` block of `documentset_repository`, with the same `DOCPIPE_POSTGRES_*` fallbacks. Without a `postgres` block, for example with `type: duckdb`, the data store connects with the `DOCPIPE_POSTGRES_*` environment variables only.
 
 ---
 

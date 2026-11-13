@@ -179,7 +179,9 @@ def get_document_set_data_store() -> DocumentSetDataStore:
     _, repo_config = AssetRepositoryFactory.get_repository_config(asset_type_name=DocumentSet.get_config_key())
     adapter_name: str = repo_config.get("storage_adapter", RepositoryType.DUCKDB.value)
     database_path: str = repo_config.get("database_path", DocpipeConstants.DOCUMENT_SET_DEFAULT_DB_PATH)
-    data_config: DataStoreConfig = {"database_path": database_path}
+    # The repository config also carries the settings of the postgres data store
+    # (content_schema and the postgres connection block).
+    data_config = cast(DataStoreConfig, {**repo_config, "database_path": database_path})
     data_store = DataStoreFactory.create(adapter_name=adapter_name, config=data_config)
     return cast(DocumentSetDataStore, data_store)
 

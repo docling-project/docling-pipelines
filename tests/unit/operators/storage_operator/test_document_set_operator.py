@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DocumentSetOperator.
 
 Tests cover:
@@ -10,11 +13,14 @@ Tests cover:
 """
 
 import os
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
 
+from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory
 from docpipe.core.assets.document_sets.application.services.document_set_service import DocumentSetService
+from docpipe.core.assets.document_sets.factories import DataStoreFactory
 from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import OperatorCategory
@@ -84,7 +90,7 @@ class TestOperatorMetadata:
         assert "document_set_id" in attrs
         assert "data_backend" in attrs
         assert "database_path" in attrs
-        assert attrs["data_backend"]["valid_values"] == ["duckdb", "filesystem"]
+        assert attrs["data_backend"]["valid_values"] == ["duckdb", "filesystem", "postgres"]
 
     def test_operator_category(self, basic_config):
         """Test operator category is Storage."""
@@ -233,6 +239,44 @@ class TestTransformInvalidName:
 
         with pytest.raises(FlowValidationException):
             DocumentSetOperator(config)
+
+
+class TestPostgresDataBackend:
+    """The postgres data backend gets its settings from the repository config."""
+
+    def test_postgres_data_backend_gets_the_repository_config(self, temp_duckdb_path, sample_table):
+        """content_schema and the postgres block of the repository config reach the data store."""
+        repo_config = {
+            "database_path": temp_duckdb_path,
+            "content_schema": "doc_set_content",
+            "postgres": {"host": "db", "schema": "docpipe_assets"},
+        }
+        create_data_store = DataStoreFactory.create
+
+        def create_duckdb_stand_in(*, adapter_name, config):
+            # A DuckDB store in place of PostgreSQL, so the transform runs without a server.
+            return create_data_store(adapter_name="duckdb", config=config)
+
+        operator = DocumentSetOperator(
+            {
+                "document_set_name": "Test Postgres Backend",
+                "data_backend": "postgres",
+                "database_path": temp_duckdb_path,
+            }
+        )
+        with (
+            patch.object(RepositoryFactory, "get_repository_config", return_value=("duckdb", repo_config)),
+            patch.object(DataStoreFactory, "create", side_effect=create_duckdb_stand_in) as create,
+        ):
+            _tables, metadata = operator.transform(sample_table)
+
+        create.assert_called_once()
+        assert create.call_args.kwargs["adapter_name"] == "postgres"
+        config = create.call_args.kwargs["config"]
+        assert config["content_schema"] == "doc_set_content"
+        assert config["postgres"] == {"host": "db", "schema": "docpipe_assets"}
+        assert config["database_path"] == temp_duckdb_path
+        assert metadata["data_storage_type"] == "postgres"
 
 
 class TestOperatorPassThrough:
