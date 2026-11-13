@@ -2,24 +2,45 @@
 
 ## Why
 
-PostgreSQL storage backends were registered inconsistently across services (`"postgresql"` in Job Management and Incremental Metadata vs `"postgres"` in Asset Repositories and Table Storage), causing global configuration fallbacks to fail when users configured `global_storage: {type: postgres}` or `global_storage: {type: postgresql}`. Additionally, PostgreSQL configuration required a redundant nested `postgres:` block when the backend was already selected as PostgreSQL, and `JsonJobStatsStore` placed job run directories directly in `<base_dir>/` rather than namespacing them under `<base_dir>/job_stats/`.
+PostgreSQL storage backends are registered inconsistently across services. Job Management and Incremental Metadata register `"postgresql"`, while Asset Repositories, Table Storage and the ededup store use `"postgres"`. A configuration that uses the other spelling fails to resolve.
+
+PostgreSQL connection settings must also be nested under a redundant `postgres:` key, even when the backend is already selected as PostgreSQL. `JsonJobStatsStore` writes run directories directly under an explicit `base_dir`, while its unconfigured default is `<data>/job_stats/`. The two layouts disagree.
+
+This change is independent of the `central-config-loader` change, which owns the config file reader, the `global_storage` precedence rules and the `backend/config-loader` capability. This change does not modify those rules. It only normalizes backend names, connection-setting shape, and the job stats directory layout.
 
 ## What Changes
 
-- **PostgreSQL Backend Name Standardization**: Standardize on `"postgres"` as the primary backend name across all storage factories and backends (`job_management`, `incremental_metadata`, `assets_management`, `ededup`), while normalizing `"postgresql"` as a supported alias so neither name causes resolution failures.
-- **Flat and Nested PostgreSQL Configuration**: Allow PostgreSQL connection settings (`host`, `port`, `database`, `user`, `password`, `schema`, `pool_size`, etc.) to be provided directly at the root of `storage.config` without requiring a redundant nested `postgres:` section. Nested `postgres:` blocks remain supported for backward compatibility.
-- **Deterministic Job Stats Filesystem Path**: Ensure `JsonJobStatsStore` always appends `job_stats` to its resolved root directory when configured with an explicit `base_dir` (e.g. `<base_dir>/job_stats/<job_run_id>/job_stats.json`), matching the unconfigured default layout.
+- **Backend name normalization**: `"postgres"` is the canonical name. `"postgresql"` is accepted as an alias in every storage factory that currently recognizes only one of the two names: `JobManagementFactory`, `IncrementalMetadataFactory`, `AssetRepositoryFactory`, `ededup_storage/factory.py`, and the `EntityStoreOperator` data backend.
+- **Flat and nested PostgreSQL connection settings**: `get_postgres_connection_string`, `create_postgres_engine`, and `get_postgres_pool_settings` in `src/docpipe/storage/postgres/connection.py` accept connection keys at the root of the config. A nested `postgres` mapping remains supported. When both forms are present, the nested mapping wins for every key it defines, and root keys fill the rest. Environment variables are used only for keys absent from both forms.
+- **Job stats directory layout**: `JsonJobStatsStore` appends `job_stats` to an explicit `base_dir` unless the path already ends in `job_stats`. Run directories are then always `<base_dir>/job_stats/<job_run_id>/`.
+
+## Breaking Changes
+
+- **BREAKING (on-disk layout)**: With `job_management.storage.config.base_dir` set to a path that does not end in `job_stats` (for example `./data/job_stats_store_data` in the shipped `docling-pipelines-config.yaml`), existing run directories at `<base_dir>/<job_run_id>/` are no longer listed or read. Operators upgrading must move them:
+
+  ```bash
+  mkdir -p <base_dir>/job_stats
+  for d in <base_dir>/*/; do
+    name=$(basename "$d")
+    [ "$name" = "job_stats" ] || mv "$d" <base_dir>/job_stats/
+  done
+  ```
+
+  Alternatively, set `base_dir` to `<base_dir>/job_stats` in the config file, which keeps existing paths readable without moving files.
+- **Environment override `DOCPIPE_JOB_STATS_BASE_DIR`**: This variable is also a `base_dir` and is subject to the same rule. The `job_stats` suffix is appended to it in the same way. Its value is not used verbatim. The migration note above applies to it as well.
 
 ## Non-goals
 
-- Removing support for nested `config.postgres` blocks (both flat and nested shapes will be supported).
-- Changing database schemas or SQL table structures for existing PostgreSQL or JSON stores.
+- Changing the `global_storage` merge or fallback rules, or the `backend/config-loader` capability. Those belong to `central-config-loader`.
+- Removing support for the nested `postgres:` block.
+- Changing database schemas, SQL migrations, or table definitions.
+- Changing ededup, entity-store, or asset-repository behavior beyond accepting the backend alias.
 - Changing frontend UI components or REST API routes.
 
 ## Capabilities
 
 ### New Capabilities
-- `backend/config-loader`: Standardized storage backend type resolution (including PostgreSQL alias normalization), flat and nested PostgreSQL connection configuration, and deterministic job stats base directory resolution.
+- `backend/postgres-storage-normalization`: Canonical PostgreSQL backend naming with alias support, flat and nested PostgreSQL connection settings, and deterministic job stats directory layout.
 
 ### Modified Capabilities
 - None
@@ -27,13 +48,21 @@ PostgreSQL storage backends were registered inconsistently across services (`"po
 ## Impact
 
 - **Affected Layer**: Backend-only.
-- **Affected Storage Adapters and Factories**:
-  - `src/docpipe/storage/postgres/connection.py` (connection string builder and engine creation supporting flat and nested configs)
-  - `src/docpipe/core/job_management/adapters/config/job_management_factory.py` (backend type normalization and flat config forwarding)
-  - `src/docpipe/core/job_management/adapters/stores/json/json_job_stats_store.py` (deterministic `job_stats` directory appending)
-  - `src/docpipe/core/incremental_metadata/adapters/config/incremental_metadata_factory.py` (backend type normalization)
-  - `src/docpipe/core/incremental_metadata/adapters/stores/postgres/postgres_incremental_store.py` (store backend registration alias)
-  - `src/docpipe/core/assets/common/factories/asset_repository_factory.py` (backend type normalization)
-  - `src/docpipe/core/operators/quality/ededup_storage/factory.py` (backend type normalization)
-- **Documentation**: `docling-pipelines-config.yaml`, `docling-pipelines-config.yaml.example`, `docs/reference/GLOBAL_CONFIG.md`, `docs/guides/ADVANCED_CONFIGURATION.md`.
-- **Tests**: Unit and integration tests for config loading, job management factory, incremental metadata factory, and json job stats store.
+- **Shared connection code**:
+  - `src/docpipe/storage/postgres/connection.py` (flat and nested settings)
+- **Factories and backend name normalization**:
+  - `src/docpipe/core/job_management/adapters/config/job_management_factory.py` (`POSTGRESQL` alias, flat config forwarding)
+  - `src/docpipe/core/incremental_metadata/adapters/config/incremental_metadata_factory.py` (`"postgresql"` alias)
+  - `src/docpipe/core/incremental_metadata/adapters/stores/postgres/postgres_incremental_store.py` (`STORE_BACKEND` alias)
+  - `src/docpipe/core/assets/common/factories/asset_repository_factory.py` (`"postgresql"` alias)
+  - `src/docpipe/core/operators/quality/ededup_storage/factory.py` (`"postgres"` alias, currently accepts only `"postgresql"`)
+  - `src/docpipe/core/operators/storage/entity_store_operator.py` (`"postgresql"` alias, currently accepts only `"postgres"`)
+- **Job stats layout**:
+  - `src/docpipe/core/job_management/adapters/stores/json/json_job_stats_store.py`
+  - `src/docpipe/core/job_management/adapters/config/job_management_factory.py` (`_resolve_filesystem_base_dir`, used for worker propagation)
+- **Configuration and documentation**:
+  - `docling-pipelines-config.yaml`, `docling-pipelines-config.yaml.example`
+  - `docs/reference/GLOBAL_CONFIG.md`, `docs/guides/ADVANCED_CONFIGURATION.md` (Breaking Changes section with the migration note)
+- **Tests**:
+  - Unit: `tests/unit/storage/` (connection), `tests/unit/core/job_management/adapters/config/`, `tests/unit/core/job_management/adapters/stores/test_json_job_stats_store.py`, `tests/unit/core/incremental_metadata/test_factory.py`, `tests/unit/core/assets/common/factories/test_asset_repository_factory.py`, `tests/unit/operators/ededup/`
+  - Integration: `tests/integration/test_ededup_postgres.py` (run only with the existing suite; no new tests added)
