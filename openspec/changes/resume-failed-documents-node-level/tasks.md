@@ -34,3 +34,9 @@
 - [x] 6.1 [backend] Wire `ResumptionService` into `FlowExecutor` / `AbstractOrchestrator` execution lifecycle in `src/docpipe/core/orchestration/abstract_orchestrator.py`.
 - [x] 6.2 [backend] Add integration test in `tests/integration/orchestration/test_node_level_resumption.py` verifying that a failed document is resumed at the failed node on a second run, that the record keeps `job_run_id` and the original error, and that retries are exhausted after `max_retry_attempts`.
 - [x] 6.3 [backend] Run the resumption tests and linters on the changed files (`pytest tests/unit/core/orchestration tests/unit/operators/ingest/test_ingest_source_resumption.py tests/integration/orchestration/test_node_level_resumption.py`, `ruff check`, `ruff format --check`).
+
+## 7. Review Follow-up: Batch-Aware Output Lookup and Configuration Docs
+
+- [x] 7.1 [backend] Add `batch_num` to `FailedNode` and `DeferredRecord` in `src/docpipe/core/orchestration/models/resumption_plan.py`; record it in `ResumptionService.record_failure` (kept from the first failure at a node), copy it in `to_deferred_records`, and pass the executor's `BATCH_NUM` from `AbstractOperatorExecutor`.
+- [x] 7.2 [backend] Make the saved-output lookup batch-aware: add `batch_num` to `NodeOutputTableName`, group `inject_saved_rows` entries by batch number, and build `<node>_<index>[/<batch_num>]` in `src/docpipe/core/orchestration/adapters/resumption_factory.py`. Verify with `pytest tests/unit/core/orchestration/test_resumption_service.py tests/unit/core/orchestration/test_executor_resumption.py`.
+- [x] 7.3 [backend] Document the configuration: update `max_retry_attempts` and `data_storage_type` in `docs/reference/GLOBAL_CONFIG.md` and `src/docpipe/core/orchestration/global_config_metadata.py` (resumption inactive for `memory` or unset storage, and `batch_num`).

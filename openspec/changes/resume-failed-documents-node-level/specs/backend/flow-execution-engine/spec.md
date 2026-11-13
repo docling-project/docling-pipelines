@@ -7,7 +7,15 @@ When a flow executes incrementally, the engine SHALL resume a previously failed 
 
 #### Scenario: Failed document resumes at failure node from stored predecessor output
 - **WHEN** a document failed at Node $K$ in a previous job run and Node $K-1$'s stored output of that job run holds the document
-- **THEN** that row is read from the stored output of Node $K-1$ (located from the `job_id` and the `job_run_id` of the failure), injected into Node $K$'s input table, and earlier nodes (1 through $K-1$) are bypassed for that document
+- **THEN** that row is read from the stored output of Node $K-1$ (located from the `job_id`, the `job_run_id` and the micro-batch number `batch_num` of the failure), injected into Node $K$'s input table, and earlier nodes (1 through $K-1$) are bypassed for that document
+
+#### Scenario: Batch number of the failed run locates the stored output
+- **WHEN** a document failed in micro-batch 3 of job run $R$ and is resumed in a later run in which the same document is assigned to micro-batch 0
+- **THEN** the row is read from `<data path>/<job_id>/$R$/data/<predecessor>_<output index>/3`, the current run's batch numbering is not used to locate it, and the row is injected into the batch the current run assigned to the document
+
+#### Scenario: Failed run was not micro-batched
+- **WHEN** a document failed in a job run without micro-batching
+- **THEN** its record has no `batch_num` and the row is read from `<data path>/<job_id>/<job_run_id>/data/<predecessor>_<output index>`
 
 #### Scenario: Document failed at several nodes is resumed at each of them
 - **WHEN** a document processed by several branches failed at Node $A$ and Node $B$
@@ -18,22 +26,37 @@ When a flow executes incrementally, the engine SHALL resume a previously failed 
 - **THEN** the document is re-ingested from the root Ingest operator and processed through the entire pipeline
 
 ### Requirement: Resumption requires persisted node output
-The engine SHALL resume failed documents only when `data_storage_type` is not `memory`, because resumption reads the persisted intermediate node output.
+The engine SHALL resume failed documents only when `global_config.data_storage_type` is set and is not `memory`, because resumption reads the persisted intermediate node output.
 
 #### Scenario: Memory storage disables resumption
 - **WHEN** `data_storage_type` is `memory`
-- **THEN** failed documents are not resumed and are re-ingested from the root Ingest operator
+- **THEN** no failure record is written, failed documents are not resumed and are re-ingested from the root Ingest operator
+
+#### Scenario: Unset storage type disables resumption
+- **WHEN** `data_storage_type` is not set
+- **THEN** resumption behaves as with `memory`
+
+### Requirement: Public configuration of resumption
+`max_retry_attempts` SHALL be a documented `global_config` key (integer, default 3) in `docs/reference/GLOBAL_CONFIG.md` and in the global configuration metadata (`src/docpipe/core/orchestration/global_config_metadata.py`). Both the `max_retry_attempts` and the `data_storage_type` documentation SHALL state that resumption requires `data_storage_type` to be set to a value other than `memory`.
+
+#### Scenario: Key is listed with its requirement
+- **WHEN** the global configuration reference or metadata is read
+- **THEN** `max_retry_attempts` is listed with default 3 and total attempts `1 + max_retry_attempts`, and the non-`memory` requirement is stated
 
 ### Requirement: Failure record content
-For each failed document the engine SHALL store the source `modification_time`, and for every node at which the document failed: the node identity, the `job_run_id` of the job run in which it failed, the consecutive failure count, and the original error message. The engine SHALL NOT store the location of any intermediate data; that location is derived from the `job_id` and the `job_run_id`.
+For each failed document the engine SHALL store the source `modification_time` and, per failed node, the node identity, `job_run_id`, `batch_num`, failure count and original error message. The engine SHALL NOT store any intermediate data location; it is derived from `job_id`, `job_run_id` and `batch_num`.
 
-#### Scenario: Failure record identifies the failed job run and error
-- **WHEN** a document fails at Node 4 in job run $R$ with error $E$
-- **THEN** its record holds Node 4, `job_run_id` $R$, failure count 1 and error message $E$
+#### Scenario: Deferred record carries the run and batch
+- **WHEN** a failed document is scheduled for resumption
+- **THEN** its deferred record carries the `job_run_id` and `batch_num` stored for the failed node
+
+#### Scenario: Failure record identifies the failed job run, batch and error
+- **WHEN** a document fails at Node 4 in micro-batch 2 of job run $R$ with error $E$
+- **THEN** its record holds Node 4, `job_run_id` $R$, `batch_num` 2, failure count 1 and error message $E$
 
 #### Scenario: Repeated failure at the same node
 - **WHEN** a resumed document fails again at the node where it already failed
-- **THEN** the failure count is incremented, the error message is replaced by the latest error, and the `job_run_id` of the first failure at that node is kept because that run holds the stored predecessor output
+- **THEN** the failure count is incremented, the error message is replaced by the latest error, and the `job_run_id` and `batch_num` of the first failure at that node are kept because that run and batch hold the stored predecessor output
 
 ### Requirement: Deferred execution accounting across pipeline nodes
 Documents scheduled for resumption at downstream nodes SHALL be included in `documents_in_scope` at the Ingest operator and categorized as `deferred_execution_docs`. Each upstream node prior to the resumption target SHALL carry forward the `deferred_execution_docs` in its execution metadata without processing them. When execution reaches the target failure node, the documents SHALL be transferred from `deferred_execution_docs` into the node's active input table.

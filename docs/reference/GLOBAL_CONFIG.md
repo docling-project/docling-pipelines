@@ -150,6 +150,8 @@ Parameters that control how the flow executes and processes data.
 
 **Note**: Memory storage is fastest but limited by available RAM. Use `"local"` for large datasets.
 
+**Failure resumption**: [`max_retry_attempts`](#max_retry_attempts) resumes failed documents from the intermediate node output, so it has no effect with `"memory"` or when `data_storage_type` is not set. Currently only `"local"` writes that output, as Parquet files in `<data path>/<job_id>/<job_run_id>/data/<node name>_<output index>[/<batch_num>]`. With any other value, failed documents are re-ingested from the start.
+
 ---
 
 ### `memmap_threshold`
@@ -238,12 +240,13 @@ Configuration for tracking and processing only changed documents.
 
 **Type**: `integer`  
 **Default**: `3`  
-**Description**: Maximum number of retries for a document that fails at the same node on consecutive runs of the same job. A document gets one initial attempt plus `max_retry_attempts` retries, so with the default it is attempted up to 4 times. On each rerun the document resumes at the node where it failed, using the intermediate output that the previous node saved in the job run where the failure happened, instead of being processed from the start. A document that failed at several nodes (for example in different branches) is resumed at each of them.
+**Description**: Maximum number of retries for a document that fails at the same node on consecutive runs of the same job. A document gets one initial attempt plus `max_retry_attempts` retries, so with the default it is attempted up to 4 times. On each rerun the document resumes at the node where it failed, using the intermediate output that the previous node saved in the job run (and micro-batch) where the failure happened, instead of being processed from the start. A document that failed at several nodes (for example in different branches) is resumed at each of them.
 
-For every failed document the job keeps the failed node(s), the `job_run_id` of the run in which it failed, and the original error message. Once the retries are exhausted, the document is recorded as non-recoverable in incremental metadata, and the job report lists it as `Failed` with a "Maximum retries exhausted" reason that includes the original error. Use `force_ingest: true` to discard resumption state and reprocess everything.
+For every failed document the job keeps the failed node(s), the `job_run_id` and micro-batch number (`batch_num`) of the run in which it failed, and the original error message. These identify the folder of the saved output; no path is stored. Once the retries are exhausted, the document is recorded as non-recoverable in incremental metadata, and the job report lists it as `Failed` with a "Maximum retries exhausted" reason that includes the original error. Use `force_ingest: true` to discard resumption state and reprocess everything.
 
 **Requirements**:
-- Resumption is active only when `data_storage_type` is not `"memory"`, because it reads the intermediate node output. With `"memory"`, failed documents are re-ingested from the start.
+- Resumption is active only when `data_storage_type` is set and is not `"memory"`, because it reads the persisted intermediate node output. With `"memory"` (or when unset), failed documents are re-ingested from the start.
+- The intermediate output of the failed run must still exist. If `<data path>/<job_id>/<job_run_id>/data` was removed, the affected documents are re-ingested from the start.
 - A newer source `modified_time` invalidates the saved failure state, and the document is re-ingested fresh.
 - A node that receives input from more than one node (for example `merge`) cannot be resumed; its documents are re-ingested from the start.
 

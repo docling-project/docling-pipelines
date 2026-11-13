@@ -9,13 +9,16 @@ from pydantic import BaseModel, Field
 class FailedNode(BaseModel):
     """A node at which a document failed, together with the run that produced the failure.
 
-    The intermediate output the node consumed is located from ``job_run_id``; nothing else is persisted.
+    The intermediate output the node consumed is located from ``job_run_id`` and ``batch_num``; no path is persisted.
     """
 
     node_id: str
     node_name: str = ""
     # Job run in which the document last failed at this node.
     job_run_id: str
+    # Micro-batch number of that job run in which the document failed; ``None`` when the run was not micro-batched
+    # (or the record predates this field). It selects the ``<batch_num>`` sub-folder of the saved predecessor output.
+    batch_num: int | None = None
     # Consecutive failures at this node; a node that later succeeds is removed from the record.
     failure_count: int = 1
     # Original error reported by the node for the latest failure.
@@ -61,6 +64,9 @@ class DeferredRecord(BaseModel):
     target_node_name: str = ""
     # Job run in which the document failed at ``target_node_id``.
     job_run_id: str
+    # Micro-batch number of that job run in which the document failed; ``None`` when it was not micro-batched.
+    # Together with ``job_run_id`` it derives the folder of the saved predecessor output.
+    batch_num: int | None = None
     failure_count: int = 1
     # Original error reported when the document failed at ``target_node_id``.
     error_message: str = ""

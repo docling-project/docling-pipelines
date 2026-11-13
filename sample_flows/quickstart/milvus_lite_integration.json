@@ -4,10 +4,10 @@
   "global_config": {
     "doc_column": "content",
     "disable_validation": false,
-    "force_ingest": true,
-    "storage": "in-memory",
+    "force_ingest": false,
+    "data_storage_type": "local",
     "execute_type": "local",
-    "enable_micro_batching": false
+    "enable_micro_batching": true
   },
   "flow": [
     {

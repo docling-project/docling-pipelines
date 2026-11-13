@@ -39,8 +39,12 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 class NodeOutputTableName(Protocol):
     """Resolves the table holding the saved output of a node in an earlier job run."""
 
-    def __call__(self, *, job_run_id: str, node_name: str, output_index: int) -> str:
-        """Return the name of the table in the table storage."""
+    def __call__(self, *, job_run_id: str, node_name: str, output_index: int, batch_num: int | None) -> str:
+        """Return the name of the table in the table storage.
+
+        ``batch_num`` is the micro-batch of the job run whose output is read; ``None`` selects the output of every
+        batch of the node (or the single output of a run that was not micro-batched).
+        """
 
 
 class ResumptionDecision(StrEnum):
@@ -335,19 +339,26 @@ class ResumptionService:
         if self._table_storage is None or self._output_table_name is None:
             return table, [], list(entries)
 
-        groups: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
+        groups: dict[tuple[str, str, int, int | None], list[dict[str, Any]]] = defaultdict(list)
         for entry in entries:
-            key = (entry["job_run_id"], entry.get("source_node_name") or "", int(entry.get("source_output_index", 0)))
+            batch_num = entry.get("batch_num")
+            key = (
+                entry["job_run_id"],
+                entry.get("source_node_name") or "",
+                int(entry.get("source_output_index", 0)),
+                int(batch_num) if batch_num is not None else None,
+            )
             groups[key].append(entry)
 
         injected_ids: list[str] = []
         unavailable: list[dict[str, Any]] = []
         parts: list[pa.Table] = []
-        for (job_run_id, node_name, output_index), group in groups.items():
+        for (job_run_id, node_name, output_index, batch_num), group in groups.items():
             rows = self._read_saved_rows(
                 job_run_id=job_run_id,
                 node_name=node_name,
                 output_index=output_index,
+                batch_num=batch_num,
                 doc_ids=[entry["doc_id"] for entry in group],
             )
             found = set(rows[OperatorConstants.Misc.ID].to_pylist()) if rows is not None else set()
@@ -376,6 +387,7 @@ class ResumptionService:
         job_run_id: str,
         node_name: str,
         output_index: int,
+        batch_num: int | None,
         doc_ids: list[str],
     ) -> pa.Table | None:
         """Read the rows of ``doc_ids`` from the saved output of a node; None when missing or unreadable."""
@@ -383,7 +395,9 @@ class ResumptionService:
             return None
         if not doc_ids or not _SAFE_ID.match(job_run_id) or job_run_id in {".", ".."}:
             return None
-        table_name = self._output_table_name(job_run_id=job_run_id, node_name=node_name, output_index=output_index)
+        table_name = self._output_table_name(
+            job_run_id=job_run_id, node_name=node_name, output_index=output_index, batch_num=batch_num
+        )
         if '"' in table_name:
             return None
         placeholders = ", ".join("?" for _ in doc_ids)
@@ -408,12 +422,14 @@ class ResumptionService:
         doc_id: str,
         doc_name: str,
         reason: str,
+        batch_num: int | None = None,
     ) -> ResumptionRecord | None:
         """Record a failure of ``doc_id`` at ``node_id`` together with the original error message.
 
-        A document that already failed at the node keeps the job run of its first failure: that run is the one whose
-        saved output holds the node's input row, because a resumed document is not part of a later run's upstream
-        output. Failures at other nodes of the document are kept, so every failed node is resumed.
+        ``batch_num`` is the micro-batch of ``job_run_id`` in which the document failed. Together they locate the
+        saved predecessor output. A document that already failed at the node keeps the job run and batch of its first
+        failure: that run and batch hold the node's input row, because a resumed document is not part of a later
+        run's upstream output. Failures at other nodes of the document are kept, so every failed node is resumed.
 
         Returns the stored record (the node entry is ``exhausted`` once the retry budget is spent) or ``None`` when
         the document has no input row to record.
@@ -434,6 +450,7 @@ class ResumptionService:
             node_id=node_id,
             node_name=node_name,
             job_run_id=previous.job_run_id if previous else job_run_id,
+            batch_num=previous.batch_num if previous else batch_num,
             failure_count=failure_count,
             error_message=reason,
             exhausted=failure_count > self._max_retry_attempts,
@@ -482,6 +499,7 @@ class ResumptionService:
                 target_node_id=node.node_id,
                 target_node_name=node.node_name,
                 job_run_id=node.job_run_id,
+                batch_num=node.batch_num,
                 failure_count=node.failure_count,
                 error_message=node.error_message,
             )

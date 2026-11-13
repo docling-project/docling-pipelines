@@ -434,6 +434,7 @@ class AbstractOperatorExecutor:
 
         job_id = self._resumption_job_id()
         job_run_id = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
+        batch_num = self._params.get(DocpipeConstants.BATCH_NUM)
         node_id = self._params[OperatorConstants.Columns.ID]
         exhausted: list[ResumptionRecord] = []
         for doc in metadata.get(Metrics.External.FAILED_DOCS, []) or []:
@@ -449,6 +450,7 @@ class AbstractOperatorExecutor:
                 doc_id=doc_id,
                 doc_name=str(doc.get("name", "")),
                 reason=str(doc.get("reason", "")),
+                batch_num=batch_num,
             )
             if record is not None and record.exhausted:
                 doc["reason"] = service.format_exhausted_reason(record=record)
@@ -465,6 +467,7 @@ class AbstractOperatorExecutor:
                 return
             job_id = self._resumption_job_id()
             job_run_id = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
+            batch_num = self._params.get(DocpipeConstants.BATCH_NUM)
             node_id = self._params[OperatorConstants.Columns.ID]
             reason = f"{type(exc).__name__}: {exc}"[:500]
             exhausted: list[ResumptionRecord] = []
@@ -478,6 +481,7 @@ class AbstractOperatorExecutor:
                     doc_id=doc_id,
                     doc_name="",
                     reason=reason,
+                    batch_num=batch_num,
                 )
                 if record is not None and record.exhausted:
                     exhausted.append(record)

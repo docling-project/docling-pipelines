@@ -81,7 +81,11 @@ class GlobalConfigMetadata:
             name="Data storage type",
             type="string",
             required=False,
-            description="Storage backend type for intermediate data during flow execution (memory or local)",
+            description=(
+                "Storage backend type for intermediate data during flow execution (memory or local). Node-level "
+                "failure resumption (max_retry_attempts) needs the intermediate node output to be persisted, so it "
+                "is inactive when this is memory or unset."
+            ),
             category=EXECUTION_CONTROL,
         ),
         # Incremental Processing
@@ -121,7 +125,7 @@ class GlobalConfigMetadata:
             description=(
                 "Retries allowed for a document that failed at a node, resumed from the stored output of the "
                 "upstream node on later runs (total attempts = 1 + max_retry_attempts). Requires "
-                "data_storage_type other than memory."
+                "data_storage_type other than memory; with memory (or unset) failed documents are re-ingested."
             ),
             category=ORCHESTRATION,
         ),

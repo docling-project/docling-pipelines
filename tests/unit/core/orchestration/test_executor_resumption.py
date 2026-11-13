@@ -38,14 +38,19 @@ class _SavedOutputs:
     def __init__(self, base_dir) -> None:
         self.base_dir = base_dir
 
-    def save(self, *, job_run_id: str, node_name: str, output_index: int, table: pa.Table) -> None:
+    def save(
+        self, *, job_run_id: str, node_name: str, output_index: int, table: pa.Table, batch_num: int | None = None
+    ) -> None:
         target = self.base_dir / JOB_ID / job_run_id / "data" / f"{node_name}_{output_index}"
+        if batch_num is not None:
+            target = target / str(batch_num)
         target.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, target / "output.parquet")
 
     @staticmethod
-    def table_name(*, job_run_id: str, node_name: str, output_index: int) -> str:
-        return f"{JOB_ID}/{job_run_id}/data/{node_name}_{output_index}"
+    def table_name(*, job_run_id: str, node_name: str, output_index: int, batch_num: int | None) -> str:
+        folder = f"{JOB_ID}/{job_run_id}/data/{node_name}_{output_index}"
+        return folder if batch_num is None else f"{folder}/{batch_num}"
 
 
 def _table(*doc_ids: str) -> pa.Table:

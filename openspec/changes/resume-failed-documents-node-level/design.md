@@ -6,6 +6,29 @@ See `proposal.md` for motivation. In Docling Pipelines, pipeline execution produ
 
 This design introduces a pre-execution **Resumption Planner** that identifies failed documents whose upstream node output is stored, tracks them as `deferred_execution_docs` through upstream nodes, and injects the stored rows directly at every node where they failed. No checkpoint copy is written: the rows are read from the intermediate node output that the executors already persist when `data_storage_type` is not `memory`.
 
+### Where the earlier run's output is found
+
+Each run has its own `job_run_id`, so a later run cannot derive the location of an earlier run's output by itself. The failure record therefore stores what is needed to derive it, and nothing else (no path):
+
+| Needed to locate the output | Source |
+|---|---|
+| `job_id` | Same job; the key of the failure records (`<job_id>/resumption`) |
+| `job_run_id` | `FailedNode.job_run_id`, copied to `DeferredRecord.job_run_id` |
+| `batch_num` | `FailedNode.batch_num`, copied to `DeferredRecord.batch_num`; `None` when the failed run was not micro-batched |
+| predecessor node name and output index | Resolved from the current flow by `ResumptionService.build_plan` (`source_node_name`, `source_output_index`) |
+
+The executors save the output of every node and output index to the folder written by `DataAccessUtils.add_node_name_to_output_folder` (`src/docpipe/core/data_access/data_access_utils.py`):
+
+```text
+<data path>/<job_id>/<job_run_id>/data/<node name>_<output index>[/<batch_num>]/output.parquet
+```
+
+`<node name>` is sanitized with `re.sub(r"\W+", "_", ...)` and `/<batch_num>` is present only when the run was micro-batched (`BATCH_NUM` is set by the orchestrator only in micro-batch mode). The resumption factory (`resumption_factory.py`) builds exactly this relative table name from the four values above, so the layout is shared by writer and reader through the same naming rule and no folder is searched for.
+
+**Batch layout.** Micro-batching is enabled by default and a batch number is only meaningful inside the run that created it: the same document can land in batch 3 in one run and batch 0 in the next. The failed run's `batch_num` is therefore recorded when the failure is recorded (`AbstractOperatorExecutor` reads `BATCH_NUM` from its params) and is used as is when resuming. The current run's batch assignment is irrelevant for reading: the resumed rows are read from `<failed run>/<failed batch>` and appended to whichever current batch the planner assigns to the document (`build_plan` keeps all entries of one document in the same current batch).
+
+**Memory storage.** When `data_storage_type` is `memory`, `DataAccessUtils.add_intermediate_storage_config` configures `DataAccessMemory`: no Parquet files are created, so there is no earlier output to read. Resumption therefore requires `data_storage_type` to be set and not `memory` (`is_resumption_enabled`). When it is `memory` or unset, `create_resumption_service` returns `None`: no failure record is written, no document is deferred, and failed documents are re-ingested from the root as before. Nothing is silently lost: the feature degrades to the existing behavior.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -65,18 +88,18 @@ graph TD
 - `NodeStats`: Updated to include `deferred_execution_docs: list[str] = Field(default_factory=list)`.
 - `ResumptionRecord`: per-document failure state, stored through the existing `KeyValueStoragePort` (adapter `KeyValueFileSystemStorage`, collection `<job_id>/resumption`):
   - `doc_id`, `doc_name`, `modified_time`
-  - `failed_nodes: list[FailedNode]`, one entry per node where the document failed (a document processed by several branches can fail at several nodes). Each `FailedNode` holds `node_id`, `node_name`, `job_run_id` (the run in which it failed), `failure_count`, `error_message` (the original error) and `exhausted`.
-  - No checkpoint data and no data path are stored; the path is derived from `job_id` and `job_run_id`.
-- `DeferredRecord`: a document scheduled for resumption at one node of the current run (`target_node_id`, `job_run_id`, `error_message`, plus the source node and output index resolved by the planner).
+  - `failed_nodes: list[FailedNode]`, one entry per node where the document failed (a document processed by several branches can fail at several nodes). Each `FailedNode` holds `node_id`, `node_name`, `job_run_id` (the run in which it failed), `batch_num` (the micro-batch of that run, `None` when not micro-batched), `failure_count`, `error_message` (the original error) and `exhausted`.
+  - No checkpoint data and no data path are stored; the path is derived from `job_id`, `job_run_id` and `batch_num`. Records written before `batch_num` existed deserialize with `batch_num = None`, which reads the node output of all batches of that run (see Risks).
+- `DeferredRecord`: a document scheduled for resumption at one node of the current run (`target_node_id`, `job_run_id`, `batch_num`, `error_message`, plus the source node and output index resolved by the planner). `batch_num` is copied from the `FailedNode` so the executor can derive the Parquet folder without consulting the record again.
 - The saved node output is read through the existing `TableStoragePort`. `TableFileSystemStorage` (new, `src/docpipe/storage/file_system/`) is a generic filesystem implementation of that port: a table is a directory and its rows are all Parquet files below it, so the per-node, per-batch folders written by the executors can be read as tables and queried with `execute_query`.
 - `Metrics.External`: Added `DEFERRED_EXECUTION_DOCS = "deferred_execution_docs"` and `DEFERRED_EXECUTION_DOCS_COUNT = "deferred_execution_docs_count"`.
 
 ### 2. Application Layer (`src/docpipe/core/orchestration/application/` & `job_management/application/`)
 - `ResumptionService`:
-  - `record_failure` stores the failed node, the `job_run_id`, the failure count and the original error message. Failures at other nodes of the same document are kept.
+  - `record_failure` stores the failed node, the `job_run_id`, the `batch_num` of that run, the failure count and the original error message. Failures at other nodes of the same document are kept.
   - Compares consecutive failure counts against `max_retry_attempts` (allows `max_retry_attempts + 1` total tries: 1 initial attempt plus `max_retry_attempts` retries). A document is exhausted when any of its failed nodes is.
   - `build_plan` resolves each deferred entry through `target_node_id` (the node is always part of the flow; a lookup by node name is used only as a fallback for authoring-format flows, whose node ids change on every compile) to its predecessor node, the output index (branching-aware) and the pending ancestors. All entries of one document go to the same micro-batch. Entries whose target is the ingest node, missing, or has several inputs are returned as unresolved.
-  - `inject_saved_rows` reads the rows with `TableStoragePort.execute_query` (document ids are bound parameters), grouped by job run, source node and output index.
+  - `inject_saved_rows` reads the rows with `TableStoragePort.execute_query` (document ids are bound parameters), grouped by job run, source node, output index and batch number. The table name is resolved by `NodeOutputTableName(job_run_id, node_name, output_index, batch_num)`; with a `batch_num` only that batch folder is read, with `None` the node folder and all batch sub-folders below it.
   - `clear_node_success` removes the failure entry of a node once a resumed document passes it; the record is deleted when no failed node remains.
   - Flags documents that exceeded `max_retry_attempts` retries for non-recoverable incremental metadata persistence; the failure reason includes the original error of every exhausted node.
 - `JobReportGenerator` / `ReportGenerator`:
@@ -91,7 +114,8 @@ graph TD
   - Sets `documents_in_scope = len(fresh) + len(deferred) + skipped + failed`.
 - `AbstractOperatorExecutor`:
   - Before executing node $K$:
-    - If `resumption_plan` has deferred docs targeting node $K$, reads the rows from the stored output of the parent node in the job run where the document failed (`<data path>/<job_id>/<job_run_id>/data/<node>_<output>/output.parquet`, including per-batch folders), filters by ID, and concatenates with input table.
+    - If `resumption_plan` has deferred docs targeting node $K$, reads the rows from the stored output of the parent node in the job run and micro-batch where the document failed (`<data path>/<job_id>/<job_run_id>/data/<node>_<output>[/<batch_num>]/output.parquet`), filters by ID, and concatenates with input table.
+    - When recording a failure, passes its own `BATCH_NUM` to `ResumptionService.record_failure`, so the record names the batch folder that holds the node's input.
     - Removes injected doc IDs from `deferred_execution_docs`.
     - If node $K$ is not the target, propagates `deferred_execution_docs` forward in metadata.
 
@@ -112,10 +136,20 @@ graph TD
 
 ## Risks / Trade-offs
 
-- **[Risk] Stored node output missing or unreadable** $\rightarrow$ **Mitigation**: If the saved output cannot be read or merged, the entry is reported as a failed document, its record is discarded, and the document is re-ingested from the root on the next run. Resumption is disabled when `data_storage_type` is `memory`, because nothing is persisted.
+- **[Risk] Stored node output missing or unreadable** $\rightarrow$ **Mitigation**: If the saved output cannot be read or merged, the entry is reported as a failed document, its record is discarded, and the document is re-ingested from the root on the next run. Resumption is disabled when `data_storage_type` is `memory` or unset, because nothing is persisted.
 - **[Risk] Stored node output removed between runs** $\rightarrow$ **Mitigation**: The output of the run listed in the record is the only input. Cleaning up `<job_id>/<job_run_id>/data` therefore turns the affected documents into fresh ingests.
+- **[Risk] Different batch layout between runs** $\rightarrow$ **Mitigation**: Batch numbers are never compared across runs. The failed run's `batch_num` is stored with the failure and used to read that run's folder, so the current run's `enable_micro_batching` or `micro_batch_size` may differ from the failed run's without affecting the lookup. If the failed run was not micro-batched, `batch_num` is `None` and the single node output is read.
+- **[Risk] Records written without `batch_num`** $\rightarrow$ **Mitigation**: `batch_num = None` reads the node folder together with all batch sub-folders, filtered by document id, so a document of an older record is still found; a document id is unique within a run's output, so the result is the same row.
 - **[Risk] Node ids change between runs for authoring-format flows** $\rightarrow$ **Mitigation**: Failure counting and planning fall back to the node name when no entry carries the node id, as long as the name is unique in the flow.
-- **[Trade-off] `job_run_id` of repeated failures** $\rightarrow$ A document that fails again at the same node keeps the `job_run_id` of its first failure at that node, because that run holds the predecessor output; a resumed document is not part of the predecessor output of later runs.
+- **[Trade-off] `job_run_id` and `batch_num` of repeated failures** $\rightarrow$ A document that fails again at the same node keeps the `job_run_id` and `batch_num` of its first failure at that node, because that run and batch hold the predecessor output; a resumed document is not part of the predecessor output of later runs.
+
+## Configuration & Documentation Impact
+
+`max_retry_attempts` is a new public `global_config` key, and its behavior depends on `data_storage_type`:
+
+- `max_retry_attempts` (integer, default `3`, total attempts `1 + max_retry_attempts`): set in the flow's `global_config`, like every other key. It is registered in `GlobalConfigMetadata` in `src/docpipe/core/orchestration/global_config_metadata.py` (`ORCHESTRATION` category), the source of the global-config parameter listing.
+- `data_storage_type` (`memory` | `local`): set in `global_config`. Resumption needs a value other than `memory`; the key description in `global_config_metadata.py` and `docs/reference/GLOBAL_CONFIG.md` states this.
+- `docs/reference/GLOBAL_CONFIG.md`: new `max_retry_attempts` section (semantics, requirements, example) and a failure-resumption note under `data_storage_type`.
 
 ## Migration Plan
 

@@ -78,6 +78,7 @@ def _fail(
     job_run_id: str = RUN_ID,
     modified_time: int = 100,
     reason: str = "boom",
+    batch_num: int | None = None,
 ):
     return service.record_failure(
         job_id=JOB_ID,
@@ -88,6 +89,7 @@ def _fail(
         doc_id=doc_id,
         doc_name="",
         reason=reason,
+        batch_num=batch_num,
     )
 
 
@@ -139,6 +141,24 @@ class TestFailureCounting:
         node = record.failed_node(node_id=NODE_ID)
         assert node.job_run_id == "run-1"
         assert node.error_message == "second"
+
+    def test_batch_num_is_stored_and_kept_from_first_failure(self, service):
+        first = _fail(service, job_run_id="run-1", batch_num=3)
+        assert first.failed_node(node_id=NODE_ID).batch_num == 3
+
+        record = _fail(service, job_run_id="run-2", batch_num=7)
+
+        assert record.failed_node(node_id=NODE_ID).batch_num == 3
+
+    def test_batch_num_defaults_to_none_without_micro_batching(self, service):
+        assert _fail(service).failed_node(node_id=NODE_ID).batch_num is None
+
+    def test_batch_num_is_part_of_the_deferred_record(self, service):
+        record = _fail(service, batch_num=2)
+
+        (deferred,) = ResumptionService.to_deferred_records(record=record)
+
+        assert (deferred.job_run_id, deferred.batch_num) == (RUN_ID, 2)
 
     def test_third_failure_is_still_within_threshold(self, service):
         # 1 initial attempt + 2 retries failed -> 3rd retry (4th attempt) is still allowed
@@ -524,14 +544,23 @@ def _write_node_output(base, run_id: str, folder: str, table: pa.Table, *, batch
     pq.write_table(table, target / "output.parquet")
 
 
-def _table_name(*, job_run_id: str, node_name: str, output_index: int) -> str:
-    return f"{JOB_ID}/{job_run_id}/data/{node_name}_{output_index}"
+def _table_name(*, job_run_id: str, node_name: str, output_index: int, batch_num: int | None) -> str:
+    folder = f"{JOB_ID}/{job_run_id}/data/{node_name}_{output_index}"
+    return folder if batch_num is None else f"{folder}/{batch_num}"
 
 
 class TestInjection:
     @staticmethod
-    def _entry(doc_id: str, *, run: str = RUN_ID, node: str = "chunker", index: int = 0) -> dict:
-        return {"doc_id": doc_id, "job_run_id": run, "source_node_name": node, "source_output_index": index}
+    def _entry(
+        doc_id: str, *, run: str = RUN_ID, node: str = "chunker", index: int = 0, batch_num: int | None = None
+    ) -> dict:
+        return {
+            "doc_id": doc_id,
+            "job_run_id": run,
+            "source_node_name": node,
+            "source_output_index": index,
+            "batch_num": batch_num,
+        }
 
     @staticmethod
     def _service(tmp_path, *, with_tables: bool = True) -> ResumptionService:
@@ -570,6 +599,29 @@ class TestInjection:
 
         assert sorted(merged.column("id").to_pylist()) == ["d1", "d2"]
         assert (sorted(injected), unavailable) == (["d1", "d2"], [])
+
+    def test_batch_num_selects_the_batch_folder_of_the_failed_run(self, tmp_path):
+        # The same document id may sit in several batch folders (e.g. an earlier resumed copy); only the batch of the
+        # failed run is read.
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d1", "other"), batch="0")
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d2"), batch="1")
+
+        merged, injected, unavailable = self._service(tmp_path).inject_saved_rows(
+            table=None, entries=[self._entry("d2", batch_num=1)]
+        )
+
+        assert merged.column("id").to_pylist() == ["d2"]
+        assert (injected, unavailable) == (["d2"], [])
+
+    def test_document_in_another_batch_is_unavailable(self, tmp_path):
+        _write_node_output(tmp_path, RUN_ID, "chunker_0", _input_table("d1"), batch="0")
+
+        _, injected, unavailable = self._service(tmp_path).inject_saved_rows(
+            table=None, entries=[self._entry("d1", batch_num=1)]
+        )
+
+        assert injected == []
+        assert [e["doc_id"] for e in unavailable] == ["d1"]
 
     def test_missing_output_is_reported_unavailable(self, tmp_path):
         base = _input_table("fresh")
@@ -657,6 +709,35 @@ class TestFactory:
         service = create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "local"})
 
         assert service.max_retry_attempts == DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS
+
+    def test_output_table_name_includes_batch_num(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DOCPIPE_DATA_PATH", str(tmp_path))
+        job_id, failed_run = "job-1", "run-failed"
+        target = tmp_path / job_id / failed_run / "data" / "chunker_0" / "3"
+        target.mkdir(parents=True)
+        pq.write_table(_input_table("d1"), target / "output.parquet")
+        other = tmp_path / job_id / failed_run / "data" / "chunker_0" / "0"
+        other.mkdir(parents=True)
+        pq.write_table(_input_table("d2"), other / "output.parquet")
+        service = create_resumption_service(
+            config={
+                DocpipeConstants.DATA_STORAGE_TYPE: "local",
+                DocpipeConstants.JOB_ID: job_id,
+                DocpipeConstants.JOB_RUN_ID: "run-current",
+            }
+        )
+        entry = {"job_run_id": failed_run, "source_node_name": "chunker", "source_output_index": 0}
+
+        merged, injected, unavailable = service.inject_saved_rows(
+            table=None, entries=[{**entry, "doc_id": "d1", "batch_num": 3}]
+        )
+        _, other_injected, other_unavailable = service.inject_saved_rows(
+            table=None, entries=[{**entry, "doc_id": "d1", "batch_num": 0}]
+        )
+
+        assert (merged.column("id").to_pylist(), injected, unavailable) == (["d1"], ["d1"], [])
+        assert other_injected == []
+        assert [e["doc_id"] for e in other_unavailable] == ["d1"]
 
     def test_max_retry_attempts_is_configurable(self):
         service = create_resumption_service(
