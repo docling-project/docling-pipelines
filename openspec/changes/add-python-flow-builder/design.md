@@ -10,7 +10,7 @@ Current gaps are concrete:
 - `FlowValidator` constructs operators with `validating_flow=True`. Some custom parameter checks are then skipped by `should_validate_field()`, while constructors can load models or instantiate adapters.
 - Filesystem source config validation checks path existence; static schema reuse therefore needs a pure mode, not unconditional use of the existing validators.
 - `AuthoringFlow.to_dict()` currently omits its optional flow ID. Round-trip support needs to preserve it without changing generated runtime-ID semantics.
-- The actual registry has 22 classes: 21 public components plus internal `doc_id_hash`. Do not expose the internal class merely to match registry size.
+- The actual registry has 23 classes: 22 public components plus internal `doc_id_hash`. Do not expose the internal class merely to match registry size.
 
 Relevant existing tests include `tests/unit/test_docpipe_flow_manager*.py`, authoring model/compiler tests under `tests/unit/core/assets_management/`, and `tests/unit/utils/operators/test_config_validation.py`. Active source/extraction proposals overlap some provider config files; this change adds schemas for current behavior only.
 
@@ -24,15 +24,15 @@ Relevant existing tests include `tests/unit/test_docpipe_flow_manager*.py`, auth
 
 ### 1. A small public builder over the authoring model
 
-Expose `Flow` and `OperatorSpec` from `docpipe`, and stable configuration classes from `docpipe.config`. Put the facade in `src/docpipe/lib/flow.py`, report types in the library layer, and shared schemas/services under `src/docpipe/core/operators/configuration/`. Import schema definitions without importing concrete runtime operators or adapters. Existing top-level imports may need lazy exports to avoid pulling runtime dependencies into configuration-only use.
+Expose `FlowBuilder` and `OperatorSpec` from `docpipe`, and stable configuration classes from `docpipe.config`. Put the facade in `src/docpipe/lib/flow.py`, report types in the library layer, and shared schemas/services under `src/docpipe/core/operators/configuration/`. Import schema definitions without importing concrete runtime operators or adapters. Top-level `docpipe` exports must be lazy: importing `docpipe` or `docpipe.config` must not load the flow engine, operator registry, data_processing, PyArrow, job management, or optional provider packages.
 
 Public shape:
 
 ```python
-from docpipe import Flow
+from docpipe import FlowBuilder
 from docpipe import config as cfg
 
-flow = Flow(
+flow = FlowBuilder(
     name="prepare-documents",
     description="Docling extraction and output",
     global_config={"doc_column": "content"},
@@ -43,7 +43,7 @@ flow.add(
     name="source",
     operator=cfg.Ingest(
         provider="filesystem",
-        provider_config={"paths": ["./documents"]},
+        provider_config=cfg.FilesystemSource(paths=["./documents"]),
     ),
 )
 flow.add(
@@ -58,20 +58,20 @@ flow.add(
         mode="processed_content",
         destination_config={
             "provider": "filesystem",
-            "provider_config": {"root_path": "./output"},
+            "provider_config": cfg.FilesystemDestination(root_path="./output"),
         },
     ),
 )
-flow.connect_chain(nodes=["source", "extract", "output"])
+flow.connect_chain(nodes=["source", "extract", "output"])  # unknown names fail here, before any edge is added
 report = flow.validate()
 report.raise_for_errors()
 definition = flow.to_dict()
 result = flow.execute()
 ```
 
-Also support `Flow.from_dict(data=...)`, `Flow(flow_id=...)`, and `execute()` keyword options corresponding to current manager job IDs, reporting, and logging controls. Preserve metadata/log access through facade methods delegating to the most recent manager. Keep `DocpipeFlowManager` unchanged as a supported public entrypoint.
+Also support `FlowBuilder.from_dict(data=...)`, `FlowBuilder(flow_id=...)`, and `execute()` keyword options corresponding to current manager job IDs, reporting, and logging controls. Preserve metadata/log access through facade methods delegating to the most recent manager. Keep `DocpipeFlowManager` unchanged as a supported public entrypoint.
 
-`add`, `connect`, and `connect_chain` return the flow for optional fluent usage. They validate candidate mutations before committing them, so invalid batch connections cannot leave partial state. Complete-flow constraints are deferred to `validate()`; intermediate builders can be incomplete. Unknown names and outputs, repeated edges, self-edges, and cycles fail immediately. Preserve current graph semantics for non-merge dependencies rather than introducing new implicit aggregation rules.
+`add`, `connect`, and `connect_chain` return the flow for optional fluent usage. They validate candidate mutations before committing them, so invalid batch connections cannot leave partial state. Complete-flow constraints are deferred to `validate()`; intermediate builders can be incomplete. Unknown names and outputs, repeated edges, self-edges, and cycles fail immediately. Nodes are referenced by the unique names passed to `add`, not by handles; `add` returns the builder, not a node object. Preserve current graph semantics for non-merge dependencies rather than introducing new implicit aggregation rules.
 
 Alternative: directly instantiate existing operator classes as Haystack components. Rejected because their constructors take runtime dictionaries and can initialize resources; configuration objects give autocomplete without those side effects. A fluent-only pipeline chain is insufficient for branching.
 
@@ -103,9 +103,10 @@ Baseline exports:
 | Noop | noop |
 | VectorDB | vectordb |
 | DocumentSet | document_set |
+| EntityStore | entity_store |
 | StorageOutput | storage_output |
 
-`Branch` is a nested configuration model, not an executable operator. Existing provider config models are reused after separating environment checks. Nested mappings are accepted and parsed by provider-specific schemas; model instances can be accepted too and serialize to the same dictionary. Preserve extraction's text/entity blocks, PII/HAP independent provider selection, chunker summarization, vector feature mappings, and output-format/structure settings.
+`BranchRule` is a nested configuration model, not an executable operator. Existing provider config models are reused after separating environment checks. The public `FilesystemSource` and `FilesystemDestination` models are pure; path existence stays in the runtime `FilesystemSourceConfig` and is checked at execution. Nested mappings are accepted and parsed by provider-specific schemas; model instances can be accepted too and serialize to the same dictionary. Preserve extraction's text/entity blocks, PII/HAP independent provider selection, chunker summarization, vector feature mappings, and output-format/structure settings.
 
 Schema registration associates the selected operator class identity with its pure model and optional static feature resolver. Do not key extension schemas only by short name: overrides can have different contracts. Add an optional schema hook to the operator contract with a backward-compatible default of no schema; providers register their schema classes without adapter instantiation. Runtime factories keep priority resolution. Use lazy imports for schema discovery and optional providers.
 
@@ -117,7 +118,7 @@ Models retain which fields users explicitly supplied. `to_dict()` exports detach
 
 Separate known flow-wide settings and compiler/runtime envelope fields from strict authored operator keys. Validate authored node dictionaries before injecting fields such as available features and generated merge links. Internally generated fields are an explicit trusted set, not a blanket exemption for unknown authored keys. Flow-global extension keys are allowed only when claimed by a selected extension; do not let arbitrary globals bypass typo detection.
 
-Deferred secret references use the existing supported syntax, represented by a schema-level reference type without resolving their values. Validate literal fields normally; defer only checks depending on references. Resolve through the existing environment/vault path and revalidate the resolved effective config before use. Never include raw input values in secret-related diagnostics. Export preserves references for the caller's existing execution environment.
+Deferred secret references use the existing supported syntax, represented by a schema-level reference type without resolving their values. Validate literal fields normally; defer only checks depending on references. Resolve through the existing environment/vault path and revalidate the resolved effective config before use. After resolution, secret-bearing fields hold `SecretValue` from the `add-secret-management` change (design D5); revalidation accepts it for those fields without coercing it to `str`. Length and pattern constraints are not checked on secret-bearing fields, because `SecretValue` does not expose its contents. Never include raw input values in secret-related diagnostics. Export preserves references for the caller's existing execution environment.
 
 Alternative: materialize every default on model construction. Rejected because that would silently override inherited `doc_column` and other global settings. Blind Pydantic coercion would also hide user mistakes.
 
@@ -128,7 +129,7 @@ Introduce a pure configuration validation service and an explicit static path in
 Stages:
 
 1. Typed construction: validate known authored values without resource access.
-2. `Flow.validate()`, manager validation, CLI validation, REST validation: validate effective schemas, structural rules, and known input/output features without runtime constructors.
+2. `FlowBuilder.validate()`, manager validation, CLI validation, REST validation: validate effective schemas, structural rules, and known input/output features without runtime constructors.
 3. Execution: existing cancellation check first, pure parameter preflight next, secret resolution and deferred/environment checks before affected resources, then existing orchestrator execution. Mandatory parameter checks remain active when DAG validation is disabled.
 
 Filesystem source existence, destination access, model availability, vector index compatibility, and network credentials remain execution concerns. Existing provider validators that perform these checks must be split or supplied with an explicit pure context that does not probe resources. Existing execution checks are retained. Do not promise that static success proves credentials or remote index compatibility.
@@ -139,11 +140,11 @@ Alternative: call `manager.validate()` unchanged from the builder. Rejected beca
 
 ### 5. Reuse branch/merge authoring semantics
 
-`cfg.Branching(branches={"english": cfg.Branch(filter_criteria_list=["lang_name = 'en'"])})` serializes to the current branch dictionary. `connect(source="route", output="english", target="chunk_en")` serializes as `depends_on=["route.english"]`. The compiler generates runtime branch IDs and input links. No runtime IDs leak into the Python API.
+`cfg.Branching(branches={"english": cfg.BranchRule(filter_criteria_list=["lang_name = 'en'"])})` serializes to the current branch dictionary. `connect(source="route", output="english", target="chunk_en")` serializes as `depends_on=["route.english"]`. The compiler generates runtime branch IDs and input links. No runtime IDs leak into the Python API.
 
 Conditional branches are independent filters; no first-match or implicit else behavior. Empty branches are unconditional copies. Branch predicates can leave rows unmatched. Row merging concatenates distinct IDs and retains runtime duplicate rejection; column merging joins on `id`, preserving current duplicate-column suffix behavior and nested-column handling. Recommend distinct embedding column names. Static checks catch missing join keys and known incompatible schemas, but data-dependent duplicates remain runtime errors. Separate output leaves require no merge. Preserve current terminal warnings.
 
-Serialization round trips authoring semantics, not generated runtime UUIDs. Preserve an explicit flow ID and deterministic authoring node/edge order. `Flow.execute()` passes a deep copy to the manager because the existing compilation path mutates the input with `flow_source`. Keep the original builder and user's dictionaries untouched.
+Serialization round trips authoring semantics, not generated runtime UUIDs. Preserve an explicit flow ID and deterministic authoring node/edge order. `FlowBuilder.execute()` passes a deep copy to the manager because the existing compilation path mutates the input with `flow_source`. Keep the original builder and user's dictionaries untouched.
 
 Alternative: implicit branching from an overloaded `>>` operator and automatic merges. Rejected to keep table routing and recombination visible and consistent with the visual/JSON representation.
 

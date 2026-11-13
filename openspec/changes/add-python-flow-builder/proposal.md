@@ -8,7 +8,7 @@ Python users can execute dictionaries through `DocpipeFlowManager`, but must man
 
 ## What Changes
 
-- Add `Flow`, exported from `docpipe`, with typed node configuration, explicit connections, named branch outputs, merge inputs, chain connections, authoring-dictionary import/export, validation reports, and execution through the existing manager/compiler/runtime.
+- Add `FlowBuilder`, exported from `docpipe`, with typed node configuration, explicit connections, named branch outputs, merge inputs, chain connections, authoring-dictionary import/export, validation reports, and execution through the existing manager/compiler/runtime.
 - Add `docpipe.config` with keyword-based configuration models for every public built-in operator and nested provider settings. Retain existing JSON parameter names, defaults, provider aliases, and documented passthrough settings.
 - Add `OperatorSpec` for registered custom operators, preserving factory priority and optional custom schemas. Keep internal `doc_id_hash` unavailable as a public component.
 - Share pure parameter validation across Python, CLI/JSON, REST validation, and execution preflight. Separate schema errors from upstream-feature checks and environment-dependent checks; construction and serialization perform no model loading, network access, or filesystem writes.

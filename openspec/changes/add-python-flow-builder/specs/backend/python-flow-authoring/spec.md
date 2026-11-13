@@ -7,7 +7,7 @@ Allow Python applications and notebooks to construct, inspect, validate, and exe
 ## ADDED Requirements
 
 ### Requirement: Construct flows with configured nodes
-The public Python API SHALL expose `Flow` with keyword-based node addition using typed configurations or a registered-operator specification. Nodes SHALL have unique names. Adding a node SHALL snapshot its configuration without initializing an operator or modifying the caller's configuration.
+The public Python API SHALL expose `FlowBuilder` with keyword-based node addition using typed configurations or a registered-operator specification. Nodes SHALL have unique names. Adding a node SHALL snapshot its configuration without initializing an operator or modifying the caller's configuration.
 
 #### Scenario: Configure a node
 - **WHEN** a user adds a named chunker with a valid configuration
@@ -74,7 +74,7 @@ The API SHALL expose `to_dict()` and `from_dict(data=...)` using the existing au
 - **THEN** it compiles and executes through the existing authoring/compiler path without a JSON file
 
 ### Requirement: Validate without executing the flow
-`Flow.validate()` SHALL return a report with `valid`, `errors`, and `warnings`, plus `raise_for_errors()`. Validation SHALL check parameter schemas, graph structure, and upstream feature compatibility without instantiating runtime operators or probing external services. Warnings SHALL NOT make a report invalid, including existing missing-terminal-output warnings.
+`FlowBuilder.validate()` SHALL return a report with `valid`, `errors`, and `warnings`, plus `raise_for_errors()`. Validation SHALL check parameter schemas, graph structure, and upstream feature compatibility without instantiating runtime operators or probing external services. Warnings SHALL NOT make a report invalid, including existing missing-terminal-output warnings.
 
 #### Scenario: Required upstream feature absent
 - **WHEN** a node requires a column not supplied by its predecessors
@@ -89,7 +89,7 @@ The API SHALL expose `to_dict()` and `from_dict(data=...)` using the existing au
 - **THEN** static validation does not fail solely because those resources are unavailable
 
 ### Requirement: Execute using existing runtime semantics
-`Flow.execute()` SHALL delegate a detached authoring definition through the existing flow manager and runtime, returning the manager's execution result. The API SHALL support existing execution options and custom packages. Global settings, micro-batching defaults, cancellation, and execution metadata SHALL retain manager semantics.
+`FlowBuilder.execute()` SHALL delegate a detached authoring definition through the existing flow manager and runtime, returning the manager's execution result. The API SHALL support existing execution options and custom packages. Global settings, micro-batching defaults, cancellation, and execution metadata SHALL retain manager semantics.
 
 #### Scenario: Default micro-batching
 - **WHEN** a builder flow executes without an explicit micro-batching setting
@@ -116,3 +116,10 @@ The API SHALL accept `OperatorSpec(type=..., config=...)` for registered custom 
 #### Scenario: No extension schema
 - **WHEN** a generic custom node has no registered pure configuration schema
 - **THEN** static validation reports its limited coverage without constructing the operator and execution retains its existing checks
+
+### Requirement: Import the public API without runtime dependencies
+Importing `docpipe` or `docpipe.config` SHALL NOT load the flow engine, operator registry, data_processing, PyArrow, job management, or optional model and provider packages.
+
+#### Scenario: Fresh interpreter import
+- **WHEN** `docpipe` and `docpipe.config` are imported in a new interpreter
+- **THEN** `sys.modules` contains none of the flow engine, operator registry, data_processing, PyArrow, job management, or optional provider modules

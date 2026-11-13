@@ -8,6 +8,7 @@ Each tracked task is scoped to at most two hours. Tests and documentation land w
 - [ ] 1.2 [backend] Add detached explicit-field serialization and effective-config merging for recognized globals and node overrides; verify omitted defaults, explicitly supplied defaults, nested copies, and unknown-global-key tests. (2h)
 - [ ] 1.3 [backend] Add pure schema/feature registration hooks and resolution by selected operator identity, preserving existing factory priority; verify custom overrides, disabled custom loading, and schema-less warnings with registry tests. (2h)
 - [ ] 1.4 [backend] Document schema extension, provider passthrough, inheritance, and deferred-reference rules in a focused section of the custom-operator guide; verify examples against fixture schemas and all relative links. (1h)
+- [ ] 1.5 [backend] Make top-level `docpipe` exports lazy so importing `docpipe` or `docpipe.config` does not load the flow engine, operator registry, data_processing, PyArrow, job management, or optional providers; verify with a fresh-interpreter test that checks `sys.modules` for each excluded module. (2h)
 
 ## 2. Source and extraction configuration contracts
 
@@ -26,7 +27,7 @@ Each tracked task is scoped to at most two hours. Tests and documentation land w
 - [ ] 3.1 [backend] Add Chunker configuration for simple/hybrid modes and pure size/overlap relationships; verify boundary, enum, inheritance, and bool-as-int tests against existing chunker semantics. (2h)
 - [ ] 3.2 [backend] Add semantic chunker and summarization nested configuration; verify thresholds, provider options, references, and no model initialization. (2h)
 - [ ] 3.3 [backend] Add Embeddings configuration and pure LiteLLM/Watsonx/HuggingFace provider contracts; verify passthrough, required provider settings, output-column naming, and current embedding fixtures. (2h)
-- [ ] 3.4 [backend] Add Branching, Branch, and Merge configurations in authoring format; verify predicates, empty fan-out branches, merge choices, and compiler-generated input-link compatibility. (2h)
+- [ ] 3.4 [backend] Add Branching, BranchRule, and Merge configurations in authoring format; verify predicates, empty fan-out branches, merge choices, and compiler-generated input-link compatibility. (2h)
 - [ ] 3.5 [backend] Add Noop and EntityCuration configurations and keep DocIdHash internal; verify schema exports, known parameter errors, and entity-schema dependencies using fixtures. (1h)
 - [ ] 3.6 [backend] Add DocumentClassifier configuration and pure provider selection; verify confidence range, document-type mapping/list forms, and current classification examples. (2h)
 - [ ] 3.7 [backend] Add PIIAndHAP configuration including independent PII/HAP providers and redaction settings; verify provider fallback, threshold boundaries, Presidio restrictions, and current fixtures. (2h)
@@ -41,8 +42,9 @@ Each tracked task is scoped to at most two hours. Tests and documentation land w
 - [ ] 4.3 [backend] Add DocumentSet and StorageOutput mode/format/structure configurations; verify current mode-required fields and table-column prerequisites. (2h)
 - [ ] 4.4 [backend] Adapt filesystem and S3/IBM COS destination schemas for pure inspection; verify source references and destination path checks remain deferred to execution. (2h)
 - [ ] 4.5 [backend] Adapt existing SharePoint/OneDrive/Google Drive/Box/Dropbox destination schema discovery; verify alias-specific schema selection and nested errors using current fixtures. (2h)
-- [ ] 4.6 [backend] Expose lightweight `docpipe.config` imports and add the 21-public-operator coverage matrix; verify optional runtime packages can be absent and `doc_id_hash` has no public typed export. (2h)
+- [ ] 4.6 [backend] Expose lightweight `docpipe.config` imports and add the 22-public-operator coverage matrix; verify optional runtime packages can be absent and `doc_id_hash` has no public typed export. (2h)
 - [ ] 4.7 [backend] Update storage/vector-store parameter reference examples and migration notes for stricter fields; verify schema-only fixture parity and links without updating CHANGELOG.md. (1h)
+- [ ] 4.8 [backend] Add EntityStore configuration (`data_backend`, `database_path`, `schema`, `table_prefix`) matching the operator's constructor checks, including rejection of PostgreSQL connection settings in operator configuration; verify the backend enum and table-prefix pattern statically, with no database opened. (2h)
 
 ## 5. Shared static validation and metadata
 
@@ -59,18 +61,18 @@ Each tracked task is scoped to at most two hours. Tests and documentation land w
 - [ ] 6.2 [backend] Integrate shared schemas into REST authoring/Elyra validation and metadata services; verify HTTP envelopes, node/field errors, no persistence, and equivalent Python/JSON/Elyra fixtures. (2h)
 - [ ] 6.3 [backend] Preserve feature-enrichment tolerance for incomplete editor flows using the pure path; verify warnings, partial enrichment, and request deep-copy tests. (2h)
 - [ ] 6.4 [backend] Add parameter preflight after cancellation and before runtime resource initialization; verify invalid parameters fail before adapters, graph-validation bypass retains parameter checks, and cancelled runs skip preflight. (2h)
-- [ ] 6.5 [backend] Revalidate resolved references and retain resource availability/runtime checks; verify referenced type errors, redacted failures, missing-source runtime errors, and schema-less custom hooks. (2h)
+- [ ] 6.5 [backend] Revalidate resolved references, accepting `SecretValue` in secret-bearing fields without `str` coercion, and retain resource availability/runtime checks; verify referenced type errors, redacted failures, missing-source runtime errors, and schema-less custom hooks. (2h)
 - [ ] 6.6 [backend] Update validation documentation for the stricter behavior and graph-bypass distinction; verify documented CLI/REST cases against entrypoint tests. (1h)
 
 ## 7. Public Python flow authoring
 
-- [ ] 7.1 [backend] Add Flow/OperatorSpec node storage and lightweight public exports with detached configuration snapshots; verify duplicate names, optional imports, fluent returns, and caller-mutation isolation. (2h)
+- [ ] 7.1 [backend] Add FlowBuilder/OperatorSpec node storage and lightweight public exports with detached configuration snapshots; verify duplicate names, optional imports, fluent returns, and caller-mutation isolation. (2h)
 - [ ] 7.2 [backend] Implement atomic connect/connect_chain with named-output and graph checks; verify unknown nodes/outputs, duplicate edges, cycles, self-edges, and failed-chain rollback. (2h)
 - [ ] 7.3 [backend] Implement authoring dictionary import/export and preserve explicit flow IDs through AuthoringFlow; verify JSON round trips, references, deterministic order, inheritance, and compiler branch/merge links. (2h)
-- [ ] 7.4 [backend] Add validation report/raise_for_errors and connect Flow.validate to static services; verify error aggregation, warning-only validity, missing features, and no runtime resource access. (2h)
+- [ ] 7.4 [backend] Add validation report/raise_for_errors and connect FlowBuilder.validate to static services; verify error aggregation, warning-only validity, missing features, and no runtime resource access. (2h)
 - [ ] 7.5 [backend] Delegate execution and metadata/log retrieval to DocpipeFlowManager with existing options and custom packages; verify manager call arguments, deep copies, micro-batching defaults/overrides, and repeated execution isolation. (2h)
 - [ ] 7.6 [backend] Add generic custom-component authoring with selected schema resolution; verify custom built-in overrides, schema-less coverage warnings, disabled-custom behavior, and factory priority. (2h)
-- [ ] 7.7 [backend] Create `docs/guides/PROGRAMMATIC_FLOW_AUTHORING_GUIDE.md` with the public API and configuration examples for all 21 public components; verify every example via schema-only fixtures and exclude internal DocIdHash from the public catalog. (2h)
+- [ ] 7.7 [backend] Create `docs/guides/PROGRAMMATIC_FLOW_AUTHORING_GUIDE.md` with the public API and configuration examples for all 22 public components; verify every example via schema-only fixtures and exclude internal DocIdHash from the public catalog. (2h)
 - [ ] 7.8 [backend] Add linear output/vector-store, conditional branch/row merge, and dual-embedding/column merge examples and link the guide from existing documentation; verify exports compile and offline test fixtures exercise each graph. (2h)
 
 ## 8. Integration verification

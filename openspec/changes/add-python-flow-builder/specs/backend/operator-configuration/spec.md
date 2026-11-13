@@ -11,7 +11,7 @@ The public `docpipe.config` namespace SHALL provide named configuration models f
 
 #### Scenario: Catalog coverage
 - **WHEN** the baseline built-in registry is compared to public configuration exports
-- **THEN** typed coverage exists for ingest_source, extract_operator, branching, chunker, embeddings, merge, noop, entity_curation, document_classifier, doc_quality, ededup, lang_detect, ml_enrichment, pii_and_hap, readability, redaction, sql_filter, vectordb, document_set, acl_operator, and storage_output
+- **THEN** typed coverage exists for ingest_source, extract_operator, branching, chunker, embeddings, merge, noop, entity_curation, document_classifier, doc_quality, ededup, lang_detect, ml_enrichment, pii_and_hap, readability, redaction, sql_filter, vectordb, document_set, acl_operator, entity_store, and storage_output
 
 #### Scenario: Optional dependencies absent
 - **WHEN** configuration models are imported with optional model/provider packages absent
@@ -68,6 +68,10 @@ Existing environment and vault reference syntax SHALL survive static validation 
 #### Scenario: Invalid literal alongside reference
 - **WHEN** a provider has referenced credentials and a literal port with an invalid type
 - **THEN** validation still reports the invalid port
+
+#### Scenario: Resolved secret revalidated
+- **WHEN** a secret-bearing field resolves to a `SecretValue`
+- **THEN** revalidation accepts the wrapper without coercing it to `str`, skips length and pattern constraints on its contents, and diagnostics do not display its value
 
 ### Requirement: Share validation across authoring surfaces
 Equivalent built-in configurations SHALL have the same parameter acceptance and rejection rules in typed Python, authoring JSON, CLI validation, and REST authoring/Elyra validation. Runtime graph fields and recognized global settings SHALL be separated from authored operator parameters before strict checking.
