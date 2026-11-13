@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: VectorDB feature mapping and backend configuration
-The VectorDB custom panel SHALL support database backend selection (OpenSearch / Milvus / Weaviate), index/collection naming, and a feature mapping tearsheet that manages embeddings-to-field bindings and calls the feature enrichment endpoint. The provider list SHALL come from operator metadata. Each provider SHALL be rendered with its own connection, authentication, naming, and similarity configuration; an unknown provider MUST NOT silently render another provider's fields. For Weaviate the panel SHALL provide on-prem and Weaviate Cloud connection controls, authentication-method-specific masked credential inputs, a collection-name rule, a distance metric selector without an engine selector, and a capability-driven BM25 option. Invalid Weaviate connection or credential configuration SHALL block opening the feature-mapping tearsheet and enrichment. Every new user-facing string SHALL be localizable, and every new control SHALL be keyboard operable with accessible labels and error messages. OpenSearch and Milvus behavior SHALL be unchanged.
+The VectorDB custom panel SHALL support database backend selection (OpenSearch / Milvus / Weaviate), index/collection naming, Milvus Lite binary vector restriction warnings, similarity metric selection including binary metrics (`HAMMING`, `JACCARD`) for Milvus, and a feature mapping tearsheet that manages embeddings-to-field bindings and calls the feature enrichment endpoint. The provider list SHALL come from operator metadata. Each provider SHALL be rendered with its own connection, authentication, naming, and similarity configuration; an unknown provider MUST NOT silently render another provider's fields. For Weaviate the panel SHALL provide on-prem and Weaviate Cloud connection controls, authentication-method-specific masked credential inputs, a collection-name rule, a distance metric selector without an engine selector, and a capability-driven BM25 option. Invalid Weaviate connection or credential configuration SHALL block opening the feature-mapping tearsheet and enrichment. Every new user-facing string SHALL be localizable, and every new control SHALL be keyboard operable with accessible labels and error messages. OpenSearch and Milvus behavior SHALL be unchanged.
 
 #### Scenario: Backend selection displays relevant configuration fields
 - **WHEN** the user selects "OpenSearch" or "Milvus" as the vector database provider
@@ -12,6 +12,18 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 #### Scenario: Feature mapping tearsheet manages embedding field bindings
 - **WHEN** the user opens the feature mapping tearsheet
 - **THEN** upstream embedding features and document metadata can be mapped to vector database payload fields
+
+#### Scenario: Binary similarity metric selection for binary embeddings
+- **WHEN** the user configures a Milvus vector database with an upstream `vector_binary` feature
+- **THEN** binary similarity metrics (`HAMMING`, `JACCARD`) are available in the similarity metric selection dropdown with localized descriptive labels
+
+#### Scenario: Milvus Lite binary vector restriction warning
+- **WHEN** the user selects `auth_type: "lite"` in Milvus provider configuration and an upstream node provides `vector_binary` features
+- **THEN** an inline warning notification is displayed in the properties panel explaining that Milvus Lite does not support binary vectors
+
+#### Scenario: OpenSearch binary vector restriction warning
+- **WHEN** the user selects OpenSearch provider configuration and an upstream node provides `vector_binary` features
+- **THEN** an inline warning notification is displayed in the properties panel explaining that OpenSearch does not support binary vectors
 
 #### Scenario: Weaviate offered when the backend lists it
 - **WHEN** operator metadata lists `weaviate` among the `provider_config` providers
