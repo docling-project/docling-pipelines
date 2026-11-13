@@ -335,3 +335,21 @@ class TestMilvusAdapterValidatesBeforeConnecting:
         error, mock_client_cls = self._build_expecting_error(config)
         assert message in str(error)
         mock_client_cls.assert_not_called()
+
+
+class TestMilvusAdapterIndexDocuments:
+    """index_documents reports rows rejected before insert together with insert failures."""
+
+    def test_merges_rejected_rows_with_insert_failures(self):
+        adapter = _make_adapter()
+        rejected = [{"index": {"_id": "too_long", "error": {"reason": "over VARCHAR limit"}}}]
+        insert_failed = [{"index": {"_id": "insert_err", "error": {"reason": "connection lost"}}}]
+        batches = [[{"pk": "ok"}]]
+        adapter.batch_processor.create_batches.return_value = (batches, rejected)
+        adapter.batch_processor.process_batches.return_value = (1, insert_failed)
+
+        success_count, failed_items = adapter.index_documents([("ok", {}), ("too_long", {}), ("insert_err", {})])
+
+        adapter.batch_processor.process_batches.assert_called_once_with(batches=batches)
+        assert success_count == 1
+        assert failed_items == rejected + insert_failed
