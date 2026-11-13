@@ -86,8 +86,20 @@ def test_dispatch_does_not_execute_when_mapping_is_missing(*, dispatch_services)
     service, mapping_service, flow_service, orchestrator = dispatch_services
     mapping_service.get_mapping.side_effect = LookupError("unknown routing key")
 
-    with pytest.raises(LookupError, match="unknown routing key"):
+    with pytest.raises(LookupError, match="unknown routing key") as error:
         service.dispatch(event=_event())
+
+    assert "unknown routing key" in str(error.value)
+    assert error.value is mapping_service.get_mapping.side_effect
 
     flow_service.get_flow.assert_not_called()
     orchestrator.execute.assert_not_called()
+
+
+def test_dispatch_propagates_failed_flow_load(*, dispatch_services) -> None:
+    """The original loading error reaches the listener unchanged."""
+    service, _, flow_service, _ = dispatch_services
+    flow_service.get_flow.side_effect = LookupError("flow deleted")
+    with pytest.raises(LookupError, match="flow deleted") as error:
+        service.dispatch(event=_event())
+    assert error.value is flow_service.get_flow.side_effect

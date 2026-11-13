@@ -31,9 +31,11 @@ class GraphExecutionEngine:
             orchestrator=OrchestratorType.PYTHON
         )
         self.output_buffer = OutputBuffer()
+        self._operators: list[AbstractOperator] = []
 
     def execute(self) -> dict[UUID, OperatorOutput]:
         """Run operators and return each terminal operator's output table."""
+        node = None
         try:
             for node_id in self.ordered_operator_ids:
                 node = self.flow_graph.nodes[node_id]
@@ -55,13 +57,18 @@ class GraphExecutionEngine:
                     operator_output = self._execute_simple_node(node=node, input_table=input_table)
                 self._raise_if_node_failed(node=node, metadata=operator_output.metadata)
                 self.output_buffer.put_output(node_id=node_id, output=operator_output)
+                node = None
 
             terminal_ids = [
                 node_id for node_id in self.ordered_operator_ids if not self.flow_graph.get_output_edges(node_id)
             ]
             return {node_id: self.output_buffer.get_output(node_id) for node_id in terminal_ids}
+        except Exception as exc:
+            context = f"node_id={node.id} node={node.name} operator={node.operator_name}" if node else "Graph execution"
+            raise FlowExecutionFailedException(f"{context}: {exc}") from exc
         finally:
             self.output_buffer.clear()
+            self._cleanup_operators()
 
     def _get_input_table(self, *, source_id: UUID, branch_id: str | None = None) -> pa.Table:
         """Read a source output, selecting the connected branch when applicable."""
@@ -113,12 +120,12 @@ class GraphExecutionEngine:
             return OperatorOutput(tables=[input_table], metadata=metadata)
         return self._execute_node(node=node, input_table=input_table)
 
-    @staticmethod
-    def _execute_merging_node(*, node: Node, input_tables: dict[str, pa.Table]) -> OperatorOutput:
+    def _execute_merging_node(self, *, node: Node, input_tables: dict[str, pa.Table]) -> OperatorOutput:
         """Run the merge operator with its resolved input tables."""
         operator = MergeOperator(config=node.operator_config)
+        self._operators.append(operator)
         output_tables, metadata = operator.transform(table=pa.table({}), tables=input_tables)
-        return GraphExecutionEngine._prepare_output(operator=operator, tables=output_tables, metadata=metadata)
+        return self._prepare_output(operator=operator, tables=output_tables, metadata=metadata)
 
     def _execute_simple_node(self, *, node: Node, input_table: pa.Table | None) -> OperatorOutput:
         """Run a linear node or pass its empty input through."""
@@ -138,6 +145,7 @@ class GraphExecutionEngine:
         if not operator_class:
             raise ValueError(f"Operator:{node.operator_name} not found.")
         operator: AbstractOperator = operator_class(config=node.operator_config)
+        self._operators.append(operator)
         output_tables, metadata = operator.transform(table=input_table)
         return self._prepare_output(operator=operator, tables=output_tables, metadata=metadata)
 
@@ -174,3 +182,12 @@ class GraphExecutionEngine:
             raise FlowExecutionFailedException(
                 f"Operator '{node.name}' ({node.operator_name}) reported a failed execution."
             )
+
+    def _cleanup_operators(self) -> None:
+        """Invoke cleanup hooks for all operators constructed by this attempt."""
+        for operator in self._operators:
+            try:
+                operator.cleanup()
+            except Exception:
+                logger.warning("Operator cleanup failed for %s", operator.short_name, exc_info=True)
+        self._operators.clear()
