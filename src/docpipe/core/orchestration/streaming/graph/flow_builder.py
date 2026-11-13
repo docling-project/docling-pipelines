@@ -28,7 +28,7 @@ class FlowBuilder:
         """Validate the runtime definition, construct its graph, and validate graph relationships.
 
         Configuration is merged with precedence:
-        flow[global_config] < operator[config] < runtime params.
+        flow[global_config] < operator[config] < selected operator override < runtime params.
         """
         StreamFlowValidator.validate_json(flow=self.flow)
         flow_dag: list[dict] = self.flow[DocpipeConstants.DAG]
@@ -76,7 +76,18 @@ class FlowBuilder:
         flow_dag = enriched_flow[DocpipeConstants.DAG]
         global_config = enriched_flow.get(OperatorConstants.Config.GLOBAL_CONFIG) or {}
         for operator in flow_dag:
-            stored_config = {**global_config, **(operator.get(OperatorConstants.Config.CONFIG) or {})}
+            operator_override = global_config.get(
+                operator[OperatorConstants.Misc.NAME],
+                global_config.get(
+                    operator[OperatorConstants.Misc.ID],
+                    global_config.get(operator[OperatorConstants.Misc.OPERATOR], {}),
+                ),
+            )
+            stored_config = {
+                **global_config,
+                **(operator.get(OperatorConstants.Config.CONFIG) or {}),
+                **operator_override,
+            }
             operator[OperatorConstants.Config.CONFIG] = {
                 **resolve_value(stored_config),
                 **self.params,

@@ -109,6 +109,42 @@ def test_streaming_resolves_config_secrets_without_resolving_event(*, mocker, mo
     assert params == original_params
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_max_files"),
+    [
+        ({}, 99),
+        ({"ingest_source": {"max_files": 3}}, 3),
+        ({str(INGEST_ID): {"max_files": 2}, "ingest_source": {"max_files": 3}}, 2),
+        ({"source": {"max_files": 1}, str(INGEST_ID): {"max_files": 2}, "ingest_source": {"max_files": 3}}, 1),
+        ({"source": {}, str(INGEST_ID): {"max_files": 2}, "ingest_source": {"max_files": 3}}, 99),
+    ],
+    ids=["node-config", "type", "id-before-type", "name-before-id", "empty-name-override"],
+)
+@pytest.mark.parametrize("runtime_max_files", [None, 4], ids=["saved-config", "runtime-override"])
+def test_streaming_applies_operator_overrides(*, mocker, overrides, expected_max_files, runtime_max_files):
+    """Apply saved overrides by name, ID, or type before runtime parameters without mutating the flow."""
+    flow = {
+        "name": "operator-overrides-flow",
+        "global_config": {"max_files": 10, **overrides},
+        "dag": [_node(INGEST_ID, "source", "ingest_source", {**INGEST_CONFIG, "max_files": 99}, [], [])],
+    }
+    params = {} if runtime_max_files is None else {"max_files": runtime_max_files}
+    original_flow, original_params = deepcopy(flow), deepcopy(params)
+
+    def capture_ingest(self, table):
+        expected = expected_max_files if runtime_max_files is None else runtime_max_files
+        assert self.config["max_files"] == expected
+        return [pa.table({})], {}
+
+    transform = mocker.patch.object(IngestSourceOperator, "transform", autospec=True, side_effect=capture_ingest)
+
+    StreamingOrchestrator().execute(flow=flow, params=params)
+
+    transform.assert_called_once()
+    assert flow == original_flow
+    assert params == original_params
+
+
 def test_streaming_orchestrator_empty_input_skips_simple_node(mocker):
     """A simple node that receives an empty table is skipped and the empty table is passed through."""
     flow = {
