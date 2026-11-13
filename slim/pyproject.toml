@@ -54,7 +54,7 @@ dependencies = [
     "msal==1.39.0",
     "nltk==3.10.4",
     "numpy>=2.0.0,<3.0.0",
-    "o365==2.1.9",
+    "o365==2.1.10",
     "ollama==0.6.3",
     "openai==2.33.0",
     "opensearch-py==3.2.0",
