@@ -47,7 +47,7 @@ export function useJobRunPoller(): UseJobRunPollerResult {
   const networkRetryRef = useRef(0);  // counts consecutive network / 5xx retries
   const finalRef       = useRef(false);  // guards the one-shot 5 s final poll
   const jobRunIdRef    = useRef<string | null>(null);
-  const flowNameRef    = useRef<string | null>(null);  // null = do not notify
+  const flowNameRef    = useRef<string | undefined>(undefined);  // undefined = do not notify
   const notifiedRef    = useRef(false);  // guards the one-shot completion notification
 
   const notifyCompletion = useCallback((status: string): void => {
@@ -120,7 +120,7 @@ export function useJobRunPoller(): UseJobRunPollerResult {
     networkRetryRef.current = 0;
     finalRef.current = false;
     notifiedRef.current = false;
-    flowNameRef.current = flowName ?? null;
+    flowNameRef.current = flowName;
     jobRunIdRef.current = jobRunId;
     const ac = new AbortController();
     abortCtrlRef.current = ac;
