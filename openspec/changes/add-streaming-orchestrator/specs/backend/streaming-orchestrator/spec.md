@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Execute one event-referenced document through a saved flow's existing operators synchronously, preserving configured
-chunk/embedding spill behavior and isolated attempt state without creating a tracked job run.
+Execute one event-referenced document through a saved flow's existing operators with in-memory intermediates,
+isolated attempt state, and synchronous outcome signalling without creating a tracked job run.
 
 ## ADDED Requirements
 
@@ -23,7 +23,7 @@ flows SHALL fail explicitly before document processing.
 
 #### Scenario: Flow cannot be prepared
 - **WHEN** the selected flow is absent or its format is unsupported
-- **THEN** processing fails before an operator runs and the listener reports the event and preparation failure
+- **THEN** processing fails before an operator runs and identifies the flow and preparation failure
 
 ### Requirement: Runtime integrity without full per-event validation
 
@@ -52,25 +52,36 @@ validation and SHALL NOT be bypassed by `disable_validation`.
 
 ### Requirement: Feature-propagation preparation
 
-Each attempt SHALL compute per-node feature metadata using the existing PythonOrchestrator-based setup without
-running full flow/operator validation. Propagation results SHALL NOT be reused across events.
+Each attempt SHALL compute per-node feature metadata without constructing a batch orchestrator or running full
+flow/operator validation. Operator metadata and feature propagation SHALL use the same effective discovery settings
+as execution. Propagation state and cached results SHALL be isolated per attempt and SHALL NOT be reused across
+retries or events.
 
-#### Scenario: Preparation avoids full validation
+#### Scenario: Preparation without a batch orchestrator
 - **WHEN** streaming prepares a valid saved flow
-- **THEN** it computes the downstream feature views and global parameters without processing document tables
-  during preparation
+- **THEN** it computes the downstream feature views and global parameters without creating a batch orchestrator or
+  processing document tables during preparation
 
-#### Scenario: Later event recomputes feature metadata after failure
-- **WHEN** an event fails and the saved flow changes its output features before a later event selects it
-- **THEN** the later event uses fresh propagation state and computes feature views from the updated definition without
-  reusing the failed event's cached results
+#### Scenario: Custom operator metadata matches execution discovery
+- **WHEN** configured discovery selects a custom operator class for a saved node
+- **THEN** preparation propagates that selected class's declared features and downstream metadata consistently with
+  the class selected for execution
+
+#### Scenario: Disabled custom operators remain disabled during propagation
+- **WHEN** custom operators are explicitly disabled and a flow requires an operator available only from a custom package
+- **THEN** preparation reports the operator as unavailable rather than enabling it through default metadata discovery
+
+#### Scenario: Retry recomputes feature metadata
+- **WHEN** an attempt fails and the saved flow changes its output features before a permitted retry
+- **THEN** the retry uses fresh propagation state and computes feature views from the updated definition without
+  reusing the earlier attempt's cached results
 
 ### Requirement: One document bound through the configured provider
 
 Each event SHALL bind its existing file reference to the ingest provider's single-file binding contract and force
 reprocessing for both create and update operations. Source credentials, include/exclude filters, and provider-native
 reference meanings SHALL be preserved. The event SHALL NOT expand processing to other configured source documents.
-Skip decisions, reasons, and logging SHALL remain operator-owned.
+The runtime SHALL log source-filter skips with event ID, flow ID, and the available reason before completing as a no-op.
 
 #### Scenario: Create and update bypass incremental exclusion
 - **WHEN** create and update events reference a document that was processed previously
@@ -78,7 +89,7 @@ Skip decisions, reasons, and logging SHALL remain operator-owned.
 
 #### Scenario: Source filters exclude the document
 - **WHEN** the referenced document is excluded by the saved flow's source filters
-- **THEN** the ingest operator handles the skip and its reason using its existing metadata and logging
+- **THEN** the runtime logs the source-filter skip with event ID, flow ID, and the available reason
 - **AND** downstream routes receive no rows and the attempt completes as a no-op without a failure or sink writes
 
 #### Scenario: Provider cannot bind the reference
@@ -87,17 +98,17 @@ Skip decisions, reasons, and logging SHALL remain operator-owned.
 
 ### Requirement: Existing operator discovery and configuration
 
-Streaming execution SHALL support built-in operators and preserve existing flow-level and
+Streaming execution SHALL honor configured built-in and custom operator discovery and existing flow-level and
 node-level configuration precedence. Event binding and streaming execution constraints SHALL take precedence over
-saved values that would select another input document or enable batch processing.
+saved values that would select another input document, enable batching, or persist intermediate data.
 
-#### Scenario: Built-in operator in saved flow
-- **WHEN** a saved flow references a built-in operator with node-level configuration
-- **THEN** the operator processes the event using its node-level configuration
+#### Scenario: Custom operator in saved flow
+- **WHEN** a saved flow references an enabled custom operator with a node-specific override
+- **THEN** the discovered operator processes the event using the effective override
 
 #### Scenario: Saved batch settings are present
-- **WHEN** a saved flow enables micro-batching
-- **THEN** the streaming attempt still executes synchronously without starting batch processing
+- **WHEN** a saved flow enables micro-batching or filesystem-backed intermediate storage
+- **THEN** the streaming attempt still executes sequentially with in-memory intermediate tables
 
 ### Requirement: Arrow table and metadata contract
 
@@ -119,21 +130,16 @@ required document identifiers, branch metadata, and document outcome metadata; m
 
 Streaming execution SHALL supply the feature metadata required by downstream operators and sinks, including merge
 column disambiguation and embedding metadata. Configured output feature drops and renames SHALL apply to all
-relevant output tables before downstream processing. Rename-aware updates to propagated feature metadata are
-outside this change's scope; existing output-feature drop propagation is retained.
+relevant output tables before downstream processing.
 
 #### Scenario: Sink receives required feature metadata
 - **WHEN** extraction, chunking, and embeddings precede a configured vector sink
 - **THEN** the sink receives the table columns and feature metadata required to persist the configured fields
   and vectors
 
-#### Scenario: Output features are dropped
-- **WHEN** a node drops configured output features
-- **THEN** every relevant output table and downstream feature view reflect those drops
-
-#### Scenario: Output features are renamed
-- **WHEN** a node renames configured output features
-- **THEN** every relevant output table reflects those renames
+#### Scenario: Output features are transformed
+- **WHEN** a node drops or renames configured output features
+- **THEN** every relevant output table and downstream feature view reflect those transformations
 
 ### Requirement: Sequential dependency order
 
@@ -159,11 +165,6 @@ explicitly rather than substitute an unrelated table.
 - **WHEN** two branches produce different output tables and feed a merge
 - **THEN** each branch consumes its selected table and the merge receives inputs under the saved link identities
 
-#### Scenario: Elyra branch identity follows batch execution
-- **WHEN** an Elyra runtime flow stores branch identity as `link_id` on the downstream node
-- **THEN** streaming uses that identity to select the branch output, as batch execution does
-- **AND** no additional field is required on the runtime output edge
-
 #### Scenario: Branch output metadata is inconsistent
 - **WHEN** a requested route has no valid result index or refers outside the operator's output tables
 - **THEN** the attempt fails with the branch operator and route context
@@ -184,31 +185,35 @@ flow with no reported failure SHALL complete as a no-op.
 
 ### Requirement: Fresh attempt state and cleanup
 
-Each attempt SHALL use fresh operators and isolated configuration. On success or failure, cleanup SHALL call every
-constructed operator's `cleanup()`, release attempt-owned table, route-state, and operator references before returning
-or raising and before the next event, and log hook errors without changing the processing outcome or preventing other
-cleanup. `AbstractOperator.cleanup()` SHALL default to a no-op; resource-owning operators MAY override it.
+Each attempt SHALL use fresh operators and isolated configuration and session state. On success and failure,
+unconditional cleanup SHALL call supported hooks for all constructed operators and release attempt-owned table,
+route-state, and operator references before return or raise and before any retry or later event. Cleanup errors SHALL
+be logged without replacing the processing outcome or preventing other cleanup.
 
-#### Scenario: Later event has fresh state
-- **WHEN** a later event uses the same saved flow after an earlier event completes or fails
-- **THEN** operator mutations and in-memory deduplication state from the earlier event are absent
+#### Scenario: Retry and later event have fresh state
+- **WHEN** an event retries or a later event uses the same saved flow
+- **THEN** operator mutations and in-memory deduplication state from the earlier attempt are absent
 
 #### Scenario: Attempt ends on success or failure
 - **WHEN** an attempt succeeds or fails, including when an operator cleanup hook raises
 - **THEN** resources for all constructed operators are released as far as supported and the processing outcome
   is retained
 - **AND** attempt-owned intermediate table, route-state, and operator references are released before the attempt
-  returns or raises and before any subsequent event starts
+  returns or raises and before any retry or subsequent event starts
 
-### Requirement: Job-independent execution context
+### Requirement: In-memory intermediates and job-independent context
 
-Streaming execution SHALL NOT create jobs, job runs, job snapshots, batch artifacts, or job finalization records.
-Operators SHALL retain their configured chunk/embedding spill behavior. Explicitly configured sinks SHALL retain their
-persistence behavior.
+Streaming execution SHALL keep intermediate tables, chunks, and embeddings in memory and SHALL NOT create jobs,
+job runs, job snapshots, batch artifacts, or job finalization records. Operators SHALL run without inherited job/run
+identifiers. Explicitly configured sinks SHALL retain their persistence behavior.
 
 #### Scenario: Sink completes without a tracked run
 - **WHEN** a streaming flow writes its document to a configured sink
-- **THEN** the sink result exists and no streaming job-run history is created
+- **THEN** the sink result exists, no streaming job-run history is created, and no intermediate spill files are written
+
+#### Scenario: Existing session has batch identifiers
+- **WHEN** streaming execution begins in a context that previously held job and run identifiers
+- **THEN** operators observe no batch job/run identifiers and the prior context is restored after the attempt
 
 ### Requirement: Synchronous terminal outcome
 

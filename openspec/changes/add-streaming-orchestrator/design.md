@@ -44,7 +44,7 @@ requirements are needed: the new contracts apply to a separate streaming entrypo
 
 - Reuse flow formats, operator discovery, feature propagation, and pure table utilities without importing the batch
   lifecycle into streaming execution.
-- Make the boundary between flow execution outcome and Kafka acknowledgement explicit.
+- Make the boundary between attempt execution, event retry policy, and Kafka acknowledgement explicit.
 - Keep mutable state and table lifetimes scoped to an attempt, including failure and cleanup paths.
 
 **Non-Goals:**
@@ -57,31 +57,27 @@ requirements are needed: the new contracts apply to a separate streaming entrypo
 
 ## Decisions
 
-### 1. Separate synchronous runtime and event outcome owner
+### 1. Separate synchronous runtime and retry owner
 
 Add `core/orchestration/streaming/` with a `StreamingOrchestrator` and small preparation/operator-runner helpers.
-The orchestrator exposes `execute(*, flow, params) -> None`: normal return means completion; a contextual execution
+The orchestrator exposes `execute(*, flow_id, event) -> None`: normal return means completion; a contextual execution
 exception means attempt failure. It does not return tables or allocate a durable execution identifier.
 
 `EventDispatchService` receives mapping service and orchestrator dependencies. `dispatch(*, event) -> None` resolves
-the current mapping and calls `execute()`. `KafkaEventListener` owns terminal reporting and the commit decision. Each
-valid record invokes dispatch once; a dispatch failure is reported, its message-specific commit is attempted, and the
-listener moves on to the next record.
+the current mapping and calls `execute()`. `KafkaEventListener` owns the entire event retry loop, terminal reporting,
+and commit decision. Every retry invokes dispatch again and re-fetches/recompiles the selected flow.
 
-Let preparation errors propagate unchanged. Operator execution errors include node identity and preserve the original
-cause. Metadata-reported failures identify the operator without copying failed-document reasons into the exception.
-The existing listener logs event ID, Kafka coordinates, and the exception traceback. No flow ID plumbing or additional
-dispatcher/orchestrator exception wrappers are needed.
-Failure notification means raising the in-process outcome to the listener; external notifications and Kafka publications
-remain deferred.
+Use a typed streaming execution error containing stage, flow ID when known, and node identity when known, preserving
+the original cause. Routing failures before orchestration are labelled by the dispatcher/listener. This gives useful
+diagnostics without job statistics. Failure notification means raising the in-process outcome to the listener; external
+notifications and Kafka publications remain deferred. Dispatch emits correlated completion diagnostics with the selected
+flow ID before returning; listener diagnostics add attempt count and Kafka record context.
 
-Operators own skip decisions, reasons, metadata, and logging. The orchestrator preserves empty-input handling without
-interpreting skip reasons or adding skip-specific logs. The listener keeps its completion/commit policy; `execute()` and
-`dispatch()` return `None`.
+The streaming runtime logs source-filter skips as no-op completions with event/flow correlation and the available reason
+before normal return. The listener keeps its completion/commit policy; `execute()` and `dispatch()` return `None`.
 
-Alternative: delegate streaming execution to `JobManagementService`, `FlowExecutor`, or `PythonOrchestrator`.
-Rejected because each couples execution to jobs, batch data access, or finalization. An executor pool is unnecessary
-for one synchronous active event.
+Alternative: reuse `JobManagementService`, `FlowExecutor`, or `PythonOrchestrator`. Rejected because each couples
+execution to jobs, batch data access, or finalization. An executor pool is unnecessary for one synchronous active event.
 
 ### 2. Use existing application services and storage ports
 
@@ -97,7 +93,7 @@ The layer boundaries are:
 | Application | Mapping resolution, `FlowService` reads, streaming preparation and execution |
 | Adapters | Existing asset repositories, key-value mapping stores, source adapters, and configured sink adapters |
 | Composition | `EventStreamingFactory` resolves configured adapters and builds the listener service graph |
-| Transport | Kafka deserialization, terminal diagnostics, message commits, and lifecycle |
+| Transport | Kafka deserialization, retries, terminal diagnostics, message commits, and lifecycle |
 
 Domain/application code continues to use ports rather than import storage adapter implementations. Operators continue
 to use their configured source, LLM, and sink abstractions. No storage schema or REST DTO changes are needed.
@@ -115,13 +111,52 @@ Use `sort_dag_topologically()` with explicit checks for duplicate IDs, unresolve
 and reachability. Resolve every operator class through the existing Python operator factory, honoring enabled custom
 packages and existing discovery priority. No model-bearing operator construction is needed merely to check identity.
 
-Reuse the existing `FlowValidator.propagate_features_per_node()` path. It computes per-node column/feature views and
-propagated parameters without processing documents or performing full operator validation. Keep the current
-PythonOrchestrator-based discovery and metadata setup; reuse the feature traversal, merge disambiguation, and
-propagated global parameters rather than duplicating feature logic.
+Reuse `FlowValidator.propagate_features_per_node()` in feature-propagation mode as defined in Decision 3a. This mode
+computes per-node column/feature views and propagated parameters without processing documents or performing full
+operator validation. Reuse the existing feature traversal, merge disambiguation, and propagated global parameters
+rather than duplicating feature logic.
 
 Alternative: disable all preparation or run full validation per event. The first loses required sink metadata and
 integrity checks; the second repeats expensive service/configuration validation on the consumer's critical path.
+
+### 3a. Define the feature-propagation construction and lifetime contract
+
+Extend the existing constructor with this keyword-only surface:
+
+```python
+def __init__(
+    self, *, orchestrator: AbstractOrchestrator | None = None,
+    custom_operator_packages: list[str] | None = None, enable_custom_operators: bool | None = None,
+    feature_propagator: FeaturePropagator | None = None,
+) -> None:
+```
+
+- With an orchestrator, retain the existing validation mode, logging context, and optional propagator injection.
+  Discovery settings come from the orchestrator. Explicit discovery arguments in this mode raise `ValueError` rather
+  than silently overriding or conflicting with orchestrator settings.
+- Without an orchestrator, select feature-propagation mode. Require an explicit boolean `enable_custom_operators`;
+  omission raises `ValueError`. `custom_operator_packages=None` retains the existing factory meaning for that value.
+  Read logging context from the current `SessionInfo`, including flow/event correlation, without creating job/run IDs.
+- Streaming constructs a fresh validator and propagator for each attempt and leaves `feature_propagator` unset.
+  Snapshot the effective discovery settings at construction, preserving an explicit `False` enablement value.
+  Add explicit discovery inputs to `OperatorMetadata` and optional metadata-provider injection to `FeaturePropagator`.
+  In feature-propagation mode, load internal feature metadata once and supply the same attempt-local metadata provider
+  to both the validator and propagator. Do not let the propagator independently fall back to default discovery.
+  Existing orchestrator-based callers retain their current construction and validation behavior.
+
+The streaming preparation path has the following method contract:
+
+| Method | Streaming preparation |
+| --- | --- |
+| `propagate_features_per_node()` | Call once after compilation, graph checks, and operator-class resolution |
+| `validate()` | Skip |
+| `validate_dag()` | Skip |
+| `validate_dag_with_features()` | Skip |
+| `validate_last_operator()` | Skip |
+| Operator `validate()` | Never invoke during preparation |
+
+The four skipped `FlowValidator` validation entrypoints raise `RuntimeError` before validation work if called on a
+feature-propagation-mode instance. Per-node metadata computation continues to use the existing propagation helpers.
 
 "Compilation and runtime integrity checks" specifically means saved-format conversion plus the following checks,
 all completed before document processing and independently of full validation or `disable_validation`:
@@ -132,23 +167,30 @@ all completed before document processing and independently of full validation or
 - Every referenced operator class resolves through the configured Python factory and discovery priority, without
   constructing model-bearing operators merely to check identity.
 
-Keep `_node_features_cache` instance-local and initially `None`. Each streaming attempt creates a new validator through
-the existing PythonOrchestrator path and discards it after preparation. No propagation results are reused across events.
+Keep `_node_features_cache` instance-local and initially `None`. A validator is bound by contract to one fixed prepared
+definition, effective global configuration, and discovery snapshot for its entire lifetime. Streaming computes the
+cache once; repeated access for that same definition can reuse it. Discard the validator, metadata provider, propagator,
+and cached results when the attempt ends, including failures. A retry or later event creates fresh instances and
+recomputes metadata. Instances remain non-thread-safe and must never be shared between attempts or concurrent callers;
+no cross-attempt cache, cache invalidation mechanism, or synchronization is introduced.
 
 ### 4. Build configuration with explicit streaming overrides
 
-Preserve flow configuration precedence: global configuration, then node configuration. Inject node ID/name and
-prepared feature metadata into a fresh dictionary.
+Preserve current precedence: global configuration, node configuration, then the existing global override keyed by
+node name, node ID, or operator type. Inject node ID/name and prepared feature metadata into a fresh dictionary.
 Resolve vault references using the existing secret provider without logging resolved values.
 
 Apply these execution-owned overrides last, including against per-node values:
 
 - Ingest receives the validated event serialized as `input_event` and `force_ingest=true`. Binding remains inside the
   existing source adapter contract; no path-to-provider-ID conversion or additional credential lookup is introduced.
-- Saved batching settings do not activate the batch engine. The runtime uses the synchronous graph engine and preserves
-  the configured `memmap_threshold` and existing chunk/embedding spill behavior.
+- Batching and batch-only execution settings do not activate the batch engine. The runtime always uses in-memory
+  tables and forces `memmap_threshold=0`, the chunker's existing no-spill behavior; embeddings then remain in memory.
+- Remove stale job/run identifiers and batch bookkeeping fields from effective operator configuration.
 
-Keep operator-local deduplication isolated by fresh instances for each event.
+Temporarily install a fresh `SessionInfo` with `flow_id` and `transaction_id=str(event.event_id)` and unset job/run IDs.
+Read and restore the previous context through existing session accessors in a `finally` block. Do not pass session or
+job identifiers through method arguments. Keep operator-local deduplication isolated by fresh instances on each retry.
 
 Alternative: mutate the loaded definition or reuse a previous event's instances. Rejected because ingest binding,
 branch metadata, feature state, and deduplication are mutable and could suppress or redirect later work.
@@ -159,21 +201,20 @@ Maintain an attempt-local map from node IDs to output tables, metadata, and reso
 in topological order on the listener thread. Construct each needed operator once per attempt through the existing
 factory; call its ordinary Arrow transform contract directly.
 
-For ordinary nodes, supply the single resolved parent table. Generic ordinary multi-table output is outside initial
-streaming support; branching outputs remain separate route-specific tables.
-For branching, use the downstream node's `link_id` as in batch execution. Select the table through
-`metadata["branches"][route]["result_index"]` rather than list order or output-edge labels. For merges, build `tables`
-under the compiled `input_edges`/`input_links` names and invoke the existing merge transform contract.
+For ordinary nodes, supply the resolved parent table. Preserve all rows from applicable ordinary multi-table output
+using ordered Arrow concatenation where the output schema permits it; fail incompatible ambiguous output explicitly.
+For branching, resolve the selected table through `metadata["branches"][route]["result_index"]`, validating bounds and
+route identity rather than inferring the route from list order. For merges, build `tables` under the compiled
+`input_edges`/`input_links` names and invoke the existing merge transform contract.
 
 Track empty output as a resolved route. Skip an ordinary node whose selected input is empty. A merge waits for every
 parent route to resolve, then receives the populated inputs and preserves the existing merge behavior of filtering
 empty inputs and passing a single populated input through. If all input routes are empty, resolve an empty output.
 Do not recursively mark a shared merge or its populated sibling as skipped when one route empties.
 
-Use `OperatorUtils` for configured feature drops/renames on every output table. Preserve existing feature-drop
-propagation; rename-aware updates to propagated metadata remain deferred under task 2.5. Empty-content and
-zero-byte filtering and skipped metadata remain operator-owned. Do not invoke the batch helper's incremental persistence
-side effects. Retain branch metadata
+Use `OperatorUtils` for configured feature drops/renames on every output table. Preserve existing empty-content and
+zero-byte filtering and skipped metadata through a narrowly shared pure table helper or a streaming helper using
+existing utilities. Do not invoke the batch helper's incremental persistence side effects. Retain branch metadata
 until routing has finished; do not remove internal metrics prematurely.
 
 Validate transform result shape and inspect failed-document counts/records and failure status. Any reported failure
@@ -188,77 +229,70 @@ deleted-row tracking, and job/incremental concerns. Only suitable stateless beha
 Maintain an ownership list for every constructed operator. Release instances after their work is complete, and use
 an outer `finally` to cover preparation/runtime errors and any constructed but skipped operator. Cleanup must be
 idempotent, invoke supported `cleanup()` hooks, log hook failures, and continue releasing other instances. Drop table
-and instance references before returning or raising.
+and instance references and restore session state before returning or raising.
 
-Declare a no-op `cleanup()` method on `AbstractOperator`; resource-owning operators override it. Both the batch Python
-executor and streaming engine call this method directly.
-
-Do not add parquet snapshots, job logs, or batch finalization artifacts. Preserve configured chunk/embedding spill
-behavior. Explicit sinks still write their configured outputs. Existing operators that already work without job context use
+Keep intermediates in memory without parquet snapshots, chunk spill files, job logs, or batch finalization artifacts.
+Explicit sinks still write their configured outputs. Existing operators that already work without job context use
 that mode; unsupported job-dependent behavior fails explicitly with operator context, never a fabricated job.
 
-Fresh instances keep deduplication state isolated between events without adding a shared resource lifecycle.
+Fresh instances make retries and deduplication behavior predictable without adding a shared resource lifecycle.
 
-### 7. Acknowledge one processing outcome per event
+### 7. Define retry, acknowledgement, and configuration together
 
 Keep one processing loop with no application queue:
 
 1. Poll one record, check the stop flag again before beginning new work, deserialize, and validate it.
-2. For a valid event, call dispatch once and wait for the complete flow to return or fail.
-3. Report the terminal outcome and attempt the existing message-specific synchronous commit after either success or
-   processing failure. Then continue to the next record.
-4. Invalid records are reported and committed without flow execution. Broker error records remain diagnostic only.
-5. Log commit exceptions and partition errors separately; preserve the processing outcome and continue. Later replay
-   remains possible if the commit fails.
+2. For a valid event, attempt full dispatch up to `1 + max_retries` times with no delay or intermediate commit.
+3. On completion or exhaustion, emit the terminal outcome, then call the existing message-specific synchronous commit.
+4. Invalid records are reported and committed without execution retries. Broker error records remain diagnostic only.
+5. Log commit exceptions and partition errors separately; preserve processing outcome and continue without an immediate
+   pipeline rerun. Later replay is possible and no transactional sink/offset guarantee is introduced.
 
-Do not automatically retry a failed flow in this change. A retry starts from ingest regardless of the stage that
-failed, and earlier operators or sinks may already have persisted state. Without stage-aware failure classification and
-reconciliation of persisted writes, blind retries can duplicate or conflict with stored output. Future retry behavior
-requires a separate design for stage-specific retry policy and persisted-state reconciliation. Until then, the listener
-reports the failure, attempts the message commit, and moves to the next event. No retry-count environment setting is
-added.
+Add `DOCPIPE_EVENT_MAX_RETRIES` with proposed default `0` to preserve the existing single-attempt default while allowing
+bounded retries. Parse it before listener startup as a nonnegative integer and log the active value. This change adds
+no poll-interval configuration or special handling for the deferred corner cases.
 
 ### 8. Drain the processing thread during shutdown
 
-`stop()` is awaitable: it sets the stop flag to prevent new events from starting and waits for the listener thread for
-up to five seconds. Run the join through `asyncio.to_thread` so the asyncio event loop remains responsive.
+`stop()` is awaitable: it sets the stop flag to prevent new events from starting and returns only after the listener
+thread exits. Waiting for thread exit must keep the asyncio event loop responsive; the shutdown caller continues
+awaiting completion while unrelated asynchronous tasks can run. Replace the current five-second join with this wait.
 
-An active event continues through execution, cleanup, terminal reporting, and its offset-commit attempt before the
-listener closes the consumer and exits its processing thread. If the thread remains active after five seconds,
-`stop()` logs a timeout warning and returns; the event and consumer thread are not cancelled, and the consumer closes
-when that thread later reaches its normal exit path. Running operators are allowed to finish. If stop arrives after poll
-but before new event execution, leave that record uncommitted and exit. Preserve idempotent start/stop behavior.
+An active event finishes its configured retry sequence, cleanup, terminal reporting, and offset-commit attempt before
+the listener closes the consumer and exits its processing thread. `stop()` remains pending throughout that work,
+including sink writes and the commit attempt. Running operators are allowed to finish; a stop request neither cancels
+nor abandons them and does not count as retry exhaustion. If stop arrives after poll but before new event execution,
+leave that record uncommitted and exit. Preserve idempotent start/stop behavior.
 
-Automatic commits/offset storage remain disabled, so unfinished work is not committed by this shutdown path. If the
-process terminates while the daemon listener thread is still active after the wait expires, the active event may remain
-uncommitted. The five-second wait bounds the shutdown caller's wait; it does not forcibly terminate an operator.
-Forced cancellation and recovery policy remain deferred under [STR-008](#str-008---forced-termination-during-active-processing).
+Automatic commits/offset storage remain disabled, so unfinished work is not committed by this shutdown path. There is
+no drain timeout in this change: an operator that never returns can keep shutdown pending indefinitely. Bounded
+termination and forced-cancellation policy remain deferred under
+[STR-008](#str-008---forced-termination-during-active-processing).
 
-Alternative: cancel the running transform at the timeout. Rejected because existing synchronous operators have no safe
-general cancellation contract.
+Alternative: bound the join at five seconds or cancel the running transform. The former falsely completes shutdown;
+the latter has no safe general contract across existing synchronous operators.
 
 ## Risks / Trade-offs
 
 - **In-memory expansion and model load cost** -> Keep one event active, release resources, and test multi-row/chunk
-  output and repeated event delivery. Large documents can still exceed memory and reduce throughput.
+  output and repeated attempts. Large documents can still exceed memory and reduce throughput.
 - **Behavior drift from executor bypass** -> Add focused parity tests for metadata, renames/drops, empty documents,
   branch indices, merge names, vault resolution, custom operators, and sink features. Share only narrow pure helpers.
-- **Job-dependent operator assumptions** -> Retain existing no-job-context behavior; test built-in ingest, chunking,
-  embeddings, deduplication, and storage/sink paths without creating or attaching jobs. Fail unsupported extensions
-  explicitly with operator context.
-- **Shutdown integration** -> Wait asynchronously and validate ordinary stop requests during active event processing.
+- **Job-dependent operator assumptions** -> Clear job/run context explicitly; test built-in ingest, chunking,
+  embeddings, deduplication, and storage/sink paths without jobs. Fail unsupported extensions explicitly.
+- **Shutdown integration** -> Drain asynchronously and validate ordinary stop requests during retries and sink writes.
 
 ## Migration Plan
 
 1. Add and test the runtime independently, then wire it through `EventStreamingFactory` and replace HTTP dispatch.
    Keep existing REST/CLI/library paths and opt-in listener startup intact; no schema migration is required.
-2. Update the streaming guide and Docker sample settings to describe actual completion, failure-and-skip behavior,
-   no job history, commit timing, and graceful shutdown. Remove only obsolete
+2. Update the streaming guide and Docker sample settings to describe actual completion, retries, no job history,
+   commit timing, and graceful shutdown. Remove only obsolete
    HTTP-submission-specific API URL settings; retain that variable if another consumer still needs it.
 3. Stop the old consumer, drain its previously submitted asynchronous jobs, and deploy the new version with the same
-   group/topic configuration. Do not run mixed old/new listener versions in one
+   group/topic configuration and the chosen retry setting. Do not run mixed old/new listener versions in one
    group during cutover because their acknowledgement meanings differ.
-4. Run the existing event-streaming sample end to end, verifying sink results, failure handling, commit ordering,
+4. Run the existing event-streaming sample end to end, verifying sink results, sequential retries, commit ordering,
    and absence of newly created event job records. Run REST/CLI/library regressions and the strict change validator.
 5. Roll back by draining/stopping the new listener, restoring the prior version and HTTP dispatch configuration, and
    restarting it. Existing committed offsets are not rewound automatically; terminally skipped events require explicit
@@ -278,7 +312,7 @@ corner cases for future consideration.
 
 **Type:** Corner case and safeguard. **Status:** Deferred.
 
-Synchronous processing and cleanup can outlast `max.poll.interval.ms`, causing ownership loss and failed
+Synchronous processing, retries, and cleanup can outlast `max.poll.interval.ms`, causing ownership loss and failed
 offset commits. Future work can evaluate handling-time budgets, poll-interval configuration, processing deadlines,
 and polling/processing separation. Reproducing overruns and checking ownership/commit behavior belongs to that work.
 No poll-interval setting, deadline, or overrun safeguard is required by this change.
@@ -287,10 +321,10 @@ No poll-interval setting, deadline, or overrun safeguard is required by this cha
 
 **Type:** Corner case and safeguard. **Status:** Deferred.
 
-A shared source, model, or sink outage can cause successive valid events to fail and be skipped under the current
-commit-after-failure policy. Future work must decide outage classification, consumption pause or circuit breaking,
-recovery, and the corresponding offset policy before adding a safeguard. Outage reproduction and backlog-loss
-experiments belong to that future change.
+A shared source, model, or sink outage can exhaust retries for successive valid events. The initial commit-after-
+exhaustion policy can then skip those events. Future work must decide outage classification, consumption pause or
+circuit breaking, recovery, and the corresponding offset policy before adding a safeguard. Outage reproduction and
+backlog-loss experiments belong to that future change; the current generic retry/commit policy remains as specified.
 
 ### STR-003 - Compiled-flow caching
 
@@ -298,7 +332,7 @@ experiments belong to that future change.
 
 Preparing flows for every event repeats compilation and metadata work. Future design must define cache identity and
 reliable invalidation when saved definitions, mappings, or operator availability change. Current execution continues
-to load and prepare a flow for each event.
+to load and prepare a flow for each attempt.
 
 ### STR-004 - Dead-letter routing and published completion events
 
@@ -328,11 +362,10 @@ Current execution retains one active event per listener with no application queu
 
 **Type:** Corner case and delivery guarantees. **Status:** Deferred.
 
-An event can write some sink output before failing, or finish its sink work before an offset commit fails. Redelivery
-can repeat those side effects. Automatic processing retries are excluded until failure stages can be classified and
-persisted writes can be reconciled. Future work must decide idempotency, stage-specific retry rules, reconciliation,
-and any stronger sink/offset guarantees before adding transactional writes, rollback, deduplication across events, or
-replay tooling. Current work preserves configured sink behavior and existing commit-error reporting.
+An attempt can write some sink output before failing, or finish its sink work before an offset commit fails.
+Retry/redelivery can repeat those side effects. Future work must decide idempotency, reconciliation, and any stronger
+sink/offset guarantees before adding transactional writes, rollback, deduplication across events, or replay tooling.
+Current work preserves configured sink behavior and existing commit-error reporting.
 
 ### STR-008 - Forced termination during active processing
 
