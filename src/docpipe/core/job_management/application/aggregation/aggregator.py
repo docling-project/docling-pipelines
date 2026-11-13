@@ -1,10 +1,15 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 MetadataAggregator - Handles custom metadata aggregation strategies.
 This class provides flexible aggregation of operator-specific metadata
 """
 
+import json
 from typing import Any, Callable
 
+from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.constants.operator_constants import OperatorConstants
 
 from .strategies import DEFAULT_STRATEGIES, AggregationStrategy
@@ -154,6 +159,7 @@ class MetadataAggregator:
 
     @staticmethod
     def _apply_concat(values: list[Any]) -> list[Any]:
+        """Concatenate lists and append non-list values."""
         result: list[Any] = []
         for value in values:
             if isinstance(value, list):
@@ -164,6 +170,7 @@ class MetadataAggregator:
 
     @staticmethod
     def _apply_merge_dict(values: list[Any]) -> dict:
+        """Shallow-merge dicts, later keys overwriting earlier ones."""
         result: dict = {}
         for value in values:
             if isinstance(value, dict):
@@ -171,6 +178,7 @@ class MetadataAggregator:
         return result
 
     def _apply_deep_merge(self, values: list[Any]) -> dict:
+        """Deep-merge dict values in order."""
         result: dict = {}
         for value in values:
             if isinstance(value, dict):
@@ -188,12 +196,14 @@ class MetadataAggregator:
 
     @staticmethod
     def _apply_last_completed(values: list[Any]) -> Any:
+        """Return the last truthy value, or the final value if none."""
         for value in reversed(values):
             if value:
                 return value
         return values[-1] if values else None
 
     def _apply_custom_strategy(self, *, field_name: str, values: list[Any]) -> Any:
+        """Apply the registered custom function, or return the last value."""
         custom_func = self.custom_functions.get(field_name)
         return custom_func(values) if custom_func else values[-1]
 
@@ -214,6 +224,9 @@ class MetadataAggregator:
         if strategy == AggregationStrategy.UNION:
             return self._apply_union_strategy(values=values)
 
+        if strategy == AggregationStrategy.INTERSECTION:
+            return self._apply_intersection_strategy(values=values)
+
         if strategy == AggregationStrategy.FIRST:
             return values[0]
 
@@ -225,15 +238,21 @@ class MetadataAggregator:
 
         if strategy == AggregationStrategy.PRIORITY_STATUS:
             status_priority = {
-                "RUNNING": 3,
-                "FAILING": 2,
-                "FAILED": 2,
-                "COMPLETED": 1,
-                "COMPLETED_WITH_ERRORS": 1,
-                "COMPLETED_WITH_WARNINGS": 1,
-                "SKIPPED": 0,
+                self._normalize_status_key(ExecutionStatus.RUNNING.value): 4,
+                self._normalize_status_key(ExecutionStatus.FAILING.value): 3,
+                self._normalize_status_key(ExecutionStatus.FAILED.value): 3,
+                self._normalize_status_key(ExecutionStatus.COMPLETED_WITH_ERRORS.value): 3,
+                self._normalize_status_key(ExecutionStatus.COMPLETED_WITH_WARNINGS.value): 2,
+                self._normalize_status_key(ExecutionStatus.COMPLETED.value): 1,
+                self._normalize_status_key(ExecutionStatus.SKIPPED.value): 0,
+                self._normalize_status_key(ExecutionStatus.CANCELED.value): 0,
+                self._normalize_status_key(ExecutionStatus.PENDING.value): 0,
+                self._normalize_status_key(ExecutionStatus.QUEUED.value): 0,
             }
-            return max(values, key=lambda status: status_priority.get(str(status).upper(), 0))
+            return max(
+                values,
+                key=lambda status: status_priority.get(self._normalize_status_key(status), 0),
+            )
 
         if strategy == AggregationStrategy.CUSTOM:
             return self._apply_custom_strategy(field_name=field_name, values=values)
@@ -248,11 +267,56 @@ class MetadataAggregator:
         for value in values:
             if isinstance(value, list):
                 for item in value:
-                    item_key = str(item) if not isinstance(item, (str, int, float, bool, type(None))) else item
+                    item_key = MetadataAggregator._collection_item_key(item)
                     if item_key not in seen:
                         result.append(item)
                         seen.add(item_key)
         return result
+
+    @staticmethod
+    def _normalize_status_key(status: Any) -> str:
+        """Letters only, then upper, so CamelCase and SCREAMING_SNAKE share one key.
+
+        Digits are discarded, so values that differ only by numbers (e.g. RETRY_2
+        vs RETRY_3) collide on the same key.
+        """
+        return "".join(char for char in str(status) if char.isalpha()).upper()
+
+    @staticmethod
+    def _apply_intersection_strategy(*, values: list[Any]) -> list[Any]:
+        """Items present in every list, in first-list order, without duplicates."""
+        lists = [value for value in values if isinstance(value, list)]
+        if not lists:
+            return []
+
+        shared = {MetadataAggregator._collection_item_key(item) for item in lists[0]}
+        for items in lists[1:]:
+            shared &= {MetadataAggregator._collection_item_key(item) for item in items}
+
+        result: list[Any] = []
+        seen: set[Any] = set()
+        for item in lists[0]:
+            key = MetadataAggregator._collection_item_key(item)
+            if key in shared and key not in seen:
+                result.append(item)
+                seen.add(key)
+        return result
+
+    @staticmethod
+    def _collection_item_key(item: Any) -> Any:
+        """Return a hashable key for a collection item.
+
+        bool is checked before int because bool subclasses int and
+        True == 1 with equal hashes. Dicts use a sort_keys JSON form so
+        insertion order does not change equality.
+        """
+        if isinstance(item, bool):
+            return ("bool", item)
+        if isinstance(item, (str, int, float, type(None))):
+            return item
+        if isinstance(item, dict):
+            return json.dumps(item, sort_keys=True, default=str)
+        return str(item)
 
     def _deep_merge(self, *, dict1: dict, dict2: dict) -> dict:
         """
