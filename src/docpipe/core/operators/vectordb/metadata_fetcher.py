@@ -9,6 +9,8 @@ and stored_resource_metadata on vectordb operator nodes during flow enrichment.
 
 All adapter-specific logic lives in the adapter layer:
   - OpenSearch: adapters/outbound/opensearch/resource_metadata.py
+  - Milvus: adapters/outbound/milvus/resource_metadata.py
+  - Weaviate: adapters/outbound/weaviate/resource_metadata.py
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ def compute_default_feature_mappings(
       2. "id"                                              → "document_id"
       3. "name"                                            → "document_name"
       4. First feature with type="vector"                  → "vector_embeddings"
-      5. [Milvus, add_sparse_vector=True only]
+      5. [providers with server-side BM25 sparse retrieval, add_sparse_vector=True only]
          Feature with type="vector_sparse"                 → "sparse_embeddings"
          content_column                                    → "text"
       6. Remaining mandatory_for_vector_db=True features   → identity mapping
@@ -53,8 +55,8 @@ def compute_default_feature_mappings(
 
     Args:
         available_features: Propagated feature map from the DAG snapshot.
-        add_sparse_vector: When True (Milvus only), adds sparse_embeddings and
-            content_column to the defaults.
+        add_sparse_vector: When True (providers with server-side BM25 sparse
+            retrieval), adds sparse_embeddings and content_column to the defaults.
         content_column: Name of the document content column. Defaults to "content".
             Only used when add_sparse_vector=True.
 
@@ -112,7 +114,7 @@ def compute_default_feature_mappings(
             covered.add(name)
             break
 
-    # Rule 5 — Milvus sparse path (add_sparse_vector=True only)
+    # Rule 5 — BM25 sparse path (add_sparse_vector=True only)
     if add_sparse_vector:
         for name, meta in available_features.items():
             if (
@@ -150,6 +152,8 @@ class VectorDBMetadataFetcher:
 
     Each adapter's read-only metadata logic lives in its own module:
       - opensearch: adapters/outbound/opensearch/resource_metadata.OpenSearchResourceMetadata
+      - milvus: adapters/outbound/milvus/resource_metadata.MilvusResourceMetadata
+      - weaviate: adapters/outbound/weaviate/resource_metadata.WeaviateResourceMetadata
 
     This class owns only the shared helpers (_normalise_feature_mappings,
     _default_feature_mappings_from_features, _empty_result) and injects them
@@ -202,6 +206,20 @@ class VectorDBMetadataFetcher:
             )
 
             return MilvusResourceMetadata().fetch(
+                provider_config=provider_config,
+                operator_config=operator_config,
+                available_features=available_features,
+                normalise_feature_mappings=self._normalise_feature_mappings,
+                default_feature_mappings_from_features=self._default_feature_mappings_from_features,
+                empty_result=self._empty_result,
+            )
+
+        if adapter_name == OperatorConstants.VectorDB.WEAVIATE:
+            from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
+                WeaviateResourceMetadata,
+            )
+
+            return WeaviateResourceMetadata().fetch(
                 provider_config=provider_config,
                 operator_config=operator_config,
                 available_features=available_features,

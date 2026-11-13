@@ -43,7 +43,7 @@ dependencies = [
     "langchain-community==0.4.2",
     "langchain-core==1.6.10",
     "langchain-experimental==0.4.1",
-    "langchain-text-splitters==1.1.2",
+    "langchain-text-splitters==1.1.3",
     "langdetect==1.0.9",
     "langsmith==0.14.7",
     "litellm==1.106.0",
@@ -54,7 +54,7 @@ dependencies = [
     "msal==1.39.0",
     "nltk==3.10.4",
     "numpy>=2.0.0,<3.0.0",
-    "o365==2.1.9",
+    "o365==2.1.10",
     "ollama==0.6.3",
     "openai==2.33.0",
     "opensearch-py==3.2.0",
@@ -94,6 +94,8 @@ dependencies = [
     "unicodedataplus==16.0.0.post1",
     "urllib3==2.8.0",
     "uvicorn[standard]==0.54.0",
+    # weaviate-client caps grpcio<1.80.0; grpcio is held below 1.80 to resolve with the client
+    "weaviate-client==4.24.1",
 ]
 
 [project.optional-dependencies]
