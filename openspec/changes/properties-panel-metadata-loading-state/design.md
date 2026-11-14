@@ -224,6 +224,11 @@ rendered with `intl.formatMessage`, as required by the canonical `frontend/i18n`
   read, and each panel keeps its existing behavior. This will be verified by the existing
   panel tests passing after they supply metadata through the store, and by a manual check
   that an open panel still receives its options when the response arrives.
+- **Nodes dropped before the metadata arrives still get no defaults:** `applyNodeDefaults`
+  currently skips a node when `operatorMetadata` has no attributes for its operator, and
+  nothing retries. The loading state hides the form while the request is in flight, but it
+  does not write defaults. This is out of scope because fixing it changes Canvas behavior
+  (see the non-goals in the proposal).
 - **Unused `appData.operatorMetadata`:** Canvas will keep placing `operatorMetadata` in
   `appData`, and nothing in the properties panel will read it. This is left in place to keep
   Canvas unchanged and can be removed in a separate cleanup.

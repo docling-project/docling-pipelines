@@ -105,6 +105,13 @@ Affected frontend areas:
   not add loading or error state to the `appData` that Canvas builds for the properties panel.
   Canvas will keep placing `operatorMetadata` in `appData`. Removing it once nothing in the
   properties panel reads it is a separate cleanup.
+- This change will not apply defaults to nodes dropped on the canvas before the operator
+  metadata arrives. `applyNodeDefaults` in `Canvas.tsx` currently returns early for these nodes
+  because it has no attributes to read, and nothing applies their defaults later, so their
+  saved parameters stay empty. Fixing this modifies Canvas behavior and saved flow data, so it
+  is a separate change against `frontend/canvas-page`. In this change, the Configuration tab
+  shows the form for such a node once the metadata arrives, and the form
+  does not have the defaults that `applyNodeDefaults` would have written.
 - This change will not modify behavior in `frontend/state/operators-slice`. Its loading and
   error states already cover this lifecycle.
 - This change will not add an automatic retry for a failed metadata
