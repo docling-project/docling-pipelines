@@ -51,25 +51,32 @@ must merge after PR 1.
 - [ ] 2.3 In `CommonPropertiesPanel`, read the loading flag from the `operators` slice
   with `useAppSelector` and `selectOperatorsLoading`, in addition to the metadata from task 1.1.
   Keep the existing check for a registered configuration panel first, so an operator with no
-  registered panel still shows the placeholder. For an operator with a registered panel, show
-  the form if the metadata has an entry for the node's operator, otherwise the loading state if
-  `loading` is true, otherwise the error state. Render `InlineLoading` or
-  `InlineNotification kind="error"` in the Configuration tab in place of the form. Verify the
-  loading, error, already loaded, remount after failure, and missing operator entry
-  scenarios, and that an unknown operator still shows the placeholder, in the
-  `CommonPropertiesPanel` tests, using `renderWithProviders`.
+  registered panel still shows the placeholder. Add a set of operators whose panel does not
+  depend on operator metadata (`branching`, `merge`, `ededup`, `doc_quality`) next to
+  `OPERATOR_PANEL_MAP`, with a comment that a panel that reads operator metadata must not be
+  added. For these operators, render the form whatever the metadata and `loading` are. For any
+  other operator with a registered panel, show the form if the metadata has attributes for the
+  node's operator, otherwise the loading state if `loading` is true, otherwise the error state.
+  Render `InlineLoading` or `InlineNotification kind="error"` in the Configuration tab in
+  place of the form. Verify the loading, error, already loaded, remount after failure, missing
+  operator entry, and empty entry scenarios, that an unknown operator still shows the
+  placeholder, and that each operator in the set renders its form with empty metadata, while
+  loading and after a failure, in the `CommonPropertiesPanel` tests, using
+  `renderWithProviders`.
 - [ ] 2.4 Verify that an open panel moves from the loading state to the
   form, and from the loading state to the error state, when the slice changes.
 - [ ] 2.5 Call `controller.setSaveButtonDisable(true)` while the loading or error
   state is shown, and re-evaluate required fields when the form renders. Verify Save is
-  disabled in both states and that the saved parameters of an existing node are unchanged.
+  disabled in both states, that the saved parameters of an existing node are unchanged, and
+  that Save is not disabled by the metadata request for an operator in the set from task 2.3.
 - [ ] 2.6 Verify the accessibility scenarios: the loading indicator exposes a
   status message and the error is announced as an alert.
 - [ ] 2.7 Run `npm run lint` and `npm run test:coverage` in `frontend/` and verify
   all unit tests pass. Run `npm run build` and verify a successful build.
 - [ ] 2.8 Reproduce the original issue manually: restart the server and open an
   Ingest properties panel before the metadata arrives. Verify the loading state is shown and
-  is then replaced by the populated provider list.
+  is then replaced by the populated provider list. Also open a Branching panel in the same
+  window and verify it renders at once.
 
 ## 3. Spec validation and archiving
 

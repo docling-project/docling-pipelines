@@ -17,21 +17,21 @@ map, so metadata-driven options are missing. This causes several problems:
 ## What Changes
 
 - While the operator metadata is not yet available, the Configuration tab will show a loading
-  state instead of the configuration form.
+  state instead of the configuration form. This applies only to operators whose panel depends on
+  operator metadata. Operators whose panel does not read it, such as Branching, Merging,
+  Ededup, and Document Quality, will keep rendering their panel immediately.
 - When the operator metadata arrives while the panel is open, the loading state will be replaced by the
   configuration form with populated options from the operator metadata.
 - When the operator metadata fetch fails, the Configuration tab will show an error state instead of an
   empty or partial form, and will not stay in the loading state indefinitely.
-- When the operator metadata fetch succeeds but has no metadata for the selected node's operator,
-  because the result is empty or lacks that operator, the Configuration tab will show the same
-  error state. The panel depends on the metadata of its own operator to populate its fields, so
-  this is treated as an error and not as a loading state. An operator with no registered
-  configuration panel still shows the placeholder.
+- When the operator metadata fetch succeeds but has no attributes for the selected node's operator,
+  because the result is empty or lacks that operator, the Configuration tab will show the same error state. The panel depends on the metadata of its own operator to populate its fields, so this is treated as an error and not as a loading state. An operator with no registered configuration panel still shows the placeholder.
 - When the operator metadata is fetched again on Canvas remount after an earlier failure, the
   Configuration tab will show the loading state and not the previous error. The fetch action
   will clear the previous error when the new request starts.
 - While the Configuration tab is in the loading or error state, the panel Save button will be
-  disabled, so an unrendered form cannot be saved over the node's existing configuration.
+  disabled, so an unrendered form cannot be saved over the node's existing configuration. Save
+  is not affected for operators whose panel does not depend on operator metadata.
 - When the operator metadata is already loaded, the form will continue to render immediately with no
   loading flash. This is the current behavior. It will be specified so it is not regressed.
 - Any usage of the operator metadata in the properties panel components will read it from the
@@ -81,8 +81,9 @@ Planned change of Redux (no new slice fields):
   `nodeFeatureMap`, stays on `appData`. The full rename list is in `design.md`.
 - PR 2: the fetch action will clear the previous error and set `loading` before the request,
   and set `error` on failure. `CommonPropertiesPanel` will read the metadata and `loading`
-  from the slice. No metadata for the selected node's operator, with `loading` false, is the
-  error state.
+  from the slice. For an operator whose panel depends on operator metadata, no attributes for
+  the selected node's operator, with `loading` false, is the error state. Operators whose
+  panel does not depend on operator metadata skip the loading and error checks.
 
 Carbon components: `InlineLoading` will render the loading state and `InlineNotification` with
 `kind="error"` will render the error state. Both will render inside the existing Configuration tab.

@@ -3,12 +3,10 @@
 ## ADDED Requirements
 
 ### Requirement: Configuration tab loading state while operator metadata is pending
-The Configuration tab SHALL display a loading state in place of the operator-specific
-form whenever the operator metadata request is in flight and the operator metadata has not
-yet been received. The loading state SHALL be exposed as a status message. While it is shown, the panel Save button SHALL be disabled. The tab headers, the editable display name, and the Input and Output tabs SHALL remain available.
+For an operator whose configuration panel depends on operator metadata, the Configuration tab SHALL display a loading state in place of the operator-specific form while the metadata request is in flight and that operator's metadata has not been received. The loading state SHALL be exposed as a status message and the Save button SHALL be disabled. The tab headers, the editable display name, and the Input and Output tabs SHALL remain available.
 
 #### Scenario: Panel opened while metadata is pending
-- **WHEN** the user opens the panel for an operator node while the operator metadata request is still in flight
+- **WHEN** the user opens the panel for an operator node whose panel depends on operator metadata while the operator metadata request is still in flight
 - **THEN** the Configuration tab shows a loading state, no operator fields are rendered, and the Save button is disabled
 
 #### Scenario: Form replaces loading state when metadata arrives
@@ -32,18 +30,14 @@ yet been received. The loading state SHALL be exposed as a status message. While
 - **THEN** the loading indicator is exposed with an accessible status message
 
 ### Requirement: Configuration tab error state when operator metadata fails to load
-The Configuration tab SHALL display an error state in place of the operator-specific form
-when the fetch failed or the metadata has no entry for the selected node's operator. The
-error state SHALL state that the configuration could not be loaded, SHALL be exposed as an
-alert, and SHALL NOT expose technical error details. While it is shown, the Save button
-SHALL be disabled so that unrendered fields cannot overwrite the node's saved configuration.
+For an operator whose configuration panel depends on operator metadata, the Configuration tab SHALL display an error state in place of the operator-specific form when the fetch failed or the metadata has no attributes for the selected node's operator. The error state SHALL state that the configuration could not be loaded, SHALL be exposed as an alert, and SHALL NOT expose technical error details. The Save button SHALL be disabled.
 
 #### Scenario: Fetch fails before the panel is opened
-- **WHEN** the operator metadata request has failed and the user opens the panel for an operator node
+- **WHEN** the operator metadata request has failed and the user opens the panel for an operator node whose panel depends on operator metadata
 - **THEN** the Configuration tab shows the error state, no operator fields are rendered, and the Save button is disabled
 
 #### Scenario: Fetch succeeds but has no metadata for the node's operator
-- **WHEN** the operator metadata request succeeds but the response is empty or has no metadata for the selected node's operator, and the user opens the panel for that node
+- **WHEN** the operator metadata request succeeds but the response is empty, lacks the selected node's operator, or has no attributes for it, and the user opens the panel for that node
 - **THEN** the Configuration tab shows the same error state as a failed request, no operator fields are rendered, and the Save button is disabled
 
 #### Scenario: Fetch fails while the panel shows the loading state
@@ -69,7 +63,7 @@ The panel SHALL always render three tabs â€” Configuration, Input, and Output â€
 
 #### Scenario: Configuration tab is default
 - **WHEN** the user opens the panel by selecting a node
-- **THEN** the Configuration tab is active, and it shows the operator-specific form once the operator metadata for the node's operator is available, or the loading or error state while the operator metadata is pending or unavailable for that operator
+- **THEN** the Configuration tab is active, and it shows the operator-specific form, except that for an operator whose panel depends on operator metadata, it shows the loading or error state while that operator's metadata is pending or unavailable
 
 #### Scenario: Input tab shows upstream features
 - **WHEN** the user selects the Input tab
@@ -80,11 +74,15 @@ The panel SHALL always render three tabs â€” Configuration, Input, and Output â€
 - **THEN** the combined set of features the node will emit to downstream operators is displayed
 
 ### Requirement: Operator-specific configuration panel
-The Configuration tab SHALL render the operator-specific form registered for the selected operator type once the operator metadata for that operator is available. While the operator metadata is pending, or is unavailable for that operator, the Configuration tab SHALL show the loading or error state instead of the form. When no panel is registered for an operator, a placeholder message SHALL be shown.
+The Configuration tab SHALL render the operator-specific form registered for the selected operator type. For an operator whose form depends on operator metadata, the form SHALL render once that operator's metadata is available, and the loading or error state SHALL be shown until then. When no panel is registered for an operator, a placeholder message SHALL be shown.
 
 #### Scenario: Known operator shows its form
-- **WHEN** the selected node is a known operator (e.g. ingest_source, chunker) and the operator metadata for that operator is available
+- **WHEN** the selected node is a known operator whose panel depends on operator metadata (e.g. ingest_source, chunker) and that operator's metadata is available
 - **THEN** the operator's custom configuration form is rendered in the Configuration tab
+
+#### Scenario: Operator that does not depend on metadata shows its form
+- **WHEN** the selected node is an operator whose panel does not read operator metadata (e.g. branching, merge), whether the operator metadata is available, still pending, or failed to load
+- **THEN** the operator's configuration form is rendered in the Configuration tab, with no loading or error state, and the Save button is not disabled by the metadata request
 
 #### Scenario: Unknown operator shows placeholder
 - **WHEN** the selected node has no registered configuration panel, whether or not the operator metadata is available

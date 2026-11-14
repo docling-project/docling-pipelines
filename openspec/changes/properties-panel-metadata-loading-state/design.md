@@ -40,7 +40,8 @@ PR 2, loading and error state (depends on PR 1):
 - The metadata action will clear the previous error and set `loading` and `error` on the
   `operators` slice.
 - `CommonPropertiesPanel` will read the metadata and `loading` from the slice and render a
-  loading, error, or form state in the Configuration tab.
+  loading, error, or form state in the Configuration tab. Operators whose panel does not
+  depend on operator metadata skip this check and render their panel as they do now.
 
 The behavior of `Canvas.tsx` will not change in either PR. Its only edit is the import of the
 renamed selector in PR 1.
@@ -52,13 +53,16 @@ Planned structure:
 ```
 CommonPropertiesPanel                  ← will read operators slice (metadata, loading) via selectors
 └── Configuration tab
+    ├── placeholder                    ← shows when no panel is registered for the operator
     ├── InlineLoading                  ← will show while metadata is pending; status text
-    ├── InlineNotification kind=error  ← will show when the metadata fetch failed
-    └── operator-specific form         ← will show when metadata is available
-        (custom panel)                    will read operator metadata from the operators slice
+    ├── InlineNotification kind=error  ← will show when the metadata is unavailable
+    └── operator-specific form         ← will show when metadata is available, or at once for an
+        (custom panel)                    operator that does not depend on it; panels that depend
+                                          on it will read it from the operators slice
 ```
 
-The three branches will be mutually exclusive. The Input and Output tabs will not change.
+The four branches will be mutually exclusive. The loading and error branches apply only to an
+operator whose panel depends on operator metadata. The Input and Output tabs will not change.
 `Canvas.tsx` is not part of this hierarchy.
 
 No new SCSS modules are expected. The Carbon `InlineLoading` and `InlineNotification` components will
@@ -69,11 +73,11 @@ with no hex or px literals.
 
 | Trigger | Current behavior | Planned behavior |
 |---|---|---|
-| Canvas mounts with empty metadata | An effect calls `getOperatorMetadata(dispatch)`. No properties panel loading state is set. | The same effect stays. Before the `try` block, the action will dispatch `clearError()` and `setLoading(true)`, so an error left by an earlier failed fetch is not paired with `loading=true`. `CommonPropertiesPanel` will show the loading state while the request is in flight. |
+| Canvas mounts with empty metadata | An effect calls `getOperatorMetadata(dispatch)`. No properties panel loading state is set. | The same effect stays. Before the `try` block, the action will dispatch `clearError()` and `setLoading(true)`, so an error left by an earlier failed fetch is not paired with `loading=true`. `CommonPropertiesPanel` will show the loading state while the request is in flight, for an operator whose panel depends on operator metadata. |
 | Request succeeds | The action dispatches `setOperatorMetadata`, which sets `metadata`, `loading=false`, `error=null`. | No change to the action. `CommonPropertiesPanel` will re-render and show the form. |
-| Request succeeds with no metadata for the selected node's operator (an empty map, or a map without that operator) | Same dispatch. The panel renders a form with no options. | No change to the action. `CommonPropertiesPanel` will show the error state. |
-| Request fails | The action logs the error. The store is unchanged. | The action will dispatch `setError` with a generic message, which sets `error` and `loading=false`. `CommonPropertiesPanel` will re-render and show the error state. |
-| User opens a node (double-click or node context menu) | Canvas `openWithParamDef` opens the panel. | No change to Canvas. `CommonPropertiesPanel` will mount and show loading state, error, or form from the current slice state. |
+| Request succeeds with no attributes for the selected node's operator (an empty map, a map without that operator, or an empty entry for it) | Same dispatch. The panel renders a form with no options. | No change to the action. For an operator whose panel depends on operator metadata, `CommonPropertiesPanel` will show the error state. |
+| Request fails | The action logs the error. The store is unchanged. | The action will dispatch `setError` with a generic message, which sets `error` and `loading=false`. For an operator whose panel depends on operator metadata, `CommonPropertiesPanel` will re-render and show the error state. |
+| User opens a node (double-click or node context menu) | Canvas `openWithParamDef` opens the panel. | No change to Canvas. `CommonPropertiesPanel` will mount and show loading state, error, or form from the current slice state. An operator whose panel does not depend on operator metadata will show its form in every slice state. |
 
 ## Decisions
 
@@ -131,36 +135,50 @@ equivalent. It also uses `MODIFIED Requirements` for three canonical requirement
 current wording would contradict the new behavior once archived:
 
 - `Three-tab structure`: the "Configuration tab is default" scenario currently says the
-  operator-specific form is visible when the panel opens. That is no longer true while the
-  metadata is pending or failed.
+  operator-specific form is visible when the panel opens. That is no longer true for an
+  operator whose panel depends on operator metadata while the metadata is pending or failed.
 - `Operator-specific configuration panel`: currently says the Configuration tab always renders
-  the operator-specific form. It will render the form once the metadata is available.
+  the operator-specific form. For an operator whose panel depends on operator metadata, it will
+  render the form once the metadata is available. It gains a scenario for operators that do not
+  depend on operator metadata, which render their form regardless.
 - `General operator configuration lifecycle`: step 1 currently reads metadata from controller
   `appData`. It will read operator metadata from the Redux `operators` slice with a new
   scenario for it.
 
+### Operators that do not depend on operator metadata
+
+The loading and error checks apply only to operators whose panel depends on operator metadata.
+A panel does not depend on it when it never reads `operatorMetadata`. Currently the panels of
+`branching`, `merge`, `ededup`, and `doc_quality` do not read it.
+
+`CommonPropertiesPanel` will keep an explicit set of these operators next to
+`OPERATOR_PANEL_MAP`, with a comment that an operator whose panel reads operator metadata must
+not be added to it.
+
 ### State derivation
 
-The Configuration tab will derive its branch from `loading` and from whether `metadata` has an
-entry for the operator of the selected node ("populated"). `error` does not select the branch.
-The endpoint returns the metadata of all operators at once, so the panel checks only the entry
-of its own node. A map that is `{}`, or that lacks this operator, is "empty".
+The Configuration tab will derive its branch from `loading` and from whether `metadata` has
+attributes for the operator of the selected node ("populated"). `error` does not select the
+branch. The endpoint returns the metadata of all operators at once, so the panel checks only
+the entry of its own node. A map that is `{}`, that lacks this operator, or whose entry for it
+has no attributes, is "empty".
 
 | `metadata` for the node's operator | `loading` | `error` | Branch | Case |
 |---|---|---|---|---|
 | populated | any | any | Operator-specific form | Normal case. |
 | empty | true | any | Loading state | The request is in flight. |
 | empty | false | non-null | Error state | The request failed. |
-| empty | false | null | Error state | Edge case: the request succeeded but the metadata has no entry for the node's operator. |
+| empty | false | null | Error state | Edge case: the request succeeded but the metadata has no attributes for the node's operator. |
 
 Two checks run in this order. If the metadata is populated, the form is shown. Otherwise, if
 `loading` is true, the loading state is shown. Anything else is the error state, so it is the
 fallthrough and not a check of its own. The populated check runs first so that an error can
 never hide a form that already has its data.
 
-An operator with no registered configuration panel is a different case. It still shows the
-placeholder whatever the metadata is, because the panel checks for a registered panel first and
-applies the metadata check only to operators that have one.
+These checks run only for an operator that has a registered panel and depends on operator
+metadata. The panel first checks for a registered panel. An operator with no registered panel
+shows the placeholder whatever the metadata is. An operator in the set of operators that do not
+depend on operator metadata shows its form whatever the metadata is.
 
 `loading` can be relied on because `getOperatorMetadata` is called only from `Canvas.tsx`,
 which mounts before a user can open a panel, and because the action dispatches
@@ -181,7 +199,8 @@ mounted starts no new request, so a failed fetch must keep showing its error the
 The form will not be rendered in the loading and error states, so the panel's
 required-field evaluation will have nothing to read. The panel will call
 `controller.setSaveButtonDisable(true)` for those branches and re-evaluate required fields
-when the form appears.
+when the form appears. This does not apply to operators that do not depend on operator
+metadata, because their form is always rendered.
 
 ### Generic error message
 
@@ -202,9 +221,14 @@ rendered with `intl.formatMessage`, as required by the canonical `frontend/i18n`
 
 ## Risks and Trade-offs
 
-- **A failed fetch will leave properties panels unusable until the Canvas page mounts
-  again:** Accepted because retry is out of scope. The error message will tell the user
-  the configuration could not be loaded.
+- **A failed fetch will leave properties panels that depend on operator metadata unusable
+  until the Canvas page mounts again:** Accepted because retry is out of scope. The error
+  message will tell the user the configuration could not be loaded. Panels that do not depend
+  on operator metadata, such as Branching and Merging, stay usable.
+- **The set of operators that do not depend on operator metadata can drift:** If a panel in
+  the set later starts reading operator metadata, it would render a form with empty options
+  during loading. A test for each operator in the set will render it
+  with empty metadata and check that its form is shown.
 - **The loading state depends on `setLoading(true)` running before the request is issued:**
   Otherwise a panel opened in that window would show the error state for a request that is in
   flight. It will be dispatched synchronously before the `try` block, and covered by a test in
