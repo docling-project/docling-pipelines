@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service that bridges execution context to OpenLineage events."""
 
 import traceback
@@ -34,6 +37,7 @@ _INTERNAL_LINEAGE_KEYS = frozenset(
         "all_doc_ids",
         "branches",
         "non_recoverable_docs_table",
+        "deferred_entries",
     }
 )
 

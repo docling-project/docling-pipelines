@@ -1,0 +1,115 @@
+# backend/flow-execution-engine Specification Delta
+
+## ADDED Requirements
+
+### Requirement: Node-level failure resumption from stored node output
+When a flow executes incrementally, the engine SHALL resume a previously failed document at every node where it failed, within `max_retry_attempts`, instead of re-executing it from the root Ingest operator. The rows to resume are read from the intermediate output that the immediate predecessor of the failed node stored in the job run where the failure happened. The engine SHALL NOT persist a separate checkpoint copy of the document data.
+
+#### Scenario: Failed document resumes at failure node from stored predecessor output
+- **WHEN** a document failed at Node $K$ in a previous job run and Node $K-1$'s stored output of that job run holds the document
+- **THEN** that row is read from the stored output of Node $K-1$ (located from the `job_id`, the `job_run_id` and the micro-batch number `batch_num` of the failure), injected into Node $K$'s input table, and earlier nodes (1 through $K-1$) are bypassed for that document
+
+#### Scenario: Batch number of the failed run locates the stored output
+- **WHEN** a document failed in micro-batch 3 of job run $R$ and is resumed in a later run in which the same document is assigned to micro-batch 0
+- **THEN** the row is read from `<data path>/<job_id>/$R$/data/<predecessor>_<output index>/3`, the current run's batch numbering is not used to locate it, and the row is injected into the batch the current run assigned to the document
+
+#### Scenario: Failed run was not micro-batched
+- **WHEN** a document failed in a job run without micro-batching
+- **THEN** its record has no `batch_num` and the row is read from `<data path>/<job_id>/<job_run_id>/data/<predecessor>_<output index>`
+
+#### Scenario: Document failed at several nodes is resumed at each of them
+- **WHEN** a document processed by several branches failed at Node $A$ and Node $B$
+- **THEN** both failed nodes are recorded for the document, and the document is injected at Node $A$ and at Node $B$
+
+#### Scenario: Document without usable stored output falls back to root ingestion
+- **WHEN** a document failed in a previous run but the stored output of the predecessor node is unavailable, the failed node cannot be found in the flow, or the failed node has several inputs
+- **THEN** the document is re-ingested from the root Ingest operator and processed through the entire pipeline
+
+### Requirement: Resumption requires persisted node output
+The engine SHALL resume failed documents only when `global_config.data_storage_type` is set and is not `memory`, because resumption reads the persisted intermediate node output.
+
+#### Scenario: Memory storage disables resumption
+- **WHEN** `data_storage_type` is `memory`
+- **THEN** no failure record is written, failed documents are not resumed and are re-ingested from the root Ingest operator
+
+#### Scenario: Unset storage type disables resumption
+- **WHEN** `data_storage_type` is not set
+- **THEN** resumption behaves as with `memory`
+
+### Requirement: Public configuration of resumption
+`max_retry_attempts` SHALL be a documented `global_config` key (integer, default 3) in `docs/reference/GLOBAL_CONFIG.md` and in the global configuration metadata (`src/docpipe/core/orchestration/global_config_metadata.py`). Both the `max_retry_attempts` and the `data_storage_type` documentation SHALL state that resumption requires `data_storage_type` to be set to a value other than `memory`.
+
+#### Scenario: Key is listed with its requirement
+- **WHEN** the global configuration reference or metadata is read
+- **THEN** `max_retry_attempts` is listed with default 3 and total attempts `1 + max_retry_attempts`, and the non-`memory` requirement is stated
+
+### Requirement: Failure record content
+For each failed document the engine SHALL store the source `modification_time` and, per failed node, the node identity, `job_run_id`, `batch_num`, failure count and original error message. The engine SHALL NOT store any intermediate data location; it is derived from `job_id`, `job_run_id` and `batch_num`.
+
+#### Scenario: Failure state is stored per job and survives job runs
+- **WHEN** a document fails in job run $R_1$ and the same job is executed again as job run $R_2$
+- **THEN** the failure record written in $R_1$ (source `modification_time`, failure count, original error) is read in $R_2$, because it is stored per `job_id` and not in the per-run job statistics
+
+#### Scenario: Failure count accumulates across job runs
+- **WHEN** a document fails at Node 4 in job run $R_1$ and again at Node 4 in job run $R_2$
+- **THEN** the single record of the document holds a failure count of 2 for Node 4
+
+#### Scenario: Deferred record carries the run and batch
+- **WHEN** a failed document is scheduled for resumption
+- **THEN** its deferred record carries the `job_run_id` and `batch_num` stored for the failed node
+
+#### Scenario: Failure record identifies the failed job run, batch and error
+- **WHEN** a document fails at Node 4 in micro-batch 2 of job run $R$ with error $E$
+- **THEN** its record holds Node 4, `job_run_id` $R$, `batch_num` 2, failure count 1 and error message $E$
+
+#### Scenario: Repeated failure at the same node
+- **WHEN** a resumed document fails again at the node where it already failed
+- **THEN** the failure count is incremented, the error message is replaced by the latest error, and the `job_run_id` and `batch_num` of the first failure at that node are kept because that run and batch hold the stored predecessor output
+
+### Requirement: Deferred execution accounting across pipeline nodes
+Documents scheduled for resumption at downstream nodes SHALL be included in `documents_in_scope` at the Ingest operator and categorized as `deferred_execution_docs`. Each upstream node prior to the resumption target SHALL carry forward the `deferred_execution_docs` in its execution metadata without processing them. When execution reaches the target failure node, the documents SHALL be transferred from `deferred_execution_docs` into the node's active input table.
+
+#### Scenario: Deferred docs counted in scope at Ingest and upstream nodes
+- **WHEN** Ingest identifies 10 fresh documents and 2 documents deferred for resumption at Node 4
+- **THEN** Ingest and intermediate nodes (Nodes 2 and 3) report `documents_in_scope: 12`, `processed_docs: 10`, and `deferred_execution_docs: [doc_11, doc_12]`
+
+#### Scenario: Deferred docs removed from deferred list at resumption node
+- **WHEN** execution reaches Node 4 where the 2 deferred documents are injected
+- **THEN** Node 4 reports `documents_in_scope: 12`, `processed_docs: 12`, and `deferred_execution_docs: []`
+
+### Requirement: Source file modification invalidates stale failure state
+When a document fails, the engine SHALL record its source `modification_time`. During subsequent Ingest, if the data source reports a `modified_time` for a previously failed document that is strictly newer than its saved `modification_time`, the engine SHALL discard the failure record and ingest the modified document as fresh from the root node.
+
+#### Scenario: Newer file version discards failure state and re-ingests fresh
+- **WHEN** a failed document has saved source modification timestamp $T_1$ but the current source file reports modified timestamp $T_2 > T_1$
+- **THEN** the failure record is discarded, the document is ingested as a fresh document at Node 1, and it is not categorized as deferred
+
+#### Scenario: Modified document that exhausted its retries is processed again
+- **WHEN** a document has exhausted its retries at Node 4 and its source file is then modified
+- **THEN** the failure record is discarded and the document is ingested as a fresh document at Node 1
+
+#### Scenario: Unmodified file retains failure state and is deferred
+- **WHEN** a failed document has current source modified timestamp equal to its saved source modification timestamp $T_1$
+- **THEN** the failure record is preserved and the document is scheduled as `deferred_execution_docs`
+
+### Requirement: Maximum retry attempts threshold
+The engine SHALL track the consecutive failure count per document at each node. A document SHALL be permitted 1 initial execution plus up to `global_config.max_retry_attempts` (default: 3) retries (total `max_retry_attempts + 1` attempts). If a document's consecutive failure count at any node exceeds `max_retry_attempts` (i.e. reaches `max_retry_attempts + 1`), the engine SHALL NOT schedule it for automated resumption and SHALL classify it as non-recoverable until force-ingested.
+
+#### Scenario: Failure count within threshold triggers resumption
+- **WHEN** a document has failed 3 consecutive times at Node 4 (1 initial attempt + 2 retries) and `max_retry_attempts` is 3
+- **THEN** the document is scheduled for its 3rd retry (4th total attempt) for node-level resumption
+
+#### Scenario: Failure count exceeding threshold halts automatic retry
+- **WHEN** a document has failed 4 consecutive times at Node 4 (1 initial attempt + 3 retries, exceeding `max_retry_attempts`) and `max_retry_attempts` is 3
+- **THEN** the document is excluded from automatic resumption and marked non-recoverable in incremental metadata
+
+### Requirement: Persistence and reporting of exhausted retry documents
+When a document exhausts its configured maximum retry attempts, the engine SHALL persist its failure metadata to the incremental metadata store as a non-recoverable document, and report its status and failure details, including the original error message of each node that exhausted its retries, in the post-execution job run report.
+
+#### Scenario: Exhausted retry document persisted to incremental metadata
+- **WHEN** a document reaches 4 consecutive failures (`max_retry_attempts + 1` total attempts) at Node 4 and `max_retry_attempts` is 3
+- **THEN** its metadata record is persisted to the incremental metadata store to prevent future automated retries
+
+#### Scenario: Exhausted retry document reported in job run report
+- **WHEN** a job run report is generated for a run where a document exhausted maximum retries
+- **THEN** the report row for that document contains status `Failed` with reason stating maximum retries were exhausted along with the failure node and the original error message

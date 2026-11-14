@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Data Access Layer for NodeStats model.
 
@@ -26,6 +29,7 @@ _NODE_STATS_UPDATE_FIELDS = [
     NodeStatsFields.TOTAL_DOCS,
     NodeStatsFields.FAILED_DOCS,
     NodeStatsFields.SKIPPED_DOCS,
+    NodeStatsFields.DEFERRED_EXECUTION_DOCS,
     NodeStatsFields.DOCS_COMPLETED,
     NodeStatsFields.NODE_METADATA,
     NodeStatsFields.ERROR,
@@ -160,7 +164,7 @@ class NodeStatsDAL:
 
             return self._dao.get_first_by_query(query=query)
         except Exception as e:
-            logger.error(f"Failed to get node stats: {e}")
+            logger.error("Failed to get node stats: %s", e)
             raise PostgresOperationException(
                 message=f"Failed to get node stats: {e}", operation="get", table="node_stats"
             ) from e
@@ -185,7 +189,7 @@ class NodeStatsDAL:
             )
             return self._dao.get_by_query(query=query)
         except Exception as e:
-            logger.error(f"Failed to get aggregated node stats: {e}")
+            logger.error("Failed to get aggregated node stats: %s", e)
             raise PostgresOperationException(
                 message=f"Failed to get aggregated node stats: {e}", operation="get_aggregated", table="node_stats"
             ) from e
@@ -210,7 +214,7 @@ class NodeStatsDAL:
             )
             return self._dao.get_by_query(query=query)
         except Exception as e:
-            logger.error(f"Failed to get batch node stats: {e}")
+            logger.error("Failed to get batch node stats: %s", e)
             raise PostgresOperationException(
                 message=f"Failed to get batch node stats: {e}", operation="get_batch", table="node_stats"
             ) from e
@@ -236,7 +240,7 @@ class NodeStatsDAL:
             )
             return self._dao.get_by_query(query=query)
         except Exception as e:
-            logger.error(f"Failed to get failed docs for batch: {e}")
+            logger.error("Failed to get failed docs for batch: %s", e)
             raise PostgresOperationException(
                 message=f"Failed to get failed docs for batch: {e}",
                 operation="get_failed_docs_for_batch",
@@ -261,7 +265,7 @@ class NodeStatsDAL:
             query = select(model).where(model.job_run_id == job_run_id)
             return self._dao.get_by_query(query=query)
         except Exception as e:
-            logger.error(f"Failed to get all node stats: {e}")
+            logger.error("Failed to get all node stats: %s", e)
             raise PostgresOperationException(
                 message=f"Failed to get all node stats: {e}", operation="get_all", table="node_stats"
             ) from e

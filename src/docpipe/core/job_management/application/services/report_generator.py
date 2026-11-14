@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Job Report Generator Module
 
@@ -32,6 +35,7 @@ logger = get_logger()
 # Constants for report generation
 GENERIC_SKIP_MESSAGE = "Document skipped during processing"
 GENERIC_FAILURE_MESSAGE = "Job failed before document reached destination"
+RETRIES_EXHAUSTED_PREFIX = "Maximum retries exhausted"
 
 
 def _build_node_metadata_list(*, node_stats: dict) -> list[dict]:
@@ -256,6 +260,7 @@ class JobReportGenerator:
 
         # Step 1: Initialize documents from ingest operator
         all_docs = self._initialize_docs_from_ingest()
+        self._add_resumption_documents(all_docs)
 
         if not all_docs:
             logger.warning("No documents found in ingest operator")
@@ -1042,9 +1047,47 @@ class JobReportGenerator:
         return None
 
     def _find_failure_reason(self, doc_id: str) -> str:
-        """Find failure reason for a document from node_metadata_list."""
+        """Find failure reason for a document from node_metadata_list.
+
+        A retry-exhausted reason takes precedence because it names the failure node and the last error.
+        """
+        for node_meta in self.node_metadata_list:
+            nested = node_meta.get("node_metadata") if isinstance(node_meta, dict) else None
+            if not isinstance(nested, dict):
+                continue
+            exhausted = self._extract_reason_from_docs_list(nested.get("failed_docs", []), doc_id)
+            if exhausted and exhausted.startswith(RETRIES_EXHAUSTED_PREFIX):
+                return exhausted
         reason = self._extract_reason_from_node_metadata(doc_id, "failed_docs")
         return reason if reason else GENERIC_FAILURE_MESSAGE
+
+    def _add_resumption_documents(self, all_docs: dict[str, dict[str, Any]]) -> None:
+        """Add documents known only through node stats: resumed (deferred) and retry-exhausted ones.
+
+        Such documents are not part of the ingest output table, so they would otherwise be missing from the report.
+        """
+        names: dict[str, str] = {}
+        for node_meta in self.node_metadata_list:
+            nested = node_meta.get("node_metadata") if isinstance(node_meta, dict) else None
+            if not isinstance(nested, dict):
+                continue
+            for key in ("failed_docs", "skipped_docs"):
+                for doc in nested.get(key, []) or []:
+                    if isinstance(doc, dict) and doc.get("id"):
+                        names.setdefault(doc["id"], str(doc.get("name", "")))
+
+        candidates: set[str] = set(names)
+        for node_stats in self.job_stats.node_stats.values():
+            candidates.update(getattr(node_stats, "deferred_execution_docs", None) or [])
+        for node_id in self._get_destination_node_ids():
+            node_stats = self.job_stats.node_stats.get(node_id)
+            if node_stats and node_stats.docs_completed:
+                candidates.update(node_stats.docs_completed)
+
+        for doc_id in candidates - set(all_docs):
+            all_docs[doc_id] = self._create_doc_entry(
+                doc_name=names.get(doc_id) or doc_id, modified_time=None, timestamp_str=""
+            )
 
     def _find_skip_reason(self, doc_id: str) -> str:
         """Find skip reason for a document from node_metadata_list."""

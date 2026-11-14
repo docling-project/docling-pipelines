@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Prefect Flow Engine - Prefect-specific implementation of FlowEnginePort.
 
@@ -254,23 +257,32 @@ class PrefectEngine(FlowEnginePort):
             if batch_semaphore:
                 batch_semaphore.acquire()
                 self.logger.info(
-                    f"Batch {batch_num} (ID: {batch_id}): acquired batch semaphore slot",
+                    "Batch %s (ID: %s): acquired batch semaphore slot",
+                    batch_num,
+                    batch_id,
                     extra=self.common_log_arguments,
                 )
 
             try:
                 self.logger.info(
-                    f"Batch {batch_num} (ID: {batch_id}): starting execution", extra=self.common_log_arguments
+                    "Batch %s (ID: %s): starting execution",
+                    batch_num,
+                    batch_id,
+                    extra=self.common_log_arguments,
                 )
                 from docpipe.core.constants.operator_constants import OperatorConstants
 
                 self.logger.debug(
-                    f"Batch {batch_num}: global_config has ingest_source={OperatorConstants.Config.INGEST_SOURCE in global_config}",
+                    "Batch %s: global_config has ingest_source=%s",
+                    batch_num,
+                    OperatorConstants.Config.INGEST_SOURCE in global_config,
                     extra=self.common_log_arguments,
                 )
                 batch_global_config = global_config.copy()
                 self.logger.debug(
-                    f"Batch {batch_num}: batch_global_config (after copy) has ingest_source={OperatorConstants.Config.INGEST_SOURCE in batch_global_config}",
+                    "Batch %s: batch_global_config (after copy) has ingest_source=%s",
+                    batch_num,
+                    OperatorConstants.Config.INGEST_SOURCE in batch_global_config,
                     extra=self.common_log_arguments,
                 )
                 if global_config.get(DocpipeConstants.ENABLE_MICRO_BATCHING, False):
@@ -288,7 +300,10 @@ class PrefectEngine(FlowEnginePort):
                     global_config=batch_global_config,
                 )
                 self.logger.info(
-                    f"Batch {batch_num} (ID: {batch_id}): completed execution", extra=self.common_log_arguments
+                    "Batch %s (ID: %s): completed execution",
+                    batch_num,
+                    batch_id,
+                    extra=self.common_log_arguments,
                 )
                 return result
             finally:
@@ -296,7 +311,9 @@ class PrefectEngine(FlowEnginePort):
                 if batch_semaphore:
                     batch_semaphore.release()
                     self.logger.info(
-                        f"Batch {batch_num} (ID: {batch_id}): released batch semaphore slot",
+                        "Batch %s (ID: %s): released batch semaphore slot",
+                        batch_num,
+                        batch_id,
                         extra=self.common_log_arguments,
                     )
                 # Last-resort drop of this batch's non-recoverable-docs bucket.
@@ -334,7 +351,10 @@ class PrefectEngine(FlowEnginePort):
             )
             batch_futures.append(batch_future)
             self.logger.info(
-                f"Submitted batch {batch_future.batch_num} (ID: {batch_future.batch_id}) future: {batch_future.describe_state()}",
+                "Submitted batch %s (ID: %s) future: %s",
+                batch_future.batch_num,
+                batch_future.batch_id,
+                batch_future.describe_state(),
                 extra=self.common_log_arguments,
             )
 
@@ -533,7 +553,10 @@ class PrefectEngine(FlowEnginePort):
         batch_num = global_config.get(DocpipeConstants.BATCH_NUM)
 
         self.logger.info(
-            f"inner_flow: batch_num={batch_num}, ingest_node_id={ingest_node_id}, op_flow_length={len(op_flow)}",
+            "inner_flow: batch_num=%s, ingest_node_id=%s, op_flow_length=%s",
+            batch_num,
+            ingest_node_id,
+            len(op_flow),
             extra=self.common_log_arguments,
         )
 
@@ -549,19 +572,25 @@ class PrefectEngine(FlowEnginePort):
 
                 if node_id_ref not in node_id_to_index_map:
                     self.logger.debug(
-                        f"Node {node_id_ref} not in node_id_to_index_map. Checking: ingest_node_id={ingest_node_id}, match={node_id_ref == ingest_node_id}",
+                        "Node %s not in node_id_to_index_map. Checking: ingest_node_id=%s, match=%s",
+                        node_id_ref,
+                        ingest_node_id,
+                        node_id_ref == ingest_node_id,
                         extra=self.common_log_arguments,
                     )
 
                     if ingest_node_id and node_id_ref == ingest_node_id:
                         self.logger.debug(
-                            f"Found ingest node dependency {node_id_ref} - will use batch data",
+                            "Found ingest node dependency %s - will use batch data",
+                            node_id_ref,
                             extra=self.common_log_arguments,
                         )
                         has_ingest_dependency = True
                         continue
                     self.logger.error(
-                        f"Node {node_id_ref} not found in flow. ingest_node_id={ingest_node_id}",
+                        "Node %s not found in flow. ingest_node_id=%s",
+                        node_id_ref,
+                        ingest_node_id,
                         extra=self.common_log_arguments,
                     )
                     raise FlowExecutionFailedException(f"Node {node_id_ref} not found in flow")
@@ -696,7 +725,6 @@ class PrefectEngine(FlowEnginePort):
             failed_doc_ids=failed_doc_ids,
             non_recoverable_docs_table=non_recoverable_docs_table,
         )
-
         # Reset non-recoverable docs for micro-batching support
         self.orchestrator._reset_non_recoverable_docs_for_batch(
             global_config=global_config, common_log_arguments=self.common_log_arguments
@@ -755,17 +783,20 @@ class PrefectEngine(FlowEnginePort):
 
                 if kwargs.get("stop_node_id") == op_def.get(OperatorConstants.Columns.ID):
                     logger.info(
-                        f"Stop node reached: {op_def.get(OperatorConstants.Columns.NAME)} id:{op_def.get(OperatorConstants.Columns.ID)}"
+                        "Stop node reached: %s id:%s",
+                        op_def.get(OperatorConstants.Columns.NAME),
+                        op_def.get(OperatorConstants.Columns.ID),
                     )
                     logger.info(
-                        f"No more tasks will be submitted, waiting for current tasks: {len(submitted_futures)} to complete"
+                        "No more tasks will be submitted, waiting for current tasks: %s to complete",
+                        len(submitted_futures),
                     )
                     stop_submission = True
                     final_destination = future
 
             except Exception as e:
                 error = f"Branched flow task execution failed for {task_type.value} in non operator execution flow with error:{e!s}"
-                logger.error(error, stack_info=True, exc_info=True)
+                logger.exception(error, stack_info=True)
                 raise PrefectFlowFailed(message=error, error_code=ErrorCode.PREFECT_FLOW_TASK_FAILED) from e
 
         self.__wait_for_tasks_with_exceptions(destinations=submitted_futures, task_type=task_type)
@@ -794,11 +825,11 @@ class PrefectEngine(FlowEnginePort):
                 future.result()
         except FlowValidationException as se:
             error = f"Branched flow task execution failed for {task_type.value} in non operator execution flow with error:{se!s}"
-            logger.error(error, stack_info=True, exc_info=True)
+            logger.exception(error, stack_info=True)
             raise se
         except Exception as e:
             error = f"Branched flow task execution failed for {task_type.value} in non operator execution flow with error:{e!s}"
-            logger.error(error, stack_info=True, exc_info=True)
+            logger.exception(error, stack_info=True)
             raise PrefectFlowFailed(message=error, error_code=ErrorCode.PREFECT_FLOW_TASK_FAILED) from e
 
     def _collect_failed_doc_ids(self, *, batch_id: str | None) -> list[str]:

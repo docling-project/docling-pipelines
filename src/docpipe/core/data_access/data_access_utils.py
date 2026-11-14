@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Utility functions for data access and parquet table I/O in docpipe."""
 
 import re
@@ -70,12 +73,17 @@ class DataAccessUtils:
             }
 
     @staticmethod
+    def default_intermediate_output_folder(*, job_id: str, job_run_id: str) -> str:
+        """Return the folder holding the intermediate node outputs of a job run when no output folder is configured."""
+        return f"{get_data_path()}/{job_id}/{job_run_id}/data"
+
+    @staticmethod
     def add_data_local_config_for_cpd(config: dict, job_id: str, job_run_id: str):
         """Add data local config for cpd."""
         local_config = config.get("data_local_config", {})
         config["data_config"] = None
         if not local_config or not local_config.get("output_folder"):
-            output_folder = f"{get_data_path()}/{job_id}/{job_run_id}/data"
+            output_folder = DataAccessUtils.default_intermediate_output_folder(job_id=job_id, job_run_id=job_run_id)
             config["data_local_config"] = {
                 "input_folder": "UNUSED",
                 "output_folder": output_folder,

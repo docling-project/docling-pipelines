@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class for operator executors in the docpipe orchestration layer."""
 
 import copy
@@ -20,6 +23,9 @@ from docpipe.core.data_access.data_access_utils import DataAccessUtils
 from docpipe.core.job_management.domain.ports import JobStatsService
 from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
+from docpipe.core.orchestration.application.services.resumption_service import ResumptionService
+from docpipe.core.orchestration.models.resumption_plan import ResumptionRecord
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.deleted_rows_tracker import update_deleted_rows
 
@@ -55,6 +61,15 @@ class AbstractOperatorExecutor:
         self._operator = operator
         self._params = params | {OperatorConstants.Columns.NAME: name}
         self._job_stats_service = job_stats_service
+        # Node-level failure resumption state, populated per execution
+        # Ids of deferred documents passed through this node untouched (their retries are exhausted)
+        self._carried_deferred_ids: list[str] = []
+        # Ids of documents injected into this node's input from a previous run's saved predecessor output
+        self._injected_resumed_ids: list[str] = []
+        # Resumed entries whose saved predecessor output could not be loaded; they are failed or deferred again
+        self._unavailable_resumed_entries: list[dict[str, Any]] = []
+        # Input table of the current execution, kept so failures can be recorded against it
+        self._resumption_input: pa.Table | None = None
         job_id: str = str(self._params.get(DocpipeConstants.JOB_ID))
         job_run_id: str = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
         DataAccessUtils.add_intermediate_storage_config(
@@ -78,7 +93,13 @@ class AbstractOperatorExecutor:
         Returns:
             Tuple of (list[DataAccess], metadata dict)."""
         input_tables = self._get_input_tables(data_access=data_access)
-        out_tables, metadata = self._execute_impl(tables=input_tables)
+        input_tables = self._inject_resumed_documents(tables=input_tables)
+        self._resumption_input = input_tables if isinstance(input_tables, pa.Table) else None
+        try:
+            out_tables, metadata = self._execute_impl(tables=input_tables)
+        except Exception as exc:
+            self._record_node_failure(exc=exc)
+            raise
         if deleted_rows_list is not None:
             deleted_rows = update_deleted_rows(
                 prev_tables=input_tables,
@@ -218,7 +239,7 @@ class AbstractOperatorExecutor:
             job_run_id=self._params[DocpipeConstants.JOB_RUN_ID],
             node_id=node_id,
             node_name=self._name,
-            total_docs=OperatorUtils.get_unique_ids(tables=tables),
+            total_docs=self._total_docs_in_scope(tables=tables),
             batch_id=batch_id,
             batch_num=batch_num,
         )
@@ -241,14 +262,17 @@ class AbstractOperatorExecutor:
         job_run_id = self._params[DocpipeConstants.JOB_RUN_ID]
         logger.info("Updating final stats for node '%s'.", node_id)
 
+        self._apply_resumption_to_metadata(metadata=metadata)
+
         # Use injected job stats service
         if not self._job_stats_service:
             logger.warning("Job stats service not available for node '%s'", node_id)
             return
 
-        # Remove 'non_recoverable_docs_table' from metadata before saving
+        # Remove internal-only entries from metadata before saving
         metadata_copy = copy.deepcopy(metadata)
         metadata_copy.pop(Metrics.Internal.NON_RECOVERABLE_DOCS_TABLE, None)
+        metadata_copy.pop(Metrics.Internal.DEFERRED_ENTRIES, None)
         # Extract batch_id and batch_num from params if micro-batching is enabled
         batch_id = self._params.get(DocpipeConstants.BATCH_ID)
         batch_num = self._params.get(DocpipeConstants.BATCH_NUM)
@@ -259,6 +283,10 @@ class AbstractOperatorExecutor:
         ]
         skipped_docs = [
             doc.get("id", "") for doc in metadata_copy.get(Metrics.External.SKIPPED_DOCS, []) if isinstance(doc, dict)
+        ]
+        deferred_docs = [
+            doc.get("id", "") if isinstance(doc, dict) else str(doc)
+            for doc in metadata_copy.get(Metrics.External.DEFERRED_EXECUTION_DOCS, [])
         ]
         failed_and_skipped_set = set(failed_docs) | set(skipped_docs)
         docs_completed = [doc_id for doc_id in all_doc_ids if doc_id not in failed_and_skipped_set]
@@ -285,6 +313,7 @@ class AbstractOperatorExecutor:
             docs_completed=docs_completed,
             failed_docs=failed_docs,
             skipped_docs=skipped_docs,
+            deferred_execution_docs=deferred_docs,
             col_names=col_names,
             node_status=node_status,
             node_metadata=metadata_copy,
@@ -292,6 +321,197 @@ class AbstractOperatorExecutor:
             batch_num=batch_num,
         )
         logger.info("Final stats for node '%s' stored successfully.", node_id)
+
+    # ------------------------------------------------------------------ node-level failure resumption
+
+    def _resumption_job_id(self) -> str:
+        """Return the job id under which resumption state is stored (context id, falling back to job id)."""
+        return str(self._params.get(DocpipeConstants.CONTEXT_ID) or self._params.get(DocpipeConstants.JOB_ID))
+
+    def _resumption_entries(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Return (entries injected at this node, entries carried through this node) from the resumption plan."""
+        return ResumptionService.entries_for_node(
+            plan=self._params.get(DocpipeConstants.RESUMPTION_PLAN),
+            batch_id=self._params.get(DocpipeConstants.BATCH_ID),
+            node_id=self._params[OperatorConstants.Columns.ID],
+        )
+
+    def resumption_injection_pending(self) -> bool:
+        """True when deferred documents must be injected into this node's input, even if that input is empty."""
+        inject, _ = self._resumption_entries()
+        return bool(inject)
+
+    def _inject_resumed_documents(self, *, tables):
+        """Append the saved input rows of deferred documents when this node is their resumption target.
+
+        The rows are read from the intermediate output that the predecessor node saved in the job run where the
+        document failed.
+        """
+        inject, carried = self._resumption_entries()
+        self._carried_deferred_ids = list(dict.fromkeys(entry["doc_id"] for entry in carried))
+        if not inject:
+            return tables
+        service = create_resumption_service(config=self._params)
+        if service is None or not isinstance(tables, pa.Table):
+            self._unavailable_resumed_entries = inject
+            return tables
+        merged, injected_ids, unavailable = service.inject_saved_rows(table=tables, entries=inject)
+        self._injected_resumed_ids = injected_ids
+        self._unavailable_resumed_entries = unavailable
+        if unavailable:
+            service.discard_all_for_ids(
+                job_id=self._resumption_job_id(), doc_ids=[entry["doc_id"] for entry in unavailable]
+            )
+        logger.info(
+            "Resumed %s deferred documents at node '%s' (%s without a usable saved input)",
+            len(injected_ids),
+            self._name,
+            len(unavailable),
+        )
+        return merged
+
+    def _total_docs_in_scope(self, *, tables) -> list[Any]:
+        """Document ids in scope for this node: the input table plus deferred documents carried through it."""
+        ids = OperatorUtils.get_unique_ids(tables=tables)
+        extra = self._carried_deferred_ids + [entry["doc_id"] for entry in self._unavailable_resumed_entries]
+        seen = set(ids)
+        return ids + [doc_id for doc_id in extra if doc_id not in seen]
+
+    def _apply_resumption_to_metadata(self, *, metadata: dict[str, Any]) -> None:
+        """Record failures for resumption and add deferred-document accounting to the node metadata (in place)."""
+        try:
+            if self._resumption_input is not None:
+                self._record_failures_from_metadata(metadata=metadata)
+            self._clear_resumed_successes(metadata=metadata)
+            for entry in self._unavailable_resumed_entries:
+                if Metrics.External.FAILED_DOCS_COUNT in metadata:
+                    AbstractOperator.record_failed_document(
+                        metadata=metadata,
+                        doc_id=entry["doc_id"],
+                        doc_name=entry.get("doc_name", ""),
+                        reason=(
+                            "Saved output of the previous node is unavailable for resumption "
+                            f"(failed in job run {entry.get('job_run_id', '')}: {entry.get('error_message', '')}); "
+                            "the document will be re-ingested on the next run"
+                        ),
+                    )
+            extra_total = len(self._carried_deferred_ids) + len(self._unavailable_resumed_entries)
+            if self._carried_deferred_ids:
+                existing = list(metadata.get(Metrics.External.DEFERRED_EXECUTION_DOCS, []))
+                merged = existing + [doc_id for doc_id in self._carried_deferred_ids if doc_id not in existing]
+                metadata[Metrics.External.DEFERRED_EXECUTION_DOCS] = merged
+                metadata[Metrics.External.DEFERRED_EXECUTION_DOCS_COUNT] = len(merged)
+            if extra_total:
+                metadata[Metrics.External.TOTAL_DOCS] = metadata.get(Metrics.External.TOTAL_DOCS, 0) + extra_total
+        except Exception as exc:
+            logger.warning("Failed to apply resumption accounting for node '%s': %s", self._name, type(exc).__name__)
+
+    def _clear_resumed_successes(self, *, metadata: dict[str, Any]) -> None:
+        """Drop the failure entry of this node for resumed documents that did not fail again."""
+        if not self._injected_resumed_ids:
+            return
+        service = create_resumption_service(config=self._params)
+        if service is None:
+            return
+        failed_docs = metadata.get(Metrics.External.FAILED_DOCS, []) or []
+        failed_ids = {doc.get("id") for doc in failed_docs if isinstance(doc, dict)}
+        service.clear_node_success(
+            job_id=self._resumption_job_id(),
+            node_id=self._params[OperatorConstants.Columns.ID],
+            node_name=self._name,
+            doc_ids=[doc_id for doc_id in self._injected_resumed_ids if doc_id not in failed_ids],
+        )
+
+    def _record_failures_from_metadata(self, *, metadata: dict[str, Any]) -> None:
+        """Record every document the operator reported as failed, with its error (recoverable failures only)."""
+        service = create_resumption_service(config=self._params)
+        if service is None or self._resumption_input is None:
+            return
+        non_recoverable_ids: set[Any] = set()
+        non_recoverable = metadata.get(Metrics.Internal.NON_RECOVERABLE_DOCS_TABLE)
+        if isinstance(non_recoverable, pa.Table) and non_recoverable.num_rows > 0:
+            non_recoverable_ids = set(non_recoverable[OperatorConstants.Misc.ID].to_pylist())
+
+        job_id = self._resumption_job_id()
+        job_run_id = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
+        batch_num = self._params.get(DocpipeConstants.BATCH_NUM)
+        node_id = self._params[OperatorConstants.Columns.ID]
+        exhausted: list[ResumptionRecord] = []
+        for doc in metadata.get(Metrics.External.FAILED_DOCS, []) or []:
+            doc_id = doc.get("id") if isinstance(doc, dict) else None
+            if not doc_id or doc_id in non_recoverable_ids:
+                continue
+            record = service.record_failure(
+                job_id=job_id,
+                job_run_id=job_run_id,
+                node_id=node_id,
+                node_name=self._name,
+                input_table=self._resumption_input,
+                doc_id=doc_id,
+                doc_name=str(doc.get("name", "")),
+                reason=str(doc.get("reason", "")),
+                batch_num=batch_num,
+            )
+            if record is not None and record.exhausted:
+                doc["reason"] = service.format_exhausted_reason(record=record)
+                exhausted.append(record)
+        self._persist_exhausted(records=exhausted)
+
+    def _record_node_failure(self, *, exc: Exception) -> None:
+        """A node raised: every document of its input failed at this node."""
+        if self._resumption_input is None:
+            return
+        try:
+            service = create_resumption_service(config=self._params)
+            if service is None:
+                return
+            job_id = self._resumption_job_id()
+            job_run_id = str(self._params.get(DocpipeConstants.JOB_RUN_ID))
+            batch_num = self._params.get(DocpipeConstants.BATCH_NUM)
+            node_id = self._params[OperatorConstants.Columns.ID]
+            reason = f"{type(exc).__name__}: {exc}"[:500]
+            exhausted: list[ResumptionRecord] = []
+            for doc_id in OperatorUtils.get_unique_ids(tables=self._resumption_input):
+                record = service.record_failure(
+                    job_id=job_id,
+                    job_run_id=job_run_id,
+                    node_id=node_id,
+                    node_name=self._name,
+                    input_table=self._resumption_input,
+                    doc_id=doc_id,
+                    doc_name="",
+                    reason=reason,
+                    batch_num=batch_num,
+                )
+                if record is not None and record.exhausted:
+                    exhausted.append(record)
+            self._persist_exhausted(records=exhausted)
+        except Exception as record_exc:
+            logger.warning("Failed to record node failure for resumption: %s", type(record_exc).__name__)
+
+    def _persist_exhausted(self, *, records: list[ResumptionRecord]) -> None:
+        """Persist retry-exhausted documents as non-recoverable so they are never scheduled automatically again.
+
+        Their resumption records are retained."""
+        if not records:
+            return
+        from docpipe.core.incremental_metadata import get_incremental_update_service
+
+        table = pa.table(
+            {
+                OperatorConstants.Misc.ID: [r.doc_id for r in records],
+                OperatorConstants.Misc.NAME: [r.doc_name for r in records],
+                OperatorConstants.Metadata.MODIFIED_TIME: pa.array(
+                    [r.modified_time or 0 for r in records], type=pa.int64()
+                ),
+            }
+        )
+        get_incremental_update_service().save_metadata_for_incremental_update(
+            job_id=self._resumption_job_id(),
+            job_run_id=self._params.get(DocpipeConstants.JOB_RUN_ID),
+            tables=[table],
+            failed_doc_ids=None,
+        )
 
     @staticmethod
     def get_output_file_path(*, data_access):

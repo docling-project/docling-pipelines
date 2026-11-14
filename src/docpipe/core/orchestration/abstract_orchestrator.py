@@ -4,6 +4,7 @@
 """Abstract base class for all docpipe flow orchestrators."""
 
 import threading
+import uuid
 from abc import ABC, abstractmethod
 from operator import itemgetter
 from queue import Queue
@@ -27,7 +28,7 @@ from docpipe.core.models.session_info import SessionInfo, get_session_info, set_
 from docpipe.core.operators.abstract_operator import OperatorCategory
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.orchestration.abstract_operator_executor import AbstractOperatorExecutor
-from docpipe.core.orchestration.batch_manager import BatchManager
+from docpipe.core.orchestration.batch_manager import BatchInfo, BatchManager
 from docpipe.core.orchestration.flow_execution_event_handler import FlowExecutionEventHandler
 from docpipe.core.orchestration.models.execution_event_context import NodeTableSummary, SinkDatasetInfo
 from docpipe.core.orchestration.operator_factory import OperatorFactory
@@ -538,7 +539,10 @@ class AbstractOrchestrator(ABC):
         from docpipe.core.orchestration.models.execution_event_context import NodeTableSummary
 
         prev_data_access, prev_table = self._unpack_prev_results(prev_results=prev_results)
-        skip = self.evaluate_execution_skip(executor=executor, tables=prev_table, deleted_docs_count=deleted_docs_count)
+        skip = (
+            self.evaluate_execution_skip(executor=executor, tables=prev_table, deleted_docs_count=deleted_docs_count)
+            and not executor.resumption_injection_pending()
+        )
         metadata = {}
         internal_metadata = {}
         if skip:
@@ -1334,8 +1338,12 @@ class AbstractOrchestrator(ABC):
             ),
         )
 
+        # Node-level failure resumption: distribute deferred documents across batches
+        deferred_entries = ingest_results.internal_metadata.get(Metrics.Internal.DEFERRED_ENTRIES, []) or []
+        has_deferred = bool(deferred_entries)
+
         # Check if table is empty
-        if ingested_table.num_rows == 0:
+        if ingested_table.num_rows == 0 and not has_deferred:
             self.logger.info(
                 ">>> No documents ingested — marking downstream nodes as skipped and exiting early",
                 extra=self.common_log_arguments,
@@ -1373,6 +1381,14 @@ class AbstractOrchestrator(ABC):
         batches, global_config = self.batch_manager.prepare_batches(
             ingested_table=ingested_table, global_config=global_config, common_log_arguments=self.common_log_arguments
         )
+        if has_deferred:
+            batches, global_config = self._apply_resumption_plan(
+                batches=batches,
+                global_config=global_config,
+                op_flow=op_flow,
+                ingested_table=ingested_table,
+                deferred_entries=deferred_entries,
+            )
         self.logger.debug(
             "After prepare_batches: ingest_source in global_config=%s",
             OperatorConstants.Config.INGEST_SOURCE in global_config,
@@ -1417,6 +1433,55 @@ class AbstractOrchestrator(ABC):
             # This ensures operator summary is printed even when batches fail in fail-fast mode
             clean_up_prefect_home()
             self._finalize_dag_flow(op_flow=op_flow, global_config=global_config)
+
+    def _apply_resumption_plan(
+        self,
+        *,
+        batches,
+        global_config: dict,
+        op_flow: list[dict],
+        ingested_table: pa.Table,
+        deferred_entries: list[dict],
+    ):
+        """Attach deferred (resumed) documents to batches and store the plan in the global config.
+
+        Batches that only hold deferred documents are created when no fresh documents exist. Deferred entries whose
+        target node is not part of the flow fall back to root ingestion on the next run (their records are dropped).
+        All entries of a document that failed at several nodes are placed in the same batch.
+        """
+        from docpipe.core.orchestration.adapters.resumption_factory import create_resumption_service
+        from docpipe.core.orchestration.application.services.resumption_service import (
+            ResumptionService,
+            resumption_batch_key,
+        )
+
+        if not batches:
+            batch_id = str(uuid.uuid4())
+            batches = [BatchInfo(batch_id=batch_id, batch_num=0, table=ingested_table.slice(0, 0))]
+            if global_config.get(DocpipeConstants.ENABLE_MICRO_BATCHING, False):
+                global_config[DocpipeConstants.BATCH_COUNT] = 1
+        batch_keys = [
+            resumption_batch_key(
+                batch_id=batch.batch_id if global_config.get(DocpipeConstants.ENABLE_MICRO_BATCHING, False) else None
+            )
+            for batch in batches
+        ]
+        plan, unresolved = ResumptionService.build_plan(
+            entries=deferred_entries, op_flow=op_flow, batch_keys=batch_keys
+        )
+        if unresolved:
+            service = create_resumption_service(config=global_config)
+            if service is not None:
+                service.discard_all_for_ids(
+                    job_id=self.context_id or self.job_id or "", doc_ids=[e["doc_id"] for e in unresolved]
+                )
+            self.logger.warning(
+                "%s deferred entries cannot be resumed in this flow; their documents will be re-ingested next run",
+                len(unresolved),
+                extra=self.common_log_arguments,
+            )
+        global_config[DocpipeConstants.RESUMPTION_PLAN] = plan
+        return batches, global_config
 
     def _create_empty_result(self):
         """Create an empty ExecuteStepResults for use as the initial ingest input.
