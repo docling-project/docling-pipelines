@@ -18,7 +18,7 @@ dependencies = [
     "azure-storage-blob==12.28.0",
     "babel==2.18.0",
     "boto3==1.43.1",
-    "botocore==1.43.1",
+    "botocore==1.43.127",
     "box-sdk-gen==1.17.0",
     "cryptography==50.0.0",
     "data-prep-toolkit-transforms==1.1.8",
