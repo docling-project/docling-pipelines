@@ -37,7 +37,9 @@ must merge after PR 1.
 
 - [ ] 2.1 In `getOperatorMetadata` (`frontend/src/services/api/actions/operator-actions.ts`),
   dispatch `clearError()` and `setLoading(true)` as the first statements, before the `try`
-  block, and dispatch `setError` on failure. Keep the no-throw behavior
+  block, and dispatch `setError` with an error code on failure, not the raw Axios error and
+  not a user-facing string. Align the code with the centralised error handling mechanism
+  that is added across the UI. Keep the no-throw behavior
   and keep logging the raw error with `logUtil.error`. Update the JSDoc of the action: remove
   the `@throws` tag, since the action logs and absorbs errors and does not rethrow, remove the
   statement that the metadata is passed to the panels via `appData.operatorMetadata`, and
@@ -46,8 +48,8 @@ must merge after PR 1.
   error is cleared when the new request starts, and `loading` is true before the request
   resolves.
 - [ ] 2.2 Add the loading and error strings with `defineMessages()`, following the canonical
-  `frontend/i18n` spec. Verify the new ids appear in `messages_en.json` and none were added
-  by hand.
+  `frontend/i18n` spec, including the message for each error code and for the default code.
+  Verify the new ids appear in `messages_en.json` and none were added by hand.
 - [ ] 2.3 In `CommonPropertiesPanel`, read the loading flag from the `operators` slice
   with `useAppSelector` and `selectOperatorsLoading`, in addition to the metadata from task 1.1.
   Keep the existing check for a registered configuration panel first, so an operator with no
@@ -58,7 +60,9 @@ must merge after PR 1.
   other operator with a registered panel, show the form if the metadata has attributes for the
   node's operator, otherwise the loading state if `loading` is true, otherwise the error state.
   Render `InlineLoading` or `InlineNotification kind="error"` in the Configuration tab in
-  place of the form. Verify the loading, error, already loaded, remount after failure, missing
+  place of the form. In the error state, read the error code with `selectOperatorsError` and
+  show its intl message, or the message of the default code when `error` is null. Verify the
+  loading, error, already loaded, remount after failure, missing
   operator entry, and empty entry scenarios, that an unknown operator still shows the
   placeholder, and that each operator in the set renders its form with empty metadata, while
   loading and after a failure, in the `CommonPropertiesPanel` tests, using

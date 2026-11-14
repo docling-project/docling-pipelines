@@ -76,7 +76,7 @@ with no hex or px literals.
 | Canvas mounts with empty metadata | An effect calls `getOperatorMetadata(dispatch)`. No properties panel loading state is set. | The same effect stays. Before the `try` block, the action will dispatch `clearError()` and `setLoading(true)`, so an error left by an earlier failed fetch is not paired with `loading=true`. `CommonPropertiesPanel` will show the loading state while the request is in flight, for an operator whose panel depends on operator metadata. |
 | Request succeeds | The action dispatches `setOperatorMetadata`, which sets `metadata`, `loading=false`, `error=null`. | No change to the action. `CommonPropertiesPanel` will re-render and show the form. |
 | Request succeeds with no attributes for the selected node's operator (an empty map, a map without that operator, or an empty entry for it) | Same dispatch. The panel renders a form with no options. | No change to the action. For an operator whose panel depends on operator metadata, `CommonPropertiesPanel` will show the error state. |
-| Request fails | The action logs the error. The store is unchanged. | The action will dispatch `setError` with a generic message, which sets `error` and `loading=false`. For an operator whose panel depends on operator metadata, `CommonPropertiesPanel` will re-render and show the error state. |
+| Request fails | The action logs the error. The store is unchanged. | The action will dispatch `setError` with an error code, which sets `error` and `loading=false`. For an operator whose panel depends on operator metadata, `CommonPropertiesPanel` will re-render and show the error state with the intl message for that code. |
 | User opens a node (double-click or node context menu) | Canvas `openWithParamDef` opens the panel. | No change to Canvas. `CommonPropertiesPanel` will mount and show loading state, error, or form from the current slice state. An operator whose panel does not depend on operator metadata will show its form in every slice state. |
 
 ## Decisions
@@ -168,7 +168,7 @@ has no attributes, is "empty".
 | populated | any | any | Operator-specific form | Normal case. |
 | empty | true | any | Loading state | The request is in flight. |
 | empty | false | non-null | Error state | The request failed. |
-| empty | false | null | Error state | Edge case: the request succeeded but the metadata has no attributes for the node's operator. |
+| empty | false | null | Error state | Edge case: the request succeeded but the metadata has no attributes for the node's operator. The message of the default code is shown. |
 
 Two checks run in this order. If the metadata is populated, the form is shown. Otherwise, if
 `loading` is true, the loading state is shown. Anything else is the error state, so it is the
@@ -202,11 +202,21 @@ required-field evaluation will have nothing to read. The panel will call
 when the form appears. This does not apply to operators that do not depend on operator
 metadata, because their form is always rendered.
 
-### Generic error message
+### Error code and intl message
 
-The fetch action will store a fixed, user-facing message in `error` instead of the raw
-Axios error. This will keep status codes and backend text out of the UI. The raw error will
-continue to go to `logUtil.error`, as it currently does.
+The fetch action will store an error code in `error`, not the raw Axios error and not a
+user-facing string. The component reads the code and shows the matching message, defined with
+`defineMessages()` and rendered with `intl.formatMessage`. This keeps status codes and backend
+text out of the UI, and keeps user-facing text out of the store, so it is translated in the
+component. The raw error will continue to go to `logUtil.error`, as it currently does.
+
+The `error` field of the `operators` slice is a string, so a code needs no change to its type.
+The names and shape of the code will follow the centralised error handling mechanism that is added across the UI.
+
+The error state can also be reached with `error` null, when the request succeeded but the
+metadata has no attributes for the node's operator. There is no code to read in that case, so
+the panel will show the message of a default code. The error state therefore shows an intl
+message in every case it can be reached.
 
 ### Keeping the no-throw behavior
 

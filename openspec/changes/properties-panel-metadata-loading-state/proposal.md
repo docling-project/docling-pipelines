@@ -23,7 +23,9 @@ map, so metadata-driven options are missing. This causes several problems:
 - When the operator metadata arrives while the panel is open, the loading state will be replaced by the
   configuration form with populated options from the operator metadata.
 - When the operator metadata fetch fails, the Configuration tab will show an error state instead of an
-  empty or partial form, and will not stay in the loading state indefinitely.
+  empty or partial form, and will not stay in the loading state indefinitely. The fetch action
+  will store an error code in the `operators` slice, and the component will show the intl
+  message for that code. No user-facing string is stored in Redux.
 - When the operator metadata fetch succeeds but has no attributes for the selected node's operator,
   because the result is empty or lacks that operator, the Configuration tab will show the same error state. The panel depends on the metadata of its own operator to populate its fields, so this is treated as an error and not as a loading state. An operator with no registered configuration panel still shows the placeholder.
 - When the operator metadata is fetched again on Canvas remount after an earlier failure, the
@@ -80,10 +82,12 @@ Planned change of Redux (no new slice fields):
   `controller.getAppData()`. Other data in `appData`, such as `nodeId`, `pipelineFlow`, and
   `nodeFeatureMap`, stays on `appData`. The full rename list is in `design.md`.
 - PR 2: the fetch action will clear the previous error and set `loading` before the request,
-  and set `error` on failure. `CommonPropertiesPanel` will read the metadata and `loading`
-  from the slice. For an operator whose panel depends on operator metadata, no attributes for
-  the selected node's operator, with `loading` false, is the error state. Operators whose
-  panel does not depend on operator metadata skip the loading and error checks.
+  and set `error` to an error code on failure, not the raw Axios error and not a user-facing
+  string. `CommonPropertiesPanel` will read the metadata and `loading` from the slice, and
+  will show the intl message for the error code. For an operator whose panel depends on
+  operator metadata, no attributes for the selected node's operator, with `loading` false, is
+  the error state. Operators whose panel does not depend on operator metadata skip the
+  loading and error checks.
 
 Carbon components: `InlineLoading` will render the loading state and `InlineNotification` with
 `kind="error"` will render the error state. Both will render inside the existing Configuration tab.

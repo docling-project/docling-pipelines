@@ -46,7 +46,7 @@ For an operator whose configuration panel depends on operator metadata, the Conf
 
 #### Scenario: Error details are not shown
 - **WHEN** the error state is displayed
-- **THEN** the message is generic and does not include status codes, stack traces, or backend error text
+- **THEN** the message is a localized message chosen from an error code, and does not include status codes, stack traces, or backend error text
 
 #### Scenario: Error state is announced
 - **WHEN** the Configuration tab enters the error state
