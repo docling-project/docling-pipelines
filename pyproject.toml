@@ -50,7 +50,7 @@ dependencies = [
     "langdetect==1.0.9",
     "langsmith==0.14.7",
     "litellm==1.106.0",
-    "lxml==6.1.0",
+    "lxml==6.1.3",
     "mako==1.4.3",
     "mlx==0.32.4; sys_platform == 'darwin'",
     "msal==1.37.0",
