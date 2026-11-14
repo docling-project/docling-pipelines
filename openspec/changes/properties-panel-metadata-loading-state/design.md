@@ -20,32 +20,37 @@ Three facts about the current code shape the design:
   `error = null`).
 - The `operators` slice has `loading` and `error` for the metadata fetch lifecycle, and
   `setError` clears `loading`. The metadata action does not use them.
-- The slice exports the selectors `getOperatorMetadata`, `getOperatorsLoading`, and
-  `getOperatorsError`.
+- The slice exports six selectors, all named `getX`. `getOperatorMetadata` is also the name of
+  the API action in `operator-actions.ts`, and `Canvas.tsx` disambiguates them with import
+  aliases.
 
 ### Planned change
 
 The implementation will be delivered in two PRs, in this order.
 
 PR 1, a single source of operator metadata (no user-visible change):
+- All six selectors in `operatorsSlice.ts` will be renamed from `getX` to `selectX` (see
+  Decisions). The API action in `operator-actions.ts` keeps the name `getOperatorMetadata`.
 - Any usage of operator metadata in the properties panel components, including
   `CommonPropertiesPanel` and the custom panels, will read it from the slice instead of
   `controller.getAppData()`, so there is a single source of truth for the loading state,
   the error state, and the form options.
 
 PR 2, loading and error state (depends on PR 1):
-- The metadata action will set `loading` and `error` on the `operators` slice.
-- `CommonPropertiesPanel` will read the error from the slice and render a loading, error,
-  or form state in the Configuration tab.
+- The metadata action will clear the previous error and set `loading` and `error` on the
+  `operators` slice.
+- `CommonPropertiesPanel` will read the metadata and `loading` from the slice and render a
+  loading, error, or form state in the Configuration tab.
 
-`Canvas.tsx` will not change in either PR.
+The behavior of `Canvas.tsx` will not change in either PR. Its only edit is the import of the
+renamed selector in PR 1.
 
 ## Component Hierarchy
 
 Planned structure:
 
 ```
-CommonPropertiesPanel                  ← will read operators slice (metadata, error) via selectors
+CommonPropertiesPanel                  ← will read operators slice (metadata, loading) via selectors
 └── Configuration tab
     ├── InlineLoading                  ← will show while metadata is pending; status text
     ├── InlineNotification kind=error  ← will show when the metadata fetch failed
@@ -64,8 +69,9 @@ with no hex or px literals.
 
 | Trigger | Current behavior | Planned behavior |
 |---|---|---|
-| Canvas mounts with empty metadata | An effect calls `getOperatorMetadata(dispatch)`. No properties panel loading state is set. | The same effect stays. The action will dispatch `setLoading(true)` before the request. |
+| Canvas mounts with empty metadata | An effect calls `getOperatorMetadata(dispatch)`. No properties panel loading state is set. | The same effect stays. Before the `try` block, the action will dispatch `clearError()` and `setLoading(true)`, so an error left by an earlier failed fetch is not paired with `loading=true`. `CommonPropertiesPanel` will show the loading state while the request is in flight. |
 | Request succeeds | The action dispatches `setOperatorMetadata`, which sets `metadata`, `loading=false`, `error=null`. | No change to the action. `CommonPropertiesPanel` will re-render and show the form. |
+| Request succeeds with no metadata for the selected node's operator (an empty map, or a map without that operator) | Same dispatch. The panel renders a form with no options. | No change to the action. `CommonPropertiesPanel` will show the error state. |
 | Request fails | The action logs the error. The store is unchanged. | The action will dispatch `setError` with a generic message, which sets `error` and `loading=false`. `CommonPropertiesPanel` will re-render and show the error state. |
 | User opens a node (double-click or node context menu) | Canvas `openWithParamDef` opens the panel. | No change to Canvas. `CommonPropertiesPanel` will mount and show loading state, error, or form from the current slice state. |
 
@@ -79,13 +85,14 @@ the loading state for the form as soon as the slice flips to loaded, while the c
 would still read `controller.getAppData()`. If `appData` were stale at that moment, the form
 would appear with empty options and no loading indicator, which is worse than the current
 behavior because the UI would signal that it is ready. Merging PR 1 first means each PR is
-correct when merged on its own, and PR 1 changes nothing the user can see.
+correct when merged on its own, and PR 1 changes nothing the user can see. PR 2 should be
+raised right after PR 1.
 
 ### Redux is the single source of operator metadata for the properties panel
 
 Any usage of operator metadata in the properties panel components, including
 `CommonPropertiesPanel` and the custom panels, will use the `operators` slice with
-`useAppSelector` and the selectors the slice already exports. No properties panel component
+`useAppSelector` and the renamed `selectX` selectors of the slice. No properties panel component
 will read `operatorMetadata` through `controller.getAppData()`. Other data that Canvas
 places in `appData`, such as `nodeId`, `pipelineFlow`, and `nodeFeatureMap`, will still be
 read from `appData`. Canvas will not pass loading or error state through `appData`. This
@@ -96,6 +103,26 @@ loaded, pending to failed) through the Redux usage, with no extra update to
 
 The loading and error state depends on the Redux store, so reading the form options from a
 second source could show a form with empty options at the moment the slice flips to loaded.
+
+### Rename all selectors in the operators slice to selectX, and not the API action
+
+`getOperatorMetadata` names both the API action in `operator-actions.ts` and the Redux
+selector in `operatorsSlice.ts`. In PR 1, every selector in `operatorsSlice.ts` will be
+renamed from `getX` to `selectX`, and every use of them will follow:
+
+| Current name | New name |
+|---|---|
+| `getOperatorMetadata` | `selectOperatorMetadata` |
+| `getOperatorsLoading` | `selectOperatorsLoading` |
+| `getOperatorsError` | `selectOperatorsError` |
+| `getNodeFeatures` | `selectNodeFeatures` |
+| `getFeaturesLoading` | `selectFeaturesLoading` |
+| `getNodeFeaturesForNode` | `selectNodeFeaturesForNode` |
+
+`selectOperatorMetadata` is the name `Canvas.tsx` already uses through an import alias, so the
+rename removes that alias. Renaming all six keeps one naming convention in the slice. Only
+`getOperatorMetadata` is imported outside the slice file (by `Canvas.tsx`), so the rename is
+safe in one PR. The API action keeps its name.
 
 ### Spec delta modifies three existing requirements
 
@@ -114,13 +141,40 @@ current wording would contradict the new behavior once archived:
 
 ### State derivation
 
-The Configuration tab will derive its branch from slice state, in this order:
+The Configuration tab will derive its branch from `loading` and from whether `metadata` has an
+entry for the operator of the selected node ("populated"). `error` does not select the branch.
+The endpoint returns the metadata of all operators at once, so the panel checks only the entry
+of its own node. A map that is `{}`, or that lacks this operator, is "empty".
 
-1. `error` is non-null: error state.
-2. `metadata` is empty: loading state. This will also cover the window before the fetch
-   action has dispatched `setLoading(true)`, so the first render after mount is never a
-   flash of an empty form.
-3. Otherwise: the operator-specific form.
+| `metadata` for the node's operator | `loading` | `error` | Branch | Case |
+|---|---|---|---|---|
+| populated | any | any | Operator-specific form | Normal case. |
+| empty | true | any | Loading state | The request is in flight. |
+| empty | false | non-null | Error state | The request failed. |
+| empty | false | null | Error state | Edge case: the request succeeded but the metadata has no entry for the node's operator. |
+
+Two checks run in this order. If the metadata is populated, the form is shown. Otherwise, if
+`loading` is true, the loading state is shown. Anything else is the error state, so it is the
+fallthrough and not a check of its own. The populated check runs first so that an error can
+never hide a form that already has its data.
+
+An operator with no registered configuration panel is a different case. It still shows the
+placeholder whatever the metadata is, because the panel checks for a registered panel first and
+applies the metadata check only to operators that have one.
+
+`loading` can be relied on because `getOperatorMetadata` is called only from `Canvas.tsx`,
+which mounts before a user can open a panel, and because the action dispatches
+`setLoading(true)` before the request while `setOperatorMetadata` and `setError` both clear it.
+
+### Clear the previous error when the fetch starts
+
+The `operators` slice outlives the Canvas page, and `setLoading(true)` does not clear `error`.
+After a failed fetch, a later Canvas mount would start a new request with the old error still
+in the store. The fetch action will therefore dispatch `clearError()` together with
+`setLoading(true)` before the request, so `loading=true` is never paired with an earlier error.
+The panel does not depend on this, because it checks `loading` before the error state. It is
+done in the action and not on panel mount. A panel that mounts again while Canvas stays
+mounted starts no new request, so a failed fetch must keep showing its error there.
 
 ### Save gating
 
@@ -151,6 +205,10 @@ rendered with `intl.formatMessage`, as required by the canonical `frontend/i18n`
 - **A failed fetch will leave properties panels unusable until the Canvas page mounts
   again:** Accepted because retry is out of scope. The error message will tell the user
   the configuration could not be loaded.
+- **The loading state depends on `setLoading(true)` running before the request is issued:**
+  Otherwise a panel opened in that window would show the error state for a request that is in
+  flight. It will be dispatched synchronously before the `try` block, and covered by a test in
+  `operator-actions.test.ts`.
 - **No retry while Canvas stays mounted:** `metadataFetchedRef` in Canvas is a per-mount
   `useRef` that currently exists and will not change. After a failure, the fetch is not
   attempted again until Canvas mounts again with no metadata loaded.
@@ -166,9 +224,6 @@ rendered with `intl.formatMessage`, as required by the canonical `frontend/i18n`
   read, and each panel keeps its existing behavior. This will be verified by the existing
   panel tests passing after they supply metadata through the store, and by a manual check
   that an open panel still receives its options when the response arrives.
-- **PR 2 must not merge before PR 1:** Between the two PRs, the loading state and the form
-  options would come from different sources. PR 2 depends on PR 1 and should be raised right
-  after it.
 - **Unused `appData.operatorMetadata`:** Canvas will keep placing `operatorMetadata` in
   `appData`, and nothing in the properties panel will read it. This is left in place to keep
   Canvas unchanged and can be removed in a separate cleanup.
