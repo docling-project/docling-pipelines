@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class and supporting types for all docpipe operators."""
 
 from enum import StrEnum
@@ -38,7 +41,8 @@ class AbstractOperator(AbstractTableTransform):  # type: ignore[misc]
 
     Extends ``AbstractTableTransform`` from data-prep-toolkit and enforces
     the docpipe operator contract: ``short_name``, ``category``, ``owner``,
-    ``transform()``, and ``get_metadata()``."""
+    ``transform()``, and ``get_metadata()``. Provides a no-op ``cleanup()``
+    hook for operators that need to release resources."""
 
     short_name: str
     category: OperatorCategory
@@ -65,6 +69,9 @@ class AbstractOperator(AbstractTableTransform):  # type: ignore[misc]
         }
         # Initialize telemetry service for operator tracing
         self._telemetry = get_telemetry_service()
+
+    def cleanup(self) -> None:
+        """Release resources held by the operator, if any."""
 
     def _create_operator_span(self, *, operation_name: str | None = None) -> Any:
         """Create a telemetry span for operator execution.
