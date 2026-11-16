@@ -423,6 +423,23 @@ class TestTextExtractionAdapterFactoryValidateGpu:
                 use_processes=False,
             )
 
+    @pytest.mark.parametrize("device", ["mps", "auto"])
+    def test_factory_rejects_vlm_with_explicit_or_detected_gpu(self, device):
+        accelerator: dict[str, object] = {"num_threads": 9}
+        if device != "auto":
+            accelerator["device"] = device
+        config = {"provider_config": {"vlm_pipeline": {}, "standard_pipeline": {"accelerator": accelerator}}}
+        with (
+            patch.object(TextExtractionAdapterFactory, "_auto_detect_device", return_value="mps"),
+            pytest.raises(ValueError, match="cannot be combined"),
+        ):
+            TextExtractionAdapterFactory.create_adapter(
+                mode=TextExtractionMode.DOCLING_LIBRARY,
+                text_extraction_config=config,
+                global_config={},
+                max_workers=1,
+            )
+
     def test_zero_num_threads_raises(self):
         with pytest.raises(ValueError, match="num_threads must be a positive integer"):
             TextExtractionAdapterFactory._validate_gpu_config(
@@ -1278,3 +1295,152 @@ class TestAutoDetectDevice:
             )
         mock_detect.assert_not_called()
         assert result[OperatorConstants.Extraction.DEVICE] == "mps"
+
+
+@pytest.mark.parametrize("model", ["whisper_turbo", "", None])
+def test_video_options_use_selected_model_or_docling_default(model):
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import VideoPipelineOptions
+
+    adapter = _make_adapter({"asr_model_name": model})
+    options: dict = {}
+    adapter._add_video_format_option(format_options=options)
+    video = options[InputFormat.VIDEO].pipeline_options
+    assert video.generate_frame_images is False
+    expected = adapter._configure_asr_engine().asr_options if model else VideoPipelineOptions().asr_options
+    assert video.asr_options == expected
+
+
+def test_video_missing_format_option_keeps_audio(monkeypatch):
+    import docling.document_converter as converter_module
+    from docling.datamodel.base_models import InputFormat
+
+    adapter = _make_adapter()
+    audio = object()
+    options = {InputFormat.AUDIO: audio}
+    monkeypatch.delattr(converter_module, "VideoFormatOption")
+    adapter._add_video_format_option(format_options=options)
+    assert options == {InputFormat.AUDIO: audio}
+
+
+@pytest.mark.parametrize("gpu", [False, True])
+def test_video_option_is_bound_in_converter_paths(gpu):
+    from docling.datamodel.base_models import InputFormat
+
+    adapter = _make_adapter({"use_asr_pipeline": True, "asr_model_name": "whisper_turbo"})
+    adapter.use_asr_pipeline = True
+    adapter.gpu_device = "mps" if gpu else None
+    with (
+        patch(
+            "docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter._asr_available",
+            return_value=True,
+        ),
+        patch(
+            "docpipe.core.operators.operator_utils.OperatorUtils.extract_content", return_value={"success": False}
+        ) as extract,
+    ):
+        if gpu:
+            adapter._gpu_converter_config = adapter._build_gpu_converter_config()
+        adapter.extract_single_document(file_path="movie.mp4", binary_content=b"video")
+    options = extract.call_args.kwargs["converter_config"]["format_options"]
+    assert InputFormat.AUDIO in options
+    assert InputFormat.VIDEO in options
+
+
+def test_vlm_and_asr_are_both_preserved():
+    from docling.datamodel.base_models import InputFormat
+    from docling.pipeline.vlm_pipeline import VlmPipeline
+
+    adapter = _make_adapter({"use_vlm_pipeline": True, "use_asr_pipeline": True})
+    adapter.use_vlm_pipeline = True
+    adapter.use_asr_pipeline = True
+    with (
+        patch(
+            "docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter._asr_available",
+            return_value=True,
+        ),
+        patch.object(adapter, "_configure_vlm_engine", return_value=None),
+        patch(
+            "docpipe.core.operators.operator_utils.OperatorUtils.extract_content", return_value={"success": False}
+        ) as extract,
+    ):
+        adapter.extract_single_document(file_path="movie.mp4", binary_content=b"video")
+    options = extract.call_args.kwargs["converter_config"]["format_options"]
+    assert options[InputFormat.PDF].pipeline_cls is VlmPipeline
+    assert options[InputFormat.IMAGE].pipeline_cls is VlmPipeline
+    assert InputFormat.AUDIO in options and InputFormat.VIDEO in options
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["FFmpeg is required for video processing but was not found on PATH", "Video dependency is not installed"],
+)
+def test_missing_video_conversion_requirement_is_reported_in_document_failure(message):
+    from contextlib import contextmanager
+
+    import pyarrow as pa
+
+    from docpipe.core.operators.extract.extract_operator import ExtractOperator
+
+    adapter = _make_adapter()
+    converter = MagicMock()
+    converter.convert.side_effect = RuntimeError(message)
+
+    @contextmanager
+    def lease(**kwargs):
+        yield converter
+
+    table = pa.table({"id": ["1"], "name": ["clip.mp4"], "binary_content": [b"video"]})
+    metadata = ExtractOperator(config={"text_extraction": {"provider": "docling_library"}}).create_base_metadata(
+        total_docs_count=1
+    )
+    with (
+        patch("docpipe.core.operators.operator_utils._use_converter", side_effect=lease),
+        pytest.raises(ValueError, match=message),
+    ):
+        adapter.transform(table=table, metadata=metadata)
+    assert metadata["failed_docs_count"] == 1
+    assert message in metadata["failed_docs"][0]["reason"]
+
+
+@pytest.mark.parametrize("gpu", [False, True])
+@pytest.mark.parametrize("model", [None, "", "whisper_turbo"])
+def test_video_model_configuration_in_both_converter_paths(gpu, model):
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import VideoPipelineOptions
+
+    adapter = _make_adapter({"asr_model_name": model})
+    adapter.use_asr_pipeline = True
+    adapter.gpu_device = "mps" if gpu else None
+    with (
+        patch(
+            "docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_adapter._asr_available",
+            return_value=True,
+        ),
+        patch(
+            "docpipe.core.operators.operator_utils.OperatorUtils.extract_content", return_value={"success": False}
+        ) as extract,
+    ):
+        if gpu:
+            adapter._gpu_converter_config = adapter._build_gpu_converter_config()
+        adapter.extract_single_document(file_path="clip.mp4", binary_content=b"video")
+    options = extract.call_args.kwargs["converter_config"]["format_options"]
+    expected = adapter._configure_asr_engine().asr_options if model else VideoPipelineOptions().asr_options
+    assert options[InputFormat.VIDEO].pipeline_options.asr_options == expected
+
+
+def test_omitted_asr_model_uses_turbo():
+    adapter = _make_adapter()
+    assert adapter.asr_model_name == "whisper_turbo"
+
+
+def test_video_configuration_does_not_require_resemblyzer():
+    import sys
+
+    from docling.datamodel.base_models import InputFormat
+
+    adapter = _make_adapter()
+    options: dict = {}
+    with patch.dict(sys.modules, {"resemblyzer": None}):
+        adapter._add_video_format_option(format_options=options)
+    assert InputFormat.VIDEO in options

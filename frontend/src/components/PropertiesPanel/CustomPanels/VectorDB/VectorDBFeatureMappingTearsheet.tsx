@@ -35,6 +35,8 @@ import type { FeatureMappingRow, FeatureMappingItem, VectorDBEnrichmentResult } 
 import { enrichFlowFeaturesForNode } from './vectordb-enrichment';
 import {
   DEFAULT_COLUMN_MAPPINGS,
+  MILVUS_BINARY_METRIC_VALUES,
+  MILVUS_DENSE_METRIC_VALUES,
   VECTORDB_LABELS,
   VECTORDB_PROVIDERS,
   omitProviderConfigKeys,
@@ -171,6 +173,8 @@ export function VectorDBFeatureMappingTearsheet({
     inner_product: intl.formatMessage(messages.metricInnerProduct),
     IP: intl.formatMessage(messages.metricIPMilvus),
     BM25: intl.formatMessage(messages.metricBM25),
+    HAMMING: intl.formatMessage(messages.metricHamming),
+    JACCARD: intl.formatMessage(messages.metricJaccard),
   };
 
   const engineOptionLabels: Record<string, string> = {
@@ -284,6 +288,38 @@ export function VectorDBFeatureMappingTearsheet({
   // Similarity and engine are locked for existing resources when the backend
   // already knows those values (they were set at index/collection creation time).
   const isConfigReadOnly = !isCreateNew && Boolean(storedMeta?.vector_similarity);
+
+  const effectiveSimilarityOptions = useMemo(() => {
+    if (provider !== VECTORDB_PROVIDERS.MILVUS) {
+      return vectorSimilarityOptions;
+    }
+    const hasBinary = tableRows.some((r) => availableFeatures[r.feature]?.type === 'vector_binary')
+      || Object.values(availableFeatures).some((f) => f?.type === 'vector_binary');
+    const hasDense = tableRows.some((r) => availableFeatures[r.feature]?.type === 'vector')
+      || Object.values(availableFeatures).some((f) => f?.type === 'vector');
+
+    if (hasBinary && !hasDense) {
+      const base: string[] = [...MILVUS_BINARY_METRIC_VALUES];
+      if (sparseVectorEnabled && !base.includes('BM25')) {
+        base.push('BM25');
+      }
+      return base.filter((v) => vectorSimilarityOptions.includes(v));
+    }
+    if (hasDense && !hasBinary) {
+      const base: string[] = [...MILVUS_DENSE_METRIC_VALUES];
+      if (sparseVectorEnabled && !base.includes('BM25')) {
+        base.push('BM25');
+      }
+      return base.filter((v) => vectorSimilarityOptions.includes(v));
+    }
+    return vectorSimilarityOptions;
+  }, [availableFeatures, provider, sparseVectorEnabled, tableRows, vectorSimilarityOptions]);
+
+  useEffect(() => {
+    if (isCreateNew && effectiveSimilarityOptions.length > 0 && !effectiveSimilarityOptions.includes(similarityMetric)) {
+      setSimilarityMetric(effectiveSimilarityOptions[0] ?? '');
+    }
+  }, [effectiveSimilarityOptions, isCreateNew, similarityMetric]);
 
   const handleResourceChange = ({ selectedItem }: { selectedItem?: string | null }): void => {
     const selectedResourceName = selectedItem ?? CREATE_NEW;
@@ -564,11 +600,11 @@ export function VectorDBFeatureMappingTearsheet({
                         id="similarity-metric-select"
                         titleText={similarityLabel}
                         label={intl.formatMessage(messages.selectSimilarity, { similarityLabel: similarityLabel.toLowerCase() })}
-                        items={vectorSimilarityOptions.map((v) => similarityMetricLabels[v] ?? v)}
+                        items={effectiveSimilarityOptions.map((v) => similarityMetricLabels[v] ?? v)}
                         selectedItem={similarityMetricLabels[similarityMetric] ?? similarityMetric}
                         onChange={({ selectedItem }: { selectedItem?: string | null }) => {
                           if (selectedItem) {
-                            const value = vectorSimilarityOptions.find(
+                            const value = effectiveSimilarityOptions.find(
                               (v) => (similarityMetricLabels[v] ?? v) === selectedItem
                             );
                             if (value) { setSimilarityMetric(value); }

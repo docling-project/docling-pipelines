@@ -714,12 +714,14 @@ class TestEmbeddingsQuantizationSpecialCase:
         result = self._propagate(propagator, {OperatorConstants.Config.QUANTIZATION: quantization})
         feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
         assert feature.type == OperatorConstants.Types.TYPE_VECTOR_BINARY
+        assert feature.description == "Binary vector embeddings for similarity search"
 
     @pytest.mark.parametrize("config", [{}, {OperatorConstants.Config.QUANTIZATION: "none"}])
     def test_no_quantization_keeps_dense_vector_type(self, propagator, config):
         result = self._propagate(propagator, config)
         feature = result.feature_metadata[OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT]
         assert feature.type == OperatorConstants.Types.TYPE_VECTOR
+        assert feature.description == "Dense vector embeddings for similarity search"
 
     def test_quantization_in_global_config_is_ignored(self, propagator):
         """quantization is a node-level setting: a global_config value does not change the propagated type."""

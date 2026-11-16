@@ -1,14 +1,20 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for SecretProvider base, reference parsing, and resolve_value."""
 
 import pytest
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.integrations.secrets.secret_provider import (
+    MalformedSecretReferenceError,
     SecretProvider,
     SecretReference,
     clear_providers,
+    has_vault_references,
     is_vault_reference,
     parse_reference,
+    parse_vault_reference,
     register_provider,
     resolve_value,
 )
@@ -48,28 +54,133 @@ def _cleanup_providers():
 
 
 class TestParseReference:
-    """Tests for parse_reference()."""
+    """Tests for parse_reference() - strict grammar, fail closed."""
 
     def test_valid_reference_with_key(self):
-        ref = parse_reference("vault://hashicorp/database/postgres#password")
+        ref = parse_reference(value="vault://hashicorp/database/postgres#password")
         assert ref == SecretReference(provider="hashicorp", path="database/postgres", key="password")
 
     def test_valid_reference_without_key(self):
-        ref = parse_reference("vault://hashicorp/api/token")
+        ref = parse_reference(value="vault://hashicorp/api/token")
         assert ref == SecretReference(provider="hashicorp", path="api/token", key=None)
 
     def test_valid_reference_deep_path(self):
-        ref = parse_reference("vault://hashicorp/a/b/c/d#mykey")
+        ref = parse_reference(value="vault://hashicorp/a/b/c/d#mykey")
         assert ref == SecretReference(provider="hashicorp", path="a/b/c/d", key="mykey")
 
-    def test_non_vault_reference_returns_none(self):
-        assert parse_reference("just-a-string") is None
-        assert parse_reference("") is None
-        assert parse_reference("http://example.com") is None
+    def test_non_vault_value_returns_none(self):
+        assert parse_reference(value="just-a-string") is None
+        assert parse_reference(value="") is None
+        assert parse_reference(value="http://example.com") is None
+        assert parse_reference(value="vault:/hashicorp/x") is None
 
     def test_different_provider(self):
-        ref = parse_reference("vault://cyberark/safe/object#Content")
+        ref = parse_reference(value="vault://cyberark/safe/object#Content")
         assert ref == SecretReference(provider="cyberark", path="safe/object", key="Content")
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "vault://",
+            "vault://hashicorp",
+            "vault://hashicorp/",
+            "vault:///path/only",
+            "vault://hashicorp/path#",
+            "vault://invalid",
+        ],
+    )
+    def test_truncated_reference_rejected(self, value):
+        with pytest.raises(MalformedSecretReferenceError):
+            parse_reference(value=value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "Bearer vault://hashicorp/api#token",
+            "https://host/?k=vault://hashicorp/api#token",
+            " vault://hashicorp/api#token",
+            "vault://hashicorp/api#token vault://hashicorp/other#token",
+            "vault://hashicorp/api#tokenvault://hashicorp/other#token",
+            "xvault://hashicorp/api#token",
+        ],
+    )
+    def test_embedded_reference_rejected(self, value):
+        with pytest.raises(MalformedSecretReferenceError):
+            parse_reference(value=value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "vault://hashicorp/team-a/../team-b/db#password",
+            "vault://hashicorp/../db#password",
+            "vault://hashicorp/./db#password",
+            "vault://hashicorp/db/..#password",
+            "vault://hashicorp/db//creds#password",
+            "vault://hashicorp//db#password",
+            "vault://hashicorp/db/#password",
+        ],
+    )
+    def test_traversal_and_empty_segments_rejected(self, value):
+        with pytest.raises(MalformedSecretReferenceError):
+            parse_reference(value=value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "vault://hashicorp/db creds#password",
+            "vault://hashicorp/db\t#password",
+            "vault://hashicorp/db\n#password",
+            "vault://hashicorp/db\r\n",
+            "vault://hashicorp/db\x00#password",
+            "vault://hashicorp/db\x7f#password",
+            "vault://hashicorp/db#pass word",
+            "vault://hashicorp/db\u00a0x#password",
+            "vault://hashicorp/db#password ",
+        ],
+    )
+    def test_whitespace_and_control_characters_rejected(self, value):
+        with pytest.raises(MalformedSecretReferenceError):
+            parse_reference(value=value)
+
+    def test_second_key_separator_rejected(self):
+        with pytest.raises(MalformedSecretReferenceError):
+            parse_reference(value="vault://hashicorp/db#a#b")
+
+    def test_length_limit(self):
+        prefix = "vault://hashicorp/"
+        at_limit = prefix + "a" * (1024 - len(prefix))
+        assert parse_reference(value=at_limit) is not None
+        with pytest.raises(MalformedSecretReferenceError):
+            parse_reference(value=at_limit + "a")
+
+    def test_error_never_echoes_value(self):
+        canary = "CANARY-typo-secret-91d2"  # pragma: allowlist secret
+        with pytest.raises(MalformedSecretReferenceError) as exc_info:
+            parse_reference(value=f"vault://hashicorp/../{canary}")
+        assert canary not in str(exc_info.value)
+        assert "hashicorp" not in str(exc_info.value)
+        assert exc_info.value.__cause__ is None
+
+    def test_malformed_error_is_a_configuration_error(self):
+        assert issubclass(MalformedSecretReferenceError, ConfigurationError)
+
+    def test_positional_value_is_not_accepted(self):
+        with pytest.raises(TypeError):
+            parse_reference("vault://hashicorp/api/token")  # type: ignore[misc]
+
+
+class TestParseVaultReference:
+    """Tests for the tuple-returning wrapper."""
+
+    def test_valid(self):
+        assert parse_vault_reference("vault://hashicorp/a/b#k") == ("hashicorp", "a/b", "k")
+
+    @pytest.mark.parametrize("value", ["plain", "vault://", "vault://hashicorp/../x", "Bearer vault://h/p#k"])
+    def test_invalid_raises_value_error_without_echo(self, value):
+        with pytest.raises(ValueError, match="Invalid vault reference") as exc_info:
+            parse_vault_reference(value)
+        assert str(exc_info.value) == "Invalid vault reference"
+        assert exc_info.value.__cause__ is None
 
 
 class TestIsVaultReference:
@@ -77,6 +188,10 @@ class TestIsVaultReference:
 
     def test_vault_reference(self):
         assert is_vault_reference("vault://hashicorp/path#key") is True
+
+    def test_embedded_or_malformed_values_are_detected_so_the_parser_rejects_them(self):
+        assert is_vault_reference("Bearer vault://hashicorp/api#token") is True
+        assert is_vault_reference("vault://") is True
 
     def test_not_vault_reference(self):
         assert is_vault_reference("plain-value") is False
@@ -199,3 +314,57 @@ class TestResolveValue:
 
         resolved = resolve_value("vault://hashicorp/app/raw#data")
         assert resolved == "{invalid-json"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "vault://",
+            "vault://hashicorp",
+            "vault://hashicorp/",
+            "Bearer vault://hashicorp/db/creds#user",
+            "https://host/?k=vault://hashicorp/db/creds#user",
+            "vault://hashicorp/team-a/../db/creds#user",
+            "vault://hashicorp/db/creds#",
+        ],
+    )
+    def test_malformed_reference_rejected_never_returned_as_literal(self, value):
+        provider = FakeProvider(secrets={"db/creds": {"user": "admin"}})
+        register_provider(name="hashicorp", provider=provider)
+
+        with pytest.raises(MalformedSecretReferenceError):
+            resolve_value(value)
+
+    def test_malformed_reference_makes_no_provider_call(self):
+        class CountingProvider(FakeProvider):
+            calls = 0
+
+            def get_secret(self, *, path, key=None):
+                type(self).calls += 1
+                return super().get_secret(path=path, key=key)
+
+        register_provider(name="hashicorp", provider=CountingProvider(secrets={"db/creds": {"user": "admin"}}))
+
+        with pytest.raises(MalformedSecretReferenceError):
+            resolve_value("vault://hashicorp/team-a/../db/creds#user")
+        assert CountingProvider.calls == 0
+
+    def test_malformed_reference_nested_in_config_rejected_without_echo(self):
+        canary = "CANARY-partial-paste-5b1e"  # pragma: allowlist secret
+        config = {"provider_config": {"secret_key": f"prefix-vault://hashicorp/{canary}"}}  # pragma: allowlist secret
+
+        with pytest.raises(MalformedSecretReferenceError) as exc_info:
+            resolve_value(config)
+        assert canary not in str(exc_info.value)
+
+    def test_malformed_reference_in_list_rejected(self):
+        with pytest.raises(MalformedSecretReferenceError):
+            resolve_value(["ok", "vault://"])
+
+
+class TestHasVaultReferences:
+    def test_detects_malformed_and_embedded_values(self):
+        assert has_vault_references({"a": ["x", {"b": "vault://"}]}) is True
+        assert has_vault_references("Bearer vault://hashicorp/x#y") is True
+
+    def test_plain_config_has_none(self):
+        assert has_vault_references({"a": ["x", {"b": 1}]}) is False

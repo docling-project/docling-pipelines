@@ -438,6 +438,27 @@ class TestFetchMetadataRouting:
     def test_milvus_constant_equals_expected_string(self):
         assert OperatorConstants.VectorDB.MILVUS == "milvus"
 
+    def test_weaviate_delegates_to_weaviate_resource_metadata(self):
+        fetcher = VectorDBMetadataFetcher()
+        expected = VectorDBMetadataFetcher._empty_result()
+
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateResourceMetadata"
+        ) as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.fetch.return_value = expected
+            mock_cls.return_value = mock_instance
+
+            result = fetcher.fetch_metadata(
+                adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+                operator_config={OperatorConstants.Config.PROVIDER_CONFIG: {"host": "localhost"}},
+                available_features={},
+            )
+
+        assert result is expected
+        mock_instance.fetch.assert_called_once()
+        assert mock_instance.fetch.call_args.kwargs["provider_config"] == {"host": "localhost"}
+
     def test_fetch_passes_provider_config_to_adapter(self):
         """fetch_metadata extracts provider_config from operator_config and forwards it."""
         fetcher = VectorDBMetadataFetcher()
@@ -873,6 +894,34 @@ class TestMilvusResourceMetadata:
         assert schema["vector"]["index_info"]["metric_type"] == "L2"
         assert "text" in schema
 
+    def test_selected_resource_schema_populated_for_binary_vector_collection(self):
+        mock_client = MagicMock()
+        mock_client.list_collections.return_value = ["binary_col"]
+        mock_client.describe_collection.return_value = {
+            "fields": [
+                {"name": "pk", "dtype": "Int64", "is_primary": True, "description": "primary key"},
+                {
+                    "name": "bin_vector",
+                    "dtype": "BINARY_VECTOR",
+                    "is_primary": False,
+                    "description": "",
+                    "params": {"dim": 768},
+                    "indexes": [{"index_name": "bin_idx", "index_type": "BIN_FLAT", "metric_type": "HAMMING"}],
+                },
+            ]
+        }
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient") as mock_cls:
+            mock_cls.return_value.get_client.return_value = mock_client
+            result = self._call(
+                provider_config={"host": "localhost", "auth_type": "standalone", "collection_name": "binary_col"}
+            )
+        schema = result[OperatorConstants.VectorDB.SELECTED_RESOURCE_SCHEMA]
+        assert "bin_vector" in schema
+        assert schema["bin_vector"]["dimension"] == 768
+        assert schema["bin_vector"]["index_created"] is True
+        assert schema["bin_vector"]["index_info"]["metric_type"] == "HAMMING"
+        assert schema["bin_vector"]["index_info"]["index_type"] == "BIN_FLAT"
+
     # ------------------------------------------------------------------
     # _stored_metadata
     # ------------------------------------------------------------------
@@ -891,6 +940,21 @@ class TestMilvusResourceMetadata:
         }
         meta = MilvusResourceMetadata._stored_metadata(schema)
         assert meta == {"vector_similarity": "L2", "dimension_size": 384}
+
+    def test_stored_metadata_from_binary_vector_field_with_index(self):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
+
+        schema = {
+            "pk": {"type": "Int64", "is_primary": True},
+            "bin_vector": {
+                "type": "BINARY_VECTOR",
+                "dimension": 1536,
+                "index_info": {"index_name": "idx", "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"},
+                "index_created": True,
+            },
+        }
+        meta = MilvusResourceMetadata._stored_metadata(schema)
+        assert meta == {"vector_similarity": "JACCARD", "dimension_size": 1536}
 
     def test_stored_metadata_returns_none_when_no_vector_field(self):
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
@@ -924,13 +988,13 @@ class TestMilvusResourceMetadata:
         assert result["supported"] is True
         assert result["collection_name"] == "new_col"
 
-    def test_is_supported_no_float_vector_field(self):
+    def test_is_supported_no_vector_field(self):
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
 
         schema = {"pk": {"type": "INT64", "is_primary": True}}
         result = MilvusResourceMetadata._is_supported(collection_name="col", available_resources=["col"], schema=schema)
         assert result["supported"] is False
-        assert "FLOAT_VECTOR" in result["reason"]
+        assert "no vector field" in result["reason"]
 
     def test_is_supported_float_vector_without_index(self):
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
@@ -944,6 +1008,21 @@ class TestMilvusResourceMetadata:
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
 
         schema = {"vector": {"type": "FLOAT_VECTOR", "dimension": 384, "index_created": True}}
+        result = MilvusResourceMetadata._is_supported(collection_name="col", available_resources=["col"], schema=schema)
+        assert result["supported"] is True
+
+    def test_is_supported_binary_vector_without_index(self):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
+
+        schema = {"bin_vec": {"type": "BINARY_VECTOR", "dimension": 768}}
+        result = MilvusResourceMetadata._is_supported(collection_name="col", available_resources=["col"], schema=schema)
+        assert result["supported"] is False
+        assert "index" in result["reason"]
+
+    def test_is_supported_binary_vector_with_index(self):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
+
+        schema = {"bin_vec": {"type": "BINARY_VECTOR", "dimension": 768, "index_created": True}}
         result = MilvusResourceMetadata._is_supported(collection_name="col", available_resources=["col"], schema=schema)
         assert result["supported"] is True
 

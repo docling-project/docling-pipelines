@@ -149,4 +149,22 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.advancedConfigInvalidError',
     defaultMessage: 'Advanced JSON configuration must be a valid JSON object before opening feature mappings.',
   },
+  milvusLiteBinaryWarningTitle: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.milvusLiteBinaryWarningTitle',
+    defaultMessage: 'Milvus Lite restriction',
+  },
+  milvusLiteBinaryWarning: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.milvusLiteBinaryWarning',
+    defaultMessage:
+      'Milvus Lite does not support binary vectors. Use standalone, grpc, or uri deployments for binary vector indexes, or set Quantization to "None" in the upstream Embeddings operator.',
+  },
+  openSearchBinaryWarningTitle: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.openSearchBinaryWarningTitle',
+    defaultMessage: 'OpenSearch restriction',
+  },
+  openSearchBinaryWarning: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.openSearchBinaryWarning',
+    defaultMessage:
+      'OpenSearch does not support binary vectors. Use a provider that supports binary vectors (such as Milvus), or set Quantization to "None" in the upstream Embeddings operator.',
+  },
 });

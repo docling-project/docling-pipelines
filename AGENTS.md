@@ -32,7 +32,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/core/operators/extract/` | `ExtractOperator` — docling-based text + entity extraction |
 | `src/docpipe/core/operators/functional/` | `BranchingOperator`, `ChunkerOperator`, `EmbeddingsOperator`, `MergeOperator`, `DocIdHashOperator`, `NOOPOperator`, `EntityCurationOperator` |
 | `src/docpipe/core/operators/quality/` | `DocumentClassifierOperator`, `DocQuality`, `EdedupOperator`, `LanguageDetect`, `MLEnrichmentOperator`, `PIIAndHAPAnnotator`, `ReadabilityOperator`, `RedactionOperator`, `SQLFilterOperator` |
-| `src/docpipe/core/operators/vectordb/` | `VectorDBOperator` — OpenSearch / Milvus adapters |
+| `src/docpipe/core/operators/vectordb/` | `VectorDBOperator` — OpenSearch / Milvus / Weaviate adapters |
 | `src/docpipe/core/operators/document_sets/` | `DocumentSetOperator` — Storage category |
 | `src/docpipe/core/operators/acl/` | `ACLOperator` — access control on data |
 | `src/docpipe/core/orchestration/flow_executor.py` | `FlowExecutor` — loads flow JSON, calls orchestrator |
@@ -228,7 +228,7 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `OLLAMA_HOST` | LLM host, default `http://localhost:11434` |
 | `PREFECT_API_URL` | Prefect server URL |
 | `PREFECT_MODE` | `server` \| `ephemeral` |
-| `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `true` (default) \| `false` |
+| `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `false` (default) \| `true` — custom operators (uploaded, `DOCPIPE_CUSTOM_OPERATORS`) load only when enabled |
 | `DOCPIPE_CUSTOM_OPERATORS` | Comma-separated package paths injected as operator providers |
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
 | `DOCPIPE_STORAGE_BACKEND` | Forwarded to workers only; no longer overrides `job_management.storage` in the config file |

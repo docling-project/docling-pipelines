@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Test script to verify the OperatorFactory refactoring for issue #5578.
 Tests frozenset-based operator loading and priority resolution.
@@ -379,3 +382,65 @@ class TestGetOperator:
     def test_get_missing_operator_returns_none(self):
         factory = OperatorFactory(orchestrator=OrchestratorType.PYTHON, enable_custom_operators=False)
         assert factory.get_operator(operator_name="nonexistent_op_xyz") is None
+
+
+class TestEnableCustomOperatorsDefault:
+    """Custom operators are disabled unless explicitly enabled (argument > env var > disabled)."""
+
+    ENV_VAR = "DOCPIPE_ENABLE_CUSTOM_OPERATORS"
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv(self.ENV_VAR, raising=False)
+        monkeypatch.delenv("DOCPIPE_CUSTOM_OPERATORS", raising=False)
+        OperatorFactoryProvider.operator_factories.clear()
+        yield
+        OperatorFactoryProvider.operator_factories.clear()
+
+    def test_built_in_default_is_disabled(self):
+        assert DocpipeConstants.ENABLE_CUSTOM_OPERATORS_DEFAULT is False
+
+    def test_nothing_configured_resolves_to_disabled(self):
+        assert OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None) is False
+
+    @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", " Yes "])
+    def test_env_var_enables(self, *, monkeypatch: pytest.MonkeyPatch, value: str):
+        monkeypatch.setenv(self.ENV_VAR, value)
+        assert OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None) is True
+
+    @pytest.mark.parametrize("value", ["false", "0", "no", "", "enabled", "tru"])
+    def test_unrecognised_env_value_disables(self, *, monkeypatch: pytest.MonkeyPatch, value: str):
+        monkeypatch.setenv(self.ENV_VAR, value)
+        assert OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None) is False
+
+    def test_explicit_false_wins_over_env_true(self, *, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(self.ENV_VAR, "true")
+        assert OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=False) is False
+
+    def test_explicit_true_wins_over_env_false(self, *, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(self.ENV_VAR, "false")
+        assert OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=True) is True
+
+    def test_factory_without_argument_does_not_invoke_loader(self):
+        with patch.object(OperatorFactory, "_load_custom_operators_from_packages") as loader:
+            factory = OperatorFactory(orchestrator=OrchestratorType.PYTHON, package_names=["some_pkg"])
+        assert factory.enable_custom_operators is False
+        loader.assert_not_called()
+
+    def test_factory_with_env_true_invokes_loader(self, *, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(self.ENV_VAR, "true")
+        with patch.object(OperatorFactory, "_load_custom_operators_from_packages") as loader:
+            factory = OperatorFactory(orchestrator=OrchestratorType.PYTHON, package_names=["some_pkg"])
+        assert factory.enable_custom_operators is True
+        loader.assert_called_once()
+
+    def test_provider_without_argument_returns_disabled_factory(self):
+        factory = OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON)
+        assert factory.enable_custom_operators is False
+
+    def test_provider_none_and_false_share_one_cached_factory(self):
+        first = OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON)
+        second = OperatorFactoryProvider.get_operator_factory(
+            orchestrator=OrchestratorType.PYTHON, enable_custom_operators=False
+        )
+        assert first is second

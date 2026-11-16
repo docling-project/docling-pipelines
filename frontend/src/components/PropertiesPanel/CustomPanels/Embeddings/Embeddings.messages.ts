@@ -65,4 +65,20 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.Embeddings.tokenLimit',
     defaultMessage: 'Token limit',
   },
+  quantization: {
+    id: 'src.components.PropertiesPanel.CustomPanels.Embeddings.quantization',
+    defaultMessage: 'Quantization',
+  },
+  selectQuantization: {
+    id: 'src.components.PropertiesPanel.CustomPanels.Embeddings.selectQuantization',
+    defaultMessage: 'Select quantization',
+  },
+  quantizationNone: {
+    id: 'src.components.PropertiesPanel.CustomPanels.Embeddings.quantizationNone',
+    defaultMessage: 'None (Float32)',
+  },
+  quantizationBinary: {
+    id: 'src.components.PropertiesPanel.CustomPanels.Embeddings.quantizationBinary',
+    defaultMessage: 'Binary (1-bit packed)',
+  },
 });

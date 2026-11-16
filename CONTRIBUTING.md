@@ -513,7 +513,7 @@ export DOCPIPE_CUSTOM_OPERATORS="my_company.operators,another_package.ops"
 
 **DOCPIPE_ENABLE_CUSTOM_OPERATORS:**
 
-Boolean flag to enable/disable custom operator loading (default: `true`).
+Boolean flag to enable/disable custom operator loading (default: `false`). Custom operators execute arbitrary Python, so they are off unless enabled. Accepted enabling values: `true`, `1`, `yes`; any other value disables. An explicit `enable_custom_operators` argument takes precedence over this variable.
 
 ```bash
 export DOCPIPE_ENABLE_CUSTOM_OPERATORS="true"  # or "false"

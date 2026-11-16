@@ -1,6 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Shared Pydantic config models for LLM-based providers."""
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,6 +17,12 @@ class LLMProviderConfig(BaseModel):
     selecting the ``litellm`` provider in EmbeddingsOperator or
     DocumentClassifierOperator.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "api_base",
+    )
 
     model_config = ConfigDict(extra="allow")
 
@@ -37,6 +46,13 @@ class WatsonxProviderConfig(LLMProviderConfig):
     Extends LLMProviderConfig with watsonx-specific fields. Used when selecting
     the ``watsonx`` provider in EmbeddingsOperator or DocumentClassifierOperator.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "api_base",
+        "url",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
