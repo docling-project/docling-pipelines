@@ -34,7 +34,7 @@ dependencies = [
     "google-auth-oauthlib==1.2.4",
     "google-cloud-storage==3.9.0",
     "google-re2==1.1.20251105",
-    "griffe==1.15.0",
+    "griffe==2.4.1",
     "httpx==0.28.1",
     "ibm-cos-sdk==2.14.3",
     "ibm-watsonx-ai==1.8.1",
