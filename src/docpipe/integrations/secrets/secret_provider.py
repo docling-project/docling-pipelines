@@ -29,7 +29,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from docpipe.exceptions.docpipe_exceptions import ConfigurationError
+from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.utils.infrastructure import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -57,6 +57,17 @@ class MalformedSecretReferenceError(ConfigurationError):
             "malformed reference: a value containing 'vault://' must be exactly one "
             "valid vault://<provider>/<path>[#<key>] reference"
         )
+
+
+class ProviderUnreachableError(ExternalServiceError):
+    """The secret backend could not be reached or authenticated against.
+
+    Raised for network, TLS, timeout, platform-login, rate-limit, and server-side
+    failures, so the shared resolver can report ``vault unreachable`` and keep
+    it apart from a missing path or key, a denial, or an ambiguous secret, which
+    are all reported as ``secret unavailable``. The message must not carry the
+    backend address, a path, or a response body.
+    """
 
 
 @dataclass(frozen=True)
@@ -104,6 +115,9 @@ class SecretProvider(ABC):
             The secret value as a string.
 
         Raises:
+            ProviderUnreachableError: If the backend cannot be reached or authenticated against
+                (network, TLS, timeout, login, rate limit, server error). The shared resolver
+                reports this as ``vault unreachable``.
             ExternalServiceError: If the key does not exist at the path or the secret cannot be retrieved.
             ConfigurationError: If no key is specified and the secret has multiple keys.
         """
@@ -138,6 +152,11 @@ def get_provider(*, name: str) -> SecretProvider | None:
         The provider instance, or None if not registered.
     """
     return _providers.get(name)
+
+
+def registered_provider_names() -> tuple[str, ...]:
+    """Return the names of all registered providers."""
+    return tuple(_providers)
 
 
 def _is_unsafe_reference_char(char: str) -> bool:

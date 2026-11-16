@@ -22,6 +22,7 @@ import os
 from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
 from docpipe.integrations.secrets.hashicorp_vault import HashiCorpVaultProvider
+from docpipe.integrations.secrets.resolver import SecretPolicy
 from docpipe.integrations.secrets.secret_provider import register_provider
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
@@ -125,3 +126,6 @@ def _initialize_secret_providers() -> None:
         provider._config.addr,
         provider._config.mount_point,
     )
+
+    # 8. Deployment policy diagnostics: ERROR when allowed_paths is unset (deny-all), WARNING for '*:**'
+    SecretPolicy.log_startup_diagnostics()
