@@ -468,7 +468,15 @@ For `vectordb` nodes with `provider: "weaviate"`, flow enrichment SHALL return `
 
 #### Scenario: Sparse defaults for a new collection
 - **WHEN** `add_sparse_vector` is true, `collection_name` is new, and the node has no saved mappings
-- **THEN** the returned `feature_mappings` include `content` mapped to `text` and `sparse_embeddings` mapped to `sparse_embeddings`
+- **THEN** the returned `feature_mappings` include `content` mapped to `text`, and no sparse-vector column or `sparse_embeddings` mapping is generated
+
+#### Scenario: Saved mappings containing only excluded features
+- **WHEN** `feature_mappings` contains only mappings for features not supported by Weaviate (e.g. `sparse_embeddings`)
+- **THEN** flow enrichment drops the unsupported mappings and falls back to live-schema or default feature mappings
+
+#### Scenario: Node available features projection
+- **WHEN** a Weaviate node is enriched with upstream sparse vector features
+- **THEN** the node's `available_features` in parameters excludes sparse vectors, while `input_features` preserves the full set of upstream features
 
 #### Scenario: No host or cluster URL configured
 - **WHEN** no host or cluster URL is configured for the node

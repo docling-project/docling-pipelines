@@ -670,20 +670,22 @@ class TestMergeOutputFeaturesSelection:
 
 
 class TestFetchVectordbMetadata:
-    """_fetch_vectordb_metadata returns None when no provider_config, or a five-key dict."""
+    """_fetch_vectordb_metadata returns fetcher result (with empty fallback for unconfigured nodes)."""
 
     def _call_fetch(self, *, node_feature_result: dict) -> Any:
         service = FlowEnrichmentService.__new__(FlowEnrichmentService)
         return service._fetch_vectordb_metadata(node_feature_result=node_feature_result)
 
-    def test_returns_none_when_provider_config_absent(self):
-        """UI distinguishes 'not configured' from 'configured but empty'."""
+    def test_returns_fallback_result_when_provider_config_absent(self):
+        """Unconfigured node returns empty fallback result with standard keys."""
         result = self._call_fetch(node_feature_result={"operator_config": {}})
-        assert result is None
+        assert isinstance(result, dict)
+        assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES in result
 
-    def test_returns_none_when_operator_config_missing(self):
+    def test_returns_fallback_result_when_operator_config_missing(self):
         result = self._call_fetch(node_feature_result={})
-        assert result is None
+        assert isinstance(result, dict)
+        assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES in result
 
     def test_returns_dict_with_five_keys_when_provider_config_present(self):
         expected = _mf_mod.VectorDBMetadataFetcher._empty_result()
@@ -831,6 +833,72 @@ class TestBuildNodeFeatureMetadataVectorDB:
             "dimension_size": None,
         }
 
+    def test_vectordb_normalizes_vdb_meta_available_features_when_provided(self):
+        """When vdb_meta contains available_features, available_features is normalized and filtered."""
+        incoming_features = {
+            "content": _make_feature(type_="string"),
+            "embeddings": _make_feature(type_="vector"),
+            "sparse_embeddings": _make_feature(type_="vector_sparse"),
+        }
+        mappable_features = {
+            "content": _make_feature(type_="string"),
+            "embeddings": _make_feature(type_="vector"),
+        }
+        fake_result = {
+            **_mf_mod.VectorDBMetadataFetcher._empty_result(),
+            OperatorConstants.Config.AVAILABLE_FEATURES: mappable_features,
+        }
+        nfr = _make_node_feature_result(
+            inputs=incoming_features,
+            available=incoming_features,
+            operator_config={
+                "provider": "weaviate",
+                "provider_config": {"host": "localhost"},
+            },
+        )
+        with patch.object(_mf_mod, "VectorDBMetadataFetcher") as mock_cls:
+            mock_cls.return_value.fetch_metadata.return_value = fake_result
+            block = self._build(nfr)
+
+        # available_features has the provider's mappable projection (sparse excluded)
+        af = block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "content" in af
+        assert "embeddings" in af
+        assert "sparse_embeddings" not in af
+        # Ensure it was normalised (has "name", "node_id", etc.)
+        assert af["content"]["name"] == "content"
+        assert af["content"]["node_id"] == "node-1"
+
+        # input_features retains all incoming features (including sparse)
+        inf = block[OperatorConstants.Config.INPUT_FEATURES]
+        assert "sparse_embeddings" in inf
+
+    def test_weaviate_node_without_provider_config_excludes_sparse_from_available_features_and_omits_vdb_keys(self):
+        """When provider is weaviate and provider_config is absent, sparse is excluded and VDB keys are omitted."""
+        incoming_features = {
+            "content": _make_feature(type_="string"),
+            "embeddings": _make_feature(type_="vector"),
+            "sparse_embeddings": _make_feature(type_="vector_sparse"),
+        }
+        nfr = _make_node_feature_result(
+            inputs=incoming_features,
+            available=incoming_features,
+            operator_config={"provider": "weaviate"},
+        )
+        block = self._build(nfr)
+
+        af = block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "content" in af
+        assert "embeddings" in af
+        assert "sparse_embeddings" not in af
+        assert af["content"]["name"] == "content"
+
+        inf = block[OperatorConstants.Config.INPUT_FEATURES]
+        assert "sparse_embeddings" in inf
+
+        assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES not in block
+        assert OperatorConstants.VectorDB.STORED_RESOURCE_METADATA not in block
+
     def test_fetcher_called_with_correct_adapter_and_config(self):
         """fetch_metadata receives adapter_name, operator_config, and available_features."""
         op_cfg = {
@@ -863,6 +931,33 @@ class TestBuildNodeFeatureMetadataVectorDB:
             )
             assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES not in block, f"VDB key leaked into {op}"
             assert OperatorConstants.VectorDB.STORED_RESOURCE_METADATA not in block, f"VDB key leaked into {op}"
+
+
+class TestVectorDBEnrichmentIntegration:
+    """VectorDB metadata fetcher results (including provider-projected available_features) merge into the node block."""
+
+    def test_vdb_metadata_merges_and_preserves_input_features(self):
+        service = FlowEnrichmentService.__new__(FlowEnrichmentService)
+        sparse = _make_feature(type_=OperatorConstants.Types.TYPE_VECTOR_SPARSE)
+        content = _make_feature()
+        nfr = _make_node_feature_result(
+            available={"content": content, "sparse_embeddings": sparse},
+            inputs={"content": content, "sparse_embeddings": sparse},
+            operator_config={"provider": OperatorConstants.VectorDB.WEAVIATE, "provider_config": {"host": "localhost"}},
+        )
+        with patch.object(_mf_mod, "VectorDBMetadataFetcher") as mock_cls:
+            mock_cls.return_value.fetch_metadata.return_value = {
+                **_mf_mod.VectorDBMetadataFetcher._empty_result(),
+                OperatorConstants.Config.AVAILABLE_FEATURES: {"content": content},
+            }
+            block = service._build_node_feature_metadata(
+                node_id="node-vdb",
+                node_feature_result=nfr,
+                operator_type=OperatorConstants.Operators.VECTORDB,
+            )
+        assert "sparse_embeddings" not in block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "content" in block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "sparse_embeddings" in block[OperatorConstants.Config.INPUT_FEATURES]
 
 
 # ---------------------------------------------------------------------------

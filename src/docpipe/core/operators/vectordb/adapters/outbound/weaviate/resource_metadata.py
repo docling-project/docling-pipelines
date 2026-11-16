@@ -76,6 +76,12 @@ class WeaviateResourceMetadata:
             returns the plain empty result; any other failure returns it with
             is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
         """
+        mappable_features = {
+            name: meta
+            for name, meta in available_features.items()
+            if meta.get(OperatorConstants.Misc.TYPE) != OperatorConstants.Types.TYPE_VECTOR_SPARSE
+        }
+
         is_cloud = (
             provider_config.get(OperatorConstants.VectorDB.CONNECTION_TYPE)
             == OperatorConstants.VectorDB.CONNECTION_TYPE_CLOUD
@@ -83,7 +89,9 @@ class WeaviateResourceMetadata:
         endpoint_key = OperatorConstants.VectorDB.CLUSTER_URL if is_cloud else OperatorConstants.VectorDB.HOST
         if not provider_config.get(endpoint_key):
             logger.debug("Weaviate provider_config missing host/cluster_url - skipping metadata fetch")
-            return empty_result()
+            result = empty_result()
+            result[OperatorConstants.Config.AVAILABLE_FEATURES] = mappable_features
+            return result
 
         client_kwargs = {
             kwarg: provider_config[key]
@@ -121,7 +129,7 @@ class WeaviateResourceMetadata:
 
             feature_mappings = self._resolve_feature_mappings(
                 operator_config=operator_config,
-                available_features=available_features,
+                available_features=mappable_features,
                 selected_resource_schema=schema,
                 props=props,
                 normalise_feature_mappings=normalise_feature_mappings,
@@ -136,7 +144,7 @@ class WeaviateResourceMetadata:
                 legacy_indexed=legacy_indexed,
                 add_sparse=add_sparse,
                 feature_mappings=feature_mappings,
-                available_features=available_features,
+                available_features=mappable_features,
             )
             return {
                 OperatorConstants.VectorDB.AVAILABLE_RESOURCES: available_resources,
@@ -144,12 +152,14 @@ class WeaviateResourceMetadata:
                 OperatorConstants.VectorDB.FEATURE_MAPPINGS_RESPONSE: feature_mappings,
                 OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE: is_supported,
                 OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: stored,
+                OperatorConstants.Config.AVAILABLE_FEATURES: mappable_features,
             }
         except Exception as exc:
             reason = redact_secrets(text=str(exc), secrets=client_manager.resolved_secrets)
             logger.warning("Failed to fetch Weaviate metadata: %s", reason)
             result = empty_result()
             result[OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE] = {"supported": False, "error": reason}
+            result[OperatorConstants.Config.AVAILABLE_FEATURES] = mappable_features
             return result
         finally:
             client_manager.close()
@@ -339,17 +349,25 @@ class WeaviateResourceMetadata:
 
         The live-schema step applies only to an existing collection (non-empty schema):
         pk -> primary feature, first indexed vector -> first vector feature, properties named
-        like a feature -> identity, and in BM25 mode the content property and the sparse feature.
+        like a feature -> identity, and in BM25 mode the content property.
         """
         saved = operator_config.get(OperatorConstants.Config.FEATURE_MAPPINGS)
         if saved:
-            return normalise_feature_mappings(saved)
+            normalised = normalise_feature_mappings(saved)
+            filtered = [
+                mapping
+                for mapping in normalised
+                if mapping.get(OperatorConstants.Misc.FEATURE_NAME) in available_features
+            ]
+            if filtered:
+                return filtered
 
         if selected_resource_schema and available_features:
             add_sparse = operator_config.get(OperatorConstants.VectorDB.ADD_SPARSE_VECTOR, False)
             type_key = OperatorConstants.Misc.TYPE
 
             def _first_feature(feature_type: str) -> str | None:
+                """Return the first available feature name matching the specified type."""
                 return next((n for n, m in available_features.items() if m.get(type_key) == feature_type), None)
 
             primary_feature = next(
@@ -366,6 +384,7 @@ class WeaviateResourceMetadata:
             covered: set[str] = set()
 
             def _map(*, feature: str | None, column: str) -> None:
+                """Record a feature-to-column mapping if not already mapped."""
                 if feature and feature not in covered:
                     result.append(
                         {
@@ -391,10 +410,6 @@ class WeaviateResourceMetadata:
                     )
                     if content_feature in available_features:
                         _map(feature=content_feature, column=content_prop.name)
-                    _map(
-                        feature=_first_feature(OperatorConstants.Types.TYPE_VECTOR_SPARSE),
-                        column=OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT,
-                    )
 
             if result:
                 return result
