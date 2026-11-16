@@ -75,6 +75,13 @@ class SecretValue:
         msg = "SecretValue has no length"
         raise TypeError(msg)
 
+    def __bool__(self) -> bool:
+        """Always true, so ``if not secret:`` does not fall back to ``__len__``, which raises.
+
+        The resolver rejects an empty value, so a ``SecretValue`` is never an empty credential.
+        """
+        return True
+
     def __eq__(self, other: object) -> bool:
         return self is other
 

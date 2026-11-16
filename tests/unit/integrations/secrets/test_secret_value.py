@@ -99,6 +99,12 @@ class TestSecretValueOperators:
         with pytest.raises(TypeError):
             list(secret)
 
+    def test_truth_value_is_true_and_does_not_call_len(self, secret: SecretValue) -> None:
+        assert bool(secret) is True
+        assert not (not secret)
+        assert (secret or "fallback") is secret
+        assert (1 if secret else 0) == 1
+
     def test_concatenation_unsupported(self, secret: SecretValue) -> None:
         with pytest.raises(TypeError):
             _ = "Bearer " + secret  # type: ignore[operator]
