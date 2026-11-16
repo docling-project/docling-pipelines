@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMilvusGpuMode } from '@/components/PropertiesPanel/CustomPanels/VectorDB/constants';
+import { isMilvusGpuMode } from '@/utils/vectordb';
 
 describe('isMilvusGpuMode', () => {
   it('is true when vector_mode is gpu', () => {

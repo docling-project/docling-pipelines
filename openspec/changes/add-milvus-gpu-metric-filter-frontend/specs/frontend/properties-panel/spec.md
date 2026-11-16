@@ -24,3 +24,7 @@ The VectorDB feature mapping tearsheet SHALL restrict the Milvus similarity metr
 #### Scenario: Binary-only features keep binary metrics
 - **WHEN** GPU mode is active and only `vector_binary` features are mapped
 - **THEN** the dropdown offers `HAMMING` and `JACCARD` as it does for any Milvus binary collection
+
+#### Scenario: Mixed dense, binary and sparse features in GPU mode
+- **WHEN** GPU mode is active and dense, `vector_binary` and sparse vector features are all mapped
+- **THEN** the dropdown offers only `L2` and `IP`, because the metric configures the dense field

@@ -32,6 +32,7 @@ import {
 import { ErrorEmptyState } from '@carbon/ibm-products';
 import { Tearsheet } from '@carbon/ibm-products';
 import type { FeatureMappingRow, FeatureMappingItem, VectorDBEnrichmentResult } from '@/types';
+import { isMilvusGpuMode } from '@/utils/vectordb';
 import { enrichFlowFeaturesForNode } from './vectordb-enrichment';
 import {
   DEFAULT_COLUMN_MAPPINGS,
@@ -40,7 +41,6 @@ import {
   MILVUS_GPU_METRIC_VALUES,
   VECTORDB_LABELS,
   VECTORDB_PROVIDERS,
-  isMilvusGpuMode,
   omitProviderConfigKeys,
   type ProviderConfig,
 } from './constants';

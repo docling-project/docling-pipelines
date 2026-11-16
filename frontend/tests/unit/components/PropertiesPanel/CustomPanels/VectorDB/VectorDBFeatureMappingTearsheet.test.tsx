@@ -1603,6 +1603,34 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     expect(options.some((o) => /Cosine/i.test(o))).toBe(true);
   });
 
+  it('offers only L2 and IP in gpu mode with mixed dense, binary and sparse features', async () => {
+    const feature = (name: string, type: string) => ({
+      name,
+      type,
+      description: name,
+      available_for_filter: false,
+      available_for_vector_db: true,
+      mandatory_for_vector_db: true,
+      node_id: 'node-1',
+      tags: [],
+    });
+    mockEnrich.mockResolvedValue({
+      ...denseEnrichment,
+      available_features: {
+        dense_emb: feature('dense_emb', 'vector'),
+        binary_emb: feature('binary_emb', 'vector_binary'),
+        sparse_emb: feature('sparse_emb', 'vector_sparse'),
+      },
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+    renderMilvusDense({ vector_mode: 'gpu' }, 'L2', true);
+
+    const options = await openMetricOptions();
+    expect(options).toHaveLength(2);
+    expect(options.some((o) => /Euclidean/i.test(o))).toBe(true);
+    expect(options.some((o) => /Inner product/i.test(o))).toBe(true);
+    expect(options.some((o) => /Cosine|BM25|Hamming|Jaccard/i.test(o))).toBe(false);
+  });
+
   it('keeps binary metrics in gpu mode when only vector_binary features are present', async () => {
     mockEnrich.mockResolvedValue({
       ...denseEnrichment,

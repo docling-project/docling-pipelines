@@ -23,7 +23,7 @@ None.
 
 ## Impact
 
-- **Frontend only**: `frontend/src/components/PropertiesPanel/CustomPanels/VectorDB/constants.ts` and `VectorDBFeatureMappingTearsheet.tsx`, plus unit tests under `frontend/tests/unit/components/PropertiesPanel/CustomPanels/VectorDB/`.
+- **Frontend only**: `VectorDB/constants.ts`, `frontend/src/utils/vectordb.ts` and `VectorDBFeatureMappingTearsheet.tsx`, plus unit tests under `frontend/tests/unit/`.
 - No backend, API, dependency, or i18n message changes (`L2` and `IP` labels already exist).
 
 ## Non-goals

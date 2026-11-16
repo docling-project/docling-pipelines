@@ -18,7 +18,8 @@ The backend (`MilvusIndexManager`) accepts only `L2` and `IP` in GPU mode and in
 
 ## Decisions
 
-- **Helper in `constants.ts`**: `isMilvusGpuMode(providerConfig)` and `MILVUS_GPU_METRIC_VALUES` sit beside the existing `MILVUS_DENSE_METRIC_VALUES` / `MILVUS_BINARY_METRIC_VALUES`, keeping provider rules as data/pure functions rather than inline branches. An explicit `vector_mode` wins; only an unset mode falls back to the `GPU_` prefix, matching `_resolve_vector_mode`.
+- **Constants**: `MILVUS_GPU_METRIC_VALUES` sits beside the existing `MILVUS_DENSE_METRIC_VALUES` / `MILVUS_BINARY_METRIC_VALUES`, keeping provider rules as data. An explicit `vector_mode` wins; only an unset mode falls back to the `GPU_` prefix, matching `_resolve_vector_mode`.
+- **GPU filter helper lives in `frontend/src/utils/vectordb.ts`**: `isMilvusGpuMode()` is a function, so it goes in utils rather than `constants.ts` (constants hold data only).
 - **GPU filter applies unless features are binary-only**: binary-only keeps `HAMMING`/`JACCARD` (the backend rejects GPU with only binary features, so the user sees the backend message rather than an empty dropdown). Mixed and unknown feature sets are filtered to `L2`/`IP`, because the metric configures the dense field.
 - **`BM25` dropped in GPU mode**: the backend rejects `add_sparse_vector` with an explicit non-sparse mode, and the dense field in a GPU-index hybrid collection needs `L2`/`IP`.
 - **Alternative rejected**: reading `valid_values` from operator metadata. The backend `Literal` lists all metrics regardless of mode, so metadata cannot express the mode-dependent subset.
