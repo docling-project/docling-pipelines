@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
+import React, { useState, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
@@ -11,7 +11,7 @@ import { flowRowFixture } from '../../../mocks/fixtures/flow.fixture';
 import { PERMISSION_SCENARIOS, authPreloadedState, ME } from '../../../mocks/fixtures/permission.fixture';
 import type { RootState } from '@/store';
 
-function BreadcrumbWrapper({ children }: { children: ReactNode }) {
+function BreadcrumbWrapper({ children }: { children: ReactNode }): React.JSX.Element {
   const [actions, setActions] = useState<ReactNode>(null);
   return (
     <BreadcrumbActionsContext.Provider value={{ actions, setActions }}>

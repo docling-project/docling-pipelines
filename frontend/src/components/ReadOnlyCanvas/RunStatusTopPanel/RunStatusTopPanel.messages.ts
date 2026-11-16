@@ -68,15 +68,15 @@ export const messages = defineMessages({
 
   // ── Permission & ownership tooltips ────────────────────────────────────────
   stopDisabledPermission: {
-    id: 'runStatus.stopDisabledPermission',
+    id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.stopDisabledPermission',
     defaultMessage: 'You do not have permission to stop this job run',
   },
   stopDisabledOwnership: {
-    id: 'runStatus.stopDisabledOwnership',
+    id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.stopDisabledOwnership',
     defaultMessage: 'Only the user who started the run or an administrator can stop it',
   },
   runAgainDisabledPermission: {
-    id: 'runStatus.runAgainDisabledPermission',
+    id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.runAgainDisabledPermission',
     defaultMessage: 'You do not have permission to run flows',
   },
 });
