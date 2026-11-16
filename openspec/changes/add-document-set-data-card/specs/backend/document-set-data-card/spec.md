@@ -209,6 +209,10 @@ The card SHALL be built only from the allowlisted fields named in this capabilit
 - **WHEN** an S3 node sets `bucket` to a `vault://` reference
 - **THEN** the source carries no bucket-derived name or path
 
+#### Scenario: Resolved secret never reaches the card
+- **WHEN** a flow runs through the executor, an upstream node sets a location field to a `vault://` reference, and the provider can resolve it to a canary value
+- **THEN** neither the reference nor the canary value appears in the serialized card
+
 ### Requirement: Recording failures are isolated
 A failure while building or saving the card SHALL be logged and SHALL NOT fail the node, the flow, or the stored data. The node metadata SHALL report `data_card_status` as `recorded` or `failed`, and on failure SHALL add `data_card_error` holding the exception class name only.
 

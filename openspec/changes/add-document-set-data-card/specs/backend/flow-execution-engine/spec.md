@@ -21,9 +21,17 @@ The session context available to operators SHALL expose `flow_name` beside `flow
 - **WHEN** an operator is used outside a flow run
 - **THEN** `flow_name` is null and the operator does not fail
 
-### Requirement: Flow definition available to operators
-The compiled flow definition SHALL remain available to every operator in its configuration under `flow_definition`, so that an operator can inspect the nodes upstream of itself. This change SHALL NOT alter the shape of the flow definition or of any other configuration key.
+### Requirement: Flow definition available to operators unresolved
+The compiled flow definition SHALL remain available to every operator in its configuration under `flow_definition`, so that an operator can inspect the nodes upstream of itself. Secret references inside it SHALL be left as written. The executor SHALL still resolve secret references in every other configuration key of the operator. The shape of the flow definition SHALL NOT change.
 
 #### Scenario: Operator reads upstream nodes
 - **WHEN** an operator inspects `flow_definition` in its configuration
 - **THEN** it finds the nodes with their `id`, `name`, `operator`, `config`, and `input_edges`
+
+#### Scenario: Upstream secret reference stays a reference
+- **WHEN** an upstream node's configuration holds a `vault://` reference and a downstream operator is built
+- **THEN** the operator's `flow_definition` still holds the reference text and the secret is not fetched for it
+
+#### Scenario: Own parameters still resolved
+- **WHEN** the operator's own configuration holds a `vault://` reference outside `flow_definition`
+- **THEN** the operator receives the resolved value as before

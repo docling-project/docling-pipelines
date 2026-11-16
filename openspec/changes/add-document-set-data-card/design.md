@@ -100,6 +100,12 @@ of the asset. The `document_set` operator already updates the set on every store
 A pure module `core/operators/document_sets/data_card_run_builder.py`, with static methods, no I/O, and no repository
 access. Input: the operator config, the stored table, and a small stats value. Output: a `DataCardRunRecord`.
 
+**The builder must see an unresolved flow definition (D12).** The operator config holds `flow_definition`, but
+`PythonOperatorExecutor._resolve_operator_params` runs `resolve_value` over the whole merged config before the operator
+is built, and `resolve_value` walks nested dicts and lists. Left alone, every `vault://` value in an upstream node would
+reach the builder already replaced by the real secret, and `is_vault_reference()` could not recognise it. D12 changes
+the executor so `flow_definition` is not resolved.
+
 **DAG walk.** From the `document_set` node (found by `config["id"]`, falling back to `node_id`), walk `input_edges`
 (`node_id_ref`) breadth-first, collecting every ancestor. Visited set, so a diamond is listed once. Sort the ancestors
 topologically (Kahn on the ancestor subgraph) so output is upstream to downstream and deterministic; ties broken by the
@@ -155,17 +161,47 @@ host, port and path of a URL.
 Rules that apply to every row:
 
 - A value for which `is_vault_reference()` is true is skipped, so the card does not reveal that a field was a vault
-  reference or what it pointed at.
+  reference or what it pointed at. This only works because the builder receives the unresolved definition (D12). The
+  skip rule is not a defence on its own: a resolved secret is an ordinary string and cannot be recognised.
 - A `${VAR}` placeholder is recorded as written. The builder does not resolve environment variables, so a resolved secret
   can never enter the card.
 - An unknown provider yields `input: provider` with no `name` and no `paths`. This is deliberately conservative:
   supporting a provider is a one-line table edit plus a test.
 
-A single unit test feeds nodes seeded with sentinel secrets under every credential key the repository knows, serializes
-the card to JSON, and asserts none of the sentinels appear. This test is the safety net for the "no secrets" requirement.
+Two tests guard the "no secrets" requirement. A builder-level test feeds nodes seeded with sentinel secrets under every
+credential key the repository knows, serializes the card to JSON, and asserts none of the sentinels appear. A second
+test goes through the real `PythonOperatorExecutor` with a registered fake provider, puts a `vault://` reference in a
+location field of an upstream node, builds the operator, runs the builder on the operator's own config, and asserts that
+neither the reference nor the canary value is in the card. Only the second test can catch a resolution problem like D12.
 
-**Relation to `add-secret-management`.** That change deals with resolved secrets leaking from runtime stores. This one
-is safe either way because it never reads credential keys. The two do not share code.
+**Relation to `add-secret-management`.** That change narrows `_resolve_operator_params` to the node's own declared
+fields (its task B.4), which would also leave `flow_definition` unresolved. D12 is the minimal version of the same rule
+and stays correct if B.4 lands first or later. The two changes touch the same function, so whichever lands second
+rebases over a small, local edit.
+
+### D12. Leave `flow_definition` unresolved in the executor
+
+`PythonOperatorExecutor._resolve_operator_params` is changed to resolve every key of the merged config except
+`DocpipeConstants.FLOW_DEFINITION`, which is passed through as written. The vault-path collection that decides whether
+to resolve at all ignores that key too, so a flow whose only vault references sit in other nodes triggers no provider
+call for this operator.
+
+- **Why it is safe.** Nothing in `src/` reads `flow_definition` from an operator config as a source of values. The
+  Prefect engine reads it from `global_config` before any executor exists. `OperatorUtils.is_operator_present_in_flow`
+  only looks at node names. The streaming orchestrator never puts `flow_definition` in node configs at all.
+- **Why it is right.** The key holds every node's configuration. Resolving it hands each downstream operator the
+  credentials of every other node, which is the leak `add-secret-management` is removing.
+- **Scope.** One key, one function. The operator's own parameters, `global_config` entries, and the shape of the
+  definition are unchanged.
+
+**Alternative rejected: read the snapshot from `JobStatsService.get_flow_definition()`.** That is the original authoring
+document (`type`, `depends_on`), not the compiled DAG (`operator`, `input_edges`), so the builder would need a second
+walker. It is only written when both a job ID and a job run ID exist and a stats service is configured, and
+`original_flow_def` is `None` on some CLI paths. A direct read of the compiled definition with the executor fix is simpler
+and available on every path.
+
+**Alternative rejected: pass a second, pre-resolution copy under another key.** It doubles the definition in memory and
+in Prefect task parameters, and leaves the resolved copy available to operators.
 
 ### D6. Idempotency, retention, ordering
 
@@ -292,6 +328,7 @@ list response and keeps the existing contract byte-for-byte. A consumer that wan
 | Card growth | 50-run retention per flow. Only allowlisted fields are stored. |
 | Enterprise schema drift | A hand-written enterprise-shaped fixture pins the documented fields, and the round-trip test fails if either side renames a field. |
 | Secret leakage through a new provider key | Allowlist table plus the sentinel-secret test. Unknown providers record nothing but the provider name. |
+| Vault references already resolved when the builder runs | D12: the executor leaves `flow_definition` unresolved. A test through the real executor fails if that regresses. |
 | Micro-batch duplicates | Run ID as the identity, with a test of three sequential and N concurrent recordings. |
 | Slow card write delaying the pipeline | One read, one write per `document_set` node execution, and the work is bounded by retention. Stats lookup failures return `None` immediately. |
 | `updated_at` churn on the set | Accepted. The set is already updated on each store. |

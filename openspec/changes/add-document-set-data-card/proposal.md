@@ -32,6 +32,9 @@ same field names where they apply, so that a card is meaningful on both sides an
   section is system-maintained and read-only over the API. Existing document set responses are unchanged.
 - **Session context.** `SessionInfo` gains `flow_name`, set once by the orchestrator, so operators can read the flow
   name without parsing the flow definition.
+- **Unresolved flow definition.** The Python executor stops resolving `vault://` references inside the `flow_definition`
+  key of an operator's config. Without this, upstream secrets would reach the card builder already resolved. Every other
+  key is still resolved.
 - **BREAKING (Python API of an unused model).** The flat `DataCard(flow_id=..., operators=[...], lineage_metadata=...)`
   constructor is removed. Nothing in the repository constructs it outside tests, and no persisted data exists to migrate.
 - **Docs.** A data card guide, REST API reference rows, the `document_set` operator README, and `OPERATORS.md`.
@@ -59,7 +62,8 @@ serialization. A new application service reads and writes through the existing r
 ### Modified Capabilities
 
 - `backend/document-sets-api`: Adds retrieval and update of a document set's data card.
-- `backend/flow-execution-engine`: Adds the flow name to the session context available to operators.
+- `backend/flow-execution-engine`: Adds the flow name to the session context available to operators, and keeps the
+  flow definition in an operator's config unresolved so upstream secret references stay references.
 
 ## Non-goals
 
@@ -87,12 +91,15 @@ serialization. A new application service reads and writes through the existing r
   `core/assets/document_sets/application/services/document_set_service.py` (takes the per-set lock around its two
   read-modify-write paths, no behaviour change),
   `core/operators/document_sets/document_set_operator.py`, `core/models/session_info.py`,
-  `core/orchestration/abstract_orchestrator.py`, `api/routes/document_sets.py`, `api/dependencies.py`, and
+  `core/orchestration/abstract_orchestrator.py`, `core/orchestration/python/python_operator_executor.py`
+  (leaves `flow_definition` unresolved), `api/routes/document_sets.py`, `api/dependencies.py`, and
   `core/constants/operator_constants.py` (metadata key).
 - **Tests:** rewrite the flat `DataCard` tests in `tests/unit/core/operators/document_sets/test_document_set_models.py`;
   add model, service, builder, operator, and route tests plus an enterprise-shaped fixture.
 - **Docs:** new `docs/guides/DOCUMENT_SET_DATA_CARD.md`; updates to `docs/api/REST_API_SERVER.md`,
   `docs/operators/storage/document_set_readme.md`, and `docs/reference/OPERATORS.md`.
 - **Dependencies:** none added.
-- **Related in-flight change:** `add-secret-management` removes resolved secrets from places they leak today.
-  This change reads only allowlisted fields and does not depend on it, and it stays correct if that change lands first or later.
+- **Related in-flight change:** `add-secret-management` removes resolved secrets from places they leak today and
+  rewrites `_resolve_operator_params` (its task B.4). This change makes a one-key edit to the same function (leave
+  `flow_definition` unresolved), which that rewrite subsumes. It stays correct if either change lands first, and the
+  second to land rebases over a small edit.
