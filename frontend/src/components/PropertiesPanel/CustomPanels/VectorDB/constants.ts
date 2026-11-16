@@ -43,6 +43,20 @@ export const MILVUS_BINARY_METRIC_VALUES = ['HAMMING', 'JACCARD'] as const;
 /** Milvus dense similarity metrics */
 export const MILVUS_DENSE_METRIC_VALUES = ['L2', 'IP', 'COSINE'] as const;
 
+/** Milvus GPU index (GPU_*) metrics — GPU mode accepts only L2 and IP. */
+export const MILVUS_GPU_METRIC_VALUES = ['L2', 'IP'] as const;
+
+/**
+ * True when provider_config selects Milvus GPU mode: `vector_mode` is "gpu", or
+ * `vector_mode` is unset and `index_type` starts with "GPU_" (the backend infers the
+ * mode from the index type the same way).
+ */
+export function isMilvusGpuMode(providerConfig: Record<string, unknown>): boolean {
+  const { vector_mode: vectorMode, index_type: indexType } = providerConfig;
+  if (vectorMode) { return vectorMode === 'gpu'; }
+  return typeof indexType === 'string' && indexType.startsWith('GPU_');
+}
+
 // ── Provider configuration map ───────────────────────────────────────────────
 
 /**
