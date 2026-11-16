@@ -37,14 +37,19 @@ def _clean_env(monkeypatch):
 def startup_log(caplog):
     """Capture records of the startup module logger.
 
-    The ``docpipe`` logger hierarchy may have propagation disabled by ``setup_logging()``,
-    so the caplog handler is attached to the module logger directly.
+    Disable propagation while active so records arrive once via the attached handler
+    regardless of whether ``docpipe`` has propagation enabled or disabled.
     """
     module_logger = logging.getLogger(startup_validation.__name__)
+    previous_level = module_logger.level
+    previous_propagate = module_logger.propagate
+    module_logger.propagate = False
     module_logger.addHandler(caplog.handler)
     caplog.set_level(logging.DEBUG, logger=startup_validation.__name__)
     yield caplog
     module_logger.removeHandler(caplog.handler)
+    module_logger.setLevel(previous_level)
+    module_logger.propagate = previous_propagate
 
 
 def _warnings(caplog) -> list[str]:
