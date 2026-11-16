@@ -181,8 +181,8 @@ class VectorDBMetadataFetcher:
                 Used as the Source 4 fallback for feature_mappings derivation.
 
         Returns:
-            Dict with five normalised keys. Never raises — returns empty-value
-            defaults on any connection failure or unknown adapter.
+            Five live-resource metadata keys, plus an optional provider feature projection.
+            Never raises — returns empty-value live metadata on connection failure or an unknown adapter.
         """
         # Imported here: the operator module imports adapters that import this module.
         from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
@@ -204,9 +204,18 @@ class VectorDBMetadataFetcher:
                 exc.provider or "unknown",
                 adapter_name,
             )
-            return self._empty_result()
+            result = self._empty_result()
+            if adapter_name == OperatorConstants.VectorDB.WEAVIATE:
+                from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
+                    project_mappable_features,
+                )
 
-        provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
+                result[OperatorConstants.Config.AVAILABLE_FEATURES] = project_mappable_features(
+                    available_features=available_features
+                )
+            return result
+
+        provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG) or {}
 
         if adapter_name == OperatorConstants.VectorDB.OPENSEARCH:
             from docpipe.core.operators.vectordb.adapters.outbound.opensearch.resource_metadata import (

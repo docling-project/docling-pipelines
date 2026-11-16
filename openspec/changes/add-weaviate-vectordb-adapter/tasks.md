@@ -109,6 +109,9 @@ Delivery order follows the proposal's Rollout: groups 1-6 are the API PR, groups
 - [x] 5.16 [backend] Isolate per-document preparation failures (design D6, spec "Object cannot be prepared"): `create_batches` returns `(batches, failed_items)`, `WeaviateAdapter.index_documents` merges the preparation failures into the write failures. Tests: a non-numeric vector fails only its chunk, and the other chunks are written.
 - [x] 5.17 [backend] Warn when stale-chunk deletion reports failures (design D20, operator spec "Stale chunk cleanup failures are reported"): `VectorDBOperator._cleanup_stale_pks` logs the failed count from `delete_documents_by_ids` and still inserts. Test in `test_vectordb_operator.py`.
 
+- [x] 5.18 [backend] Normalize absent, empty-object, null, and blank-string provider configurations at the VectorDB metadata boundary. Preserve provider projections, omit live metadata for unconfigured nodes, do not open connections or mutate the original configuration, and cover all three providers in flow-enrichment tests.
+- [x] 5.19 [backend] Preserve saved custom source mappings that are absent from metadata. Exclude only known sparse feature names and legacy `sparse_embeddings`, retain the existing live-schema/default fallback when all mappings are excluded, and test custom content sources, renamed sparse features, and sparse mappings absent from metadata.
+- [x] 5.20 [backend] Reuse a pure Weaviate feature projection when shared credential resolution fails. Keep empty live metadata and upstream features unchanged, preserve the original credential reference, invoke neither an adapter fetcher nor a client on failure, and add a regression test covering the real metadata router.
 
 ## 6. Spec-pinning tests, test server, samples, and backend docs
 

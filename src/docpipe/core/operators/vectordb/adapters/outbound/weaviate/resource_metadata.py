@@ -45,6 +45,15 @@ _CLIENT_KWARG_KEYS: dict[str, str] = {
 }
 
 
+def project_mappable_features(*, available_features: dict[str, Any]) -> dict[str, Any]:
+    """Project Weaviate mapping features without resolving credentials or performing I/O."""
+    return {
+        name: meta
+        for name, meta in available_features.items()
+        if meta.get(OperatorConstants.Misc.TYPE) != OperatorConstants.Types.TYPE_VECTOR_SPARSE
+    }
+
+
 class WeaviateResourceMetadata:
     """Fetches read-only resource metadata from a live Weaviate deployment.
 
@@ -72,15 +81,14 @@ class WeaviateResourceMetadata:
             empty_result: Injected by VectorDBMetadataFetcher; returns the five-key empty dict.
 
         Returns:
-            Dict with five normalised keys. Never raises. A missing host or cluster URL
-            returns the plain empty result; any other failure returns it with
-            is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
+            Five live-resource metadata keys plus the mappable feature projection. Never raises.
+            A missing host or cluster URL returns empty live metadata; any other failure returns it
+            with is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
         """
-        mappable_features = {
-            name: meta
-            for name, meta in available_features.items()
-            if meta.get(OperatorConstants.Misc.TYPE) != OperatorConstants.Types.TYPE_VECTOR_SPARSE
-        }
+        mappable_features = project_mappable_features(available_features=available_features)
+        excluded_feature_names = set(available_features) - set(mappable_features)
+        # Legacy sparse mappings remain excluded even when absent from propagated metadata.
+        excluded_feature_names.add(OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT)
 
         is_cloud = (
             provider_config.get(OperatorConstants.VectorDB.CONNECTION_TYPE)
@@ -130,6 +138,7 @@ class WeaviateResourceMetadata:
             feature_mappings = self._resolve_feature_mappings(
                 operator_config=operator_config,
                 available_features=mappable_features,
+                excluded_feature_names=excluded_feature_names,
                 selected_resource_schema=schema,
                 props=props,
                 normalise_feature_mappings=normalise_feature_mappings,
@@ -340,6 +349,7 @@ class WeaviateResourceMetadata:
         *,
         operator_config: dict[str, Any],
         available_features: dict[str, Any],
+        excluded_feature_names: set[str],
         selected_resource_schema: dict[str, Any],
         props: dict[str, Any],
         normalise_feature_mappings: Any,
@@ -349,7 +359,8 @@ class WeaviateResourceMetadata:
 
         The live-schema step applies only to an existing collection (non-empty schema):
         pk -> primary feature, first indexed vector -> first vector feature, properties named
-        like a feature -> identity, and in BM25 mode the content property.
+        like a feature -> identity, and in BM25 mode the content property. Saved source names
+        absent from metadata are preserved unless explicitly excluded.
         """
         saved = operator_config.get(OperatorConstants.Config.FEATURE_MAPPINGS)
         if saved:
@@ -357,7 +368,7 @@ class WeaviateResourceMetadata:
             filtered = [
                 mapping
                 for mapping in normalised
-                if mapping.get(OperatorConstants.Misc.FEATURE_NAME) in available_features
+                if mapping.get(OperatorConstants.Misc.FEATURE_NAME) not in excluded_feature_names
             ]
             if filtered:
                 return filtered

@@ -322,6 +322,49 @@ class TestFeatureMappingResolution:
         )
         assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved
 
+    def test_saved_custom_content_source_absent_from_metadata_is_preserved(self):
+        saved = [
+            {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+            {"feature_name": "body", "mapped_column_name": "text"},
+            {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={
+                OperatorConstants.Columns.DOC_COLUMN: "body",
+                OperatorConstants.Config.FEATURE_MAPPINGS: saved,
+                VB.ADD_SPARSE_VECTOR: True,
+            },
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved[:2]
+
+    def test_saved_custom_sparse_feature_is_dropped(self):
+        saved = [
+            {"feature_name": "content", "mapped_column_name": "text"},
+            {"feature_name": "keyword_vector", "mapped_column_name": "keywords"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={OperatorConstants.Config.FEATURE_MAPPINGS: saved},
+            available_features={
+                **FEATURES,
+                "keyword_vector": {"type": OperatorConstants.Types.TYPE_VECTOR_SPARSE},
+            },
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved[:1]
+
+    def test_saved_sparse_mapping_absent_from_metadata_is_dropped(self):
+        saved = [
+            {"feature_name": "content", "mapped_column_name": "text"},
+            {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={OperatorConstants.Config.FEATURE_MAPPINGS: saved},
+            available_features={name: meta for name, meta in FEATURES.items() if name != "sparse_embeddings"},
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved[:1]
+
     def test_legacy_saved_sparse_mapping_is_dropped(self):
         saved = [
             {"feature_name": "content", "mapped_column_name": "text"},

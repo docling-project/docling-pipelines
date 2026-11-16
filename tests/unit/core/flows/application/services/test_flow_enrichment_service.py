@@ -782,6 +782,53 @@ class TestBuildNodeFeatureMetadataVectorDB:
         assert OperatorConstants.VectorDB.FEATURE_MAPPINGS_RESPONSE not in block
         assert OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE not in block
 
+    @pytest.mark.parametrize(
+        ("provider_name", "client_path"),
+        [
+            (
+                OperatorConstants.VectorDB.OPENSEARCH,
+                "docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearchClient",
+            ),
+            (
+                OperatorConstants.VectorDB.MILVUS,
+                "docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient",
+            ),
+            (
+                OperatorConstants.VectorDB.WEAVIATE,
+                "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateClient",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "provider_settings",
+        [{}, {"provider_config": {}}, {"provider_config": None}, {"provider_config": ""}],
+        ids=["absent", "empty-object", "null", "blank-string"],
+    )
+    def test_unconfigured_provider_values_preserve_projection_without_connecting(
+        self, *, provider_name: str, client_path: str, provider_settings: dict[str, Any]
+    ) -> None:
+        incoming = {
+            "content": _make_feature(),
+            "sparse_embeddings": _make_feature(type_=OperatorConstants.Types.TYPE_VECTOR_SPARSE),
+        }
+        node_result = _make_node_feature_result(
+            inputs=incoming,
+            available=incoming,
+            operator_config={"provider": provider_name, **provider_settings},
+        )
+        original = json.loads(json.dumps(node_result))
+        with patch(client_path) as client_cls:
+            block = self._build(node_result)
+
+        client_cls.assert_not_called()
+        assert node_result == original
+        assert set(block[OperatorConstants.Config.INPUT_FEATURES]) == set(incoming)
+        available = block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert available["content"]["name"] == "content"
+        assert available["content"]["node_id"] == "node-1"
+        assert ("sparse_embeddings" in available) == (provider_name != OperatorConstants.VectorDB.WEAVIATE)
+        assert set(block).isdisjoint(_mf_mod.VectorDBMetadataFetcher._empty_result())
+
     def test_vdb_keys_absent_when_operator_config_missing_entirely(self):
         """VDB keys must be omitted when the node has no operator_config at all."""
         nfr = _make_node_feature_result()
@@ -1127,6 +1174,52 @@ class TestVectorDbSecretResolutionDuringEnrichment:
         ) as fetch:
             _fetch(node_result=node_result)
         fetch.assert_not_called()
+
+    def test_unresolvable_weaviate_key_preserves_projection_without_fetching(self, provider: _FakeProvider) -> None:
+        provider.fail = True
+        reference = _ref("weaviate/key")
+        incoming = {
+            "content": _make_feature(),
+            "sparse_embeddings": _make_feature(type_=OperatorConstants.Types.TYPE_VECTOR_SPARSE),
+        }
+        node_result = _make_node_feature_result(
+            inputs=incoming,
+            available=incoming,
+            operator_config={
+                "provider": OperatorConstants.VectorDB.WEAVIATE,
+                "provider_config": {
+                    "host": "milvus.example.com",
+                    "collection_name": "Docs",
+                    "auth_type": "api_key",
+                    "secure": True,
+                    "api_key": reference,
+                },
+            },
+        )
+        original = json.loads(json.dumps(node_result))
+        service = FlowEnrichmentService.__new__(FlowEnrichmentService)
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateResourceMetadata.fetch"
+            ) as fetch,
+            patch(
+                "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateClient"
+            ) as client_cls,
+        ):
+            block = service._build_node_feature_metadata(
+                node_id="vdb", node_feature_result=node_result, operator_type=OperatorConstants.Operators.VECTORDB
+            )
+
+        fetch.assert_not_called()
+        client_cls.assert_not_called()
+        assert provider.requests == ["weaviate/key"]
+        assert node_result == original
+        assert "sparse_embeddings" not in block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert block[OperatorConstants.Config.AVAILABLE_FEATURES]["content"]["node_id"] == "node-1"
+        assert "sparse_embeddings" in block[OperatorConstants.Config.INPUT_FEATURES]
+        expected_live = _mf_mod.VectorDBMetadataFetcher._empty_result()
+        assert {key: block[key] for key in expected_live} == expected_live
+        assert CANARY not in json.dumps(block)
 
     def test_successful_resolution_connects_with_resolved_values(self, provider: _FakeProvider) -> None:
         node_result = _milvus_node_result(token=_ref("milvus/token"))
