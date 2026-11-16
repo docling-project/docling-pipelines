@@ -68,6 +68,19 @@ class S3SourceAdapter(DocumentSourcePort):
         # most once per unique set of credentials rather than once per document.
         self._account_id_cache: dict[tuple, str | None] = {}
 
+    @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set one S3 object key as the only object to ingest.
+
+        ``file_reference`` is the object key in the bucket already configured
+        on the flow, for example ``invoices/TR-INV_001.pdf``. The ``s3`` and
+        ``ibm_cos`` providers share this adapter. Bucket, endpoint, and
+        credentials stay in ``provider_config`` and are never read from the
+        event. ``fetch_documents`` loads and checks that key, so this method
+        only validates the reference.
+        """
+        provider_config["object_key"] = S3SourceConfig.normalize_object_key(file_reference)
+
     async def fetch_documents(self, config: S3SourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """
         Fetch documents from S3 bucket with batched parallel downloads.
@@ -84,7 +97,7 @@ class S3SourceAdapter(DocumentSourcePort):
         Raises:
             ClientError: If S3 API calls fail
             BotoCoreError: If boto3 encounters errors
-            ValueError: If bucket or credentials are invalid
+            ValueError: If bucket or credentials are invalid, or a configured object key is unavailable
         """
         try:
             # Create S3 client
@@ -93,7 +106,15 @@ class S3SourceAdapter(DocumentSourcePort):
             # Cache AWS account ID once for all operations
             self._cached_account_id = self._get_aws_account_id(config)
 
-            logger.info(f"Streaming S3 objects from bucket '{config.bucket}' with prefix '{config.prefix}' ")
+            if config.object_key:
+                yield await self._fetch_single_object(s3_client=s3_client, config=config)
+                return
+
+            logger.info(
+                "Streaming S3 objects from bucket '%s' with prefix '%s'",
+                config.bucket,
+                config.prefix,
+            )
 
             # Process in batches to avoid loading all objects into memory
             batch_size = config.max_concurrent_downloads * 5  # Process 5x concurrency at a time
@@ -105,7 +126,7 @@ class S3SourceAdapter(DocumentSourcePort):
                     try:
                         return await self._download_s3_object(s3_client, config, s3_obj)
                     except Exception as e:
-                        logger.error(f"Failed to download S3 object {s3_obj['Key']}: {e}", exc_info=True)
+                        logger.exception("Failed to download S3 object %s: %s", s3_obj["Key"], e)
                         return None
 
             fetched_count = 0
@@ -119,7 +140,7 @@ class S3SourceAdapter(DocumentSourcePort):
 
                 # Process batch when it reaches batch_size
                 if len(batch) >= batch_size:
-                    logger.info(f"Processing batch of {len(batch)} objects (total listed: {total_listed})")
+                    logger.info("Processing batch of %d objects (total listed: %d)", len(batch), total_listed)
 
                     # Create tasks for this batch
                     tasks = [download_with_semaphore(obj) for obj in batch]
@@ -136,7 +157,7 @@ class S3SourceAdapter(DocumentSourcePort):
 
             # Process remaining objects in final batch
             if batch:
-                logger.info(f"Processing final batch of {len(batch)} objects (total listed: {total_listed})")
+                logger.info("Processing final batch of %d objects (total listed: %d)", len(batch), total_listed)
                 tasks = [download_with_semaphore(obj) for obj in batch]
 
                 # Gather results in order to maintain deterministic ordering
@@ -147,15 +168,17 @@ class S3SourceAdapter(DocumentSourcePort):
                         yield document
 
             logger.info(
-                f"Completed streaming from S3 bucket '{config.bucket}': "
-                f"listed {total_listed} objects, fetched {fetched_count} documents"
+                "Completed streaming from S3 bucket '%s': listed %d objects, fetched %d documents",
+                config.bucket,
+                total_listed,
+                fetched_count,
             )
 
         except (ClientError, BotoCoreError) as e:
-            logger.error(f"S3 error while fetching documents: {e}", exc_info=True)
+            logger.exception("S3 error while fetching documents: %s", e)
             raise
         except Exception as e:
-            logger.error(f"Unexpected error while fetching documents from S3: {e}", exc_info=True)
+            logger.exception("Unexpected error while fetching documents from S3: %s", e)
             raise
 
     async def test_connection(self, config: S3SourceConfig) -> tuple[bool, str]:
@@ -267,6 +290,11 @@ class S3SourceAdapter(DocumentSourcePort):
             "verify_expected_bucket_owner": provider_config.get("verify_expected_bucket_owner", False),
         }
 
+        # File events set object_key. Leave it unset for a normal bucket scan.
+        object_key = provider_config.get("object_key")
+        if object_key:
+            config_dict["object_key"] = object_key
+
         return S3SourceConfig(**config_dict)
 
     def _create_s3_client(self, config: S3SourceConfig) -> Any:
@@ -338,7 +366,7 @@ class S3SourceAdapter(DocumentSourcePort):
         Yields:
             S3 object metadata dictionaries (filtered)
         """
-        logger.info(f"Listing S3 objects from bucket '{config.bucket}' with prefix '{config.prefix}'")
+        logger.info("Listing S3 objects from bucket '%s' with prefix '%s'", config.bucket, config.prefix)
 
         paginator = s3_client.get_paginator("list_objects_v2")
         pages = paginator.paginate(Bucket=config.bucket, Prefix=config.prefix)
@@ -351,8 +379,11 @@ class S3SourceAdapter(DocumentSourcePort):
             total_listed += len(page_contents)
 
             logger.debug(
-                f"Received S3 page {page_number} with {len(page_contents)} object(s) "
-                f"(total listed: {total_listed}, yielded: {total_yielded})"
+                "Received S3 page %d with %d object(s) (total listed: %d, yielded: %d)",
+                page_number,
+                len(page_contents),
+                total_listed,
+                total_yielded,
             )
 
             if not page_contents:
@@ -366,8 +397,10 @@ class S3SourceAdapter(DocumentSourcePort):
                 yield obj
 
         logger.info(
-            f"Completed listing S3 bucket '{config.bucket}': "
-            f"listed {total_listed} objects, yielded {total_yielded} after filtering"
+            "Completed listing S3 bucket '%s': listed %d objects, yielded %d after filtering",
+            config.bucket,
+            total_listed,
+            total_yielded,
         )
 
     def _should_skip_object(self, obj: dict[str, Any], config: S3SourceConfig) -> bool:
@@ -395,7 +428,7 @@ class S3SourceAdapter(DocumentSourcePort):
         # Skip files exceeding max size
         max_size_bytes = config.get_max_file_size_bytes()
         if max_size_bytes and size > max_size_bytes:
-            logger.debug(f"Skipping {key}: size {size} exceeds max {max_size_bytes} bytes")
+            logger.debug("Skipping %s: size %d exceeds max %s bytes", key, size, max_size_bytes)
             return True
 
         # Skip hidden files/directories
@@ -413,7 +446,7 @@ class S3SourceAdapter(DocumentSourcePort):
             filename = Path(key).name
             for pattern in config.exclude_patterns:
                 if fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(key, pattern):
-                    logger.debug(f"Skipping {key}: matches exclude pattern '{pattern}'")
+                    logger.debug("Skipping %s: matches exclude pattern '%s'", key, pattern)
                     return True
 
         return False
@@ -430,6 +463,46 @@ class S3SourceAdapter(DocumentSourcePort):
         """
         path_parts = key.split("/")
         return any(part.startswith(".") and part not in [".", ".."] for part in path_parts)
+
+    async def _fetch_single_object(self, *, s3_client: Any, config: S3SourceConfig) -> Document:
+        """Fetch the one object named by ``config.object_key``.
+
+        HeadObject addresses that key only, so a configured prefix cannot
+        widen the result to other objects. A missing or unreadable key raises
+        ``ValueError``. The message and log record the key and error code,
+        never credentials or the endpoint.
+        """
+        key = config.object_key
+        if not key:
+            raise ValueError("File reference must be a non-empty S3 object key")
+
+        head_kwargs: dict[str, Any] = {"Bucket": config.bucket, "Key": key}
+        if self._cached_account_id:
+            head_kwargs["ExpectedBucketOwner"] = self._cached_account_id
+
+        logger.info("Fetching single S3 object: key=%s", key)
+        try:
+            head = s3_client.head_object(**head_kwargs)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+            # Drop the client exception. Its text can include the endpoint.
+            logger.error("S3 object key is not available: key=%s error_code=%s", key, error_code)
+            raise ValueError(f"S3 object key is not available: {key}") from None
+        except BotoCoreError:
+            logger.error("S3 object key is not available: key=%s", key)
+            raise ValueError(f"S3 object key is not available: {key}") from None
+
+        s3_obj = {
+            "Key": key,
+            "Size": head.get("ContentLength", 0),
+            "LastModified": head.get("LastModified"),
+            "ETag": head.get("ETag", ""),
+            "StorageClass": head.get("StorageClass", "STANDARD"),
+        }
+        document = await self._download_s3_object(s3_client, config, s3_obj)
+        if document is None:
+            raise ValueError(f"S3 object key is not available: {key}")
+        return document
 
     async def _download_s3_object(
         self, s3_client: Any, config: S3SourceConfig, s3_obj: dict[str, Any]
@@ -497,15 +570,15 @@ class S3SourceAdapter(DocumentSourcePort):
                 },
             )
 
-            logger.debug(f"Created document metadata for S3 object: {key} ({size} bytes)")
+            logger.debug("Created document metadata for S3 object: %s (%d bytes)", key, size)
             return document
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            logger.error(f"Failed to get metadata for {key}: S3 error ({error_code}): {e}")
+            logger.error("Failed to get metadata for %s: S3 error (%s): %s", key, error_code, e)
             return None
         except Exception as e:
-            logger.error(f"Failed to process {key}: {e}", exc_info=True)
+            logger.exception("Failed to process %s: %s", key, e)
             return None
 
     def fetch_binary_content(
@@ -587,11 +660,11 @@ class S3SourceAdapter(DocumentSourcePort):
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            logger.error(f"S3 ClientError ({error_code}) fetching {source_id}: {e}")
+            logger.error("S3 ClientError (%s) fetching %s: %s", error_code, source_id, e)
             return None
         except BotoCoreError as e:
-            logger.error(f"S3 BotoCoreError fetching {source_id}: {e}")
+            logger.error("S3 BotoCoreError fetching %s: %s", source_id, e)
             return None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching binary content from S3 {source_id}: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Unexpected error fetching binary content from S3 %s", source_id)
             return None
