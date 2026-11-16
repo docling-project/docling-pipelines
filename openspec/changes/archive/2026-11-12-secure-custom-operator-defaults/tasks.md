@@ -27,4 +27,4 @@
 
 - [x] 5.1 [backend] Run `ruff format --check`, `ruff check` and `mypy` on touched files, then the full unit suite.
 - [x] 5.2 [backend] Run `openspec validate secure-custom-operator-defaults --strict`.
-- [ ] 5.3 [backend] After review and merge, run `openspec archive secure-custom-operator-defaults`.
+- [x] 5.3 [backend] After review and merge, run `openspec archive secure-custom-operator-defaults`.

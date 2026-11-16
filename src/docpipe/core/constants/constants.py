@@ -119,6 +119,10 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    # Stands in for every vault:// reference while a flow is validated. A plain string (pydantic
+    # turns str subclasses back into str) that passes the non-empty and http(s) URL checks of
+    # secret-capable fields. No provider is contacted and nothing is resolved.
+    VALIDATION_SECRET_SENTINEL = "https://vault-reference.invalid"  # nosec B105  # pragma: allowlist secret
     VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
@@ -367,7 +371,6 @@ class EnvironmentVariables:
     TRANSFORMERS_OFFLINE = "TRANSFORMERS_OFFLINE"
 
     DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
-    DOCPIPE_API_BASE_URL = "DOCPIPE_API_BASE_URL"
     KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
     KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
     KAFKA_GROUP_ID = "KAFKA_GROUP_ID"

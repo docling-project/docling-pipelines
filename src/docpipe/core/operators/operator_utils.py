@@ -40,6 +40,7 @@ from docpipe.exceptions.docpipe_exceptions import (
 )
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.docling.converter_pool import get_docling_pool, options_fingerprint
+from docpipe.integrations.secrets.secret_value import SecretValue
 from docpipe.utils.infrastructure.logging import get_logger
 
 status_codes = {
@@ -224,6 +225,8 @@ def get_supported_file_extensions() -> str:
 
 
 def resolve_env_var(value: Any) -> Any:
+    if isinstance(value, SecretValue):
+        return value
     if not isinstance(value, str):
         return value
     if value.startswith("${") and value.endswith("}"):

@@ -161,6 +161,30 @@ class VectorStoreFactory:
             ) from e
 
     @classmethod
+    def get_adapter_class(cls, adapter_name: str) -> type[VectorStorePort]:
+        """Return the adapter class registered under ``adapter_name`` without instantiating it.
+
+        A lazily registered adapter is imported on first use.
+
+        Raises:
+            DocpipeException: If adapter_name is not registered or cannot be loaded
+        """
+        if adapter_name in cls._adapters:
+            return cls._adapters[adapter_name]
+        if adapter_name in cls._lazy_adapters:
+            return cls._load_lazy_adapter(adapter_name)
+        available_eager = list(cls._adapters.keys())
+        available_lazy = list(cls._lazy_adapters.keys())
+        all_available = sorted(set(available_eager + available_lazy))
+        available_str = ", ".join(all_available) if all_available else "none"
+
+        raise DocpipeException(
+            message=f"Unknown vector store adapter: '{adapter_name}'. Available adapters: {available_str}",
+            status_code=400,
+            error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+        )
+
+    @classmethod
     def create(cls, adapter_name: str, **config: Any) -> VectorStorePort:
         """Create a vector store adapter instance.
 
@@ -177,24 +201,7 @@ class VectorStoreFactory:
         Raises:
             DocpipeException: If adapter_name is not registered or cannot be loaded
         """
-        # Check if adapter is already loaded
-        if adapter_name in cls._adapters:
-            adapter_class = cls._adapters[adapter_name]
-        # Check if adapter is registered for lazy loading
-        elif adapter_name in cls._lazy_adapters:
-            adapter_class = cls._load_lazy_adapter(adapter_name)
-        else:
-            # Adapter not found in either registry
-            available_eager = list(cls._adapters.keys())
-            available_lazy = list(cls._lazy_adapters.keys())
-            all_available = sorted(set(available_eager + available_lazy))
-            available_str = ", ".join(all_available) if all_available else "none"
-
-            raise DocpipeException(
-                message=f"Unknown vector store adapter: '{adapter_name}'. Available adapters: {available_str}",
-                status_code=400,
-                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
-            )
+        adapter_class = cls.get_adapter_class(adapter_name)
 
         logger.debug("Creating vector store adapter: %s", adapter_name)
 

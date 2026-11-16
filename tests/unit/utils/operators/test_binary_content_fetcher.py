@@ -1,7 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for binary_content_fetcher utility."""
 
 import zipfile
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestGetBinaryContentLocalFile:
@@ -210,3 +215,131 @@ class TestGetAdapterForProvider:
             )
 
         assert result is None
+
+
+class TestFetchResolvesIngestNodeReferences:
+    """The fetch resolves the ingest node's own references, once per run (design D6, task B.4)."""
+
+    CANARY = "CANARY_FETCH_SECRET_77777"  # pragma: allowlist secret
+    REFERENCE = "vault://fake/s3/creds#secret_key"  # pragma: allowlist secret
+
+    @staticmethod
+    def _global_config(*, run_id: str = "run-1") -> dict:
+        ingest_node = {
+            "id": "ingest_node",
+            "name": "ingest_a",
+            "operator": "ingest_source",
+            "config": {
+                "provider": "s3",
+                "provider_config": {
+                    "bucket": "my-bucket",
+                    "access_key": "AKIA",  # pragma: allowlist secret
+                    "secret_key": TestFetchResolvesIngestNodeReferences.REFERENCE,
+                },
+            },
+        }
+        return {
+            "job_run_id": run_id,
+            "flow_definition": {"dag": [ingest_node]},
+            "ingest_source": {
+                "provider": "s3",
+                "node_id": "ingest_node",
+                "node_name": "ingest_a",
+                "provider_config": {},
+            },
+        }
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self):
+        from docpipe.integrations.secrets.secret_provider import clear_providers
+        from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
+        from docpipe.utils.operators.binary_content_fetcher import clear_fetch_caches
+
+        clear_providers()
+        clear_fetch_caches()
+        yield
+        clear_providers()
+        clear_fetch_caches()
+        DocpipeConfigLoader.reset()
+
+    def _register(self, *, allow: bool = True):
+        from docpipe.integrations.secrets.secret_provider import register_provider
+        from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
+        from tests.unit.integrations.secrets.test_resolver import RecordingProvider
+
+        fake = RecordingProvider(secrets={"s3/creds": {"secret_key": self.CANARY}})
+        register_provider(name="fake", provider=fake)
+        if allow:
+            DocpipeConfigLoader._config = {"secrets": {"vault": {"allowed_paths": ["*:**"]}}}
+        return fake
+
+    def _fetch(self, *, global_config: dict, adapter: MagicMock, source_id: str = "docs/a.pdf"):
+        from docpipe.utils.operators.binary_content_fetcher import get_binary_content
+
+        with (
+            patch(
+                "docpipe.utils.operators.binary_content_fetcher.SourceAdapterFactory.is_registered",
+                return_value=True,
+            ),
+            patch(
+                "docpipe.utils.operators.binary_content_fetcher.SourceAdapterFactory.create",
+                return_value=adapter,
+            ) as create,
+        ):
+            result = get_binary_content(doc_metadata={"source_id": source_id}, global_config=global_config)
+        return result, create
+
+    def test_adapter_receives_plain_resolved_value(self):
+        fake = self._register()
+        adapter = MagicMock()
+        adapter.fetch_binary_content.return_value = b"data"
+
+        result, _ = self._fetch(global_config=self._global_config(), adapter=adapter)
+
+        assert result == b"data"
+        provider_config = adapter.fetch_binary_content.call_args.kwargs["provider_config"]
+        assert provider_config["secret_key"] == self.CANARY
+        assert type(provider_config["secret_key"]) is str
+        assert fake.calls == [("s3/creds", "secret_key")]
+
+    def test_second_document_makes_no_second_provider_call(self):
+        fake = self._register()
+        adapter = MagicMock()
+        adapter.fetch_binary_content.return_value = b"data"
+        global_config = self._global_config()
+
+        _, first_create = self._fetch(global_config=global_config, adapter=adapter, source_id="docs/a.pdf")
+        _, second_create = self._fetch(global_config=global_config, adapter=adapter, source_id="docs/b.pdf")
+
+        assert len(fake.calls) == 1
+        assert first_create.call_count == 1
+        assert second_create.call_count == 0
+
+    def test_caches_do_not_cross_runs(self):
+        fake = self._register()
+        adapter = MagicMock()
+        adapter.fetch_binary_content.return_value = b"data"
+
+        self._fetch(global_config=self._global_config(run_id="run-1"), adapter=adapter)
+        self._fetch(global_config=self._global_config(run_id="run-2"), adapter=adapter)
+
+        assert len(fake.calls) == 2
+
+    def test_fetch_is_denied_by_default(self):
+        from docpipe.integrations.secrets.resolver import SecretResolutionError
+
+        fake = self._register(allow=False)
+
+        with pytest.raises(SecretResolutionError, match="not permitted"):
+            self._fetch(global_config=self._global_config(), adapter=MagicMock())
+
+        assert fake.calls == []
+
+    def test_global_config_never_holds_the_resolved_value(self):
+        self._register()
+        adapter = MagicMock()
+        global_config = self._global_config()
+
+        self._fetch(global_config=global_config, adapter=adapter)
+
+        assert self.CANARY not in repr(global_config)

@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for operator resolution, failure handling and release in PythonOperatorExecutor."""
 
 import logging
 from collections.abc import Iterator
 from typing import Any
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
@@ -210,13 +214,16 @@ class TestRelease:
 
         assert isinstance(executor.get_operator(), NOOPOperator)
 
-    def test_release_drops_operator_without_cleanup(self) -> None:
-        """An operator without ``cleanup()`` is dropped so the next ``get_operator()`` rebuilds it."""
+    def test_release_drops_operator_with_default_cleanup(self) -> None:
+        """The inherited no-op cleanup hook runs before the executor drops its operator."""
         executor = _make_executor(OperatorConstants.Operators.NOOP)
         first = executor.get_operator()
-        assert not hasattr(first, "cleanup")
+        assert type(first).cleanup is AbstractOperator.cleanup
 
-        executor.release()
+        with patch.object(first, "cleanup", wraps=first.cleanup) as cleanup:
+            executor.release()
+
+        cleanup.assert_called_once_with()
 
         rebuilt = executor.get_operator()
         assert isinstance(rebuilt, NOOPOperator)
