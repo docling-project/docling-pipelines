@@ -341,6 +341,19 @@ class TestTransportGate:
         assert "loopback" in caplog.text
         assert "vault-canary-host" not in caplog.text
 
+    def test_address_with_credentials_not_registered_and_never_logged(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="docpipe")
+        provider = self._provider(addr="https://vault-user:vault-canary-pw@vault-canary-host.internal:8200")
+
+        _run(env=self._ENV, provider=provider)
+
+        assert get_provider(name="hashicorp") is None
+        provider.is_available.assert_not_called()
+        assert "must not contain credentials" in caplog.text
+        assert "vault-canary-pw" not in caplog.text
+        assert "vault-user" not in caplog.text
+        assert "vault-canary-host" not in caplog.text
+
     def test_loopback_plaintext_with_skip_verify_registered(self):
         provider = self._provider(addr="http://127.0.0.1:8200", skip_verify=True)
 

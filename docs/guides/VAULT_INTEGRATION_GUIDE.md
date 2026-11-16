@@ -190,7 +190,7 @@ Environment variables override file configuration:
 | `VAULT_TOKEN` | Token for token-based auth | `""` |
 | `VAULT_TIMEOUT` | Request timeout in seconds | `30` |
 
-**Transport rules.** `VAULT_ADDR` must use `https` unless the host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`). `VAULT_TLS_SKIP_VERIFY` is honored only for a loopback address; with any other host the provider is not registered and a server-side log line says why. Redirects are never followed, requests use bounded connect and read timeouts, error messages never include the Vault address or transport exception text, and neither error messages nor logs include a response body. The Vault initializer's startup log lines still name the configured address server-side, so do not embed credentials in `VAULT_ADDR`.
+**Transport rules.** `VAULT_ADDR` must use `https` unless the host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`). `VAULT_TLS_SKIP_VERIFY` is honored only for a loopback address; with any other host the provider is not registered and a server-side log line says why. Redirects are never followed, requests use bounded connect and read timeouts, error messages never include the Vault address or transport exception text, and neither error messages nor logs include a response body. `VAULT_ADDR` must not contain credentials (`user:password@host`); such an address is refused and the provider is not registered, so a credential can never reach a log line or request URL. The Vault initializer's startup log lines still name the configured address server-side.
 
 ---
 
@@ -300,7 +300,7 @@ The web UI canvas provides interactive support for `vault://` URIs through the `
 | Symptom | Cause | Solution |
 |---|---|---|
 | `Vault AppRole login failed: connection failed` (or `Vault secret read failed (kv2): connection failed`) | Vault server unreachable. Messages name a category only and omit the address | Verify Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
-| `Vault provider will not be registered - unsafe transport configuration` | Plaintext `http` to a non-loopback host, or `VAULT_TLS_SKIP_VERIFY` with a non-loopback host | Use an `https` `VAULT_ADDR`; reserve `VAULT_TLS_SKIP_VERIFY` for loopback development |
+| `Vault provider will not be registered - unsafe transport configuration` | Plaintext `http` to a non-loopback host, `VAULT_TLS_SKIP_VERIFY` with a non-loopback host, or credentials (`user:password@`) in `VAULT_ADDR` | Use an `https` `VAULT_ADDR` without credentials; reserve `VAULT_TLS_SKIP_VERIFY` for loopback development |
 | `Key 'api_key' not found at vault path 'docpipe/embeddings'` | Secret key name or path mismatch | Check secret contents with `vault kv get secret/docpipe/embeddings` |
 | `VAULT_URI_MALFORMED` / `malformed reference` | The value contains `vault://` but is not exactly one valid reference (truncated, embedded in a longer string, `.` or `..` or empty path segment, whitespace, over 1024 characters). It is rejected, never used as a literal, and never echoed | Use the whole value `vault://<provider>/<path>[#<key>]` |
 | `Unregistered vault provider 'hashicorp'` | Vault provider not enabled | Set `VAULT_ENABLED=true` or update `docling-pipelines-config.yaml` |

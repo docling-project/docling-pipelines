@@ -151,8 +151,10 @@ class HashiCorpVaultConfig:
         """Validate that the address and TLS settings are safe to use.
 
         ``https`` is required unless the address is loopback, and
-        ``tls_skip_verify`` is honored only for a loopback address. Messages are
-        fixed strings that never include the address.
+        ``tls_skip_verify`` is honored only for a loopback address. Userinfo
+        (``user:password@``) in the address is refused so a credential never
+        reaches a log line or a request URL. Messages are fixed strings that
+        never include the address.
 
         Raises:
             ConfigurationError: If the address or TLS settings are not permitted.
@@ -165,6 +167,9 @@ class HashiCorpVaultConfig:
             parsed = urlparse("")
         if parsed.scheme not in ("http", "https") or not host:
             msg = "VAULT_ADDR must be an http(s) URL with a host."
+            raise ConfigurationError(msg)
+        if "@" in parsed.netloc:
+            msg = "VAULT_ADDR must not contain credentials (user:password@host)."
             raise ConfigurationError(msg)
 
         loopback = _is_loopback_host(host)

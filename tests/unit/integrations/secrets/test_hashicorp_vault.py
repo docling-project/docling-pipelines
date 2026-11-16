@@ -738,6 +738,22 @@ class TestVaultTransportValidation:
         assert _ADDR_CANARY not in str(exc_info.value)
         assert "10.0.0.5" not in str(exc_info.value)
 
+    @pytest.mark.parametrize(
+        "addr",
+        [
+            f"https://user:{_ADDR_CANARY}@vault.internal:8200",
+            f"https://{_ADDR_CANARY}@vault.internal:8200",
+            f"https://:{_ADDR_CANARY}@vault.internal:8200",
+            f"http://user:{_ADDR_CANARY}@127.0.0.1:8200",
+            "https://@vault.internal:8200",
+        ],
+    )
+    def test_address_with_userinfo_refused_without_echo(self, addr: str) -> None:
+        with pytest.raises(ConfigurationError, match="credentials") as exc_info:
+            self._config(addr=addr).validate_transport()
+        assert _ADDR_CANARY not in str(exc_info.value)
+        assert "vault.internal" not in str(exc_info.value)
+
     @pytest.mark.parametrize("addr", ["https://vault.internal:8200", "http://vault.internal:8200", "https://10.0.0.5"])
     def test_skip_verify_on_remote_host_refused(self, addr: str) -> None:
         with pytest.raises(ConfigurationError, match="loopback"):
