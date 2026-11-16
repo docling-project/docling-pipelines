@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Shared PostgreSQL plumbing for the asset metadata and attachment repositories.
 
 Holds the SQLAlchemy table definitions, a process-wide engine cache, and the
@@ -73,15 +76,15 @@ class PostgresAssetTables:
 
 
 class PostgresStorageUtils:
-    """Engine cache, table registry and schema bootstrap for asset repositories.
+    """Engine access, table registry and schema bootstrap for asset repositories.
 
-    All state is class-level so that every repository instance in a process
+    Engines come from ``get_shared_postgres_engine``, so every repository instance
+    in a process, and every other PostgreSQL component with the same settings,
     shares one connection pool per distinct connection configuration. This
     matters because ``DocumentSetOperator`` builds its repositories on every
     ``transform()`` call.
     """
 
-    _engines: ClassVar[dict[tuple[str, int, int, int], Engine]] = {}
     _tables: ClassVar[dict[str, PostgresAssetTables]] = {}
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
@@ -142,7 +145,7 @@ class PostgresStorageUtils:
     def get_engine(cls, *, config: dict[str, Any], owner: str) -> Engine:
         """Return a cached SQLAlchemy engine for the given repository config.
 
-        Reuses the job stats connection helpers so that the YAML keys, the
+        Uses the shared PostgreSQL connection helpers so that the YAML keys, the
         ``DOCPIPE_POSTGRES_*`` environment fallbacks and the pool settings behave
         identically for every PostgreSQL-backed component.
 
@@ -157,34 +160,16 @@ class PostgresStorageUtils:
             RepositoryConfigurationException: If no PostgreSQL password is configured.
             PostgresConnectionException: If the database cannot be reached.
         """
-        from docpipe.core.job_management.adapters.stores.postgres.database import (
-            create_postgres_engine,
-            get_postgres_connection_string,
-        )
+        from docpipe.storage.postgres.connection import get_shared_postgres_engine
 
-        section = cls.get_postgres_section(config=config)
-        engine_config = {DocpipeConfigKeys.POSTGRES: section}
-        connection_string = get_postgres_connection_string(config=engine_config)
-        if not connection_string:
+        engine = get_shared_postgres_engine(postgres=cls.get_postgres_section(config=config), owner=owner)
+        if engine is None:
             raise RepositoryConfigurationException(
                 f"PostgreSQL connection is not configured for {owner}: set 'postgres.password' in the "
                 "repository config (docling-pipelines-config.yaml) or the DOCPIPE_POSTGRES_PASSWORD "
                 "environment variable",
                 repository_type=_POSTGRES_REPOSITORY_TYPE,
             )
-
-        cache_key = (
-            connection_string,
-            int(section.get(DocpipeConfigKeys.POOL_SIZE, 5)),
-            int(section.get(DocpipeConfigKeys.MAX_OVERFLOW, 10)),
-            int(section.get(DocpipeConfigKeys.POOL_TIMEOUT, 30)),
-        )
-        with cls._lock:
-            engine = cls._engines.get(cache_key)
-            if engine is None:
-                engine = create_postgres_engine(connection_string=connection_string, config=engine_config)
-                cls._engines[cache_key] = engine
-                logger.info("Created PostgreSQL engine for asset storage: %s", cls.describe_engine(engine=engine))
         return engine
 
     @classmethod
@@ -242,12 +227,10 @@ class PostgresStorageUtils:
 
     @classmethod
     def dispose_engines(cls) -> None:
-        """Dispose and forget every cached engine (used on shutdown and in tests)."""
-        with cls._lock:
-            engines = list(cls._engines.values())
-            cls._engines.clear()
-        for engine in engines:
-            engine.dispose()
+        """Dispose and forget every shared PostgreSQL engine (used on shutdown and in tests)."""
+        from docpipe.storage.postgres.connection import dispose_shared_postgres_engines
+
+        dispose_shared_postgres_engines()
 
     @staticmethod
     def _build_tables(*, schema: str) -> PostgresAssetTables:

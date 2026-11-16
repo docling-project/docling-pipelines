@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom exception types for docpipe flow validation and execution."""
 
 from json import JSONEncoder
@@ -931,11 +934,23 @@ class CustomOperatorInvalidDataException(DocpipeException):
         self.field_name = field_name
 
 
+class CustomOperatorsDisabledException(DocpipeException):
+    """Exception raised when a custom operator upload is refused because custom operators are disabled."""
+
+    def __init__(self, *, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=409,
+            error_code=ErrorCode.CUSTOM_OPERATORS_DISABLED,
+        )
+
+
 __all__ = [
     "ConfigurationError",
     "CustomOperatorAlreadyExistsException",
     "CustomOperatorInvalidDataException",
     "CustomOperatorNotFoundException",
+    "CustomOperatorsDisabledException",
     "DatabaseMigrationException",
     "DependencyError",
     "DocpipeException",

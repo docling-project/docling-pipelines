@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating vector store adapters with lazy loading support.
 
 This factory enables automatic registration of vector store adapters through decorators
@@ -67,12 +70,12 @@ class VectorStoreFactory:
         adapter_name = adapter_class.ADAPTER_NAME
 
         if adapter_name in cls._adapters:
-            logger.warning(f"Adapter '{adapter_name}' is already registered. Overwriting.")
+            logger.warning("Adapter '%s' is already registered. Overwriting.", adapter_name)
 
         cls._adapters[adapter_name] = adapter_class
         # Remove from lazy registry if it was there
         cls._lazy_adapters.pop(adapter_name, None)
-        logger.debug(f"Registered vector store adapter: {adapter_name}")
+        logger.debug("Registered vector store adapter: %s", adapter_name)
 
         return adapter_class
 
@@ -96,11 +99,11 @@ class VectorStoreFactory:
             )
         """
         if adapter_name in cls._adapters:
-            logger.warning(f"Adapter '{adapter_name}' is already eagerly registered. Skipping lazy registration.")
+            logger.warning("Adapter '%s' is already eagerly registered. Skipping lazy registration.", adapter_name)
             return
 
         cls._lazy_adapters[adapter_name] = (module_path, class_name)
-        logger.debug(f"Registered lazy vector store adapter: {adapter_name}")
+        logger.debug("Registered lazy vector store adapter: %s", adapter_name)
 
     @classmethod
     def _load_lazy_adapter(cls, adapter_name: str) -> type[VectorStorePort]:
@@ -125,7 +128,7 @@ class VectorStoreFactory:
         module_path, class_name = cls._lazy_adapters[adapter_name]
 
         try:
-            logger.debug(f"Lazy loading adapter '{adapter_name}' from {module_path}.{class_name}")
+            logger.debug("Lazy loading adapter '%s' from %s.%s", adapter_name, module_path, class_name)
             module = importlib.import_module(module_path)
             adapter_class = getattr(module, class_name)
 
@@ -136,7 +139,7 @@ class VectorStoreFactory:
             cls._adapters[adapter_name] = adapter_class
             cls._lazy_adapters.pop(adapter_name, None)
 
-            logger.info(f"Successfully loaded lazy adapter: {adapter_name}")
+            logger.info("Successfully loaded lazy adapter: %s", adapter_name)
             return adapter_class
 
         except ImportError as e:
@@ -193,10 +196,13 @@ class VectorStoreFactory:
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             )
 
-        logger.debug(f"Creating vector store adapter: {adapter_name}")
+        logger.debug("Creating vector store adapter: %s", adapter_name)
 
         try:
             return adapter_class(**config)
+        except DocpipeException:
+            # Already a docpipe exception with its own status/error code and message: do not wrap it again.
+            raise
         except Exception as e:
             raise DocpipeException(
                 message=f"Failed to create vector store adapter '{adapter_name}': {e!s}",

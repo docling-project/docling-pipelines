@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobManagementService - High-level API for job management operations.
 
@@ -8,10 +11,12 @@ coordinating between JobStatsService and JobRunManager.
 import json
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any
 
 from docpipe.core.assets.flows.application.services import FlowService
 from docpipe.core.constants.constants import (
+    TERMINAL_JOB_STATUSES,
     DocpipeConstants,
     ExecutionStatus,
     OrchestratorType,
@@ -27,6 +32,23 @@ from docpipe.exceptions.docpipe_exceptions import (
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
+
+
+def _compute_elapsed_seconds(job_run: JobStats) -> int:
+    """Return the run duration in seconds, computed live for runs still in progress.
+
+    The stored ``duration`` is only written when a run ends, so in-progress runs
+    would otherwise report 0 until completion.
+    """
+    if job_run.duration > 0 or job_run.start_time <= 0:
+        return job_run.duration
+    if job_run.end_time > 0:
+        return max(0, job_run.end_time - job_run.start_time)
+    if job_run.status in TERMINAL_JOB_STATUSES:
+        # Finished without a recorded end time: no way to know the real duration,
+        # and measuring against "now" would make it grow forever.
+        return 0
+    return max(0, int(datetime.now(tz=UTC).timestamp()) - job_run.start_time)
 
 
 def _extract_flow_name_from_snapshot(flow_def: dict[str, Any]) -> str | None:
@@ -312,6 +334,7 @@ class JobManagementService:
                     DocpipeConstants.ORCHESTRATOR,
                 }
             )
+            item[DocpipeConstants.DURATION] = _compute_elapsed_seconds(job_run)
             # Prefer the snapshot stored at run creation time (new rows).
             # Backward compatibility: for rows created before this fix, flow_name is None.
             # Fall back to the saved flow definition snapshot to recover the name.

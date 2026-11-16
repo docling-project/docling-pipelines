@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Utility functions for fetching binary content from documents on-demand.
 
 This module provides functions to fetch binary content on-demand, supporting both:
@@ -7,14 +10,20 @@ This module provides functions to fetch binary content on-demand, supporting bot
 The on-demand fetching strategy allows operators to defer binary content fetching until
 it's actually needed, reducing memory usage and improving performance.
 
-Adapter instances are cached at module level keyed by provider name so that a single
-authenticated client is reused across all documents in a batch, avoiding a new auth
-round-trip per document.
+Credentials are not read from shared configuration. ``global_config["ingest_source"]``
+carries only non-secret source facts; the ingest node's own configuration (references
+included) is looked up in the flow definition and resolved here, at fetch time, through
+the shared resolver (design D6). The resolved provider configuration and the adapter are
+cached per run, keyed by a digest of the unresolved configuration, so a single
+authenticated client is reused across all documents and the provider is asked once.
 """
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
+from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import (
     SourceAdapterFactory,
@@ -25,10 +34,90 @@ from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Module-level cache: provider name → adapter instance.
-# Adapter instances hold their own per-session auth caches (tokens, Drive services,
-# Box clients) so reusing them across documents eliminates repeated auth round-trips.
+# Module-level caches, scoped to one job run. Adapter instances hold their own
+# per-session auth caches (tokens, Drive services, Box clients), so reusing them across
+# documents removes repeated auth round-trips. The key is a digest of the UNRESOLVED
+# configuration (reference text, never a secret value) plus the provider name.
 _adapter_cache: dict[str, DocumentSourcePort] = {}
+_provider_config_cache: dict[str, dict[str, Any]] = {}
+_cache_run_id: str | None = None
+
+
+def clear_fetch_caches() -> None:
+    """Drop the cached adapters and resolved provider configurations."""
+    _adapter_cache.clear()
+    _provider_config_cache.clear()
+
+
+def _scope_caches_to_run(*, run_id: str | None) -> None:
+    """Clear the caches when a different job run starts, so a resolved value never outlives its run."""
+    global _cache_run_id
+    if run_id != _cache_run_id:
+        clear_fetch_caches()
+        _cache_run_id = run_id
+
+
+def _find_ingest_node_config(*, global_config: dict[str, Any], ingest_source: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the ingest node's own configuration from the flow definition, or None when absent."""
+    node_id = ingest_source.get(DocpipeConstants.NODE_ID)
+    flow_definition = global_config.get(DocpipeConstants.FLOW_DEFINITION)
+    dag = flow_definition.get(DocpipeConstants.DAG) if isinstance(flow_definition, dict) else None
+    if not node_id or not isinstance(dag, list):
+        return None
+    for node in dag:
+        if isinstance(node, dict) and node.get(OperatorConstants.Columns.ID) == node_id:
+            config = node.get(OperatorConstants.Config.CONFIG)
+            return config if isinstance(config, dict) else None
+    return None
+
+
+def _resolve_ingest_provider_config(
+    *, global_config: dict[str, Any], ingest_source: dict[str, Any], provider: str
+) -> tuple[dict[str, Any], str]:
+    """Resolve the ingest node's own provider configuration for one fetch.
+
+    The configuration comes from the ingest node in the flow definition, so references are
+    resolved for the node that owns them and not from shared configuration. Values that
+    came from a reference are used exactly as stored; ``$VAR`` forms are expanded only in
+    values that did not.
+
+    Returns:
+        The plain provider configuration and the digest that identifies it in the caches.
+    """
+    from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
+    from docpipe.core.operators.operator_utils import resolve_env_var
+    from docpipe.integrations.secrets.node_config import resolve_operator_config, reveal_secret_values
+    from docpipe.integrations.secrets.secret_value import SecretValue
+
+    node_config = _find_ingest_node_config(global_config=global_config, ingest_source=ingest_source)
+    if node_config is not None:
+        provider_config = dict(node_config.get(OperatorConstants.Config.PROVIDER_CONFIG) or {})
+    else:
+        provider_config = dict(ingest_source.get(OperatorConstants.Config.PROVIDER_CONFIG) or {})
+
+    run_id = global_config.get(DocpipeConstants.JOB_RUN_ID)
+    _scope_caches_to_run(run_id=str(run_id) if run_id else None)
+    digest = hashlib.sha256(
+        json.dumps([provider, provider_config], sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    cached = _provider_config_cache.get(digest)
+    if cached is not None:
+        return cached, digest
+
+    resolved = resolve_operator_config(
+        operator_class=IngestSourceOperator,
+        config={
+            OperatorConstants.Columns.NAME: str(ingest_source.get(DocpipeConstants.NODE_NAME) or "ingest_source"),
+            OperatorConstants.Config.PROVIDER: provider,
+            OperatorConstants.Config.PROVIDER_CONFIG: provider_config,
+        },
+    )[OperatorConstants.Config.PROVIDER_CONFIG]
+    expanded = {key: resolve_env_var(value) if isinstance(value, str) else value for key, value in resolved.items()}
+    plain: dict[str, Any] = reveal_secret_values(config=expanded)
+    if any(isinstance(value, SecretValue) for value in plain.values()):  # pragma: no cover - defensive
+        raise RuntimeError("provider configuration still holds an unrevealed secret")
+    _provider_config_cache[digest] = plain
+    return plain, digest
 
 
 def get_binary_content(
@@ -103,6 +192,7 @@ def get_binary_content(
         return _fetch_from_cloud_source(
             doc_metadata=doc_metadata,
             ingest_source=ingest_source,
+            global_config=global_config,
         )
     logger.debug("Using local filesystem for '%s'", doc_name)
     return _read_from_local_file(doc_metadata=doc_metadata)
@@ -145,6 +235,7 @@ def _fetch_from_cloud_source(
     *,
     doc_metadata: dict[str, Any],
     ingest_source: dict[str, Any],
+    global_config: dict[str, Any] | None = None,
 ) -> bytes | None:
     """
     Fetch binary content from cloud source using dynamic adapter lookup.
@@ -154,15 +245,14 @@ def _fetch_from_cloud_source(
 
     Args:
         doc_metadata: Document metadata with source_id or path
-        ingest_source: Ingest source configuration with provider and provider_config
+        ingest_source: Non-secret source facts: provider, ingest node id, naming fields
+        global_config: Shared configuration; carries the flow definition used to find the
+            ingest node's own configuration
 
     Returns:
         Binary content as bytes, or None if not found or error occurred
     """
-    from docpipe.core.operators.operator_utils import resolve_env_var
-
     provider = ingest_source.get(OperatorConstants.Config.PROVIDER)
-    provider_config: dict[str, Any] = dict(ingest_source.get(OperatorConstants.Config.PROVIDER_CONFIG) or {})
 
     if not provider:
         logger.error("Missing '%s' in ingest_source configuration", OperatorConstants.Config.PROVIDER)
@@ -174,10 +264,15 @@ def _fetch_from_cloud_source(
         logger.error("Document metadata missing 'source_id', 'source', or 'path'")
         return None
 
-    # Resolve environment variables in provider_config values
-    resolved_provider_config: dict[str, Any] = {}
-    for key, value in provider_config.items():
-        resolved_provider_config[key] = resolve_env_var(value) if isinstance(value, str) else value
+    if not SourceAdapterFactory.is_registered(provider):
+        logger.error("No adapter registered for provider: %s", provider)
+        return None
+
+    # Resolve the ingest node's own references, then work on a per-document copy.
+    base_provider_config, digest = _resolve_ingest_provider_config(
+        global_config=global_config or {}, ingest_source=ingest_source, provider=provider
+    )
+    resolved_provider_config: dict[str, Any] = dict(base_provider_config)
 
     # For OneDrive/SharePoint: inject item_id and drive_id from document metadata
     # so the adapter can use the correct drive and item IDs when source_id is a web URL.
@@ -190,15 +285,12 @@ def _fetch_from_cloud_source(
     else:
         logger.debug("drive_id not found in doc_metadata. Available keys: %s", list(doc_metadata.keys()))
 
-    if not SourceAdapterFactory.is_registered(provider):
-        logger.error("No adapter registered for provider: %s", provider)
-        return None
-
     # Reuse cached adapter instance so its internal auth caches (tokens, Drive
     # services, Box clients) persist across all documents in a batch.
-    if provider not in _adapter_cache:
-        _adapter_cache[provider] = SourceAdapterFactory.create(provider)
-    adapter = _adapter_cache[provider]
+    cache_key = f"{provider}:{digest}"
+    if cache_key not in _adapter_cache:
+        _adapter_cache[cache_key] = SourceAdapterFactory.create(provider)
+    adapter = _adapter_cache[cache_key]
 
     # Let exceptions propagate so callers can record the real error reason.
     return adapter.fetch_binary_content(

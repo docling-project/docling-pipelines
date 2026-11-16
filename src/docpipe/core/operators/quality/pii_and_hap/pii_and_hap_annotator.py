@@ -434,9 +434,35 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each detection adapter config class's secret-capable declarations.
+
+        Covers the shared ``provider``/``provider_config`` pair and the per-capability
+        ``pii_provider``/``hap_provider`` pairs.
+        """
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        classes: dict[str, type] = {}
+        for name in PIIAndHAPDetectionFactory.list_adapters():
+            adapter_class = PIIAndHAPDetectionFactory.get_adapter_class(name)
+            if adapter_class is not None:
+                classes[name] = adapter_class.get_config_schema()
+
+        result: dict[str, dict[str, list[str]]] = {}
+        pairs = [(PROVIDER, OperatorConstants.Config.PROVIDER_CONFIG)]
+        pairs.extend(CAPABILITY_PROVIDER_KEYS.values())
+        for provider_key, provider_config_key in pairs:
+            result.update(
+                build_provider_secret_fields(selector=provider_key, prefix=provider_config_key, classes=classes)
+            )
+        return result
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Return operator metadata for SDK."""
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": PIIAndHAPAnnotator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: PIIAndHAPAnnotator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: PIIAndHAPAnnotator.is_available(),
@@ -973,6 +999,9 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
 
         When PII and HAP resolve to the same provider and config key (e.g. the legacy
         ``provider`` / ``provider_config`` shorthand) the config is checked only once.
+        A capability provider that falls back to the shared ``provider_config`` while
+        ``provider`` is unset also gets its unknown keys checked here, because the
+        metadata-driven check cannot tell which provider that shared config is for.
         """
         config_keys = (
             OperatorConstants.Config.PROVIDER_CONFIG,
@@ -987,7 +1016,11 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
         if self.provider_selection_errors:
             return
         checked: set[tuple[str, str]] = set()
-        for selection in (self.pii_selection, self.hap_selection):
+        legacy_provider = self.config.get(PROVIDER)
+        for capability, selection in (
+            (DetectionCapability.PII, self.pii_selection),
+            (DetectionCapability.HAP, self.hap_selection),
+        ):
             if selection is None:
                 continue
             signature = (selection.provider.lower(), selection.provider_config_key)
@@ -1002,6 +1035,39 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                         config_key=selection.provider_config_key,
                     )
                 )
+            if not legacy_provider:
+                errors.extend(PIIAndHAPAnnotator._shared_config_key_errors(capability=capability, selection=selection))
+
+    @staticmethod
+    def _shared_config_key_errors(*, capability: DetectionCapability, selection: ProviderSelection) -> list[str]:
+        """Check the shared ``provider_config`` keys against a provider that falls back to it.
+
+        Only applies while ``provider`` is unset: then ``validate_config_from_metadata``
+        cannot tell which provider the shared config belongs to.  Providers whose schema
+        allows extra keys yield no errors.
+
+        Returns:
+            The unknown-key errors plus a hint naming ``<capability>_provider_config``.
+        """
+        if selection.provider_config_key != OperatorConstants.Config.PROVIDER_CONFIG:
+            return []
+        from docpipe.utils.operators.config_validation import validate_provider_config_keys
+
+        key_errors: list[str] = []
+        validate_provider_config_keys(
+            provider_config=selection.provider_config,
+            provider_schemas=PIIAndHAPAnnotator._get_piihap_provider_schemas(capability=capability),
+            active_provider=selection.provider.lower(),
+            full_path=OperatorConstants.Config.PROVIDER_CONFIG,
+            errors=key_errors,
+        )
+        if key_errors:
+            capability_config_key = CAPABILITY_PROVIDER_KEYS[capability][1]
+            key_errors.append(
+                f"'{OperatorConstants.Config.PROVIDER_CONFIG}' is shared by the capability providers because "
+                f"'{PROVIDER}' is unset; set '{capability_config_key}' to configure '{selection.provider}' separately"
+            )
+        return key_errors
 
     def _populate_remove_row_id_and_index(
         self,

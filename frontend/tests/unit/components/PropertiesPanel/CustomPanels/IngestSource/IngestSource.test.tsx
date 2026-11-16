@@ -808,8 +808,9 @@ describe('IngestSourcePanelBody', () => {
       fireEvent.click(dropdown);
       // Find a list option for 'ibm_cos' or any item (provider other than current)
       const options = document.querySelectorAll('[role="option"]');
-      if (options.length > 0) {
-        fireEvent.click(options[0]);
+      const firstOption = options[0];
+      if (firstOption) {
+        fireEvent.click(firstOption);
         // updatePropertyValue should have been called (provider + provider_config)
         expect(controller.updatePropertyValue).toHaveBeenCalled();
       } else {
@@ -988,8 +989,9 @@ describe('IngestSourcePanelBody', () => {
       fireEvent.click(combobox);
       // Find rendered checkboxes inside the open list
       const checkboxes = document.querySelectorAll('[role="listbox"] [role="option"]');
-      if (checkboxes.length > 0) {
-        fireEvent.click(checkboxes[0]);
+      const firstCheckbox = checkboxes[0];
+      if (firstCheckbox) {
+        fireEvent.click(firstCheckbox);
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
           { name: 'include_filter' },
           expect.any(Array)
@@ -1015,8 +1017,9 @@ describe('IngestSourcePanelBody', () => {
     if (combobox) {
       fireEvent.click(combobox);
       const checkboxes = document.querySelectorAll('[role="listbox"] [role="option"]');
-      if (checkboxes.length > 0) {
-        fireEvent.click(checkboxes[0]);
+      const firstCheckbox = checkboxes[0];
+      if (firstCheckbox) {
+        fireEvent.click(firstCheckbox);
         expect(controller.updatePropertyValue).toHaveBeenCalledWith(
           { name: 'exclude_filter' },
           expect.any(Array)

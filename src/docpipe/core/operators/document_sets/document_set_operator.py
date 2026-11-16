@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document Set Operator for storing PyArrow table data with metadata tracking.
 
 This operator stores PyArrow table data in a document set using DuckDB storage,
@@ -11,8 +14,8 @@ from typing import Any
 import pyarrow as pa
 
 from docpipe.core.assets.common import adapters as common_adapters  # noqa: F401
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory
 from docpipe.core.assets.common.factories.attachment_repository_factory import AttachmentRepositoryFactory
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory
 from docpipe.core.assets.document_sets import adapters  # noqa: F401
 from docpipe.core.assets.document_sets.application.services.document_set_service import DocumentSetService
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
@@ -206,7 +209,7 @@ class DocumentSetOperator(AbstractOperator):
         # Factory calls are here rather than in __init__ because DuckDBKeyValueStorage and
         # DuckDBTableStorage are per-path singletons — repeated calls with the same
         # database_path return the cached instance at the cost of two dict lookups.
-        repo_type_str, repo_config = RepositoryFactory.get_repository_config(
+        repo_type_str, repo_config = AssetRepositoryFactory.get_repository_config(
             asset_type_name=DocumentSet.get_config_key()
         )
         attachment_repo_config = {**repo_config, OperatorConstants.DocumentSet.DATABASE_PATH: self.database_path}
@@ -218,7 +221,17 @@ class DocumentSetOperator(AbstractOperator):
             extra=self.common_log_arguments,
         )
 
-        metadata_repository = RepositoryFactory.create_repository(
+        # Create metadata repository — adapter_name from global_config wins over YAML,
+        # database_path from operator config wins over YAML.
+        #
+        # These factory calls are intentionally here rather than in __init__ because:
+        # 1. metadata_storage_type comes from self.config which is set by the orchestrator
+        #    and available here, but the executor constructs a new operator instance per
+        #    batch (PythonOperatorExecutor.get_operator()), so __init__ runs per batch anyway.
+        # 2. DuckDBKeyValueStorage and DuckDBTableStorage are per-path singletons — repeated
+        #    factory calls with the same database_path return the cached instance with no
+        #    new connection or I/O. The cost here is two dict lookups per batch.
+        metadata_repository = AssetRepositoryFactory.create_repository(
             asset_type=DocumentSet,
             config_override={OperatorConstants.DocumentSet.DATABASE_PATH: self.database_path},
         )
@@ -242,9 +255,7 @@ class DocumentSetOperator(AbstractOperator):
         )
 
         # Initialize metadata
-        metadata: dict[str, Any] = self.create_base_metadata(
-            total_docs_count=table.num_rows, node_status=ExecutionStatus.COMPLETED.value
-        )
+        metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=table.num_rows)
 
         # Add storage-specific metadata
         metadata[OperatorConstants.DocumentSet.META_DOCUMENT_SET_NAME] = self.document_set_name

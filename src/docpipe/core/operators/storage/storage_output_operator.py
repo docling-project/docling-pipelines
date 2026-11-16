@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """StorageOutputOperator — writes pipeline documents to storage destinations."""
 
 import json
@@ -21,6 +24,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.factories.des
     DestinationAdapterFactory,
 )
 from docpipe.core.operators.storage.domain.models import ContentFormat, WriteMode, WriteResult
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.binary_content_fetcher import get_binary_content
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
@@ -231,9 +235,25 @@ class StorageOutputOperator(AbstractOperator):
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each destination config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        return build_provider_secret_fields(
+            selector="destination_config.provider",
+            prefix="destination_config.provider_config",
+            classes={
+                name: DestinationAdapterFactory.create(name).get_config_schema()
+                for name in DestinationAdapterFactory.get_registered_names()
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Return operator metadata for flow validation and discovery."""
         return {
+            "secret_fields": ["destination_config.credentials.*"],
+            "secret_fields_by_provider": StorageOutputOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: StorageOutputOperator.is_available(),
             OperatorConstants.Misc.CATEGORY: StorageOutputOperator.category.value,
             OperatorConstants.Misc.LABEL: "Storage Output",
@@ -413,7 +433,7 @@ class StorageOutputOperator(AbstractOperator):
                 credentials=credentials,
             )
         except (ValueError, KeyError) as e:
-            config_error_msg = str(e)
+            config_error_msg = sanitize_exception(exc=e, config_key=f"{self.short_name}.destination_config")
             logger.error(
                 "destination config error for operator '%s': %s",
                 self.short_name,
@@ -549,10 +569,11 @@ class StorageOutputOperator(AbstractOperator):
                     )
 
             except Exception as e:
+                safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.destination_config")
                 logger.error(
                     "Unexpected error writing document %s: %s",
                     doc_name,
-                    e,
+                    safe_error,
                     extra=self.common_log_arguments,
                 )
                 row_write_results.append(
@@ -560,14 +581,14 @@ class StorageOutputOperator(AbstractOperator):
                         doc_id=doc_id,
                         doc_name=doc_name,
                         success=False,
-                        error_message=str(e),
+                        error_message=safe_error,
                     )
                 )
                 self.record_failed_document(
                     metadata=metadata,
                     doc_id=doc_id,
                     doc_name=doc_name,
-                    reason=str(e),
+                    reason=safe_error,
                 )
 
         metadata[Metrics.External.NODE_STATUS] = OperatorUtils.determine_execution_status(

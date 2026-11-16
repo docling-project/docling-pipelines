@@ -231,7 +231,7 @@
   get_flow_repository()                    get_document_set_repository()
   ┌────────────────────────────┐          ┌────────────────────────────────┐
   │ @lru_cache(maxsize=1)      │          │ @lru_cache(maxsize=1)          │
-  │ RepositoryFactory          │          │ RepositoryFactory              │
+  │ AssetRepositoryFactory     │          │ AssetRepositoryFactory         │
   │   .create_repository(      │          │   .create_repository(          │
   │      asset_type=Flow       │          │      asset_type=DocumentSet    │
   │   )                        │          │   )                            │
@@ -318,7 +318,7 @@ DocumentSet has two storage concerns, each with its own factory:
 | **Data-plane port** | — | `DocumentSetStorage` | — |
 | **Generic adapter** | `DuckDBAssetRepository[Flow]` | `DuckDBAssetRepository[DocumentSet]` or `PostgresAssetRepository[DocumentSet]` | `DuckDBAssetRepository[DocumentLibrary]` or `PostgresAssetRepository[DocumentLibrary]` |
 | **Data-plane adapter** | — | `DuckDBDocumentSetStorage` | — |
-| **Metadata factory** | `RepositoryFactory` | `MetadataRepositoryFactory` | `DocumentLibraryRepositoryFactory` |
+| **Metadata factory** | `AssetRepositoryFactory` | `MetadataRepositoryFactory` | `DocumentLibraryRepositoryFactory` |
 | **Data-plane factory** | — | `DataStoreFactory` | — |
 | **Service** | `FlowService(AssetService[Flow])` | `DocumentSetService(AssetService[DocumentSet])` | `DocumentLibraryService(AssetService[DocumentLibrary])` |
 | **DI provider** | `get_flow_service()` | `get_document_set_service()` | `get_document_library_service()` |

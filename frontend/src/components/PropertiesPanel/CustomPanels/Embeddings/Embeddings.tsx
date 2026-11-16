@@ -26,8 +26,10 @@ import {
   EMBEDDINGS_DEFAULTS,
   EMBEDDINGS_PROVIDER_LABELS,
   EMBEDDINGS_PROVIDERS,
+  EMBEDDINGS_QUANTIZATION_OPTIONS,
   WATSONX_CONTAINER_KINDS,
   type EmbeddingsProvider,
+  type EmbeddingsQuantization,
   type WatsonxContainerKind,
 } from './constants';
 import { messages } from './Embeddings.messages';
@@ -120,6 +122,14 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
     (controller?.getPropertyValue?.({ name: ATTR.TOKEN_LIMIT }) as number | undefined)
     ?? EMBEDDINGS_DEFAULTS.TOKEN_LIMIT;
 
+  const quantizationRaw: string | undefined =
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    controller?.getPropertyValue?.({ name: ATTR.QUANTIZATION }) as string | undefined;
+  const quantization: EmbeddingsQuantization =
+    quantizationRaw === 'binary' || quantizationRaw === 'ubinary'
+      ? 'binary'
+      : 'none';
+
   useProviderConfigDefaults(controller, nodeAttributes);
 
   // ── Required param validation ─────────────────────────────────────────────
@@ -127,6 +137,12 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
   const providerValidation = validate(ATTR.PROVIDER, provider);
   const overlapRatioValidation = validate(ATTR.OVERLAP_RATIO, overlapRatio);
   const tokenLimitValidation = validate(ATTR.TOKEN_LIMIT, tokenLimit);
+  const quantizationValidation = validate(ATTR.QUANTIZATION, quantization);
+
+  const quantizationLabelMap: Record<EmbeddingsQuantization, string> = {
+    none: intl.formatMessage(messages.quantizationNone),
+    binary: intl.formatMessage(messages.quantizationBinary),
+  };
 
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -464,6 +480,32 @@ export function EmbeddingsPanelBody({ controller }: EmbeddingsPanelBodyProps): R
               }}
               invalid={tokenLimitValidation.isInvalid}
               invalidText={tokenLimitValidation.errorMessage}
+            />
+          </div>
+
+          <div className={common.formField}>
+            <div className={common.labelWithTooltip}>
+              <RequiredParamTooltip
+                paramId={ATTR.QUANTIZATION}
+                nodeAttributes={nodeAttributes}
+                definition={attrDesc(ATTR.QUANTIZATION)}
+              >
+                {intl.formatMessage(messages.quantization)}
+              </RequiredParamTooltip>
+            </div>
+            <Dropdown
+              id="embeddings-quantization"
+              titleText={intl.formatMessage(messages.quantization)}
+              hideLabel
+              label={intl.formatMessage(messages.selectQuantization)}
+              items={[...EMBEDDINGS_QUANTIZATION_OPTIONS]}
+              selectedItem={quantization}
+              itemToString={(item: EmbeddingsQuantization | null) => (item ? quantizationLabelMap[item] : '')}
+              onChange={({ selectedItem }: { selectedItem: EmbeddingsQuantization | null }) => {
+                update(ATTR.QUANTIZATION, selectedItem ?? 'none');
+              }}
+              invalid={quantizationValidation.isInvalid}
+              invalidText={quantizationValidation.errorMessage}
             />
           </div>
         </AccordionItem>

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """ProjectRepositoryFactory — creates a ProjectRepository from config/env.
 
 Resolution order for base_dir (highest priority wins):
@@ -10,15 +13,12 @@ to ``_find_project_root() / "docling-pipelines-config.yaml"``.
 """
 
 import os
-from pathlib import Path
 
-import yaml
-
-from docpipe.core.constants.constants import EnvironmentVariables, _find_project_root
 from docpipe.core.projects.adapters.repositories.local.local_project_repository import (
     LocalProjectRepository,
 )
 from docpipe.core.projects.domain.ports.project_repository import ProjectRepository
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -26,8 +26,6 @@ logger = get_logger()
 # Environment variable that overrides the project repository base_dir.
 # Mirrors the pattern used for FLOW_REPOSITORY_BASE_DIR in RepositoryFactory.
 ENV_PROJECT_REPOSITORY_BASE_DIR = "PROJECT_REPOSITORY_BASE_DIR"
-
-_DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
 
 
 class ProjectRepositoryFactory:
@@ -63,19 +61,11 @@ class ProjectRepositoryFactory:
             return env_val
 
         # 2. YAML config
-        config_path = Path(os.getenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(_DEFAULT_CONFIG_PATH)))
-        if config_path.exists():
-            try:
-                with Path(config_path).open() as fh:
-                    cfg = yaml.safe_load(fh) or {}
-                base_dir = (
-                    ((cfg.get("projects_management") or {}).get("project_repository") or {}).get("config") or {}
-                ).get("base_dir")
-                if base_dir:
-                    logger.debug("ProjectRepositoryFactory: using base_dir from config: %s", base_dir)
-                    return base_dir
-            except yaml.YAMLError as exc:
-                logger.warning("ProjectRepositoryFactory: invalid YAML at %s: %s", config_path, exc)
+        cfg = DocpipeConfigLoader.get(key="projects_management", default={})
+        base_dir = cfg.get("project_repository", {}).get("config", {}).get("base_dir")
+        if base_dir:
+            logger.debug("ProjectRepositoryFactory: using base_dir from config: %s", base_dir)
+            return base_dir
 
         # 3. Fall through — adapter uses its own default
         return None

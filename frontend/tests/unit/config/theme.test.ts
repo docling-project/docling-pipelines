@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { isValidTheme, getStoredTheme, saveTheme, DEFAULT_THEME, THEME_STORAGE_KEY } from '@/config/theme';
 
 describe('isValidTheme', () => {

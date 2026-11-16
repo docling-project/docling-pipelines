@@ -201,7 +201,10 @@ describe('RunSidePanel', () => {
     // Close it — the modal close button has title="Close"
     const closeBtns = screen.getAllByTitle('Close');
     // The last Close button belongs to the modal (panel close is earlier)
-    fireEvent.click(closeBtns[closeBtns.length - 1]);
+    const lastCloseBtn = closeBtns[closeBtns.length - 1];
+    if (lastCloseBtn) {
+      fireEvent.click(lastCloseBtn);
+    }
     expect(screen.queryByText(/^B+$/)).not.toBeInTheDocument();
   });
 

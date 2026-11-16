@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating repository instances for all asset types.
 
 Provides centralized repository creation based on environment configuration.
@@ -13,22 +16,17 @@ Architecture:
     - RepositoryType: Concrete repository types (LOCAL, DUCKDB, POSTGRES)
     - get_available_repository_types(): Registry mapping types to implementation classes
     - create_repository(): Generic factory method using registry pattern
-
-
 """
 
 import os
 from enum import Enum
-from pathlib import Path
 from typing import TypeVar
-
-import yaml
 
 from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
 from docpipe.core.assets.common.domain.models.asset import Asset
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
-from docpipe.core.constants.constants import _find_project_root
 from docpipe.exceptions.docpipe_exceptions import RepositoryConfigurationException
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -53,11 +51,7 @@ class RepositoryType(AbstractRepositoryType):
     POSTGRES = "postgres"
 
 
-DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
-ENV_CONFIG_PATH_KEY = "DOCPIPE_CONFIG_PATH"
-
-
-class RepositoryFactory:
+class AssetRepositoryFactory:
     """Factory for creating AssetRepository instances for any asset type.
 
     Enables switching between repository implementations via environment
@@ -138,26 +132,6 @@ class RepositoryFactory:
         return [repo_type.value for repo_type in available_types.keys()]
 
     @staticmethod
-    def _load_yaml_config() -> dict:
-        """Load configuration from YAML file.
-
-        Returns:
-            Dictionary containing YAML configuration, or empty dict if file not found
-        """
-        config_path = Path(os.getenv(ENV_CONFIG_PATH_KEY, str(DEFAULT_CONFIG_PATH)))
-        if not config_path.exists():
-            return {}
-
-        try:
-            with Path(config_path).open() as file:
-                yaml_config = yaml.safe_load(file)
-        except yaml.YAMLError as exc:
-            logger.warning("Invalid repository YAML configuration at %s: %s", config_path, exc)
-            return {}
-
-        return yaml_config or {}
-
-    @staticmethod
     def get_repository_config(*, asset_type_name: str) -> tuple[str, dict]:
         """Get repository configuration from environment and YAML for a specific asset type.
 
@@ -167,16 +141,17 @@ class RepositoryFactory:
         Returns:
             Tuple of (repository_type_string, config_dict)
         """
-        yaml_config = RepositoryFactory._load_yaml_config()
-        assets_config = yaml_config.get("assets_management", {}) or {}
-        repo_config = assets_config.get(f"{asset_type_name}_repository", {}) or {}
+        assets_config = DocpipeConfigLoader.get(key="assets_management", default={})
+        repo_config = assets_config.get(f"{asset_type_name}_repository", {})
 
         # Environment variable pattern: FLOW_REPOSITORY_TYPE, DOCUMENT_SET_REPOSITORY_TYPE, etc.
         env_type_key = f"{asset_type_name.upper()}_REPOSITORY_TYPE"
         env_base_dir_key = f"{asset_type_name.upper()}_REPOSITORY_BASE_DIR"
 
         repo_type_str = os.getenv(env_type_key, repo_config.get("type", RepositoryType.LOCAL.value))
-        resolved_config = repo_config.get("config", {}) or {}
+        # Copy: the loader caches the parsed file, so mutating this dict would leak the env override
+        # into every later lookup in the process.
+        resolved_config = dict(repo_config.get("config", {}) or {})
 
         # Allow environment variable to override base_dir
         if env_base_dir_key in os.environ:

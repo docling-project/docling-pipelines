@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow validation module for docpipe orchestrator.
 
 This module contains the FlowValidator class which handles all flow validation logic
@@ -207,7 +210,11 @@ class FlowValidator:
             )
             # Continue with whatever metadata was successfully loaded
         # Use injected propagator when available to avoid a redundant metadata load.
-        self.feature_propagator = feature_propagator if feature_propagator is not None else FeaturePropagator()
+        # Otherwise build one from the same orchestrator, so custom operators enabled only
+        # through the orchestrator (not the environment) contribute their output features.
+        self.feature_propagator = (
+            feature_propagator if feature_propagator is not None else FeaturePropagator(orchestrator=orchestrator)
+        )
 
     def validate(self, *, flow_def: FlowConfig, params: FlowConfig) -> None:
         """Main validation entry point for a flow definition.
@@ -260,7 +267,7 @@ class FlowValidator:
         if isinstance(value, str) and is_vault_reference(value):
             if key in ("credentials", "credentials_json", "provider_credentials"):
                 return {"__vault_mock__": True}
-            return "__vault_placeholder__"
+            return DocpipeConstants.VAULT_PLACEHOLDER
         if isinstance(value, dict):
             return {k: FlowValidator._sanitize_vault_refs_for_validation(v, key=str(k)) for k, v in value.items()}
         if isinstance(value, list):
@@ -294,18 +301,25 @@ class FlowValidator:
         op_def: dict[str, Any],
         validate_results: ValidateStepResults,
     ) -> None:
-        """Validate a single vault reference URI and record any error or warning."""
+        """Validate a single vault reference URI and record any error or warning.
+
+        The error for a malformed reference names the config key only; the value
+        is never echoed.
+        """
         from docpipe.integrations.secrets.secret_provider import (
+            MalformedSecretReferenceError,
             get_provider,
-            parse_vault_reference,
+            parse_reference,
         )
 
         try:
-            provider_name, _, _ = parse_vault_reference(ref)
-        except Exception:
+            parsed = parse_reference(value=ref)
+        except MalformedSecretReferenceError:
+            parsed = None
+        if parsed is None:
             add_validation_alert(
                 message=ValidationMessage(
-                    message=f"Config key '{path}' contains a malformed vault URI: '{ref}'.",
+                    message=f"Config key '{path}' contains a malformed vault URI.",
                     message_code="VAULT_URI_MALFORMED",
                 ),
                 op_def=op_def,
@@ -313,7 +327,8 @@ class FlowValidator:
             )
             return
 
-        if not provider_name or get_provider(name=provider_name) is None:
+        provider_name = parsed.provider
+        if get_provider(name=provider_name) is None:
             add_validation_alert(
                 message=ValidationMessage(
                     message=(
@@ -601,7 +616,13 @@ class FlowValidator:
                     config = (
                         global_config
                         | op_def.get(OperatorConstants.Config.CONFIG, {})
-                        | {DocpipeConstants.VALIDATING_FLOW: True}
+                        | {
+                            DocpipeConstants.VALIDATING_FLOW: True,
+                            DocpipeConstants.VALIDATION_FEATURE_TYPES: {
+                                name: feature.get("type")
+                                for name, feature in node_result.get_input_features(node_id=node_id).items()
+                            },
+                        }
                     )
                     config = self._sanitize_vault_refs_for_validation(config)
                     operator = operator_class(config=config)

@@ -8,7 +8,7 @@ import { setLoading } from '@/slices/flowSlice';
 
 function makeWrapper(store: ReturnType<typeof createTestStore>) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(Provider, { store }, children);
+    return React.createElement(Provider as any, { store }, children);
   };
 }
 

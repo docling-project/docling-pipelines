@@ -25,7 +25,7 @@ DuckDB is an embedded analytical database that provides:
 3. **DuckDB configuration enabled** in `docling-pipelines-config.yaml`:
    ```yaml
    job_management:
-     store:
+     storage:
        type: duckdb
        config:
          database_path: ./data/duckdb/job_stats.duckdb
@@ -36,7 +36,7 @@ DuckDB is an embedded analytical database that provides:
 1. **Uncomment DuckDB configuration** in `docling-pipelines-config.yaml` (lines 20-22):
    ```yaml
    job_management:
-     store:
+     storage:
        type: duckdb
        config:
          database_path: ./data/duckdb/job_stats.duckdb
@@ -72,7 +72,7 @@ The DuckDB storage backend is configured in `docling-pipelines-config.yaml`:
 
 ```yaml
 job_management:
-  store:
+  storage:
     type: duckdb  # Use DuckDB instead of json/postgresql
     config:
       database_path: ./data/duckdb/job_stats.duckdb  # Database file location

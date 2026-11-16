@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factories for event streaming services and adapters."""
 
 import os
@@ -6,19 +9,20 @@ from typing import Any
 
 import yaml
 
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory
+from docpipe.core.assets.flows.application.services import FlowService
+from docpipe.core.assets.flows.domain.models.flow import Flow
 from docpipe.core.constants import DocpipeConfigKeys, EnvironmentVariables
-from docpipe.core.constants.constants import _find_project_root
 from docpipe.core.event_streaming.dispatch_service import EventDispatchService
 from docpipe.core.event_streaming.kafka_listener import KafkaEventListener
 from docpipe.core.event_streaming.mapping_service import EventMappingService
+from docpipe.core.orchestration.streaming.streaming_orchestrator import StreamingOrchestrator
 from docpipe.storage.factory import StorageFactory
+from docpipe.utils.infrastructure.config_utils import DEFAULT_CONFIG_PATH, DEFAULT_STORAGE_BACKEND
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
-
-DEFAULT_STORAGE_BACKEND = "filesystem"
-DEFAULT_CONFIG_PATH = _find_project_root() / "docling-pipelines-config.yaml"
 
 
 class EventStreamingFactory:
@@ -26,9 +30,11 @@ class EventStreamingFactory:
 
     @staticmethod
     def create_event_dispatch_service() -> EventDispatchService:
-        """Create the event dispatcher with persistent mapping storage."""
+        """Create the dispatcher with mapping storage, saved flows, and streaming execution."""
         return EventDispatchService(
             mapping_service=EventStreamingFactory.create_event_mapping_service(),
+            flow_service=FlowService(repository=AssetRepositoryFactory.create_repository(asset_type=Flow)),
+            orchestrator=StreamingOrchestrator(),
         )
 
     @staticmethod
@@ -59,7 +65,7 @@ class EventStreamingFactory:
     @staticmethod
     def _resolve_storage_configuration() -> tuple[str, dict[str, Any]]:
         """Resolve backend as environment override, global YAML setting, then filesystem default."""
-        config_path = Path(os.getenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(DEFAULT_CONFIG_PATH)))
+        config_path = Path(os.environ.get(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(DEFAULT_CONFIG_PATH)))
         yaml_config: dict[str, Any] = {}
         if config_path.exists():
             try:
