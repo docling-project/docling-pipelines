@@ -256,7 +256,7 @@ class TestAuditOnRejection:
         assert response.status_code == 413
         record = _only(records=audit_records)
         assert (record["outcome"], record["reason"]) == ("rejected", "file_too_large")
-        assert record["script_sha256"] == hashlib.sha256(code).hexdigest()
+        assert record["script_sha256"] is None
 
     def test_update_with_changed_short_name_is_rejected(self, *, client: TestClient, audit_records: Any) -> None:
         operator_id = _create(client=client).json()["operator_id"]
@@ -311,12 +311,111 @@ class TestAuditOnRejection:
         record = audit_records.refresh()[-1]
         assert (record["action"], record["outcome"], record["reason"]) == ("delete", "rejected", "PermissionError")
 
-    def test_rejection_never_contains_exception_message(self, *, client: TestClient, audit_records: Any) -> None:
-        _create(client=client, code=b"def broken(:\n")
+    def test_create_with_invalid_filename_is_rejected(self, *, client: TestClient, audit_records: Any) -> None:
+        response = _create(client=client, filename="a" * 300 + ".py")
 
-        text = json.dumps(audit_records.refresh())
+        assert response.status_code == 400
+        record = _only(records=audit_records)
+        assert (record["action"], record["outcome"], record["reason"]) == ("create", "rejected", "invalid_filename")
+        assert record["script_sha256"] is None
+
+    def test_update_with_invalid_filename_is_rejected(self, *, client: TestClient, audit_records: Any) -> None:
+        operator_id = _create(client=client).json()["operator_id"]
+        audit_records.refresh()
+
+        response = client.patch(
+            f"/custom_operators/{operator_id}",
+            files={"operator_file": ("a" * 300 + ".py", io.BytesIO(OPERATOR_CODE), "text/x-python")},
+        )
+
+        assert response.status_code == 400
+        record = audit_records.refresh()[-1]
+        assert (record["action"], record["outcome"], record["reason"]) == ("update", "rejected", "invalid_filename")
+        assert record["operator_id"] == operator_id
+
+    def test_update_with_invalid_extension_is_rejected(self, *, client: TestClient, audit_records: Any) -> None:
+        operator_id = _create(client=client).json()["operator_id"]
+        audit_records.refresh()
+
+        response = client.patch(
+            f"/custom_operators/{operator_id}",
+            files={"operator_file": ("audited_op.txt", io.BytesIO(OPERATOR_CODE), "text/plain")},
+        )
+
+        assert response.status_code == 400
+        record = audit_records.refresh()[-1]
+        assert (record["action"], record["outcome"], record["reason"]) == ("update", "rejected", "invalid_extension")
+        assert record["operator_id"] == operator_id
+
+    def test_update_with_oversized_file_is_rejected(self, *, client: TestClient, audit_records: Any) -> None:
+        operator_id = _create(client=client).json()["operator_id"]
+        audit_records.refresh()
+        code = b"#" * (MAX_OPERATOR_FILE_BYTES + 1)
+
+        response = client.patch(
+            f"/custom_operators/{operator_id}",
+            files={"operator_file": ("audited_op.py", io.BytesIO(code), "text/x-python")},
+        )
+
+        assert response.status_code == 413
+        record = audit_records.refresh()[-1]
+        assert (record["action"], record["outcome"], record["reason"]) == ("update", "rejected", "file_too_large")
+        assert record["script_sha256"] is None
+
+    def test_rejection_never_contains_exception_message(self, *, client: TestClient, audit_records: Any) -> None:
+        response = _create(client=client, code=b"def broken(:\n")
+
+        assert response.status_code == 400
+        record = _only(records=audit_records)
+        assert (record["outcome"], record["reason"]) == ("rejected", "custom_operator_invalid_data")
+        text = json.dumps(record)
         assert "Syntax error" not in text
         assert "broken" not in text
+
+    def test_rejection_never_contains_message_of_unclassified_exception(
+        self, *, client: TestClient, service: CustomOperatorService, audit_records: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator_id = _create(client=client).json()["operator_id"]
+        audit_records.refresh()
+
+        def _denied(*, operator_id: str) -> None:
+            raise PermissionError("canary-secret-message /etc/private/path")
+
+        monkeypatch.setattr(service.file_store, "delete", _denied)
+
+        response = client.delete(f"/custom_operators/{operator_id}")
+
+        assert response.status_code == 403
+        text = json.dumps(audit_records.refresh()[-1])
+        assert "canary-secret-message" not in text
+        assert "/etc/private/path" not in text
+
+
+class TestAuditFailureNeverChangesTheResult:
+    """Fail-open: a broken audit trail must not turn a finished operation into an error, or hide the real error."""
+
+    @pytest.fixture
+    def broken_audit(self, *, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _boom() -> logging.Logger:
+            raise OSError("audit sink unavailable")
+
+        monkeypatch.setattr("docpipe.utils.infrastructure.audit.get_audit_logger", _boom)
+
+    def test_create_still_succeeds(self, *, client: TestClient, broken_audit: None) -> None:
+        response = _create(client=client)
+
+        assert response.status_code == 201
+        assert client.get("/custom_operators").json()["count"] == 1
+
+    def test_rejection_keeps_its_own_status(self, *, client: TestClient, broken_audit: None) -> None:
+        assert _create(client=client, filename="audited_op.txt").status_code == 400
+        assert _create(client=client, code=b"x = 1\n").status_code == 400
+        assert _create(client=client, code=b"#" * (MAX_OPERATOR_FILE_BYTES + 1)).status_code == 413
+
+    def test_delete_still_succeeds(self, *, client: TestClient, broken_audit: None) -> None:
+        operator_id = _create(client=client).json()["operator_id"]
+
+        assert client.delete(f"/custom_operators/{operator_id}").status_code == 200
 
 
 class TestUnauthenticatedRequests:

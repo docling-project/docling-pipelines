@@ -3,7 +3,6 @@
 
 """Custom operator API endpoints."""
 
-import hashlib
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -62,7 +61,6 @@ def _audit_rejected(
     action: AuditAction,
     reason: str,
     operator_id: str | None = None,
-    content: bytes | None = None,
 ) -> None:
     """Write a ``rejected`` audit record for an attempt refused before it reaches the service.
 
@@ -73,7 +71,6 @@ def _audit_rejected(
         action=action,
         outcome=AuditOutcome.REJECTED,
         operator_id=operator_id,
-        script_sha256=hashlib.sha256(content).hexdigest() if content is not None else None,
         reason=reason,
     )
 
@@ -217,7 +214,7 @@ async def create_custom_operator(
 
     content = await operator_file.read()
     if len(content) > MAX_OPERATOR_FILE_BYTES:
-        _audit_rejected(caller=caller, action=AuditAction.CREATE, reason=REASON_FILE_TOO_LARGE, content=content)
+        _audit_rejected(caller=caller, action=AuditAction.CREATE, reason=REASON_FILE_TOO_LARGE)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"Operator file exceeds the maximum allowed size of {MAX_OPERATOR_FILE_BYTES // 1024} KB",
@@ -388,7 +385,6 @@ async def update_custom_operator(
                 action=AuditAction.UPDATE,
                 reason=REASON_FILE_TOO_LARGE,
                 operator_id=operator_id,
-                content=content,
             )
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,

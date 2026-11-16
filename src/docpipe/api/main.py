@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """FastAPI application main entry point.
 
 This module configures the FastAPI application with:
@@ -172,6 +175,10 @@ async def lifespan(app: FastAPI):
     from docpipe.integrations.secrets.vault_initializer import initialize_secret_providers
 
     initialize_secret_providers()
+    # Build the audit handlers now so a bad audit.file shows up at start-up (fail-open: stdout stays active)
+    from docpipe.utils.infrastructure.audit import initialize_audit_logger
+
+    initialize_audit_logger()
     event_listener = EventStreamingFactory.create_kafka_listener()
     bff_process, started_bff_url = _start_bff()
     # Shared AsyncClient — reused across all proxy_to_bff requests so the
