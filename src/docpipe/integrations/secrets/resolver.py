@@ -53,6 +53,7 @@ from docpipe.core.operators.secret_fields import (
 )
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.registry import register_secret
 from docpipe.integrations.secrets.secret_provider import (
     MalformedSecretReferenceError,
     ProviderUnreachableError,
@@ -806,6 +807,7 @@ class SecretResolver:
             except _Rejection as rejection:
                 raise SecretResolver._fail(category=rejection.category, reason=rejection.reason, **fail) from None
             resolved.append((site, value))
+            register_secret(value=value.reveal())
             SecretResolver._report_outcome(
                 node_name=node_name,
                 operator=operator,

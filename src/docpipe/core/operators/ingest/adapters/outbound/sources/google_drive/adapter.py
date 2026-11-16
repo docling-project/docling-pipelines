@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Google Drive source adapter using Google Drive API."""
 
-import hashlib
 import json
 from collections import deque
 from datetime import datetime
@@ -18,6 +20,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.google_drive.config
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
+from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -96,7 +99,7 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             },
             sort_keys=True,
         )
-        return hashlib.sha256(key_material.encode()).hexdigest()
+        return cache_key_digest(namespace="google_drive_client", parts=[key_material])
 
     @staticmethod
     def _load_service_account_credentials(config: GoogleDriveSourceConfig) -> ServiceAccountCredentials:
