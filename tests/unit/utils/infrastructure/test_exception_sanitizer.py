@@ -13,8 +13,10 @@ from pydantic import BaseModel, ValidationError
 
 from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.exception_sanitizer import (
     CATEGORY_CONNECTION,
+    CATEGORY_DATABASE,
     CATEGORY_HTTP,
     CATEGORY_TIMEOUT,
     CATEGORY_TLS,
@@ -75,6 +77,111 @@ class TestValidationError:
 
         assert CANARY not in text
         assert CATEGORY_VALIDATION in text
+        assert text.count(KEY + ": ") == 1
+
+
+class TestWrapperMessageIsKept:
+    """A wrapper with its own actionable text keeps it; only the wrapped third-party text is replaced."""
+
+    @staticmethod
+    def _docpipe_exception(*, message: str, cause: BaseException) -> DocpipeException:
+        try:
+            raise DocpipeException(message=message, status_code=400) from cause
+        except DocpipeException as wrapper:
+            return wrapper
+
+    def test_duckdb_wrapper_keeps_the_hint(self):
+        import duckdb
+
+        with pytest.raises(duckdb.Error) as info:
+            duckdb.connect().execute(f"select '{CANARY}' > 1")
+        hint = "Filter condition is invalid due to mismatched data types. Please review the filter expression."
+        wrapper = self._docpipe_exception(message=f"{hint} {info.value}", cause=info.value)
+
+        text = sanitize_exception(exc=wrapper, config_key="sql_filter_node")
+
+        assert hint in text
+        assert CANARY not in text
+        assert str(info.value) not in text
+        assert text.endswith(CATEGORY_DATABASE)
+
+    def test_fixed_text_wrapper_around_a_cause_is_unchanged(self):
+        cause = requests.exceptions.ConnectionError(f"https://u:{CANARY}@host")
+        wrapper = self._docpipe_exception(message="Could not reach the embeddings service.", cause=cause)
+
+        assert sanitize_exception(exc=wrapper, config_key=KEY) == f"{KEY}: Could not reach the embeddings service."
+
+    def test_wrapper_around_a_validation_error_keeps_hint_and_drops_input(self):
+        inner = _validation_error(value=CANARY)
+        wrapper = self._docpipe_exception(message=f"Invalid operator configuration. {inner}", cause=inner)
+
+        text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert text.startswith(f"{KEY}: Invalid operator configuration. {CATEGORY_VALIDATION} (")
+        assert CANARY not in text
+        assert f"{KEY}.port" in text
+
+    def test_wrapper_around_a_requests_error_keeps_hint(self):
+        cause = requests.exceptions.ConnectionError(f"https://u:{CANARY}@host")
+        wrapper = self._docpipe_exception(message=f"Embedding call failed: {cause}", cause=cause)
+
+        assert sanitize_exception(exc=wrapper, config_key=KEY) == f"{KEY}: Embedding call failed: {CATEGORY_CONNECTION}"
+
+    def test_message_equal_to_the_cause_text_becomes_the_category(self):
+        cause = requests.exceptions.ConnectionError(f"https://u:{CANARY}@host")
+        wrapper = self._docpipe_exception(message=str(cause), cause=cause)
+
+        assert sanitize_exception(exc=wrapper, config_key=KEY) == f"{KEY}: {CATEGORY_CONNECTION}"
+
+    def test_truncated_copy_of_the_cause_falls_back_to_the_category(self):
+        cause = requests.exceptions.ConnectionError(f"https://user:{CANARY}@host/path")
+        wrapper = self._docpipe_exception(message=f"Failed: {str(cause)[:-8]}", cause=cause)
+
+        text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert CANARY not in text
+        assert text == f"{KEY}: {CATEGORY_CONNECTION}"
+
+    def test_repr_of_the_cause_is_redacted_in_place(self):
+        cause = requests.exceptions.ConnectionError(f"https://user:{CANARY}@host/path")
+        wrapper = self._docpipe_exception(message=f"Failed: {cause!r}", cause=cause)
+
+        text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert CANARY not in text
+        assert text.startswith(f"{KEY}: Failed: ")
+
+    def test_escaped_copy_of_the_cause_falls_back_to_the_category(self):
+        cause = requests.exceptions.ConnectionError(f"""it's "quoted" {CANARY} @host""")
+        wrapper = self._docpipe_exception(message=f"Failed: {cause!r}", cause=cause)
+        assert str(cause) not in str(wrapper)  # repr escaped the quote, so verbatim replacement cannot work
+
+        text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert CANARY not in text
+        assert text == f"{KEY}: {CATEGORY_CONNECTION}"
+
+    def test_wrapper_without_a_secret_in_the_cause_text(self):
+        cause = requests.exceptions.ConnectionError("boom")
+        wrapper = self._docpipe_exception(message="Step failed.", cause=cause)
+
+        assert sanitize_exception(exc=wrapper, config_key=KEY) == f"{KEY}: Step failed."
+
+    def test_node_failure_message_keeps_the_hint(self):
+        from docpipe.core.job_management.adapters.services.job_tracker_service import JobTrackerService
+
+        cause = requests.exceptions.ConnectionError(f"https://u:{CANARY}@h")
+        wrapper = self._docpipe_exception(message=f"Search backend unreachable: {cause}", cause=cause)
+        service = JobTrackerService.__new__(JobTrackerService)
+        store = MagicMock()
+        store.get_node_stats_by_batch_and_node.return_value = None
+        service.job_stats_store = store
+
+        service.fail_node_execution(job_run_id="r", node_id="n", node_name="vectordb_node", exception=wrapper)
+
+        stored = str(store.mock_calls)
+        assert "Search backend unreachable" in stored
+        assert CANARY not in stored
 
 
 class TestCategories:
@@ -137,7 +244,7 @@ class TestCategories:
             text = sanitize_exception(exc=wrapper, config_key=KEY)
 
         assert CANARY not in text
-        assert text == f"{KEY}: {CATEGORY_CONNECTION}"
+        assert text == f"{KEY}: Failed to fetch documents: {CATEGORY_CONNECTION}"
 
     def test_unknown_exception_keeps_its_message(self):
         assert sanitize_exception(exc=ValueError("bad range"), config_key=KEY) == "bad range"
