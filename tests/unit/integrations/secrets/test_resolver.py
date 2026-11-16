@@ -10,9 +10,12 @@ import pytest
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.integrations.secrets.resolver import (
+    FindingKind,
+    ReferenceFinding,
     SecretErrorCategory,
     SecretPolicy,
     SecretResolutionError,
+    inspect_node_references,
     resolve_node_config,
 )
 from docpipe.integrations.secrets.secret_provider import (
@@ -792,4 +795,108 @@ class TestStartupDiagnostics:
         DocpipeConfigLoader._config = {}
         with caplog.at_level(logging.WARNING, logger="docpipe"):
             SecretPolicy.log_startup_diagnostics()
+        assert caplog.records == []
+
+
+# ---------------------------------------------------------------------------
+# Inspection without a provider call (flow validation)
+# ---------------------------------------------------------------------------
+
+
+def _inspect(config: dict[str, Any], operator: Any = FakeOperator) -> list[ReferenceFinding]:
+    return inspect_node_references(operator_class=operator, config=config)
+
+
+class TestInspectNodeReferences:
+    def test_valid_references_have_no_findings_and_no_provider_call(self, provider):
+        _set_policy(allowed_paths=["hashicorp:**"])
+
+        # pragma: allowlist nextline secret
+        assert _inspect({"password": "vault://hashicorp/opensearch/credentials#password"}) == []
+        assert provider.calls == []
+
+    def test_config_without_references_has_no_findings(self):
+        # pragma: allowlist nextline secret
+        assert _inspect({"password": "plain", "n": 1}) == []
+
+    def test_malformed_and_embedded_values_are_reported_by_key(self, provider):
+        _set_policy(allowed_paths=["hashicorp:**"])
+
+        findings = _inspect({"password": "vault://", "endpoint_url": "https://h/?k=vault://hashicorp/a#b"})
+
+        assert findings == [
+            ReferenceFinding(config_key="password", kind=FindingKind.MALFORMED, provider=None),
+            ReferenceFinding(config_key="endpoint_url", kind=FindingKind.MALFORMED, provider=None),
+        ]
+
+    def test_every_problem_is_reported_not_only_the_first(self, provider):
+        _set_policy(allowed_paths=["hashicorp:opensearch/*"])
+
+        findings = _inspect(
+            {
+                "name": "vault://hashicorp/opensearch/a#b",
+                # pragma: allowlist nextline secret
+                "password": "vault://hashicorp/other/a#b",
+                "token": "vault://nowhere/opensearch/a#b",
+                "model": "vault://hashicorp/opensearch/a#b",
+            }
+        )
+
+        assert {(f.config_key, f.kind) for f in findings} == {
+            ("name", FindingKind.FIELD_NOT_SECRET_CAPABLE),
+            ("password", FindingKind.PATH_NOT_PERMITTED),
+            ("token", FindingKind.PROVIDER_NOT_REGISTERED),
+            ("model", FindingKind.FIELD_NOT_SECRET_CAPABLE),
+        }
+
+    def test_findings_carry_the_provider_but_never_the_path(self, provider):
+        _set_policy(allowed_paths=["hashicorp:opensearch/*"])
+
+        (finding,) = _inspect({"password": "vault://hashicorp/CANARY-path/a#CANARY-key"})
+
+        assert finding.provider == "hashicorp"
+        assert "CANARY" not in repr(finding)
+
+    def test_provider_scoped_declaration_follows_the_selected_provider(self, provider):
+        _set_policy(allowed_paths=["hashicorp:**"])
+        # pragma: allowlist nextline secret
+        config = {"provider": "box", "provider_config": {"secret_key": "vault://hashicorp/a#b"}}
+
+        findings = _inspect(config, ProviderScopedOperator)
+
+        assert findings == [
+            ReferenceFinding(
+                config_key="provider_config.secret_key", kind=FindingKind.FIELD_NOT_SECRET_CAPABLE, provider="hashicorp"
+            )
+        ]
+
+    def test_operator_without_declarations_reports_every_reference(self, provider):
+        _set_policy(allowed_paths=["hashicorp:**"])
+
+        findings = _inspect({"x": "vault://hashicorp/a#b"}, NoDeclarationOperator)
+
+        assert [f.kind for f in findings] == [FindingKind.FIELD_NOT_SECRET_CAPABLE]
+
+    def test_literal_destination_outside_the_policy_is_reported_when_a_reference_passes(self, provider):
+        _set_policy(allowed_paths=["hashicorp:**"], allowed_destinations=["store.example.internal"])
+
+        findings = _inspect({"password": "vault://hashicorp/a#b", "endpoint_url": "https://other.example.net"})
+
+        assert findings == [
+            ReferenceFinding(config_key="endpoint_url", kind=FindingKind.DESTINATION_NOT_PERMITTED, provider=None)
+        ]
+        assert provider.calls == []
+
+    def test_literal_destination_alone_is_not_reported_without_a_reference(self):
+        _set_policy(allowed_paths=["hashicorp:**"], allowed_destinations=["store.example.internal"])
+
+        assert _inspect({"endpoint_url": "https://other.example.net"}) == []
+
+    def test_inspection_logs_nothing_and_raises_nothing(self, provider, caplog):
+        _set_policy(allowed_paths=["hashicorp:opensearch/*"])
+
+        with caplog.at_level(logging.DEBUG):
+            # pragma: allowlist nextline secret
+            _inspect({"password": "vault://hashicorp/other/a#b"})
+
         assert caplog.records == []
