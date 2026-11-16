@@ -25,6 +25,7 @@ This guide covers the setup, configuration, and end-to-end usage of HashiCorp Va
   - [Step 5 — Run flow with Vault references](#step-5--run-flow-with-vault-references)
 - [Web UI Canvas Usage](#web-ui-canvas-usage)
 - [Security, Sanitization, and Masking Guarantees](#security-sanitization-and-masking-guarantees)
+- [Persisted credentials: rotate, purge, re-ingest](#persisted-credentials-rotate-purge-re-ingest)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -292,6 +293,26 @@ The web UI canvas provides interactive support for `vault://` URIs through the `
    Standard plain passwords in flow definitions are masked as `********` when returned from API endpoints (`GET /api/v1/flows`). `vault://` URIs are preserved unmasked for UI round-tripping.
 3. **Log Sanitization**:
    Resolved secret values are never printed in application logs. Execution logs record only the configuration path names being resolved (e.g., `['provider_config.username', 'provider_config.password']`), never the secrets themselves.
+
+---
+
+## Persisted credentials: rotate, purge, re-ingest
+
+Earlier versions of the SharePoint and OneDrive ingest adapters wrote `client_id`, `client_secret` and `tenant_id` into each document's `metadata`. That metadata was serialized to parquet output and to `*.meta.json` storage sidecars. The adapters no longer do this, but output produced by older versions may still hold the credentials in clear text. Treat any credential found there as disclosed.
+
+1. **Find affected files.** The script lists affected files and the key names found. It never prints a value.
+
+   ```bash
+   python scripts/find_persisted_credentials.py /path/to/output /path/to/storage
+   ```
+
+   Exit status is `0` when nothing is found, `1` when at least one file is affected, and `2` on a usage error or when nothing could be scanned.
+
+2. **Rotate.** Rotate the SharePoint or OneDrive client secret in the identity provider (and the client ID or tenant if your policy requires it). Rotation is required because purging files does not recall copies already exported or backed up.
+3. **Purge.** Delete or overwrite the listed parquet files and sidecars, and any backups or copies of them.
+4. **Re-ingest.** Run the flow again with the new credentials. The regenerated output no longer contains the credentials.
+
+The `ACLOperator` now reads its credentials from its own `credentials` config instead of document metadata. See the [ACLOperator README](../operators/extract/acl_readme.md).
 
 ---
 
