@@ -3,6 +3,8 @@
 
 """Unit tests for WatsonxDetectionClient (src/docpipe/integrations/watsonx/detection_client.py)."""
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -221,6 +223,97 @@ class TestTokenHandling:
         client.detect(payload=PAYLOAD)
 
         assert mock_iam_token.call_count == 1
+
+
+class TestWatsonxDetectionClientThreadSafety:
+    """One shared client (and real RestClient/session) used from many worker threads."""
+
+    THREAD_COUNT = 16
+
+    @staticmethod
+    def _make_client() -> WatsonxDetectionClient:
+        return WatsonxDetectionClient(
+            api_key="test-api-key",  # pragma: allowlist secret
+            api_base=API_BASE,
+            container_id="shared-container",
+            container_kind="project",
+        )
+
+    @staticmethod
+    def _fake_request_factory(*, seen_headers: list[str]):
+        """Build a thread-safe stand-in for ``requests.Session.request`` that echoes the request."""
+        lock = threading.Lock()
+
+        def fake_request(**kwargs):
+            body = kwargs["json"]
+            with lock:
+                seen_headers.append(kwargs["headers"]["Authorization"])
+            response = MagicMock()
+            response.status_code = 200
+            response.headers = {}
+            response.raise_for_status.return_value = None
+            response.json.return_value = {
+                "detections": [{"text": body["input"], "container": body["project_id"]}],
+            }
+            return response
+
+        return fake_request
+
+    def test_concurrent_detect_calls_do_not_mix_results(self, mock_iam_token):
+        client = self._make_client()
+        seen_headers: list[str] = []
+        fake_request = self._fake_request_factory(seen_headers=seen_headers)
+
+        with patch.object(client._rest_client.session, "request", side_effect=fake_request) as session_request:
+            # Warm the token so every worker deterministically reuses the cached value.
+            client.detect(payload={"input": "warmup", "detectors": {"pii": {}}})
+            seen_headers.clear()
+
+            payloads = [{"input": f"text-{i}", "detectors": {"pii": {}}} for i in range(self.THREAD_COUNT * 4)]
+            with ThreadPoolExecutor(max_workers=self.THREAD_COUNT) as executor:
+                results = list(executor.map(lambda p: client.detect(payload=p), payloads))
+
+        assert session_request.call_count == len(payloads) + 1
+        for payload, result in zip(payloads, results, strict=True):
+            assert result == [{"text": payload["input"], "container": "shared-container"}]
+        assert seen_headers == ["Bearer token-1"] * len(payloads)
+        assert mock_iam_token.call_count == 1
+
+    def test_concurrent_first_calls_use_consistent_token(self, mock_iam_token):
+        # Cold start: racing first calls may each fetch a token (no lock), but every
+        # request must carry a real token and never ``Bearer None``.
+        mock_iam_token.side_effect = None
+        mock_iam_token.return_value = "shared-token"
+        client = self._make_client()
+        seen_headers: list[str] = []
+        fake_request = self._fake_request_factory(seen_headers=seen_headers)
+        barrier = threading.Barrier(self.THREAD_COUNT)
+
+        def worker(index: int):
+            barrier.wait(timeout=10)
+            return client.detect(payload={"input": f"text-{index}", "detectors": {"pii": {}}})
+
+        with patch.object(client._rest_client.session, "request", side_effect=fake_request):
+            with ThreadPoolExecutor(max_workers=self.THREAD_COUNT) as executor:
+                results = list(executor.map(worker, range(self.THREAD_COUNT)))
+
+        for index, result in enumerate(results):
+            assert result == [{"text": f"text-{index}", "container": "shared-container"}]
+        assert seen_headers == ["Bearer shared-token"] * self.THREAD_COUNT
+        assert 1 <= mock_iam_token.call_count <= self.THREAD_COUNT
+
+    def test_token_reset_during_fetch_does_not_send_bearer_none(self, client, mock_iam_token, mock_rest_client):
+        def fetch_and_get_reset(*, api_key):
+            # Simulate another thread clearing the cached token (401/403) mid-fetch.
+            client._access_token = None
+            return "real-token"
+
+        mock_iam_token.side_effect = fetch_and_get_reset
+
+        client.detect(payload=PAYLOAD)
+
+        headers = mock_rest_client.call_rest_json.call_args.kwargs["headers"]
+        assert headers == {"Authorization": "Bearer real-token"}
 
 
 class TestPreconditions:

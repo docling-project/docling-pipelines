@@ -72,12 +72,18 @@ class WatsonxDetectionClient:
         self._rest_client = RestClient(config=config)
 
     def _get_access_token(self) -> str:
-        """Get or fetch the cached IAM access token."""
+        """Get or fetch the cached IAM access token.
+
+        A local variable is returned instead of re-reading.
+        No lock is used; at worst the token is fetched more than once.
+        """
         if not self.api_key:
             raise ValueError("WatsonX API key is required for text detection")
-        if not self._access_token:
-            self._access_token = WatsonxPipelineOptionsProvider._get_iam_access_token(api_key=self.api_key)
-        return self._access_token
+        token = self._access_token
+        if not token:
+            token = WatsonxPipelineOptionsProvider._get_iam_access_token(api_key=self.api_key)
+            self._access_token = token
+        return token
 
     def detect(self, *, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Call the WatsonX native text detection API.

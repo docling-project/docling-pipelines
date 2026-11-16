@@ -49,6 +49,8 @@ The client keeps the IAM token in an instance attribute and resets it on 401/403
 
 Token fetch is not locked, as today. Two threads that both find no token fetch one each and the last write wins; both tokens are valid, so the cost is one extra IAM request. A lock would add behavior the issue does not ask for.
 
+The client is shared across the PII/HAP annotator's `ThreadPoolExecutor` worker threads. `RestClient` keeps no per-call state (headers are built per call and the session is not mutated), and the token read uses a local variable so a concurrent 401/403 reset cannot produce `Bearer None`. A threaded unit test covers concurrent `detect()` calls.
+
 ### D4. Explicit `validate_detection()` call in the operator adapter
 
 `WatsonxPIIAndHAPAdapter.validate()` calls `self._adapter.validate_detection()` instead of `self._adapter.validate()`. This is the same approach as `HuggingFaceHAPAdapter`, and it is needed because the core adapter's `validate()` resolves to the inference hook by method resolution order.
@@ -69,7 +71,7 @@ Alternatives considered:
 ## Risks / Trade-offs
 
 - [Tests patch `RestClient` and read `_access_token` on the adapter module] -> Move those tests to patch the client module and read the client's token attribute. `test_watsonx_adapter.py::TestWatsonXTextDetection` and `test_watsonx_adapter_embeddings_validation.py::TestWatsonXDetectionGuards` are the known cases; a missed `mock.patch` string fails at test time, so run both modules after the change.
-- [Reusing one `RestClient` changes retry state sharing] -> `RestClient` holds only configuration and a `requests.Session`; its retry wrapper is stateless per call, so reuse is safe. The client keeps 3 attempts and the same waits.
+- [Reusing one `RestClient` changes retry state sharing] -> `RestClient` holds only configuration and a `requests.Session`; its retry wrapper is stateless per call, so reuse is safe. The client keeps 3 attempts and the same waits. The shared client is used from the annotator's worker threads; no per-call state is kept, the token read uses a local variable to avoid a reset race, and a threaded unit test covers concurrent `detect()` calls.
 - [`validate()` result shape differs between the early-return branch and the delegated one] -> Out of scope; both already lack `context` in the early-return branch.
 - [Spec delta targets a capability created by PR #622] -> Archive this change after `add-huggingface-hap-provider`. If the order flips, `openspec archive` cannot find the target spec.
 
