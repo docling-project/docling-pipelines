@@ -519,6 +519,28 @@ class TestVaultResponseBodyNeverExposed:
             assert "test-role-id" not in record.getMessage()
             assert "test-secret-id" not in record.getMessage()
 
+    def test_login_non_json_200_hides_body(self, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level(logging.DEBUG, logger="docpipe")
+        provider = HashiCorpVaultProvider(config=self._make_config())
+        response = MagicMock()
+        response.status_code = 200
+        response.json.side_effect = requests.exceptions.JSONDecodeError(f"Expecting value: {_CANARY}", _CANARY, 0)
+
+        with patch("docpipe.integrations.secrets.hashicorp_vault.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session.post.return_value = response
+            mock_session.headers = {}
+            mock_session_cls.return_value = mock_session
+
+            with pytest.raises(ExternalServiceError) as exc_info:
+                provider.authenticate()
+
+        assert "invalid JSON response" in str(exc_info.value)
+        assert _CANARY not in str(exc_info.value)
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__suppress_context__ is True
+        assert _CANARY not in caplog.text
+
     @pytest.mark.parametrize("status_code", [400, 403, 429, 500, 503])
     def test_kv2_failure_hides_body(self, status_code: int, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.DEBUG, logger="docpipe")

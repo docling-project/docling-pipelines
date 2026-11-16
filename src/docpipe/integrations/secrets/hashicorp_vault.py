@@ -20,8 +20,10 @@ Transport safety:
     - ``VAULT_TLS_SKIP_VERIFY`` is honored only for a loopback address.
     - Redirects are never followed on requests that carry credentials or a token.
     - Every request uses bounded (connect, read) timeouts.
-    - Response bodies, the Vault address, and transport exception text are never
-      placed in exception messages or log records.
+    - The Vault address and transport exception text are never placed in
+      exception messages. Response bodies are never placed in exception
+      messages or log records. (The startup log lines in ``vault_initializer``
+      still name the configured address server-side.)
 
 Connection credentials are read from environment variables:
     VAULT_ADDR              - Vault server URL (default: http://127.0.0.1:8200)
@@ -330,8 +332,13 @@ class HashiCorpVaultProvider(SecretProvider):
             msg = f"Vault AppRole login failed (HTTP {response.status_code})"
             raise ExternalServiceError(msg)
 
-        data = response.json()
-        auth_data = data.get("auth", {})
+        try:
+            data = response.json()
+        except ValueError:
+            # JSONDecodeError text can embed a snippet of the response body.
+            msg = "Vault AppRole login failed: invalid JSON response"
+            raise ExternalServiceError(msg) from None
+        auth_data = data.get("auth", {}) if isinstance(data, dict) else {}
         self._token = auth_data.get("client_token")
         lease_duration = auth_data.get("lease_duration", 3600)
         self._token_expiry = time.time() + lease_duration

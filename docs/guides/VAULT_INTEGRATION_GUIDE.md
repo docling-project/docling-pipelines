@@ -190,7 +190,7 @@ Environment variables override file configuration:
 | `VAULT_TOKEN` | Token for token-based auth | `""` |
 | `VAULT_TIMEOUT` | Request timeout in seconds | `30` |
 
-**Transport rules.** `VAULT_ADDR` must use `https` unless the host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`). `VAULT_TLS_SKIP_VERIFY` is honored only for a loopback address; with any other host the provider is not registered and a server-side log line says why. Redirects are never followed, requests use bounded connect and read timeouts, and error messages and logs never include the Vault address or a response body.
+**Transport rules.** `VAULT_ADDR` must use `https` unless the host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`). `VAULT_TLS_SKIP_VERIFY` is honored only for a loopback address; with any other host the provider is not registered and a server-side log line says why. Redirects are never followed, requests use bounded connect and read timeouts, error messages never include the Vault address or transport exception text, and neither error messages nor logs include a response body. The Vault initializer's startup log lines still name the configured address server-side, so do not embed credentials in `VAULT_ADDR`.
 
 ---
 
