@@ -284,6 +284,14 @@ def test_emit_resolution_audit_record(capsys: pytest.CaptureFixture[str]) -> Non
     # Set up session info
     create_session_info(job_id="test-job", job_run_id="test-run")
 
+    levels: list[int] = []
+
+    class _LevelCapture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            levels.append(record.levelno)
+
+    get_audit_logger().addHandler(_LevelCapture())
+
     # Emit a resolved record
     emit_resolution_audit_record(
         node_name="node_1",
@@ -305,6 +313,7 @@ def test_emit_resolution_audit_record(capsys: pytest.CaptureFixture[str]) -> Non
     assert record["outcome"] == "resolved"
     assert record["correlation_id"] == "corr-123"
     assert "timestamp" in record
+    assert levels == [logging.INFO]
 
     # Emit a policy denial record (which should go as WARNING)
     emit_resolution_audit_record(
@@ -321,16 +330,18 @@ def test_emit_resolution_audit_record(capsys: pytest.CaptureFixture[str]) -> Non
     record = json.loads(lines[0])
     assert record["node"] == "node_2"
     assert record["outcome"] == "not permitted"
+    assert levels == [logging.INFO, logging.WARNING]
 
 
-def test_ds_log_level_warning_does_not_hide_resolution_records(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("ds_log_level", ["DEBUG", "WARNING"])
+def test_ds_log_level_does_not_hide_resolution_records(
+    ds_log_level: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from docpipe.core.models.session_info import create_session_info
     from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
 
     create_session_info(job_id="test-job", job_run_id="test-run")
-    monkeypatch.setenv("DS_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("DS_LOG_LEVEL", ds_log_level)
 
     emit_resolution_audit_record(
         node_name="node_1",
