@@ -3,11 +3,13 @@
 
 """Unit tests for WatsonxPIIAndHAPAdapter."""
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docpipe.core.adapters import WatsonXAdapter
 from docpipe.core.adapters.llm_adapter_factory import LLMAdapterFactory
 from docpipe.core.constants.constants import ServiceConstants
 from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.watsonx.adapter import WatsonxPIIAndHAPAdapter
@@ -35,7 +37,7 @@ _CONFIG_WITHOUT_CONTAINER_KIND: dict[str, Any] = {k: v for k, v in _FULL_CONFIG.
 @pytest.fixture
 def mock_text_detection_adapter() -> MagicMock:
     mock = MagicMock()
-    mock.validate.return_value = {"valid": True, "errors": [], "warnings": []}
+    mock.validate_detection.return_value = {"valid": True, "context": "detection", "errors": [], "warnings": []}
     mock.detect.return_value = {"success": True, "detections": []}
     return mock
 
@@ -87,7 +89,41 @@ def test_validate_delegates_to_inner_adapter(
     result = adapter.validate()
 
     assert result["valid"] is True
-    mock_text_detection_adapter.validate.assert_called_once()
+    mock_text_detection_adapter.validate_detection.assert_called_once()
+    mock_text_detection_adapter.validate.assert_not_called()
+
+
+def _build_adapter_with_real_core_adapter(*, provider_config: dict[str, Any]) -> WatsonxPIIAndHAPAdapter:
+    """Build the operator adapter around a real ``WatsonXAdapter`` with ``WatsonXClient`` patched.
+
+    The patched client keeps its constructor keyword arguments as attributes, which is all
+    ``WatsonXAdapter`` validation reads from it.
+    """
+    with patch(
+        "docpipe.core.adapters.watsonx.watsonx_adapter.WatsonXClient",
+        side_effect=lambda **kwargs: SimpleNamespace(**kwargs),
+    ):
+        return WatsonxPIIAndHAPAdapter(model_id=_MODEL_ID, provider_config=provider_config)
+
+
+def test_validate_reports_detection_context_with_real_core_adapter() -> None:
+    inst = _build_adapter_with_real_core_adapter(provider_config=_FULL_CONFIG)
+
+    assert isinstance(inst._adapter, WatsonXAdapter)
+    result = inst.validate()
+
+    assert result["valid"] is True
+    assert result["context"] == "detection"
+
+
+def test_validate_names_api_key_when_missing_with_real_core_adapter() -> None:
+    config = {k: v for k, v in _FULL_CONFIG.items() if k != "api_key"}
+    inst = _build_adapter_with_real_core_adapter(provider_config=config)
+
+    result = inst.validate()
+
+    assert result["valid"] is False
+    assert any("api_key" in error for error in result["errors"])
 
 
 def test_validate_fails_when_all_credentials_missing(mock_text_detection_adapter: MagicMock) -> None:

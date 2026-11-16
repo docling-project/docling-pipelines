@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for WatsonX unified adapter (inference, embeddings, and text detection)."""
 
 from unittest.mock import Mock, patch
@@ -256,7 +259,7 @@ class TestWatsonXTextDetection:
     @pytest.fixture
     def mock_rest_client(self):
         """Create a mock REST client."""
-        with patch("docpipe.core.adapters.watsonx.watsonx_adapter.RestClient") as mock_client_class:
+        with patch("docpipe.integrations.watsonx.detection_client.RestClient") as mock_client_class:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
             yield mock_client
@@ -265,7 +268,7 @@ class TestWatsonXTextDetection:
     def mock_iam_token(self):
         """Mock IAM token retrieval."""
         with patch(
-            "docpipe.core.adapters.watsonx.watsonx_adapter.WatsonxPipelineOptionsProvider._get_iam_access_token"
+            "docpipe.integrations.watsonx.detection_client.WatsonxPipelineOptionsProvider._get_iam_access_token"
         ) as mock_token:
             mock_token.return_value = "test-access-token"
             yield mock_token
@@ -478,10 +481,32 @@ class TestWatsonXTextDetection:
         from docpipe.exceptions.docpipe_exceptions import ExternalServiceError
 
         text = "Test text"
-        mock_rest_client.call_rest_json.side_effect = ExternalServiceError(message="Unauthorized", status_code=401)
+        mock_rest_client.call_rest_json.side_effect = [
+            ExternalServiceError(message="Unauthorized", status_code=401),
+            {"detections": []},
+        ]
 
         result = adapter.detect(text=text)
 
         assert result["success"] is False
-        # Token should be cleared for refresh on next call
-        assert adapter._access_token is None
+        assert mock_iam_token.call_count == 1
+
+        # Token was cleared by the 401, so the next call fetches a new one
+        result = adapter.detect(text=text)
+
+        assert result["success"] is True
+        assert mock_iam_token.call_count == 2
+
+    def test_construction_makes_no_network_call(self, mock_rest_client, mock_iam_token):
+        """Constructing the adapter must not request an IAM token or call the detection API."""
+        with patch("docpipe.core.adapters.watsonx.watsonx_adapter.WatsonXClient"):
+            WatsonXAdapter(
+                model_name="test-model",
+                api_key="watsonx-test-credential",  # pragma: allowlist secret
+                container_id="test-project-id",
+                api_base="https://us-south.ml.cloud.ibm.com",
+                container_kind="project",
+            )
+
+        mock_iam_token.assert_not_called()
+        mock_rest_client.call_rest_json.assert_not_called()
