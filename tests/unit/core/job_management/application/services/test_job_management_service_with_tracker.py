@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """JobManagementService tests against a real JobTrackerService.
 
 The job stats side is the production ``JobTrackerService`` over an
@@ -307,6 +310,7 @@ class TestExecuteFlowAsyncFrameworkFailures:
                 DocpipeConstants.JOB_RUN_ID: JOB_RUN_ID,
                 "k": "v",
                 DocpipeConstants.ENABLE_MICRO_BATCHING: True,
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: True,
             }
         ]
         assert _stored_run(tracker).status == ExecutionStatus.QUEUED
