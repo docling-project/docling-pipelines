@@ -3,6 +3,13 @@ import { useIntl } from 'react-intl';
 import { Form, TextInput, PasswordInput, Button, InlineNotification } from '@carbon/react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/hooks';
+import {
+  selectAuthError,
+  selectAuthProviders,
+  selectAuthState,
+  selectAuthStatus,
+  selectCredentialLogin,
+} from '@/selectors';
 import { loginUser } from '@/slices/authSlice';
 import { sanitizeReturnTo } from '@/utils/return-to';
 import { messages } from './Login.messages';
@@ -14,7 +21,11 @@ export function Login(): React.JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const { status, error, errorStatus, credentialLogin, providers } = useAppSelector((state) => state.auth);
+  const status = useAppSelector(selectAuthStatus);
+  const error = useAppSelector(selectAuthError);
+  const { errorStatus } = useAppSelector(selectAuthState);
+  const credentialLogin = useAppSelector(selectCredentialLogin);
+  const providers = useAppSelector(selectAuthProviders);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -86,6 +97,11 @@ export function Login(): React.JSX.Element {
   };
 
   const getProviderUrl = (authorizeUrl: string): string => {
+    const isSafeRelative = authorizeUrl.startsWith('/') && !authorizeUrl.startsWith('//');
+    const isSafeHttps = authorizeUrl.startsWith('https://');
+    if (!isSafeRelative && !isSafeHttps) {
+      return '#';
+    }
     const separator = authorizeUrl.includes('?') ? '&' : '?';
     return `${authorizeUrl}${separator}return_to=${encodeURIComponent(returnTo)}`;
   };
@@ -170,7 +186,10 @@ export function Login(): React.JSX.Element {
                 kind="secondary"
                 className={styles.providerBtn}
                 onClick={() => {
-                  window.location.assign(getProviderUrl(provider.authorize_url));
+                  const targetUrl = getProviderUrl(provider.authorize_url);
+                  if (targetUrl !== '#') {
+                    window.location.assign(targetUrl);
+                  }
                 }}
               >
                 {intl.formatMessage(messages.providerButton, { provider: provider.display_name })}

@@ -19,6 +19,14 @@ describe('sanitizeReturnTo', () => {
     expect(sanitizeReturnTo('\\flows')).toBeNull();
   });
 
+  it('rejects ASCII control characters', () => {
+    expect(sanitizeReturnTo('/\t/evil.com')).toBeNull();
+    expect(sanitizeReturnTo('/foo\nbar')).toBeNull();
+    expect(sanitizeReturnTo('/foo\rbar')).toBeNull();
+    expect(sanitizeReturnTo('/foo\x00bar')).toBeNull();
+    expect(sanitizeReturnTo('/foo\x7fbar')).toBeNull();
+  });
+
   it('rejects absolute URLs', () => {
     expect(sanitizeReturnTo('http://google.com/flows/x')).toBeNull();
     expect(sanitizeReturnTo('https://localhost:3000/projects')).toBeNull();

@@ -114,7 +114,8 @@ apiClient.interceptors.response.use(
 
           // Navigate to login page outside of React
           const currentPath = window.location.pathname;
-          const pathWithoutBasename = currentPath.startsWith('/ui') ? currentPath.slice(3) : currentPath;
+          const strippedPath = currentPath.startsWith('/ui') ? currentPath.slice(3) : currentPath;
+          const pathWithoutBasename = strippedPath.startsWith('/') ? strippedPath : `/${strippedPath}`;
           const returnTo = encodeURIComponent(pathWithoutBasename + window.location.search);
           window.location.assign(`/ui/login?return_to=${returnTo}`);
         }

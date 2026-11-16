@@ -123,4 +123,25 @@ describe('apiClient additional requirements', () => {
       expect(store.getState().auth.status).toBe('unauthenticated');
     });
   });
+
+  it('preserves leading slash in return_to when 401 occurs at bare /ui basename with query string', async () => {
+    // Reset the redirect latch via a successful /auth/me response first
+    server.use(
+      http.get('http://localhost:3000/auth/me', () => {
+        return HttpResponse.json({ username: 'alice', email: 'a@x.io', full_name: 'Alice', roles: ['viewer'] });
+      }),
+      http.get('http://localhost:3000/api/flows', () => {
+        return new HttpResponse(null, { status: 401 });
+      })
+    );
+    await apiClient.get('http://localhost:3000/auth/me');
+
+    window.location.pathname = '/ui';
+    window.location.search = '?tab=1';
+
+    await expect(apiClient.get('http://localhost:3000/api/flows')).rejects.toThrow();
+
+    expect(mockAssign).toHaveBeenCalledTimes(1);
+    expect(mockAssign).toHaveBeenCalledWith('/ui/login?return_to=%2F%3Ftab%3D1');
+  });
 });

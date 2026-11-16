@@ -5,7 +5,9 @@
  * The gating is a convenience only: the backend enforces every permission.
  */
 
+import { useCallback } from 'react';
 import type { AuthUser } from '@/types';
+import { selectAuthEnabled, selectAuthStatus, selectAuthUser } from '@/selectors';
 import { useAppSelector } from './useAppSelector';
 
 /** Return shape of {@link useAuth}. */
@@ -35,19 +37,22 @@ export interface UseAuthReturn {
  * Used by {@link ProtectedRoute} and by components that gate actions by role.
  */
 export function useAuth(): UseAuthReturn {
-  const user = useAppSelector((state) => state.auth.user);
-  const authEnabled = useAppSelector((state) => state.auth.authEnabled);
-  const status = useAppSelector((state) => state.auth.status);
+  const user = useAppSelector(selectAuthUser);
+  const authEnabled = useAppSelector(selectAuthEnabled);
+  const status = useAppSelector(selectAuthStatus);
 
   const roles = user?.roles ?? [];
   const canAdmin = roles.includes('admin');
   const canEdit = canAdmin || roles.includes('editor');
 
-  const canModifyAsset = (createdBy?: string | null): boolean => {
-    if (canAdmin) { return true; }
-    if (!canEdit) { return false; }
-    return !createdBy || createdBy === user?.username;
-  };
+  const canModifyAsset = useCallback(
+    (createdBy?: string | null): boolean => {
+      if (canAdmin) { return true; }
+      if (!canEdit) { return false; }
+      return !createdBy || createdBy === user?.username;
+    },
+    [canAdmin, canEdit, user?.username]
+  );
 
   return {
     user,
