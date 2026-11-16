@@ -82,6 +82,15 @@ class TestResolveOperatorConfig:
         assert resolve_operator_config(operator_class=NOOPOperator, config=config) is config
         assert provider.calls == []
 
+    def test_reference_in_runtime_input_event_is_neither_resolved_nor_rejected(
+        self, provider: RecordingProvider
+    ) -> None:
+        _allow_all()
+        config = {"name": "ingest_a", "input_event": {"file_reference": REFERENCE}}
+
+        assert resolve_operator_config(operator_class=IngestSourceOperator, config=config) is config
+        assert provider.calls == []
+
     def test_reference_in_undeclared_own_field_is_rejected(self, provider: RecordingProvider) -> None:
         _allow_all()
 

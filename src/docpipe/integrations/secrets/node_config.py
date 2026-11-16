@@ -26,15 +26,20 @@ from docpipe.integrations.secrets.secret_value import SecretValue
 if TYPE_CHECKING:
     from docpipe.core.operators.abstract_operator import AbstractOperator
 
+# Run-parameter key the event dispatcher uses for the event that triggered a streaming run.
+INPUT_EVENT_KEY: Final[str] = "input_event"
+
 # Keys the framework adds to every node's merged configuration. They are not the
 # node's own settings, so a reference inside them is never resolved for the node:
 # ``flow_definition`` is the whole unresolved flow, ``ingest_source`` carries
-# non-secret source facts, ``common_log_arguments`` carries log identifiers.
+# non-secret source facts, ``common_log_arguments`` carries log identifiers, and
+# ``input_event`` is runtime event data, which is passed to ingest unchanged.
 SHARED_CONFIG_KEYS: Final[frozenset[str]] = frozenset(
     {
         DocpipeConstants.FLOW_DEFINITION,
         OperatorConstants.Config.INGEST_SOURCE,
         OperatorConstants.Config.COMMON_LOG_ARGUMENTS,
+        INPUT_EVENT_KEY,
     }
 )
 
@@ -105,6 +110,7 @@ class ResolvedNodeConfig(dict[str, Any]):
 
 
 def _contains_secret_value(*, node: Any) -> bool:
+    """Return True when ``node`` is, or contains at any depth, a ``SecretValue``."""
     if isinstance(node, SecretValue):
         return True
     if isinstance(node, dict):
@@ -115,6 +121,7 @@ def _contains_secret_value(*, node: Any) -> bool:
 
 
 def _reveal_node(*, node: Any) -> Any:
+    """Return a copy of ``node`` with every ``SecretValue`` replaced by its plain value."""
     if isinstance(node, SecretValue):
         return node.reveal()
     if isinstance(node, dict):
