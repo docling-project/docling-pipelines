@@ -47,14 +47,14 @@ def temporary_credential_file(
         # Create file with 0600 permissions (owner-only read/write)
         fd = os.open(str(file_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
         try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
-        except Exception:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+            handle = os.fdopen(fd, "wb")
+        except BaseException:
+            # fdopen did not take ownership of the descriptor, so close it here and only here.
+            os.close(fd)
             raise
+        # From here the file object owns the descriptor and closes it, also when write raises.
+        with handle:
+            handle.write(data)
 
         yield file_path
     finally:

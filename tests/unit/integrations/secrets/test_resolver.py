@@ -911,3 +911,68 @@ class TestInspectNodeReferences:
             _inspect({"password": "vault://hashicorp/other/a#b"})
 
         assert caplog.records == []
+
+
+# ---------------------------------------------------------------------------
+# Resolution audit trail (C.3): one record per attempted reference
+# ---------------------------------------------------------------------------
+
+
+class _AuditCapture(logging.Handler):
+    """Collect the records written to the ``docpipe.audit`` logger."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+class TestResolutionAuditTrail:
+    @pytest.fixture
+    def audit(self):
+        from docpipe.utils.infrastructure.audit import get_audit_logger, reset_audit_logger
+
+        reset_audit_logger()
+        capture = _AuditCapture()
+        get_audit_logger().addHandler(capture)
+        yield capture
+        reset_audit_logger()
+
+    def test_resolved_reference_is_audited_once_at_info(self, provider, audit):
+        _set_policy(allowed_paths=["hashicorp:opensearch/*"])
+        _resolve({"password": "vault://hashicorp/opensearch/credentials#password"})  # pragma: allowlist secret
+
+        records = audit.records
+        assert len(records) == 1
+        assert records[0].levelno == logging.INFO
+        assert '"outcome":"resolved"' in records[0].getMessage()
+        assert '"config_key":"password"' in records[0].getMessage()
+        assert "p@ss/word" not in records[0].getMessage()
+
+    def test_denied_reference_is_audited_once_at_warning(self, provider, audit):
+        _set_policy(allowed_paths=["hashicorp:opensearch/*"])
+        config = {"password": "vault://hashicorp/prod/payments#key"}  # pragma: allowlist secret
+        _expect(config, SecretErrorCategory.NOT_PERMITTED)
+
+        records = audit.records
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert '"outcome":"not permitted"' in records[0].getMessage()
+        assert "payments-key" not in records[0].getMessage()
+
+    def test_unavailable_reference_is_audited_at_info(self, provider, audit):
+        _set_policy(allowed_paths=["hashicorp:**"])
+        config = {"password": "vault://hashicorp/missing/path#password"}  # pragma: allowlist secret
+        _expect(config, SecretErrorCategory.SECRET_UNAVAILABLE)
+
+        records = audit.records
+        assert len(records) == 1
+        assert records[0].levelno == logging.INFO
+        assert '"outcome":"secret unavailable"' in records[0].getMessage()
+
+    def test_no_reference_means_no_audit_record(self, provider, audit):
+        _resolve({"password": "plain-value"})  # pragma: allowlist secret
+
+        assert audit.records == []
