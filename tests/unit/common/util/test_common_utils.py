@@ -113,6 +113,11 @@ class TestBatchList(unittest.TestCase):
         result = batch_list(input_list=[], batch_size=5)
         self.assertEqual(result, [])
 
+    def test_batch_list_rejects_nonpositive_size(self):
+        for batch_size in (0, -1):
+            with self.subTest(batch_size=batch_size), self.assertRaisesRegex(ValueError, "batch_size"):
+                batch_list(input_list=[1, 2], batch_size=batch_size)
+
 
 class TestProcessInBatches(unittest.TestCase):
     """Test the process_in_batches function."""
@@ -159,6 +164,14 @@ class TestProcessInBatches(unittest.TestCase):
         result = process_in_batches(processor=processor, input_list=input_tuple, batch_size=2)
         expected = [1, 2, 3, 4]
         self.assertEqual(result, expected)
+
+    def test_process_in_batches_rejects_nonpositive_size(self):
+        def processor(batch, batch_number, start_index_offset):
+            self.fail("Processor must not run with an invalid batch size")
+
+        for batch_size in (0, -1):
+            with self.subTest(batch_size=batch_size), self.assertRaisesRegex(ValueError, "batch_size"):
+                process_in_batches(processor=processor, input_list=[], batch_size=batch_size)
 
 
 class TestSplitTextIntoChunks(unittest.TestCase):
