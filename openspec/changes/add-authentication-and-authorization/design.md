@@ -10,7 +10,7 @@ See `proposal.md` for motivation and scope. Current state that shapes the approa
 - `Flow.created_by` and `Project.created_by` exist in the domain models and schemas, but `FlowService` and `ProjectService` never set or check them.
 - `core/` must not import `docpipe.api.*` (DDD layering in `AGENTS.md`). The CLI and `DocpipeFlowManager` call the same services with no caller identity.
 - The BFF controllers send only static `Accept` and `Content-Type` headers, so `Cookie` never reaches FastAPI. `app.listen(PORT)` has no host. In wheel, Compose and Kubernetes deployments the browser talks to FastAPI, which serves `/ui` and `/auth/*` and reverse-proxies `/api/*` to the BFF. The BFF serves only `/api` and `/health`.
-- `EventDispatchService` calls `POST {api}/api/v1/job_runs` over HTTP with no credentials.
+- `EventDispatchService` resolves the saved flow through `FlowService` and runs it in process through `StreamingOrchestrator.execute()`. It makes no HTTP call to the API, so the REST guards and `ActorContext` checks never run for event-triggered runs.
 - `docker/docker-compose.yml` and `docker/all-in-one-deployment/docker-compose.yml` configure neither LDAP nor OIDC.
 - `bcrypt==5.0.0` is locked; `passlib==1.7.4` is incompatible with it.
 - `rate_limit.py` is a per-IP in-memory sliding window, not thread-safe, and keyed on the TCP peer.
@@ -71,9 +71,9 @@ Accept `return_to` on `/auth/oauth2/authorize` (keeping `redirect_after` as a ba
 ### D10. Harden the existing rate limiter in place
 Keep `rate_limit.py` and add a lock, bounded entries, failed-only counting, lockout and `Retry-After`. The lockout key is the pair of client address and username, so an attacker cannot lock a real user out from another address. The client address is the TCP peer unless `DOCPIPE_TRUST_PROXY_HEADERS=true`, in which case it is the rightmost `X-Forwarded-For` entry, which is the one the trusted proxy appended. Earlier entries are client-controlled and ignored. Login does not pass through the BFF, so the peer is the real client or the ingress. Operators behind an ingress set the flag to `true`, and the same flag drives the `Secure` cookie decision. No `slowapi` or Redis. Limits stay per-process and are documented as such.
 
-### D11. Internal calls use a system token
-`EventDispatchService` mints a token with the existing JWT handler: role `editor`, a fixed system username and a lifetime of at most 5 minutes. It sends the token as `Authorization: Bearer`, which is exempt from the CSRF header rule. The token carries no `admin` role, because job submission needs only `editor`. The API never accepts the system username or role from user input.
-*Alternative:* call the job service in-process. Cleaner, but a larger refactor of the event path; revisit separately.
+### D11. In-process event dispatch needs no system credential
+`EventDispatchService` runs mapped flows in process and calls `FlowService.get_flow` without an actor, which D6 defines as an internal caller that is always allowed. No token is minted and no code change is needed in `core/event_streaming/`. The trust boundary is the Kafka listener and its broker configuration, not the REST API. Event mappings stay protected by the `editor` guard on the REST routes that create them.
+*Alternative:* mint a system token as the earlier design did. Rejected: there is no HTTP call to attach it to, and a token that is never verified would be dead code.
 
 ### D12. Audit through the existing logger
 Authorization denials and successful writes are logged via `get_logger()` with username, action, target and outcome, in `%s` style. Failed writes such as 404 and 409 are logged with the same fields and the status code. Usernames and targets from untrusted sources have newlines and control characters removed first. Secrets and tokens are never logged. No new audit store.
@@ -123,4 +123,4 @@ The specs describe the end state, where the default is `true`. In implementation
 ## Open Questions
 
 - Should a follow-up add a shared-store revocation port for multi-replica deployments (D7)?
-- Should event dispatch call the job service in-process instead of using a system token (D11)?
+- Should event-triggered runs record an owner or an audit entry, which requires a way to attribute a Kafka event to a user (D11)?

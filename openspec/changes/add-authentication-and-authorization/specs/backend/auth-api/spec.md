@@ -267,13 +267,9 @@ When auth is enabled the API SHALL fail to start unless `JWT_SECRET_KEY` is set,
 - **WHEN** `DOCPIPE_AUTH_ENABLED=false` and no secret is set
 - **THEN** the API starts normally
 
-### Requirement: Internal service calls authenticate
-Internal components that call the API over HTTP, such as event-triggered job submission, SHALL authenticate with a system credential so they continue to work when auth is enabled. The credential SHALL be a Bearer token with the `editor` role, a fixed system username and a lifetime of at most 5 minutes. The API SHALL NOT accept the system username or role from any user input.
+### Requirement: In-process internal callers need no credential
+Components that run inside the API process, such as event-triggered flow execution, SHALL call services with no `ActorContext` and SHALL NOT mint or send a system token.
 
-#### Scenario: Event-triggered job run succeeds
-- **WHEN** an event dispatch submits a job run while auth is enabled
-- **THEN** the job run is accepted rather than rejected with 401
-
-#### Scenario: System token lacks admin rights
-- **WHEN** the system token is used on a custom operator route
-- **THEN** the response is 403
+#### Scenario: Event-triggered flow runs while auth is enabled
+- **WHEN** the event dispatch service executes a mapped flow while auth is enabled
+- **THEN** the flow runs without a bearer token and without an ownership check
