@@ -35,6 +35,7 @@ from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults, Flo
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.core.datetime import get_current_timestamp
 from docpipe.utils.data.pyarrow_handler import BaseParquetTableHandler, get_parquet_table_handler
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.deleted_rows_tracker import (
     combine_cumulative_deleted_rows,
@@ -279,7 +280,7 @@ class AbstractOrchestrator(ABC):
         if not (is_batching_enabled and continue_on_batch_failure):
             self.job_status = ExecutionStatus.FAILING
             # Capture error message for job-level message field
-            self.message = str(e)
+            self.message = sanitize_exception(exc=e, config_key=op_def[OperatorConstants.Columns.NAME])
 
         self.flow_execution_event_handler.after_node_failure(
             node_id=op_def[OperatorConstants.Columns.ID],
@@ -298,7 +299,7 @@ class AbstractOrchestrator(ABC):
                 node_id=op_def[OperatorConstants.Columns.ID],
                 node_name=op_def[OperatorConstants.Columns.NAME],
                 operator_type=op_def.get(OperatorConstants.Misc.OPERATOR, ""),
-                error_message=str(e),
+                error_message=sanitize_exception(exc=e, config_key=op_def[OperatorConstants.Columns.NAME]),
                 exception=e,
                 start_time=start,
                 end_time=get_current_timestamp(),

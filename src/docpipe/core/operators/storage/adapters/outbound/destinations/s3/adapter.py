@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """S3 destination adapter implementation."""
 
 from typing import Any
@@ -25,9 +28,12 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.s3.config imp
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
+
+_CONFIG_KEY = "storage_output.destination_config.s3"
 
 
 @register_destination_adapter
@@ -80,11 +86,13 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
             s3_client.head_bucket(**head_kwargs)
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            msg = f"S3 destination bucket '{config.bucket}' is not accessible ({error_code}): {e}"
+            safe_error = sanitize_exception(exc=e, config_key=_CONFIG_KEY)
+            msg = f"S3 destination bucket '{config.bucket}' is not accessible ({error_code}): {safe_error}"
             logger.error(msg)
             return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
         except BotoCoreError as e:
-            msg = f"S3 destination bucket '{config.bucket}' is not accessible: {e}"
+            safe_error = sanitize_exception(exc=e, config_key=_CONFIG_KEY)
+            msg = f"S3 destination bucket '{config.bucket}' is not accessible: {safe_error}"
             logger.error(msg)
             return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
 
@@ -109,7 +117,11 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
                     return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
             except ClientError as e:
                 error_code = e.response.get("Error", {}).get("Code", "Unknown")
-                msg = f"S3 prefix check failed for 's3://{config.bucket}/{config.key_prefix}' ({error_code}): {e}"
+                safe_error = sanitize_exception(exc=e, config_key=_CONFIG_KEY)
+                msg = (
+                    f"S3 prefix check failed for 's3://{config.bucket}/{config.key_prefix}' "
+                    f"({error_code}): {safe_error}"
+                )
                 logger.error(msg)
                 return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
 
@@ -193,16 +205,19 @@ class S3DestinationAdapter(DestinationAdapterPort[S3DestinationConfig]):
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            msg = f"S3 ClientError ({error_code}) writing {key}: {e}"
+            safe_error = sanitize_exception(exc=e, config_key=_CONFIG_KEY)
+            msg = f"S3 ClientError ({error_code}) writing {key}: {safe_error}"
             logger.error(msg)
             return WriteResult(doc_id="", doc_name=key, success=False, error_message=msg)
         except BotoCoreError as e:
-            msg = f"S3 BotoCoreError writing {key}: {e}"
+            safe_error = sanitize_exception(exc=e, config_key=_CONFIG_KEY)
+            msg = f"S3 BotoCoreError writing {key}: {safe_error}"
             logger.error(msg)
             return WriteResult(doc_id="", doc_name=key, success=False, error_message=msg)
         except Exception as e:
-            msg = f"Unexpected error writing to S3 {key}: {e}"
-            logger.error(msg, exc_info=True)
+            safe_error = sanitize_exception(exc=e, config_key=_CONFIG_KEY)
+            msg = f"Unexpected error writing to S3 {key}: {safe_error}"
+            logger.error(msg)
             return WriteResult(doc_id="", doc_name=key, success=False, error_message=msg)
 
     def ensure_directory(self, *, path: str) -> None:

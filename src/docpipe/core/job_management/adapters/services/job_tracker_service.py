@@ -40,6 +40,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     JobRunInvalidStateException,
 )
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.node_ordering import order_node_items
 
@@ -457,7 +458,7 @@ class JobTrackerService(JobStatsService):
         error_message: str
         if exception is not None:
             # Get just the error message, not the full traceback
-            exception_str: str = str(exception)
+            exception_str: str = sanitize_exception(exc=exception, config_key=node_name)
             error_message = exception_str if exception_str else exception.__class__.__name__
         else:
             error_message = error  # type: ignore
@@ -1399,8 +1400,9 @@ class JobTrackerService(JobStatsService):
 
             logger.info("Wrote job logs to: %s", job_log_path)
         except Exception as e:
-            logger.error("Failed to write job logs to %s: %s", job_log_path, e)
-            msg = f"Failed to write job logs: {e}"
+            safe_error = sanitize_exception(exc=e, config_key="job_logs")
+            logger.error("Failed to write job logs to %s: %s", job_log_path, safe_error)
+            msg = f"Failed to write job logs: {safe_error}"
             raise OSError(msg) from e
 
     def list_job_runs(
