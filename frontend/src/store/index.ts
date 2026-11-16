@@ -3,14 +3,50 @@
  * Configures the central Redux store with all state slices and exports type-safe types.
  */
 
-import { configureStore } from '@reduxjs/toolkit';
+import { combineReducers, configureStore, type UnknownAction } from '@reduxjs/toolkit';
 import operatorsReducer from '@/slices/operatorsSlice';
 import flowReducer from '@/slices/flowSlice';
 import jobRunReducer from '@/slices/jobRunSlice';
 import assetsReducer from '@/slices/assetsSlice';
 import projectsReducer from '@/slices/projectsSlice';
 import notificationsReducer from '@/slices/notificationsSlice';
-import authReducer from '@/slices/authSlice';
+import authReducer, { logoutUser } from '@/slices/authSlice';
+
+const combinedReducer = combineReducers({
+  operators: operatorsReducer,
+  flow: flowReducer,
+  jobRun: jobRunReducer,
+  assets: assetsReducer,
+  projects: projectsReducer,
+  notifications: notificationsReducer,
+  auth: authReducer,
+});
+
+type CombinedState = ReturnType<typeof combinedReducer>;
+
+/**
+ * Root reducer that resets cached domain slices on user logout while preserving
+ * static operator metadata and allowing the auth slice to transition normally.
+ */
+export function rootReducer(
+  state: CombinedState | undefined,
+  action: UnknownAction
+): CombinedState {
+  if (state !== undefined && (logoutUser.fulfilled.match(action) || logoutUser.rejected.match(action))) {
+    return combinedReducer(
+      {
+        ...state,
+        flow: undefined,
+        jobRun: undefined,
+        assets: undefined,
+        projects: undefined,
+        notifications: undefined,
+      },
+      action
+    );
+  }
+  return combinedReducer(state, action);
+}
 
 /**
  * The Redux store instance for the application.
@@ -23,15 +59,7 @@ import authReducer from '@/slices/authSlice';
  * - auth: Current user, auth config and session status (no token is stored)
  */
 export const store = configureStore({
-  reducer: {
-    operators: operatorsReducer,
-    flow: flowReducer,
-    jobRun: jobRunReducer,
-    assets: assetsReducer,
-    projects: projectsReducer,
-    notifications: notificationsReducer,
-    auth: authReducer,
-  },
+  reducer: rootReducer,
 });
 
 /**

@@ -160,6 +160,34 @@ describe('Login page', () => {
     expect(mockAssign).toHaveBeenCalledWith('/auth/oauth2/authorize?provider=google&return_to=%2Fflows%2F123');
   });
 
+  it('rejects unsafe provider authorize_url schemes and protocol-relative URLs', () => {
+    renderWithProviders(<Login />, {
+      preloadedState: {
+        auth: {
+          user: null,
+          authEnabled: true,
+          providers: [
+            { name: 'evil-js', display_name: 'EvilJS', authorize_url: 'javascript:alert(1)' },
+            { name: 'evil-rel', display_name: 'EvilRel', authorize_url: '//evil.com/auth' },
+            { name: 'safe-https', display_name: 'SafeIdP', authorize_url: 'https://idp.example.com/authorize' },
+          ],
+          credentialLogin: false,
+          status: 'unauthenticated',
+          error: null,
+          errorStatus: null,
+          retryAfter: null,
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with EvilJS' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with EvilRel' }));
+    expect(mockAssign).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with SafeIdP' }));
+    expect(mockAssign).toHaveBeenCalledWith('https://idp.example.com/authorize?return_to=%2Fprojects');
+  });
+
   it('has error notification with alert role for accessibility', () => {
     renderWithProviders(<Login />, {
       preloadedState: {

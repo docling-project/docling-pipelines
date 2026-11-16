@@ -5,7 +5,7 @@
  * the `access_token` in the login response is deliberately ignored.
  */
 
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, isAnyOf } from '@reduxjs/toolkit';
 import type { AuthState, AuthUser, AuthErrorPayload, AuthConfigResponse, LoginRequest } from '@/types';
 import {
   getAuthConfig as apiGetAuthConfig,
@@ -161,7 +161,7 @@ const authSlice = createSlice({
         state.retryAfter = action.payload?.retryAfter ?? null;
       })
       .addMatcher(
-        (action) => logoutUser.fulfilled.match(action) || logoutUser.rejected.match(action),
+        isAnyOf(logoutUser.fulfilled, logoutUser.rejected),
         (state) => {
           state.user = null;
           state.status = 'unauthenticated';

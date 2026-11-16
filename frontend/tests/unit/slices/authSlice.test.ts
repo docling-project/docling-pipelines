@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer, { bootstrapAuth, loginUser, logoutUser } from '@/slices/authSlice';
+import { rootReducer } from '@/store';
+import { addNotification } from '@/slices/notificationsSlice';
+import { selectProject } from '@/slices/projectsSlice';
+import { selectFlow } from '@/slices/assetsSlice';
 import * as authActions from '@/services/api/actions/auth-actions';
 import type { AuthConfigResponse, AuthUser } from '@/types';
 
@@ -180,6 +184,53 @@ describe('authSlice', () => {
       await store.dispatch(logoutUser());
       expect(store.getState().auth.user).toBeNull();
       expect(store.getState().auth.status).toBe('unauthenticated');
+    });
+
+    it('resets cached domain slices in rootReducer while keeping auth config intact', async () => {
+      mocked.getAuthConfig.mockResolvedValue(ok(enabledConfig));
+      mocked.getMe.mockResolvedValue(ok(user));
+      mocked.logout.mockResolvedValue(ok({ message: 'Logged out' }));
+
+      const fullStore = configureStore({ reducer: rootReducer });
+      await fullStore.dispatch(bootstrapAuth());
+      fullStore.dispatch(selectProject('proj-123'));
+      fullStore.dispatch(selectFlow('flow-456'));
+      fullStore.dispatch(addNotification({ kind: 'info', title: 'Hello' }));
+
+      expect(fullStore.getState().projects.selectedProjectId).toBe('proj-123');
+      expect(fullStore.getState().assets.selectedFlowId).toBe('flow-456');
+      expect(fullStore.getState().notifications.active).toHaveLength(1);
+
+      await fullStore.dispatch(logoutUser());
+
+      const state = fullStore.getState();
+      expect(state.projects.selectedProjectId).toBeNull();
+      expect(state.assets.selectedFlowId).toBeNull();
+      expect(state.notifications.active).toHaveLength(0);
+      expect(state.auth.status).toBe('unauthenticated');
+      expect(state.auth.user).toBeNull();
+      expect(state.auth.providers).toEqual(enabledConfig.providers);
+      expect(state.auth.authEnabled).toBe(true);
+      expect(state.auth.credentialLogin).toBe(true);
+    });
+
+    it('resets cached domain slices in rootReducer even when logoutUser is rejected', async () => {
+      mocked.getAuthConfig.mockResolvedValue(ok(enabledConfig));
+      mocked.getMe.mockResolvedValue(ok(user));
+      mocked.logout.mockRejectedValue(httpError(500));
+
+      const fullStore = configureStore({ reducer: rootReducer });
+      await fullStore.dispatch(bootstrapAuth());
+      fullStore.dispatch(selectProject('proj-123'));
+      fullStore.dispatch(addNotification({ kind: 'error', title: 'Err' }));
+
+      await fullStore.dispatch(logoutUser());
+
+      const state = fullStore.getState();
+      expect(state.projects.selectedProjectId).toBeNull();
+      expect(state.notifications.active).toHaveLength(0);
+      expect(state.auth.status).toBe('unauthenticated');
+      expect(state.auth.providers).toEqual(enabledConfig.providers);
     });
   });
 });

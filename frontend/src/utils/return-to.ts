@@ -21,8 +21,9 @@ export function sanitizeReturnTo(value: unknown): string | null {
     return null;
   }
 
-  // Must not contain backslashes
-  if (value.includes('\\')) {
+  // Must not contain backslashes or ASCII control characters
+  // eslint-disable-next-line no-control-regex
+  if (value.includes('\\') || /[\x00-\x1f\x7f]/.test(value)) {
     return null;
   }
 
