@@ -56,7 +56,7 @@ graph TD
 ```
 
 1. **Validation**: `FlowValidator` detects `vault://` strings on sensitive fields and substitutes valid mock types so validation succeeds without querying Vault.
-2. **Resolution**: `PythonOperatorExecutor` scans the operator configuration, identifies `vault://` patterns, and resolves each reference via `SecretProvider`.
+2. **Resolution**: When a node is built, only that node's own declared secret-capable fields are resolved through `SecretProvider`. A node never resolves references that belong to another node, to `global_config`, or to the flow definition, so a downstream node makes no Vault request for the ingest node's credentials. The extract step resolves the ingest node's own references when it fetches document content. A reference is resolved only if it matches `secrets.vault.allowed_paths`; with that setting unset every reference is denied, so a deployer must set it (`*:**` allows all).
 3. **Execution**: The operator receives resolved credentials in memory during execution. The transient values are never written back to disk or logs.
 
 ---

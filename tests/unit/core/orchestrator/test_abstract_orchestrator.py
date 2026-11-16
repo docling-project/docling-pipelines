@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for AbstractOrchestrator."""
 
 from unittest.mock import MagicMock, Mock, patch
@@ -317,20 +320,28 @@ class TestPopulateIngestSourceConfig:
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
         assert OperatorConstants.Config.INGEST_SOURCE not in global_config
 
-    def test_provider_config_stored_in_global_config(self, orchestrator):
+    def test_only_naming_facts_stored_in_global_config(self, orchestrator):
         global_config: dict = {}
         ingest_operator = {
+            OperatorConstants.Columns.ID: "n1",
+            OperatorConstants.Columns.NAME: "ingest",
             OperatorConstants.Misc.OPERATOR: "ingest_source",
             OperatorConstants.Config.CONFIG: {
-                OperatorConstants.Config.PROVIDER_CONFIG: {"bucket": "b", "access_key": "KEY"},
+                OperatorConstants.Config.PROVIDER_CONFIG: {
+                    "bucket": "b",
+                    "prefix": "docs/",
+                    "access_key": "KEY",  # pragma: allowlist secret
+                    "endpoint_url": "https://example.test",
+                },
+                "include_filter": "pdf",
             },
         }
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
-        provider_config = global_config[OperatorConstants.Config.INGEST_SOURCE][
-            OperatorConstants.Config.PROVIDER_CONFIG
-        ]
-        assert "access_key" in provider_config
-        assert "bucket" in provider_config
+        ingest_source = global_config[OperatorConstants.Config.INGEST_SOURCE]
+        assert ingest_source[OperatorConstants.Config.PROVIDER_CONFIG] == {"prefix": "docs/"}
+        assert ingest_source["include_filter"] == "pdf"
+        assert ingest_source["node_id"] == "n1"
+        assert "KEY" not in str(ingest_source)
 
 
 @pytest.mark.unit
