@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JsonJobStatsStore - Phase 5 compatibility tests
 
@@ -10,14 +13,16 @@ Tests cover:
 """
 
 import json
+import multiprocessing as mp
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from filelock import Timeout
+from filelock import FileLock, Timeout
 
 from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.adapters.stores.json.json_job_stats_store import (
@@ -29,6 +34,26 @@ from docpipe.exceptions.docpipe_exceptions import (
     JobStatsStoreReadException,
     JobStatsStoreWriteException,
 )
+
+
+def _mp_worker_hold_and_signal(lock_path_str: str, acquired_event, can_release_event, done_event) -> None:
+    """Worker process: acquires lock, signals acquisition, waits, then marks done."""
+    lock = FileLock(lock_path_str, timeout=10.0)
+    with lock:
+        acquired_event.set()
+        can_release_event.wait(timeout=5.0)
+        time.sleep(0.5)
+        done_event.set()
+
+
+def _mp_worker_contender(lock_path_str: str, start_event, overlap_flag, holder_done_event) -> None:
+    """Worker process: waits to start, acquires lock, and checks if previous holder is still running."""
+    start_event.wait(timeout=5.0)
+    lock = FileLock(lock_path_str, timeout=10.0)
+    with lock:
+        # If the other holder has not finished, two processes are in the critical section simultaneously!
+        if not holder_done_event.is_set():
+            overlap_flag.value = 1
 
 
 @pytest.fixture
@@ -442,6 +467,32 @@ class TestListJobRuns:
         returned_job_ids = {r.job_id for r in result}
         assert returned_job_ids == {"job-0", "job-1"}
 
+    def test_list_job_runs_ignores_locks_directory(self, *, store, sample_job_stats, temp_data_dir):
+        """list_job_runs ignores .locks directory and returns only valid job runs."""
+        store.store_job_stats(sample_job_stats)
+
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        assert locks_dir.exists()
+
+        results = store.list_job_runs()
+        assert len(results) == 1
+        assert results[0].job_run_id == sample_job_stats.job_run_id
+
+    def test_list_job_runs_includes_dot_prefixed_job_run_ids(self, *, store):
+        """list_job_runs does not filter out valid job runs whose ID starts with a dot."""
+        dot_job_run_id = f".run-{uuid.uuid4()}"
+        job_stats = JobStats(
+            job_id=str(uuid.uuid4()),
+            job_run_id=dot_job_run_id,
+            status=ExecutionStatus.COMPLETED,
+        )
+        store.store_job_stats(job_stats)
+
+        results = store.list_job_runs()
+        matching = [r for r in results if r.job_run_id == dot_job_run_id]
+        assert len(matching) == 1
+        assert dot_job_run_id in store.get_all_job_run_ids()
+
     def test_list_job_runs_raises_on_iterdir_error(self, store):
         """list_job_runs raises JobStatsStoreReadException when iterdir fails."""
         # Replace _base_dir with a mock whose exists() returns True
@@ -474,11 +525,61 @@ class TestDeleteOperations:
         # Directory should be removed
         assert not job_dir.exists()
 
-    def test_delete_nonexistent_job_succeeds_silently(self, *, store):
-        """Deleting nonexistent job should succeed silently (idempotent)."""
-        # JsonJobStatsStore doesn't raise on delete of nonexistent job
-        # It just logs and returns (idempotent delete)
-        store.delete_job_stats("nonexistent")  # Should not raise
+    def test_delete_nonexistent_job_raises_not_found(self, *, store):
+        """Deleting nonexistent job should raise JobStatsStoreDeleteException."""
+        with pytest.raises(JobStatsStoreDeleteException, match="Job run not found: nonexistent"):
+            store.delete_job_stats("nonexistent")
+
+    def test_delete_job_stats_removes_job_dir_and_preserves_lock_identity(
+        self, *, store, sample_job_stats, sample_node_stats, temp_data_dir
+    ):
+        """delete_job_stats removes job directory while preserving stable lock file in .locks/."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+        store.store_node_stats(job_run_id=job_run_id, node_stats=sample_node_stats)
+
+        job_dir = Path(temp_data_dir) / "job_stats" / job_run_id
+        assert job_dir.exists()
+
+        locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        assert not (job_dir / ".locks").exists()
+
+        job_lock_path = store._get_job_stats_lock_path(job_run_id=job_run_id)
+        node_lock_path = store._get_node_stats_lock_path(job_run_id=job_run_id)
+        assert job_lock_path.exists()
+        assert node_lock_path.exists()
+
+        store.delete_job_stats(job_run_id)
+        assert not job_dir.exists()
+        assert locks_dir.exists()
+        # Retaining stable lock file prevents split-inode mutual exclusion breakage across processes
+        assert job_lock_path.exists()
+        assert node_lock_path.exists()
+
+    def test_concurrent_delete_job_stats_one_succeeds_one_raises(self, *, store, sample_job_stats):
+        """Concurrent deletion: exactly one thread succeeds, the other raises not found."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                store.delete_job_stats(job_run_id)
+                results.append("success")
+            except JobStatsStoreDeleteException as e:
+                errors.append(e)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(worker)
+            f2 = executor.submit(worker)
+            f1.result()
+            f2.result()
+
+        assert len(results) == 1
+        assert len(errors) == 1
+        assert f"Job run not found: {job_run_id}" in str(errors[0])
 
 
 class TestErrorHandling:
@@ -503,6 +604,19 @@ class TestErrorHandling:
         # Verify get_job_stats returns None for nonexistent job
         result = store.get_job_stats("nonexistent-job-id-12345678-1234-1234")
         assert result is None
+
+    def test_reads_on_unknown_job_do_not_create_job_directory(self, *, store, temp_data_dir):
+        """Reading an unknown job run must not create the job directory or locks inside it."""
+        unknown_id = f"unknown-{uuid.uuid4()}"
+        job_dir = Path(temp_data_dir) / "job_stats" / unknown_id
+
+        assert store.get_job_stats(unknown_id) is None
+        assert store.get_node_stats(job_run_id=unknown_id) == []
+        assert store.get_batch_node_stats(job_run_id=unknown_id) == {}
+        assert store.get_node_stats_by_batch_and_node(job_run_id=unknown_id, node_id="node1", batch_id="b1") is None
+        assert store.get_failed_docs_for_batch(job_run_id=unknown_id, batch_id="b1") == []
+
+        assert not job_dir.exists()
 
 
 class TestGetFailedDocsForBatch:
@@ -962,8 +1076,6 @@ class TestInitAndParseErrorPaths:
             with pytest.raises(JobStatsStoreReadException):
                 store.get_node_stats_by_batch_and_node(job_run_id, "n-parse-err", "b1")
 
-    # ── delete_job_stats: dir not found ──────────────────────────────────────
-
     # ── delete_job_stats: rmtree failure ─────────────────────────────────────
 
     def test_delete_job_stats_raises_on_rmtree_error(self, *, store, sample_job_stats):
@@ -1390,15 +1502,6 @@ class TestExceptionPaths:
             with pytest.raises(JobStatsStoreReadException, match="acquire lock for node stats read"):
                 store.get_node_stats_by_batch_and_node(job_run_id=str(uuid.uuid4()), node_id="n1", batch_id=None)
 
-    def test_delete_job_stats_is_noop_when_not_found(self, store):
-        """delete_job_stats is a no-op for an unknown job run.
-        _get_locks_dir creates the job dir as a side-effect of acquiring the lock,
-        so job_dir.exists() is True even for unknown IDs. Verify the method
-        completes without raising.
-        """
-        # Should not raise
-        store.delete_job_stats(str(uuid.uuid4()))
-
     def test_delete_job_stats_raises_on_rmtree_error(self, store):
         """delete_job_stats raises JobStatsStoreDeleteException when shutil.rmtree fails."""
         job_run_id = str(uuid.uuid4())
@@ -1431,3 +1534,178 @@ class TestExceptionPaths:
         store.store_job_stats(js)
         ids = store.get_all_job_run_ids()
         assert job_run_id in ids
+
+
+class TestLockLayoutAndSanitization:
+    """Tests for lock directory layout, lock path generation, and sanitization."""
+
+    def test_sanitize_lock_id(self):
+        """Test sanitization of job_run_id for lock filenames."""
+        # Standard UUID or alphanumeric string gets clean prefix + SHA256 digest
+        valid_id = "job-run-123_abc"
+        sanitized = JsonJobStatsStore._sanitize_lock_id(valid_id)
+        assert sanitized.startswith("job-run-123_abc_")
+        assert len(sanitized) <= 65
+
+        # Path traversal characters must be replaced and hashed
+        traversal_id = "../../etc/passwd"
+        sanitized_traversal = JsonJobStatsStore._sanitize_lock_id(traversal_id)
+        assert "/" not in sanitized_traversal
+        assert ".." not in sanitized_traversal
+        assert len(sanitized_traversal) <= 65
+
+        # Collisions between raw ID and sanitized form are eliminated by uniform hashing
+        id1 = JsonJobStatsStore._sanitize_lock_id("test_id")
+        id2 = JsonJobStatsStore._sanitize_lock_id("test/id")
+        assert id1 != id2
+
+        # Excessively long job_run_id must be truncated and hashed
+        long_id = "a" * 300
+        sanitized_long = JsonJobStatsStore._sanitize_lock_id(long_id)
+        assert len(sanitized_long) <= 65
+        assert sanitized_long.startswith("a" * 48)
+
+    def test_lock_file_locations_in_locks_dir(self, *, store, temp_data_dir):
+        """Assert exact lock file locations inside .locks/ directory."""
+        job_run_id = "custom-run-456"
+        expected_locks_dir = Path(temp_data_dir) / "job_stats" / ".locks"
+        safe_id = store._sanitize_lock_id(job_run_id)
+
+        assert store._get_locks_dir() == expected_locks_dir
+        assert store._get_job_stats_lock_path(job_run_id=job_run_id) == expected_locks_dir / f"{safe_id}_job_stats.lock"
+        assert (
+            store._get_node_stats_lock_path(job_run_id=job_run_id) == expected_locks_dir / f"{safe_id}_node_stats.lock"
+        )
+
+    def test_reserved_and_traversal_job_run_ids_rejected(self, *, store, sample_job_stats):
+        """store methods reject reserved .locks and path traversal job_run_ids."""
+        with pytest.raises(ValueError, match="Reserved job_run_id"):
+            store._validate_job_run_id(job_run_id=".locks")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store._validate_job_run_id(job_run_id="../escaped")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store._validate_job_run_id(job_run_id="sub/dir")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store._validate_job_run_id(job_run_id="sub\\dir")
+
+        with pytest.raises(ValueError, match="Invalid job_run_id"):
+            store._validate_job_run_id(job_run_id="")
+
+        # Test rejected at public API boundary
+        with pytest.raises(ValueError, match="Reserved job_run_id"):
+            store.delete_job_stats(".locks")
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.delete_job_stats("../../escape")
+
+    def test_multiprocess_unlink_breaks_mutual_exclusion(self, tmp_path):
+        """Demonstrates that unlinking a lock file after release breaks mutual exclusion across processes."""
+        ctx = mp.get_context("spawn")
+        lock_path = tmp_path / "hazard.lock"
+
+        init_lock = FileLock(str(lock_path))
+        with init_lock:
+            pass
+
+        b_acquired = ctx.Event()
+        a_unlinked = ctx.Event()
+        c_start = ctx.Event()
+        b_done = ctx.Event()
+        overlap = ctx.Value("i", 0)
+
+        p_b = ctx.Process(
+            target=_mp_worker_hold_and_signal,
+            args=(str(lock_path), b_acquired, a_unlinked, b_done),
+        )
+        p_c = ctx.Process(
+            target=_mp_worker_contender,
+            args=(str(lock_path), c_start, overlap, b_done),
+        )
+
+        p_b.start()
+        p_c.start()
+        assert b_acquired.wait(timeout=5)
+
+        # Process A unlinks the lock file while Process B is actively holding it
+        lock_path.unlink()
+        a_unlinked.set()
+
+        # Process C tries to acquire the same path (gets new inode)
+        c_start.set()
+
+        p_b.join(timeout=5)
+        p_c.join(timeout=5)
+
+        # Hazard reproduced: Process C acquired concurrently with Process B
+        assert overlap.value == 1
+
+    def test_multiprocess_stable_lock_preserves_mutual_exclusion(self, tmp_path):
+        """Demonstrates that retaining stable lock files guarantees strict mutual exclusion across processes."""
+        ctx = mp.get_context("spawn")
+        lock_path = tmp_path / "stable.lock"
+
+        init_lock = FileLock(str(lock_path))
+        with init_lock:
+            pass
+
+        b_acquired = ctx.Event()
+        can_finish = ctx.Event()
+        c_start = ctx.Event()
+        b_done = ctx.Event()
+        overlap = ctx.Value("i", 0)
+
+        p_b = ctx.Process(
+            target=_mp_worker_hold_and_signal,
+            args=(str(lock_path), b_acquired, can_finish, b_done),
+        )
+        p_c = ctx.Process(
+            target=_mp_worker_contender,
+            args=(str(lock_path), c_start, overlap, b_done),
+        )
+
+        p_b.start()
+        p_c.start()
+        assert b_acquired.wait(timeout=5)
+
+        # Process A does NOT unlink lock_path. The lock path remains stable.
+        c_start.set()
+
+        # Give Process C time to attempt acquisition; it MUST wait until B finishes
+        time.sleep(0.1)
+        can_finish.set()
+
+        p_b.join(timeout=5)
+        p_c.join(timeout=5)
+
+        # No overlap: mutual exclusion is strictly preserved!
+        assert overlap.value == 0
+
+
+class TestAtomicWriteErrorHandling:
+    """Tests for atomic write failure handling and cleanup behavior."""
+
+    def test_atomic_write_json_cleanup_failure_preserves_original_exception(self, *, store):
+        """When atomic write fails and cleanup also fails with OSError, original error is preserved."""
+        job_run_id = str(uuid.uuid4())
+        target_path = store._get_job_stats_path(job_run_id=job_run_id)
+
+        orig_unlink = Path.unlink
+
+        def scoped_unlink(path_obj, *args, **kwargs):
+            if str(path_obj).endswith(".tmp"):
+                raise OSError("Cleanup unlink failed")
+            return orig_unlink(path_obj, *args, **kwargs)
+
+        with (
+            patch("pathlib.Path.replace", side_effect=OSError("Primary replace failed")),
+            patch.object(Path, "unlink", side_effect=scoped_unlink, autospec=True),
+        ):
+            with pytest.raises(JobStatsStoreWriteException, match="Primary replace failed") as exc_info:
+                store._atomic_write_json(path=target_path, data={"key": "val"})
+
+            # The primary exception is preserved in __cause__
+            assert isinstance(exc_info.value.__cause__, OSError)
+            assert "Primary replace failed" in str(exc_info.value.__cause__)

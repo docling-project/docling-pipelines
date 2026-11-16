@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JsonJobStatsStore - Filesystem-based storage adapter
 
@@ -6,17 +9,21 @@ Process-safe and thread-safe with file-level locking for concurrent micro-batch 
 
 File Layout:
     /data/job_stats/
+        .locks/                     # Lock files directory
+            <job_run_id>_job_stats.lock   # Lock for job_stats.json
+            <job_run_id>_node_stats.lock  # Lock for node_stats operations
         {job_run_id}/
             job_stats.json          # Job-level statistics (contains job_id)
             node_stats/
                 <node_id>_<batch_id>.json  # Batch-scoped node stats (micro-batching)
                 <node_id>.json             # Non-batch node stats (e.g., ingest operator)
-            .locks/                 # Lock files directory
-                job_stats.lock      # Lock for job_stats.json
-                node_stats.lock     # Lock for node_stats operations
 """
 
+import contextlib
+import hashlib
 import json
+import re
+import shutil
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -39,6 +46,7 @@ logger = get_logger()
 
 # Constants
 JOB_STATS_SUBDIR = "/job_stats"
+RESERVED_JOB_RUN_IDS = {".locks"}
 
 
 class JsonJobStatsStore(JobStatsStore):
@@ -54,10 +62,10 @@ class JsonJobStatsStore(JobStatsStore):
     - Supports concurrent micro-batch execution
 
     File Structure:
+    - /data/job_stats/.locks/: Lock files directory
     - /data/job_stats/{job_run_id}/job_stats.json: Job-level statistics (contains job_id)
     - /data/job_stats/{job_run_id}/node_stats/<node_id>_<batch_id>.json: Batch-scoped node stats
     - /data/job_stats/{job_run_id}/node_stats/<node_id>.json: Non-batch node stats
-    - /data/job_stats/{job_run_id}/.locks/: Lock files directory
 
     Concurrency Safety:
     - File-level locks prevent race conditions across processes/threads
@@ -85,15 +93,36 @@ class JsonJobStatsStore(JobStatsStore):
         self._base_dir = resolved_base_dir
         self._lock_timeout = lock_timeout
 
-        logger.info(f"JsonJobStatsStore initialized: base_dir={self._base_dir}, lock_timeout={lock_timeout}s")
+        logger.info("JsonJobStatsStore initialized: base_dir=%s, lock_timeout=%ss", self._base_dir, lock_timeout)
 
     def _get_job_dir(self, *, job_run_id: str) -> Path:
         """Get directory path for a specific job run: /data/job_stats/{job_run_id}/"""
         return self._base_dir / job_run_id
 
-    def _get_locks_dir(self, *, job_run_id: str) -> Path:
-        """Get locks directory for a specific job run."""
-        locks_dir = self._get_job_dir(job_run_id=job_run_id) / ".locks"
+    @classmethod
+    def _validate_job_run_id(cls, *, job_run_id: str) -> None:
+        """Validate job_run_id to prevent path traversal and collisions with reserved directories."""
+        if not job_run_id or not isinstance(job_run_id, str):
+            raise ValueError(f"Invalid job_run_id: {job_run_id!r}")
+        if job_run_id in RESERVED_JOB_RUN_IDS:
+            raise ValueError(f"Reserved job_run_id: {job_run_id!r}")
+        if ".." in job_run_id or "/" in job_run_id or "\\" in job_run_id or "\0" in job_run_id:
+            raise ValueError(f"Path traversal detected in job_run_id: {job_run_id!r}")
+
+    @staticmethod
+    def _sanitize_lock_id(job_run_id: str) -> str:
+        """Sanitize job_run_id for safe use in lock filenames across platforms.
+
+        Produces a deterministic, bounded-length filename that prevents
+        collisions between distinct job run IDs.
+        """
+        clean_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", job_run_id)[:48]
+        digest = hashlib.sha256(job_run_id.encode("utf-8")).hexdigest()[:16]
+        return f"{clean_prefix}_{digest}"
+
+    def _get_locks_dir(self) -> Path:
+        """Get locks directory: /data/job_stats/.locks/"""
+        locks_dir = self._base_dir / ".locks"
         locks_dir.mkdir(parents=True, exist_ok=True)
         return locks_dir
 
@@ -107,11 +136,13 @@ class JsonJobStatsStore(JobStatsStore):
 
     def _get_job_stats_lock_path(self, *, job_run_id: str) -> Path:
         """Get lock file path for job stats."""
-        return self._get_locks_dir(job_run_id=job_run_id) / "job_stats.lock"
+        safe_id = self._sanitize_lock_id(job_run_id)
+        return self._get_locks_dir() / f"{safe_id}_job_stats.lock"
 
     def _get_node_stats_lock_path(self, *, job_run_id: str) -> Path:
         """Get lock file path for node stats operations."""
-        return self._get_locks_dir(job_run_id=job_run_id) / "node_stats.lock"
+        safe_id = self._sanitize_lock_id(job_run_id)
+        return self._get_locks_dir() / f"{safe_id}_node_stats.lock"
 
     def _get_node_stats_path(self, *, job_run_id: str, node_id: str, batch_id: str | None = None) -> Path:
         """Get file path for node stats."""
@@ -150,8 +181,8 @@ class JsonJobStatsStore(JobStatsStore):
             # Atomic rename
             temp_path.replace(path)
         except Exception as e:
-            if temp_path.exists():
-                temp_path.unlink()
+            with contextlib.suppress(OSError):
+                temp_path.unlink(missing_ok=True)
             raise JobStatsStoreWriteException(
                 message=f"Failed to write JSON file {path}: {e}", job_run_id=None, operation="atomic_write"
             ) from e
@@ -173,7 +204,7 @@ class JsonJobStatsStore(JobStatsStore):
             with Path(path).open(encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"Failed to read JSON file {path}: {e}")
+            logger.error("Failed to read JSON file %s: %s", path, e)
             raise JobStatsStoreReadException(
                 message=f"Failed to read JSON file {path}: {e}", job_run_id=None, operation="read_json"
             ) from e
@@ -220,6 +251,7 @@ class JsonJobStatsStore(JobStatsStore):
             TimeoutError: If lock cannot be acquired
         """
         job_run_id = job_stats.job_run_id
+        self._validate_job_run_id(job_run_id=job_run_id)
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -249,6 +281,8 @@ class JsonJobStatsStore(JobStatsStore):
         Returns:
             JobStats if found, None otherwise
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
+
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -274,6 +308,7 @@ class JsonJobStatsStore(JobStatsStore):
             IOError: If storage operation fails
             TimeoutError: If lock cannot be acquired
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -287,7 +322,7 @@ class JsonJobStatsStore(JobStatsStore):
 
                 self._atomic_write_json(path=path, data=data)
 
-                logger.debug(f"Stored node stats: job_run_id={job_run_id}, node_id={node_id}, batch_id={batch_id}")
+                logger.debug("Stored node stats: job_run_id=%s, node_id=%s, batch_id=%s", job_run_id, node_id, batch_id)
         except Timeout as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for node stats write: timeout={self._lock_timeout}s",
@@ -295,7 +330,7 @@ class JsonJobStatsStore(JobStatsStore):
                 operation="store_node_stats",
             ) from e
         except Exception as e:
-            logger.error(f"Failed to store node stats: {e}")
+            logger.error("Failed to store node stats: %s", e)
             raise JobStatsStoreWriteException(
                 message=f"Failed to store node stats: {e}", job_run_id=job_run_id, operation="store_node_stats"
             ) from e
@@ -313,6 +348,8 @@ class JsonJobStatsStore(JobStatsStore):
         Returns:
             List of ALL NodeStats records
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
+
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -332,10 +369,10 @@ class JsonJobStatsStore(JobStatsStore):
                             node_stats = NodeStats(**data)
                             result.append(node_stats)
 
-                    logger.debug(f"Retrieved {len(result)} node stats records: job_run_id={job_run_id}")
+                    logger.debug("Retrieved %d node stats records: job_run_id=%s", len(result), job_run_id)
                     return result
                 except Exception as e:
-                    logger.error(f"Failed to read node stats: {e}")
+                    logger.error("Failed to read node stats: %s", e)
                     raise JobStatsStoreReadException(
                         message=f"Failed to read node stats: {e}", job_run_id=job_run_id, operation="get_node_stats"
                     ) from e
@@ -359,6 +396,8 @@ class JsonJobStatsStore(JobStatsStore):
         Returns:
             Nested dict: {node_id: {batch_id: NodeStats}}
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
+
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -384,10 +423,10 @@ class JsonJobStatsStore(JobStatsStore):
                                     result[node_id] = {}
                                 result[node_id][batch_id] = node_stats
 
-                    logger.debug(f"Retrieved batch node stats: job_run_id={job_run_id}, nodes={len(result)}")
+                    logger.debug("Retrieved batch node stats: job_run_id=%s, nodes=%d", job_run_id, len(result))
                     return result
                 except Exception as e:
-                    logger.error(f"Failed to read batch node stats: {e}")
+                    logger.error("Failed to read batch node stats: %s", e)
                     raise JobStatsStoreReadException(
                         message=f"Failed to read batch node stats: {e}",
                         job_run_id=job_run_id,
@@ -440,6 +479,7 @@ class JsonJobStatsStore(JobStatsStore):
         Raises:
             JobStatsStoreWriteException: On any error other than a lock timeout.
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path))
 
@@ -475,6 +515,7 @@ class JsonJobStatsStore(JobStatsStore):
             IOError: If bulk operation fails
             TimeoutError: If lock cannot be acquired
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -489,7 +530,7 @@ class JsonJobStatsStore(JobStatsStore):
 
                     self._atomic_write_json(path=path, data=data)
 
-                logger.debug(f"Bulk stored {len(node_stats_list)} node stats: job_run_id={job_run_id}")
+                logger.debug("Bulk stored %d node stats: job_run_id=%s", len(node_stats_list), job_run_id)
         except Timeout as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for bulk node stats write: timeout={self._lock_timeout}s",
@@ -497,7 +538,7 @@ class JsonJobStatsStore(JobStatsStore):
                 operation="bulk_store_node_stats",
             ) from e
         except Exception as e:
-            logger.error(f"Failed to bulk store node stats: {e}")
+            logger.error("Failed to bulk store node stats: %s", e)
             raise JobStatsStoreWriteException(
                 message=f"Failed to bulk store node stats: {e}",
                 job_run_id=job_run_id,
@@ -529,6 +570,8 @@ class JsonJobStatsStore(JobStatsStore):
                 updates={DocpipeConstants.STATUS: ExecutionStatus.RUNNING.value, "heartbeat_timestamp": 1704067260}
             )
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
+
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -581,6 +624,8 @@ class JsonJobStatsStore(JobStatsStore):
         Returns:
             NodeStats if found, None otherwise
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
+
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
         lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
@@ -595,7 +640,7 @@ class JsonJobStatsStore(JobStatsStore):
                 try:
                     return NodeStats(**data)
                 except Exception as e:
-                    logger.error(f"Failed to parse node stats from {path}: {e}")
+                    logger.error("Failed to parse node stats from %s: %s", path, e)
                     raise JobStatsStoreReadException(
                         message=f"Failed to parse node stats: {e}",
                         job_run_id=job_run_id,
@@ -616,8 +661,10 @@ class JsonJobStatsStore(JobStatsStore):
             job_run_id: Job run identifier
 
         Raises:
-            ValueError: If job_run_id not found
+            JobStatsStoreDeleteException: If job_run_id not found or deletion fails
         """
+        self._validate_job_run_id(job_run_id=job_run_id)
+
         # Acquire both locks to ensure no concurrent operations
         job_lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         node_lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
@@ -637,13 +684,11 @@ class JsonJobStatsStore(JobStatsStore):
 
                     try:
                         # Delete entire job directory
-                        import shutil
-
                         shutil.rmtree(job_dir)
 
-                        logger.info(f"Deleted job stats: job_run_id={job_run_id}")
+                        logger.info("Deleted job stats: job_run_id=%s", job_run_id)
                     except Exception as e:
-                        logger.error(f"Failed to delete job stats: {e}")
+                        logger.error("Failed to delete job stats: %s", e)
                         raise JobStatsStoreDeleteException(
                             message=f"Failed to delete job stats: {e}", job_run_id=job_run_id
                         ) from e
@@ -706,10 +751,10 @@ class JsonJobStatsStore(JobStatsStore):
 
                     return job_stats
                 except Exception as e:
-                    logger.warning(f"Failed to parse job stats from {job_stats_path}: {e}")
+                    logger.warning("Failed to parse job stats from %s: %s", job_stats_path, e)
                     return None
         except Timeout:
-            logger.warning(f"Timeout acquiring lock for job stats read: {job_run_id}")
+            logger.warning("Timeout acquiring lock for job stats read: %s", job_run_id)
             return None
 
     def list_job_runs(
@@ -739,7 +784,7 @@ class JsonJobStatsStore(JobStatsStore):
         try:
             result: list[JobStats] = []
             for job_dir in self._base_dir.iterdir():
-                if not job_dir.is_dir():
+                if not job_dir.is_dir() or job_dir.name == ".locks":
                     continue
                 job_stats = self._read_job_stats_if_match(
                     job_dir=job_dir,
@@ -756,7 +801,7 @@ class JsonJobStatsStore(JobStatsStore):
             # Apply limit
             return result[:limit]
         except Exception as e:
-            logger.error(f"Failed to list jobs: {e}")
+            logger.error("Failed to list jobs: %s", e)
             raise JobStatsStoreReadException(
                 message=f"Failed to list jobs: {e}", job_run_id=None, operation="list_job_runs"
             ) from e
