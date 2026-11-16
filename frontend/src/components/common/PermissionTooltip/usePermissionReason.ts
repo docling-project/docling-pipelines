@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useIntl } from 'react-intl';
 import { useAuth } from '@/hooks/useAuth';
 import { messages } from './PermissionTooltip.messages';
@@ -26,11 +27,14 @@ export function usePermissionReason(): UsePermissionReasonReturn {
 
   const createReason = canEdit ? null : intl.formatMessage(messages.needEditor);
 
-  const getModifyReason = (createdBy?: string | null): string | null => {
-    if (!canEdit) { return intl.formatMessage(messages.needEditor); }
-    if (!canModifyAsset(createdBy)) { return intl.formatMessage(messages.needOwner); }
-    return null;
-  };
+  const getModifyReason = useCallback(
+    (createdBy?: string | null): string | null => {
+      if (!canEdit) { return intl.formatMessage(messages.needEditor); }
+      if (!canModifyAsset(createdBy)) { return intl.formatMessage(messages.needOwner); }
+      return null;
+    },
+    [canEdit, canModifyAsset, intl]
+  );
 
   return { canEdit, canModifyAsset, createReason, getModifyReason };
 }

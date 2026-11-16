@@ -239,7 +239,7 @@ The BFF relays only these browser request headers to the Python backend and drop
 | `X-Requested-With` | Required by the backend on cookie-authenticated writes (POST, PUT, PATCH, DELETE); the axios client sets it on those methods |
 | `X-Transaction-ID` | Correlates a request across the UI, the BFF and the backend logs |
 
-The list lives in [`server/controllers/http-headers.ts`](server/controllers/http-headers.ts).
+The list lives in [`server/constants/http-headers.ts`](server/constants/http-headers.ts).
 
 ### Authentication in the UI
 

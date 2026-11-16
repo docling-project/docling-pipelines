@@ -1234,7 +1234,7 @@ Browser -> Vite (:3000) -- /api/* --> BFF (:3001) --> REST API /api/v1/*
 ```
 
 - The axios client in `src/services/api/client.ts` sends cookies (`withCredentials`) and adds `X-Requested-With` on POST, PUT, PATCH and DELETE. It never reads or stores a token.
-- The BFF forwards only `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` to the REST API (`server/controllers/http-headers.ts`). New BFF controllers must build their upstream headers with `buildForwardHeaders` so the session reaches the backend.
+- The BFF forwards only `Cookie`, `Authorization`, `X-Requested-With` and `X-Transaction-ID` to the REST API (`server/constants/http-headers.ts`). New BFF controllers must build their upstream headers with `buildForwardHeaders` so the session reaches the backend.
 - `/auth/*` is served by the REST API only. A custom ingress must never route `/auth` to the BFF.
 - In development, register `http://localhost:3000/auth/oauth2/callback` as the OIDC redirect URI; the `/auth` Vite proxy forwards it to the REST API.
 - Gate UI actions with `useAuth()` (`canEdit`, `canAdmin`, `canModifyAsset(createdBy)`): disable the control and explain why in a tooltip. The backend enforces permissions.

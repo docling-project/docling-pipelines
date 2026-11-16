@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
@@ -5,7 +6,7 @@ import { PermissionTooltip } from '@/components/common/PermissionTooltip';
 import { usePermissionReason } from '@/components/common/PermissionTooltip/usePermissionReason';
 import { authPreloadedState, ME } from '../../../../mocks/fixtures/permission.fixture';
 
-function ReasonProbe({ owner }: { owner?: string | null }) {
+function ReasonProbe({ owner }: { owner?: string | null }): React.JSX.Element {
   const { createReason, getModifyReason } = usePermissionReason();
   return (
     <>

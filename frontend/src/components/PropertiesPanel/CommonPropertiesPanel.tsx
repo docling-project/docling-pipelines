@@ -248,7 +248,12 @@ export function CommonPropertiesPanel({
           <TabPanel>
             <div className={styles.tabContent}>
               {ConfigureComponent ? (
-                <ConfigureComponent key={currentNodeId} controller={controller} />
+                <fieldset
+                  disabled={isReadOnly}
+                  style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
+                >
+                  <ConfigureComponent key={currentNodeId} controller={controller} />
+                </fieldset>
               ) : (
                 <p className={styles.configurationLabel}>
                   {intl.formatMessage(messages.configurationPlaceholder)}

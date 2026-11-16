@@ -32,7 +32,7 @@ export function PermissionTooltip({
   }
   return (
     <Tooltip description={reason} align={align}>
-      <span className={styles.trigger} tabIndex={0}>{children}</span>
+      <span className={styles.trigger} tabIndex={0} aria-disabled="true">{children}</span>
     </Tooltip>
   );
 }
