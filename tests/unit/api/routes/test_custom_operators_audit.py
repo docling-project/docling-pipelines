@@ -234,8 +234,8 @@ class TestAuditOnRejection:
 
         response = _create(client=client)
 
-        # The HTTP status is not asserted: on main the error handler cannot render this error code as 409.
-        assert response.status_code >= 400
+        assert response.status_code == 409
+        assert response.json()["errors"][0]["code"] == "custom_operators_disabled"
         record = _only(records=audit_records)
         assert (record["outcome"], record["reason"]) == ("rejected", "custom_operators_disabled")
         assert record["script_sha256"] == OPERATOR_SHA256
