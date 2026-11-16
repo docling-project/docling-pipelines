@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for DocpipeFlowManager.
 
@@ -521,6 +524,7 @@ class TestExecuteMethod:
 
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert execute_kwargs["params"][DocpipeConstants.ENABLE_MICRO_BATCHING] is True
+        assert execute_kwargs["params"][DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] is True
 
     @patch("docpipe.lib.docpipe_flow_manager.OrchestratorFactory.create_orchestrator")
     @patch("docpipe.lib.docpipe_flow_manager.create_session_info")
@@ -541,12 +545,18 @@ class TestExecuteMethod:
         mock_flow_executor = Mock()
         mock_executor_class.return_value = mock_flow_executor
 
-        flow_def = simple_flow | {"global_config": {DocpipeConstants.ENABLE_MICRO_BATCHING: False}}
+        flow_def = simple_flow | {
+            "global_config": {
+                DocpipeConstants.ENABLE_MICRO_BATCHING: False,
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: False,
+            }
+        }
         executor = DocpipeFlowManager(flow_def=flow_def)
         executor.execute()
 
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert DocpipeConstants.ENABLE_MICRO_BATCHING not in execute_kwargs["params"]
+        assert DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in execute_kwargs["params"]
 
     @patch("docpipe.lib.docpipe_flow_manager.OrchestratorFactory.create_orchestrator")
     @patch("docpipe.lib.docpipe_flow_manager.create_session_info")

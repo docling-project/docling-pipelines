@@ -705,6 +705,17 @@ class TestFactory:
         assert create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "memory"}) is None
         assert create_resumption_service(config={}) is None
 
+    def test_disabled_when_enable_failed_doc_resumption_is_false(self):
+        assert (
+            create_resumption_service(
+                config={
+                    DocpipeConstants.DATA_STORAGE_TYPE: "local",
+                    DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: False,
+                }
+            )
+            is None
+        )
+
     def test_enabled_for_local_storage_with_default_retries(self):
         service = create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "local"})
 

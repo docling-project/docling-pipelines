@@ -35,7 +35,13 @@ def _records(*, job_id: str) -> dict:
     return {record.doc_id: record for record in records}
 
 
-def _make_flow(*, docs_path: str, job_id: str, max_retry_attempts: int) -> dict:
+def _make_flow(
+    *,
+    docs_path: str,
+    job_id: str,
+    max_retry_attempts: int,
+    enable_failed_doc_resumption: bool = True,
+) -> dict:
     return {
         "flow_name": "integration-node-level-resumption",
         "flow_id": str(uuid.uuid4()),
@@ -44,6 +50,7 @@ def _make_flow(*, docs_path: str, job_id: str, max_retry_attempts: int) -> dict:
             "doc_column": "content",
             "data_storage_type": "local",
             "enable_micro_batching": False,
+            "enable_failed_doc_resumption": enable_failed_doc_resumption,
             "max_retry_attempts": max_retry_attempts,
         },
         "flow": [
@@ -147,3 +154,20 @@ class TestNodeLevelResumption:
             (node,) = records[doc_id].failed_nodes
             assert node.failure_count == 2
             assert "simulated failure" in node.error_message
+
+    def test_resumption_disabled_when_flag_is_false(self, monkeypatch):
+        job_id = str(uuid.uuid4())
+        fail = {"enabled": True}
+        self._patch_noop(monkeypatch=monkeypatch, fail=fail)
+        flow_def = _make_flow(
+            docs_path=str(_FIXTURES_DIR),
+            job_id=job_id,
+            max_retry_attempts=3,
+            enable_failed_doc_resumption=False,
+        )
+
+        with pytest.raises(Exception):  # noqa: B017
+            self._run(flow_def=flow_def, job_id=job_id)
+
+        records = _records(job_id=job_id)
+        assert not records, "no resumption records should be created when enable_failed_doc_resumption is False"

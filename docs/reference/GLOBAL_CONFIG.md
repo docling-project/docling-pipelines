@@ -236,6 +236,23 @@ Configuration for tracking and processing only changed documents.
 
 ---
 
+### `enable_failed_doc_resumption`
+
+**Type**: `boolean`
+**Default**: `true`
+**Description**: Controls whether failed documents are resumed from intermediate node output on subsequent runs. When set to `false`, resumption logic is disabled and failed documents are re-ingested from the start.
+
+**Example**:
+```json
+{
+  "global_config": {
+    "enable_failed_doc_resumption": false
+  }
+}
+```
+
+---
+
 ### `max_retry_attempts`
 
 **Type**: `integer`  

@@ -398,6 +398,11 @@ class JobManagementService:
                 and DocpipeConstants.ENABLE_MICRO_BATCHING not in flow_config
             ):
                 params[DocpipeConstants.ENABLE_MICRO_BATCHING] = True
+            if (
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in flow_global_config
+                and DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in flow_config
+            ):
+                params[DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] = True
 
             try:
                 self.job_run_manager.update_job_run_status(

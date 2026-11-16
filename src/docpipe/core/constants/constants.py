@@ -163,6 +163,7 @@ class DocpipeConstants:
     CONTINUE_ON_BATCH_FAILURE = "continue_on_batch_failure"
     CONTINUE_ON_BATCH_FAILURE_DEFAULT = False
     # Node-level failure resumption: a document is attempted 1 + MAX_RETRY_ATTEMPTS times
+    ENABLE_FAILED_DOC_RESUMPTION = "enable_failed_doc_resumption"
     MAX_RETRY_ATTEMPTS = "max_retry_attempts"
     DEFAULT_MAX_RETRY_ATTEMPTS = 3
     DEFERRED_EXECUTION_DOCS = "deferred_execution_docs"

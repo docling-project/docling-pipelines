@@ -370,6 +370,8 @@ class DocpipeFlowManager:
         flow_global_config = self.flow_def.get("global_config", {})
         if DocpipeConstants.ENABLE_MICRO_BATCHING not in flow_global_config:
             params[DocpipeConstants.ENABLE_MICRO_BATCHING] = True
+        if DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in flow_global_config:
+            params[DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] = True
 
         try:
             # Delegate execution to FlowExecutor (logging moved to FlowExecutor.execute())

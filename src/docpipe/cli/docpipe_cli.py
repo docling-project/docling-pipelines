@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import argparse
 import hashlib
 import json
@@ -142,6 +145,8 @@ def run_command_line_executor(flow_def: dict, original_flow_json: dict | None = 
     flow_global_config = flow_def.get("global_config", {})
     if DocpipeConstants.ENABLE_MICRO_BATCHING not in flow_global_config:
         params[DocpipeConstants.ENABLE_MICRO_BATCHING] = True
+    if DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in flow_global_config:
+        params[DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] = True
 
     os.environ["RUNTIME"] = "local"
     from docpipe.core.models.session_info import (

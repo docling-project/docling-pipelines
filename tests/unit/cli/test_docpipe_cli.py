@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Integration-style tests for CLI validation features.
 
@@ -668,6 +671,7 @@ class TestMicroBatchingDefaults:
 
         execute_kwargs = mock_executor.execute.call_args.kwargs
         assert execute_kwargs["params"]["enable_micro_batching"] is True
+        assert execute_kwargs["params"]["enable_failed_doc_resumption"] is True
         mock_init.assert_called_once()
 
     @patch("docpipe.integrations.secrets.vault_initializer.initialize_secret_providers")
@@ -680,7 +684,11 @@ class TestMicroBatchingDefaults:
         mock_init,
     ):
         """Test CLI execution does not override explicit micro-batching config."""
-        flow_def = {"name": "test", "global_config": {"enable_micro_batching": False}, "dag": []}
+        flow_def = {
+            "name": "test",
+            "global_config": {"enable_micro_batching": False, "enable_failed_doc_resumption": False},
+            "dag": [],
+        }
         mock_executor = mock_executor_class.return_value
         mock_executor.execute.return_value = None
         mock_create_orchestrator.return_value = Mock()
@@ -691,6 +699,7 @@ class TestMicroBatchingDefaults:
 
         execute_kwargs = mock_executor.execute.call_args.kwargs
         assert "enable_micro_batching" not in execute_kwargs["params"]
+        assert "enable_failed_doc_resumption" not in execute_kwargs["params"]
         mock_init.assert_called_once()
 
 

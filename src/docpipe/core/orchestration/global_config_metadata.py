@@ -117,6 +117,17 @@ class GlobalConfigMetadata:
             category=INCREMENTAL_PROCESSING,
         ),
         # Orchestration configuration (Prefect + Micro-Batching)
+        DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: GlobalConfigParam(
+            name="Enable failed document resumption",
+            type="bool",
+            default=True,
+            required=False,
+            description=(
+                "Controls whether failed documents are resumed from intermediate node output on subsequent runs. "
+                "When false, failed documents are not resumed and will be re-ingested from the start."
+            ),
+            category=ORCHESTRATION,
+        ),
         DocpipeConstants.MAX_RETRY_ATTEMPTS: GlobalConfigParam(
             name="Maximum retry attempts",
             type="int",

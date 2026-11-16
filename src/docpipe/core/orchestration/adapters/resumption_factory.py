@@ -15,7 +15,9 @@ from docpipe.utils.infrastructure.filesystem import get_data_path
 
 
 def is_resumption_enabled(*, config: dict[str, Any]) -> bool:
-    """Resumption reads the intermediate node output, so it is inactive when that output only lives in memory."""
+    """Resumption reads the intermediate node output, so it is inactive when disabled or in memory."""
+    if not config.get(DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION, True):
+        return False
     storage_type = config.get(DocpipeConstants.DATA_STORAGE_TYPE, "")
     return bool(storage_type) and storage_type != DataAccessConstants.MEMORY
 
