@@ -4,7 +4,7 @@
 """Pydantic config model and error formatting for the Weaviate vector store adapter."""
 
 import re
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -25,6 +25,14 @@ class WeaviateConfig(BaseModel):
     Describes the fields the user writes inside ``provider_config`` when
     selecting the ``weaviate`` provider in a VectorDB operator node.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "bearer_token",
+        "username",
+        "password",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
@@ -130,6 +138,7 @@ class WeaviateConfig(BaseModel):
     @field_validator("collection_name")
     @classmethod
     def _validate_collection_name(cls, v: str) -> str:
+        """Require a Weaviate-valid collection name."""
         if not COLLECTION_NAME_REGEX.match(v):
             raise ValueError(
                 "collection_name must start with an uppercase ASCII letter and contain only ASCII letters, digits, and underscores"
@@ -138,6 +147,7 @@ class WeaviateConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_cross_field(self) -> "WeaviateConfig":
+        """Check cloud, TLS and authentication settings that depend on each other."""
         if self.connection_type == _CLOUD:
             if not self.cluster_url:
                 raise ValueError("cluster_url is required when connection_type is 'cloud'")

@@ -207,6 +207,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     logger.warning("Failed to close adapter after flow validation: %s", e)
 
     def _validate_config(self, *, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
+        """Run the base validation, then validate the config against the operator metadata attributes."""
         super().validate(errors=errors, warnings=warnings, available_features=available_features)
 
         metadata = self.get_metadata()
@@ -1058,11 +1059,19 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             ADAPTER_NAME as OPENSEARCH_ADAPTER_NAME,
         )
         from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import (
+            ADAPTER_NAME as WEAVIATE_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import WeaviateConfig
 
         return build_provider_secret_fields(
             selector=OperatorConstants.Config.PROVIDER,
             prefix=OperatorConstants.Config.PROVIDER_CONFIG,
-            classes={OPENSEARCH_ADAPTER_NAME: OpenSearchConfig, MILVUS_ADAPTER_NAME: MilvusConfig},
+            classes={
+                OPENSEARCH_ADAPTER_NAME: OpenSearchConfig,
+                MILVUS_ADAPTER_NAME: MilvusConfig,
+                WEAVIATE_ADAPTER_NAME: WeaviateConfig,
+            },
         )
 
     @staticmethod
