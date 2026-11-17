@@ -880,20 +880,12 @@ class TestBuildNodeFeatureMetadataVectorDB:
             "dimension_size": None,
         }
 
-    def test_vectordb_normalizes_vdb_meta_available_features_when_provided(self):
-        """When vdb_meta contains available_features, available_features is normalized and filtered."""
+    def test_vectordb_projects_and_normalizes_available_features(self):
+        """When enriching a vectordb node, available_features is projected and normalized."""
         incoming_features = {
             "content": _make_feature(type_="string"),
             "embeddings": _make_feature(type_="vector"),
             "sparse_embeddings": _make_feature(type_="vector_sparse"),
-        }
-        mappable_features = {
-            "content": _make_feature(type_="string"),
-            "embeddings": _make_feature(type_="vector"),
-        }
-        fake_result = {
-            **_mf_mod.VectorDBMetadataFetcher._empty_result(),
-            OperatorConstants.Config.AVAILABLE_FEATURES: mappable_features,
         }
         nfr = _make_node_feature_result(
             inputs=incoming_features,
@@ -903,7 +895,12 @@ class TestBuildNodeFeatureMetadataVectorDB:
                 "provider_config": {"host": "localhost"},
             },
         )
+        fake_result = _mf_mod.VectorDBMetadataFetcher._empty_result()
         with patch.object(_mf_mod, "VectorDBMetadataFetcher") as mock_cls:
+            mock_cls.return_value.project_mappable_features.return_value = {
+                "content": incoming_features["content"],
+                "embeddings": incoming_features["embeddings"],
+            }
             mock_cls.return_value.fetch_metadata.return_value = fake_result
             block = self._build(nfr)
 
@@ -981,7 +978,7 @@ class TestBuildNodeFeatureMetadataVectorDB:
 
 
 class TestVectorDBEnrichmentIntegration:
-    """VectorDB metadata fetcher results (including provider-projected available_features) merge into the node block."""
+    """VectorDB metadata fetcher results and provider-projected available_features merge into the node block."""
 
     def test_vdb_metadata_merges_and_preserves_input_features(self):
         service = FlowEnrichmentService.__new__(FlowEnrichmentService)
@@ -992,11 +989,13 @@ class TestVectorDBEnrichmentIntegration:
             inputs={"content": content, "sparse_embeddings": sparse},
             operator_config={"provider": OperatorConstants.VectorDB.WEAVIATE, "provider_config": {"host": "localhost"}},
         )
+        fake_result = {
+            **_mf_mod.VectorDBMetadataFetcher._empty_result(),
+            OperatorConstants.VectorDB.AVAILABLE_RESOURCES: ["Alpha"],
+        }
         with patch.object(_mf_mod, "VectorDBMetadataFetcher") as mock_cls:
-            mock_cls.return_value.fetch_metadata.return_value = {
-                **_mf_mod.VectorDBMetadataFetcher._empty_result(),
-                OperatorConstants.Config.AVAILABLE_FEATURES: {"content": content},
-            }
+            mock_cls.return_value.project_mappable_features.return_value = {"content": content}
+            mock_cls.return_value.fetch_metadata.return_value = fake_result
             block = service._build_node_feature_metadata(
                 node_id="node-vdb",
                 node_feature_result=nfr,
@@ -1005,6 +1004,7 @@ class TestVectorDBEnrichmentIntegration:
         assert "sparse_embeddings" not in block[OperatorConstants.Config.AVAILABLE_FEATURES]
         assert "content" in block[OperatorConstants.Config.AVAILABLE_FEATURES]
         assert "sparse_embeddings" in block[OperatorConstants.Config.INPUT_FEATURES]
+        assert block[OperatorConstants.VectorDB.AVAILABLE_RESOURCES] == ["Alpha"]
 
 
 # ---------------------------------------------------------------------------

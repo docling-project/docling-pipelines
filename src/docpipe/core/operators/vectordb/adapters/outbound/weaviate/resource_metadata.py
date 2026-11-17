@@ -47,11 +47,7 @@ _CLIENT_KWARG_KEYS: dict[str, str] = {
 
 def project_mappable_features(*, available_features: dict[str, Any]) -> dict[str, Any]:
     """Project Weaviate mapping features without resolving credentials or performing I/O."""
-    return {
-        name: meta
-        for name, meta in available_features.items()
-        if meta.get(OperatorConstants.Misc.TYPE) != OperatorConstants.Types.TYPE_VECTOR_SPARSE
-    }
+    return WeaviateResourceMetadata.project_mappable_features(available_features=available_features)
 
 
 class WeaviateResourceMetadata:
@@ -59,6 +55,15 @@ class WeaviateResourceMetadata:
 
     Used exclusively for flow enrichment. Not involved in the write path.
     """
+
+    @staticmethod
+    def project_mappable_features(*, available_features: dict[str, Any]) -> dict[str, Any]:
+        """Project Weaviate mapping features without resolving credentials or performing I/O."""
+        return {
+            name: meta
+            for name, meta in available_features.items()
+            if meta.get(OperatorConstants.Misc.TYPE) != OperatorConstants.Types.TYPE_VECTOR_SPARSE
+        }
 
     def fetch(
         self,
@@ -81,11 +86,11 @@ class WeaviateResourceMetadata:
             empty_result: Injected by VectorDBMetadataFetcher; returns the five-key empty dict.
 
         Returns:
-            Five live-resource metadata keys plus the mappable feature projection. Never raises.
-            A missing host or cluster URL returns empty live metadata; any other failure returns it
-            with is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
+            Dict with five normalised keys. Never raises. A missing host or cluster URL
+            returns the plain empty result; any other failure returns it with
+            is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
         """
-        mappable_features = project_mappable_features(available_features=available_features)
+        mappable_features = self.project_mappable_features(available_features=available_features)
         excluded_feature_names = set(available_features) - set(mappable_features)
         # Legacy sparse mappings remain excluded even when absent from propagated metadata.
         excluded_feature_names.add(OperatorConstants.Columns.SPARSE_EMBEDDINGS_COLUMN_DEFAULT)
@@ -97,9 +102,7 @@ class WeaviateResourceMetadata:
         endpoint_key = OperatorConstants.VectorDB.CLUSTER_URL if is_cloud else OperatorConstants.VectorDB.HOST
         if not provider_config.get(endpoint_key):
             logger.debug("Weaviate provider_config missing host/cluster_url - skipping metadata fetch")
-            result = empty_result()
-            result[OperatorConstants.Config.AVAILABLE_FEATURES] = mappable_features
-            return result
+            return empty_result()
 
         client_kwargs = {
             kwarg: provider_config[key]
@@ -161,14 +164,12 @@ class WeaviateResourceMetadata:
                 OperatorConstants.VectorDB.FEATURE_MAPPINGS_RESPONSE: feature_mappings,
                 OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE: is_supported,
                 OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: stored,
-                OperatorConstants.Config.AVAILABLE_FEATURES: mappable_features,
             }
         except Exception as exc:
             reason = redact_secrets(text=str(exc), secrets=client_manager.resolved_secrets)
             logger.warning("Failed to fetch Weaviate metadata: %s", reason)
             result = empty_result()
             result[OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE] = {"supported": False, "error": reason}
-            result[OperatorConstants.Config.AVAILABLE_FEATURES] = mappable_features
             return result
         finally:
             client_manager.close()

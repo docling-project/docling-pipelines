@@ -33,6 +33,11 @@ class MilvusResourceMetadata:
     connection is established once by fetch() and reused across calls.
     """
 
+    @staticmethod
+    def project_mappable_features(*, available_features: dict[str, Any]) -> dict[str, Any]:
+        """Project Milvus mappable features (all features are mappable)."""
+        return dict(available_features)
+
     def fetch(
         self,
         *,

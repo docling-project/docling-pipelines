@@ -163,6 +163,40 @@ class VectorDBMetadataFetcher:
     return the empty-value fallback dict (five keys, all empty/None).
     """
 
+    @staticmethod
+    def project_mappable_features(
+        *,
+        adapter_name: str,
+        available_features: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Project mappable features for a vector database provider.
+
+        Delegates to provider-specific project_mappable_features if defined,
+        falling back to returning available_features as-is.
+        """
+        if adapter_name == OperatorConstants.VectorDB.WEAVIATE:
+            from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
+                WeaviateResourceMetadata,
+            )
+
+            return WeaviateResourceMetadata.project_mappable_features(available_features=available_features)
+
+        if adapter_name == OperatorConstants.VectorDB.MILVUS:
+            from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import (
+                MilvusResourceMetadata,
+            )
+
+            return MilvusResourceMetadata.project_mappable_features(available_features=available_features)
+
+        if adapter_name == OperatorConstants.VectorDB.OPENSEARCH:
+            from docpipe.core.operators.vectordb.adapters.outbound.opensearch.resource_metadata import (
+                OpenSearchResourceMetadata,
+            )
+
+            return OpenSearchResourceMetadata.project_mappable_features(available_features=available_features)
+
+        return dict(available_features)
+
     def fetch_metadata(
         self,
         *,
@@ -181,8 +215,8 @@ class VectorDBMetadataFetcher:
                 Used as the Source 4 fallback for feature_mappings derivation.
 
         Returns:
-            Five live-resource metadata keys, plus an optional provider feature projection.
-            Never raises — returns empty-value live metadata on connection failure or an unknown adapter.
+            Dict with five normalised keys. Never raises — returns empty-value
+            defaults on any connection failure, secret resolution error, or unknown adapter.
         """
         # Imported here: the operator module imports adapters that import this module.
         from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
@@ -204,16 +238,7 @@ class VectorDBMetadataFetcher:
                 exc.provider or "unknown",
                 adapter_name,
             )
-            result = self._empty_result()
-            if adapter_name == OperatorConstants.VectorDB.WEAVIATE:
-                from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
-                    project_mappable_features,
-                )
-
-                result[OperatorConstants.Config.AVAILABLE_FEATURES] = project_mappable_features(
-                    available_features=available_features
-                )
-            return result
+            return self._empty_result()
 
         provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG) or {}
 

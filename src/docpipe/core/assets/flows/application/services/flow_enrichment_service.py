@@ -378,20 +378,21 @@ class FlowEnrichmentService:
             }
             available_features = self._normalise_feature_map(feature_map=filterable_features, fallback_node_id=node_id)
         elif operator_type == OperatorConstants.Operators.VECTORDB:
-            available_features = self._normalise_feature_map(
-                feature_map=available_feature_map, fallback_node_id=node_id
+            operator_config = node_feature_result.get("operator_config", {})
+            adapter_name: str = operator_config.get(
+                OperatorConstants.Config.PROVIDER,
+                OperatorConstants.VectorDB.OPENSEARCH,
             )
-            vdb_meta = self._fetch_vectordb_metadata(node_feature_result=node_feature_result)
-            if vdb_meta is not None:
-                if OperatorConstants.Config.AVAILABLE_FEATURES in vdb_meta:
-                    vdb_available = vdb_meta.pop(OperatorConstants.Config.AVAILABLE_FEATURES)
-                    if isinstance(vdb_available, dict):
-                        available_features = self._normalise_feature_map(
-                            feature_map=vdb_available, fallback_node_id=node_id
-                        )
-                operator_config = node_feature_result.get("operator_config", {})
-                if not operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG):
-                    vdb_meta = None
+            from docpipe.core.operators.vectordb.metadata_fetcher import VectorDBMetadataFetcher
+
+            fetcher = VectorDBMetadataFetcher()
+            projected_features = fetcher.project_mappable_features(
+                adapter_name=adapter_name,
+                available_features=available_feature_map,
+            )
+            available_features = self._normalise_feature_map(feature_map=projected_features, fallback_node_id=node_id)
+            if operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG):
+                vdb_meta = self._fetch_vectordb_metadata(node_feature_result=node_feature_result)
         elif operator_type == OperatorConstants.Operators.MERGE:
             available_features, merge_output_features = self._build_merge_available_features(
                 node_id=node_id,
@@ -457,9 +458,9 @@ class FlowEnrichmentService:
         *,
         node_feature_result: dict[str, Any],
     ) -> dict[str, Any]:
-        """Fetch VectorDB metadata and provider feature projection for a vectordb node.
+        """Fetch live VectorDB metadata for a vectordb node.
 
-        Never raises. Unconfigured nodes or connection failures return the fallback dict.
+        Returns a dict with five keys. Never raises — connection failures return the fallback dict.
 
         Args:
             node_feature_result: Per-node snapshot from propagate_features_per_node().

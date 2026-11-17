@@ -140,10 +140,7 @@ class TestExistingCollection:
             VB.FEATURE_MAPPINGS_RESPONSE,
             VB.IS_DOCPIPE_SUPPORTED_RESOURCE,
             VB.STORED_RESOURCE_METADATA,
-            OperatorConstants.Config.AVAILABLE_FEATURES,
         }
-        assert "sparse_embeddings" not in result[OperatorConstants.Config.AVAILABLE_FEATURES]
-        assert "embeddings" in result[OperatorConstants.Config.AVAILABLE_FEATURES]
         assert result[VB.AVAILABLE_RESOURCES] == ["Alpha", "Docs", "Zeta"]
         schema = result[VB.SELECTED_RESOURCE_SCHEMA]
         assert schema["vector_embeddings"]["type"] == "VECTOR"
@@ -436,12 +433,7 @@ class TestFailureReporting:
                 available_features=FEATURES,
             )
         client_cls.assert_not_called()
-        expected = {
-            **VectorDBMetadataFetcher._empty_result(),
-            OperatorConstants.Config.AVAILABLE_FEATURES: {
-                k: v for k, v in FEATURES.items() if k != "sparse_embeddings"
-            },
-        }
+        expected = VectorDBMetadataFetcher._empty_result()
         assert result == expected
         assert "error" not in result[VB.IS_DOCPIPE_SUPPORTED_RESOURCE]
 
@@ -455,12 +447,7 @@ class TestFailureReporting:
                 available_features=FEATURES,
             )
         client_cls.assert_not_called()
-        expected = {
-            **VectorDBMetadataFetcher._empty_result(),
-            OperatorConstants.Config.AVAILABLE_FEATURES: {
-                k: v for k, v in FEATURES.items() if k != "sparse_embeddings"
-            },
-        }
+        expected = VectorDBMetadataFetcher._empty_result()
         assert result == expected
 
     def test_authenticated_plaintext_reports_error_without_connecting(self):
@@ -568,3 +555,20 @@ class TestClientConstruction:
             )
         kwargs = client_cls.call_args.kwargs
         assert kwargs == {"host": "wv.local", "port": 9090, "grpc_port": 50099}
+
+
+class TestProjectMappableFeatures:
+    def test_excludes_sparse_vector_features_and_preserves_others(self):
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
+            WeaviateResourceMetadata,
+            project_mappable_features,
+        )
+
+        projected = WeaviateResourceMetadata.project_mappable_features(available_features=FEATURES)
+        assert "sparse_embeddings" not in projected
+        assert "embeddings" in projected
+        assert "content" in projected
+        assert "doc_id_hash" in projected
+
+        # Module-level alias returns identical projection
+        assert project_mappable_features(available_features=FEATURES) == projected
