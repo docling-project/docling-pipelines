@@ -37,7 +37,7 @@ It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, B
 - ✂️ **[Chunking](docs/operators/functional/chunker_readme.md)** — Docling-native and semantic chunking strategies
 - 🔢 **[Embeddings](docs/operators/functional/embeddings_readme.md)** — vector embedding generation for any downstream vector store
 - 🔍 **[Quality operators](docs/reference/OPERATORS.md)** — language detection, readability scoring, PII/HAP detection, deduplication, redaction, SQL filtering, document classification, and ML enrichment
-- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch or Milvus (including container-free Milvus Lite), or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
+- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch, Milvus (including container-free Milvus Lite), or Weaviate, or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
 - 🔀 **[DAG-based flows](docs/guides/FLOW_AUTHORING_FORMAT.md) & [micro-batching](docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md)** — define pipelines as JSON with automatic dependency resolution, parallel micro-batching, and distributed execution via Prefect (thread pools, process pools, or Docker work pools)
 - 🔄 **[Incremental processing](docs/reference/GLOBAL_CONFIG.md#incremental-processing)** — stateful delta runs (backed by Parquet or PostgreSQL) that track document changes, skip unchanged files, and optionally synchronize source deletions
 - ⚡ **[Event-driven streaming](docs/guides/EVENT_STREAMING_GUIDE.md)** — real-time Kafka event consumption with Schema Registry support and routing-key-to-flow mappings for automated create/update/delete triggers
@@ -189,7 +189,7 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 | **Extract** | Document Extractor (`extract_operator`), ACL Extraction (`acl_operator`) |
 | **Functional** | Chunking (`chunker`), Embeddings (`embeddings`), Branching Operator (`branching`), Merge Operator (`merge`), Document ID Hash (`doc_id_hash`), Entity Curation (`entity_curation`), No-op (`noop`) |
 | **Quality** | Language Annotator (`lang_detect`), Readability Operator (`readability`), PII and HAP Annotator (`pii_and_hap`), Document Classifier (`document_classifier`), Annotation Filter (`sql_filter`), Redaction (`redaction`), De-duplicator (`ededup`), ML Text Enrichment (`ml_enrichment`), Document Quality (`doc_quality`) |
-| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, and Milvus Lite |
+| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, Milvus Lite, and Weaviate |
 | **Storage** | Document Set (`document_set`) — DuckDB/PostgreSQL-backed document collections, Storage Output (`storage_output`) — write pipeline output to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive |
 
 For per-operator configuration guides, see [Operator Configuration Guides](docs/reference/OPERATORS.md).

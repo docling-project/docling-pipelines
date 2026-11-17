@@ -414,6 +414,30 @@ class TestListJobRuns:
         assert result[2].start_time == 1000
 
 
+class TestCountJobRuns:
+    """Count uses the same filters as list and ignores the list limit."""
+
+    def test_count_job_runs_empty(self, *, store):
+        assert store.count_job_runs() == 0
+
+    def test_count_job_runs_matches_filters_past_list_limit(self, *, store):
+        for index in range(6):
+            store.store_job_stats(
+                JobStats(
+                    job_id="job-a" if index < 4 else "job-b",
+                    job_run_id=str(uuid.uuid4()),
+                    status=ExecutionStatus.COMPLETED if index % 2 == 0 else ExecutionStatus.FAILED,
+                )
+            )
+
+        assert len(store.list_job_runs(job_id="job-a", limit=1)) == 1
+        assert store.count_job_runs(job_id="job-a") == 4
+        assert store.count_job_runs(job_ids=["job-b"]) == 2
+        assert store.count_job_runs(status=ExecutionStatus.COMPLETED) == 3
+        assert store.count_job_runs(job_id="job-a", status=ExecutionStatus.FAILED) == 2
+        assert store.count_job_runs() == 6
+
+
 class TestClearAndDelete:
     """Test cleanup operations."""
 

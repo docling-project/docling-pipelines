@@ -842,7 +842,7 @@ export function Canvas(): React.JSX.Element {
         // with a mismatched (jobRunId prop ≠ executionLogs.job_stats.job_run_id).
         dispatch(setExecutionLogs(null));
         dispatch(setCurrentRun({ jobId: flowId, jobRunId: newJobRunId }));
-        startPoll(newJobRunId);   // starts poll + dispatches setRunning(true)
+        startPoll(newJobRunId, flow.name);   // starts poll + dispatches setRunning(true)
         setIsRunMode(true);
       } catch (err: unknown) {
         dispatch(setRunning(false));
@@ -1468,14 +1468,14 @@ export function Canvas(): React.JSX.Element {
     // Run Again: ReadOnlyCanvas already created the new job run and passes
     // the new ID here. runPipelineFlowRef.current is intentionally kept — same flow def reused.
     dispatch(setCurrentRun({ jobId: currentJobId ?? '', jobRunId: newJobRunId }));
-    startPoll(newJobRunId);
+    startPoll(newJobRunId, currentFlowRef.current?.name);
   }, [currentJobId, dispatch, startPoll]);
 
   const handleStopFromCanvas = useCallback(() => {
     // Stop: cancel the run and schedule a quick re-poll to pick up Cancelled status.
     stopPoll();
     void cancelJobRun(currentJobRunId ?? '').catch(() => {}).finally(() => {
-      startPoll(currentJobRunId ?? '');
+      startPoll(currentJobRunId ?? '', currentFlowRef.current?.name);
     });
   }, [currentJobRunId, stopPoll, startPoll]);
 

@@ -23,6 +23,25 @@ from docpipe.utils.operators.vectordb_utils import (
 
 logger = get_logger()
 
+# Milvus caps VARCHAR values at 65,535 UTF-8 bytes; the server rejects longer values instead of truncating them.
+VARCHAR_MAX_LENGTH: int = 65535
+
+# Feature type -> Milvus DataType for non-vector fields declared from feature_mappings.
+FEATURE_TYPE_TO_MILVUS_DTYPE: dict[str, DataType] = {
+    "text": DataType.VARCHAR,
+    "string": DataType.VARCHAR,
+    "keyword": DataType.VARCHAR,
+    "long": DataType.INT64,
+    "integer": DataType.INT32,
+    "short": DataType.INT16,
+    "byte": DataType.INT8,
+    "double": DataType.DOUBLE,
+    "float": DataType.FLOAT,
+    "boolean": DataType.BOOL,
+    "date": DataType.VARCHAR,  # Store as string
+    "json": DataType.JSON,
+}
+
 
 class MilvusVectorModes:
     """Vector modes supported by the Milvus vector store adapter."""
@@ -731,7 +750,7 @@ class MilvusIndexManager:
         content_field_params: dict[str, Any] = {
             "name": content_field_name,
             "dtype": DataType.VARCHAR,
-            "max_length": 65535,
+            "max_length": VARCHAR_MAX_LENGTH,
             "enable_analyzer": self._is_sparse,  # Enable analyzer only for BM25 sparse mode
         }
         if not self._is_sparse:
@@ -785,7 +804,7 @@ class MilvusIndexManager:
 
                 # Add max_length for VARCHAR fields
                 if dtype == DataType.VARCHAR:
-                    field_params["max_length"] = 65535
+                    field_params["max_length"] = VARCHAR_MAX_LENGTH
 
                 # Make field nullable if not mandatory
                 # Milvus requires all fields to be present unless nullable=True or default_value is set
@@ -810,22 +829,7 @@ class MilvusIndexManager:
         if feature_type == OperatorConstants.Types.TYPE_VECTOR_BINARY:
             return DataType.BINARY_VECTOR
 
-        type_mapping: dict[str, DataType] = {
-            "text": DataType.VARCHAR,
-            "string": DataType.VARCHAR,
-            "keyword": DataType.VARCHAR,
-            "long": DataType.INT64,
-            "integer": DataType.INT32,
-            "short": DataType.INT16,
-            "byte": DataType.INT8,
-            "double": DataType.DOUBLE,
-            "float": DataType.FLOAT,
-            "boolean": DataType.BOOL,
-            "date": DataType.VARCHAR,  # Store as string
-            "json": DataType.JSON,
-        }
-
-        return type_mapping.get(feature_type)
+        return FEATURE_TYPE_TO_MILVUS_DTYPE.get(feature_type)
 
     def collection_exists(self) -> bool:
         """
