@@ -3,9 +3,10 @@ dn: ou=People,dc=abc,dc=com
 objectClass: organizationalUnit
 ou: People
 
-# 2. Create test users for authentication testing
-# Note: Passwords are set to ${TEST_USER_PASSWORD} from environment
-# Default password in .env.example is "changeme"
+# 2. Create test users for authentication and role testing
+# The "ou" attribute of each user is the group value that Docling Pipelines maps to a role
+# (LDAP_GROUP_ATTRIBUTE=ou): "editors" -> editor, "viewers" -> viewer.
+# These are local development credentials only.
 
 dn: cn=Alice Baker,ou=People,dc=abc,dc=com
 objectClass: inetOrgPerson
@@ -14,23 +15,27 @@ objectClass: shadowAccount
 cn: Alice Baker
 sn: Baker
 givenName: Alice
-uid: abaker
-userPassword: ${TEST_USER_PASSWORD}
+ou: editors
+uid: alice
+# pragma: allowlist nextline secret
+userPassword: Password123!
 uidNumber: 1003
 gidNumber: 1003
-homeDirectory: /home/abaker
-mail: abaker@abc.com
+homeDirectory: /home/alice
+mail: alice@abc.com
 
-dn: cn=Jane Smith,ou=People,dc=abc,dc=com
+dn: cn=Charlie Brown,ou=People,dc=abc,dc=com
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
-cn: Jane Smith
-sn: Smith
-givenName: Jane
-uid: jsmith
-userPassword: ${TEST_USER_PASSWORD}
+cn: Charlie Brown
+sn: Brown
+givenName: Charlie
+ou: viewers
+uid: charlie
+# pragma: allowlist nextline secret
+userPassword: Password123!
 uidNumber: 1002
 gidNumber: 1002
-homeDirectory: /home/jsmith
-mail: jsmith@abc.com
+homeDirectory: /home/charlie
+mail: charlie@abc.com
