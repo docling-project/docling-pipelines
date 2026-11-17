@@ -240,11 +240,12 @@ class MilvusAdapter(VectorStorePort):
         Returns:
             Tuple of (success_count, failed_items)
         """
-        # Create batches
-        batches = self.batch_processor.create_batches(documents=documents)
+        # Create batches; rows that cannot be stored are rejected here instead of failing their batch
+        batches, rejected_items = self.batch_processor.create_batches(documents=documents)
 
         # Process batches
-        success_count, failed_items = self.batch_processor.process_batches(batches=batches)
+        success_count, insert_failed_items = self.batch_processor.process_batches(batches=batches)
+        failed_items: list[dict[str, Any]] = rejected_items + insert_failed_items
 
         logger.debug("Indexed %s documents in %s batches, %s failed", success_count, len(batches), len(failed_items))
 
