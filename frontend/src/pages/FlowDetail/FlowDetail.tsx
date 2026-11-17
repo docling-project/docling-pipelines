@@ -12,10 +12,12 @@ import { ErrorEmptyState, NoDataEmptyState } from '@carbon/ibm-products';
 import { PageLayout } from '@/components';
 import { DeleteModal, EditDetailsModal } from '@/components/common';
 import { getFlow, getProject, patchFlow, getJobRuns, deleteJobRun } from '@/services/api';
+import type { JobRunListItem } from '@/types';
 import { cancelJobRun } from '@/services/api/actions/job-run-actions';
 import * as flowMapper from '@/services/api/mappers/flow-mapper';
 import * as projectMapper from '@/services/api/mappers/project-mapper';
 import { API_STATUS_MAP } from '@/constants/flowStatus';
+import { POLL_INTERVAL_MS } from '@/constants/jobRunStatus';
 import { setFlow, updateFlow, setLoading, setError, setCurrentFlow } from '@/slices/flowSlice';
 import { setProject } from '@/slices/projectsSlice';
 import { makeSelectFlow, makeSelectProject, selectCurrentFlow } from '@/selectors';
@@ -35,6 +37,18 @@ import styles from './FlowDetail.module.scss';
 /** Converts a raw API status string to a {@link RunStatus}. Unknown values → `'run_with_issues'`. */
 function toRunStatus(apiStatus: string): RunRow['status'] {
   return (API_STATUS_MAP[apiStatus] ?? 'run_with_issues') as RunRow['status'];
+}
+
+/** Maps a job run list item from the API to a table row. */
+function toRunRow(item: JobRunListItem): RunRow {
+  return {
+    run_id:           item.job_run_id,
+    start_time:       formatEpochToDisplay(item.start_time),
+    start_time_epoch: item.start_time,
+    status:           toRunStatus(item.status),
+    duration:         formatElapsedTime(item.duration),
+    duration_seconds: item.duration,
+  };
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -162,15 +176,7 @@ export function FlowDetail(): React.JSX.Element | null {
     setRunsError(null);
     getJobRuns({ job_id: jobId })
       .then((res) => {
-        const rows: RunRow[] = res.data.list.map((item) => ({
-          run_id:           item.job_run_id,
-          start_time:       formatEpochToDisplay(item.start_time),
-          start_time_epoch: item.start_time,
-          status:           toRunStatus(item.status),
-          duration:         formatElapsedTime(item.duration),
-          duration_seconds: item.duration,
-        }));
-        setRuns(rows);
+        setRuns(res.data.list.map(toRunRow));
       })
       .catch(() => {
         setRunsError(intl.formatMessage(messages.runsLoadError));
@@ -183,6 +189,30 @@ export function FlowDetail(): React.JSX.Element | null {
   useEffect(() => {
     if (flowId) { fetchRuns(flowId); }
   }, [flowId, fetchRuns]);
+
+  // Keep duration/status fresh while any run is still in progress. Each poll starts
+  // only after the previous one finishes, and cleanup aborts any in-flight request so
+  // a late response cannot overwrite state after the run ends or the user navigates away.
+  const hasInProgressRun = runs.some((r) => r.status === 'in_progress');
+  useEffect(() => {
+    if (!flowId || !hasInProgressRun) { return; }
+    const ac = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+
+    const tick = async (): Promise<void> => {
+      try {
+        const res = await getJobRuns({ job_id: flowId }, ac.signal);
+        if (ac.signal.aborted) { return; }
+        setRuns(res.data.list.map(toRunRow));
+      } catch {
+        // silent: next tick retries
+      }
+      if (!ac.signal.aborted) { timer = setTimeout(() => { void tick(); }, POLL_INTERVAL_MS); }
+    };
+
+    timer = setTimeout(() => { void tick(); }, POLL_INTERVAL_MS);
+    return () => { ac.abort(); clearTimeout(timer); };
+  }, [flowId, hasInProgressRun]);
 
   // ── Inject ⓘ Info button into the breadcrumb actions slot ───────────────
   // Always visible — isSelected reflects panel open state; click toggles panel.

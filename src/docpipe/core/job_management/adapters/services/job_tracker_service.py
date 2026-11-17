@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobTrackerService - Production job stats service using new architecture
 
@@ -24,6 +27,7 @@ from docpipe.core.constants.constants import (
     Metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.job_management.adapters.services.node_order_resolver import NodeOrderResolver
 from docpipe.core.job_management.application.services import NodeStatsAggregator
 from docpipe.core.job_management.domain.models import (
     JobStats,
@@ -36,7 +40,10 @@ from docpipe.exceptions.docpipe_exceptions import (
     JobRunInvalidStateException,
 )
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.registry import scrub, scrub_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.orchestration.node_ordering import order_node_items
 
 logger: Logger = get_logger()
 
@@ -69,6 +76,10 @@ class JobTrackerService(JobStatsService):
         """
         self.job_stats_store = job_stats_store
         self.node_stats_aggregator = node_stats_aggregator
+        # Lambda (not a bound method) so subclass overrides and test patches of get_flow_definition apply
+        self._node_order_resolver = NodeOrderResolver(
+            load_flow_definition=lambda job_run_id: self.get_flow_definition(job_run_id=job_run_id)
+        )
 
     def start_tracking_job(
         self,
@@ -242,7 +253,7 @@ class JobTrackerService(JobStatsService):
 
         if job_run_stats:
             if "message" in job_run_stats:
-                job_stats.message = job_run_stats["message"]
+                job_stats.message = scrub_value(job_run_stats["message"])
             if "report_status" in job_run_stats:
                 job_stats.report_status = job_run_stats["report_status"]
             if "report_generation_started_at" in job_run_stats:
@@ -371,6 +382,7 @@ class JobTrackerService(JobStatsService):
         else:
             # Already in proper format or None
             final_metadata = node_metadata
+        final_metadata = scrub_value(final_metadata)
 
         # Build complete node stats
         completed_node_stats: NodeStats = NodeStats(
@@ -448,10 +460,11 @@ class JobTrackerService(JobStatsService):
         error_message: str
         if exception is not None:
             # Get just the error message, not the full traceback
-            exception_str: str = str(exception)
+            exception_str: str = sanitize_exception(exc=exception, config_key=node_name)
             error_message = exception_str if exception_str else exception.__class__.__name__
         else:
             error_message = error  # type: ignore
+        error_message = scrub_value(error_message)
 
         # Calculate timing
         end_time: int = round(datetime.now(tz=UTC).timestamp())
@@ -770,7 +783,7 @@ class JobTrackerService(JobStatsService):
         )
 
         # Create and persist merged NodeStats
-        node_stats_dto = NodeStats(**merged_dict)
+        node_stats_dto = NodeStats(**scrub_value(merged_dict))
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=node_stats_dto)
 
     def get_node_stats(self, *, job_id: str, job_run_id: str) -> dict[str, Any]:
@@ -1371,30 +1384,28 @@ class JobTrackerService(JobStatsService):
             else:
                 job_stats_dict = job_stats
 
-            # Sort node_stats by start_time to match execution order
+            # Sort node_stats by topological order if snapshot is available, falling back to chronological order
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
                 node_stats = job_stats_dict["node_stats"]
-                # Sort by start_time, then end_time, then name
-                sorted_node_stats = dict(
-                    sorted(
-                        node_stats.items(),
-                        key=lambda item: (
-                            item[1].get("start_time", 0),
-                            item[1].get("end_time", 0),
-                            item[1].get("name", ""),
-                        ),
-                    )
+                job_run_id = job_stats_dict.get("job_run_id")
+                node_order = self._node_order_resolver.resolve(
+                    job_run_id=job_run_id,
+                    node_stats=node_stats,
+                    flow_id=job_stats_dict.get("flow_id"),
+                    flow_name=job_stats_dict.get("flow_name"),
                 )
-                job_stats_dict["node_stats"] = sorted_node_stats
+                ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
+                job_stats_dict["node_stats"] = dict(ordered_items)
 
             # Write to file
             with Path(job_log_path).open("w") as f:
-                json.dump(job_stats_dict, f, indent=2)
+                json.dump(scrub_value(job_stats_dict), f, indent=2)
 
             logger.info("Wrote job logs to: %s", job_log_path)
         except Exception as e:
-            logger.error("Failed to write job logs to %s: %s", job_log_path, e)
-            msg = f"Failed to write job logs: {e}"
+            safe_error = sanitize_exception(exc=e, config_key="job_logs")
+            logger.error("Failed to write job logs to %s: %s", job_log_path, safe_error)
+            msg = f"Failed to write job logs: {safe_error}"
             raise OSError(msg) from e
 
     def list_job_runs(
@@ -1419,6 +1430,26 @@ class JobTrackerService(JobStatsService):
         """
         # Delegate to store
         return self.job_stats_store.list_job_runs(job_id=job_id, job_ids=job_ids, status=status, limit=limit)
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+        """
+        return self.job_stats_store.count_job_runs(job_id=job_id, job_ids=job_ids, status=status)
 
     def get_formatted_job_stats(self, *, job_run_id: str, include_logs: bool = False) -> Any:
         """
@@ -1451,8 +1482,19 @@ class JobTrackerService(JobStatsService):
         if not job_stats:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
+        node_order = self._node_order_resolver.resolve(
+            job_run_id=job_run_id,
+            node_stats=job_stats.node_stats,
+            flow_id=job_stats.flow_id,
+            flow_name=job_stats.flow_name,
+        )
+
         # Delegate to mapper for enterprise-compatible model construction
-        return JobStatsMapper.to_status_response(job_stats=job_stats, include_logs=include_logs)
+        return JobStatsMapper.to_status_response(
+            job_stats=job_stats,
+            include_logs=include_logs,
+            node_order=node_order,
+        )
 
     def get_flow_definition(self, *, job_run_id: str) -> dict[str, Any] | None:
         """
@@ -1611,23 +1653,6 @@ class JobTrackerService(JobStatsService):
         return 0 < failed_batch_count < total_batch_count
 
     @staticmethod
-    def _calculate_node_sequence(*, node_stats: dict) -> list[str]:
-        """Calculate node execution sequence based on start_time."""
-        if not node_stats:
-            return []
-
-        # Sort nodes by start_time, then end_time, then name
-        sorted_nodes: list[tuple[Any, Any]] = sorted(
-            node_stats.items(),
-            key=lambda item: (
-                (item[1].get("start_time", 0) if isinstance(item[1], dict) else getattr(item[1], "start_time", 0)),
-                (item[1].get("end_time", 0) if isinstance(item[1], dict) else getattr(item[1], "end_time", 0)),
-                (item[1].get("name", "") if isinstance(item[1], dict) else getattr(item[1], "name", "")),
-            ),
-        )
-        return [node_id for node_id, _ in sorted_nodes]
-
-    @staticmethod
     def _build_node_metadata_array(*, node_stats: dict) -> list[dict]:
         """Build node_metadata array from node_stats."""
         metadata_items = []
@@ -1719,7 +1744,7 @@ class JobTrackerService(JobStatsService):
             log_parts.append("\nError Details:")
             log_parts.append(f"  {error}")
 
-        return "\n".join(log_parts)
+        return scrub("\n".join(log_parts))
 
     def create_pending_batch_node_stats(
         self,

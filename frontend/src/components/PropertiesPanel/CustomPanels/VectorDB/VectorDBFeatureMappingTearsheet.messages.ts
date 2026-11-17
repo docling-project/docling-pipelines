@@ -136,6 +136,14 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricBM25',
     defaultMessage: 'BM25 (sparse)',
   },
+  metricHamming: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricHamming',
+    defaultMessage: 'Hamming distance',
+  },
+  metricJaccard: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricJaccard',
+    defaultMessage: 'Jaccard distance',
+  },
   engineFaiss: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.engineFaiss',
     defaultMessage: 'Faiss',

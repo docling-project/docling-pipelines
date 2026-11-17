@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """SharePoint destination adapter — writes documents via Microsoft Graph API."""
 
 from typing import Any
@@ -13,6 +16,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.sharepoint.co
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -114,10 +118,11 @@ class SharePointDestinationAdapter(DestinationAdapterPort[SharePointDestinationC
                     return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
 
         except Exception as e:
+            safe_error = sanitize_exception(exc=e, config_key="storage_output.destination_config.sharepoint")
             msg = (
                 "SharePoint destination validation failed: "
                 f"drive_id={config.drive_id}, folder_path={config.folder_path}, create_dirs={config.create_dirs}, "
-                f"error={e}"
+                f"error={safe_error}"
             )
             logger.error(msg)
             return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
@@ -218,8 +223,9 @@ class SharePointDestinationAdapter(DestinationAdapterPort[SharePointDestinationC
             )
 
         except Exception as e:
-            msg = f"Unexpected error writing to SharePoint '{destination_path}': {e}"
-            logger.error(msg, exc_info=True)
+            safe_error = sanitize_exception(exc=e, config_key="storage_output.destination_config.sharepoint")
+            msg = f"Unexpected error writing to SharePoint '{destination_path}': {safe_error}"
+            logger.error(msg)
             return WriteResult(doc_id="", doc_name=destination_path, success=False, error_message=msg)
 
     def ensure_directory(self, *, path: str) -> None:

@@ -135,6 +135,8 @@ def test_builtin_adapter_capabilities():
     assert PIIAndHAPDetectionFactory.supports("litellm", capability=DetectionCapability.HAP)
     assert PIIAndHAPDetectionFactory.supports("presidio", capability=DetectionCapability.PII)
     assert not PIIAndHAPDetectionFactory.supports("presidio", capability=DetectionCapability.HAP)
+    assert PIIAndHAPDetectionFactory.supports("huggingface", capability=DetectionCapability.HAP)
+    assert not PIIAndHAPDetectionFactory.supports("huggingface", capability=DetectionCapability.PII)
     assert not PIIAndHAPDetectionFactory.supports("unknown", capability=DetectionCapability.PII)
 
 
@@ -199,6 +201,27 @@ def test_create_adapters_mixes_single_capability_providers():
     )
     assert isinstance(pii_adapter, _PIIOnlyAdapter)
     assert isinstance(hap_adapter, _HAPOnlyAdapter)
+
+
+def test_create_adapters_builds_distinct_presidio_and_huggingface_adapters():
+    # Neither adapter loads anything on construction: Presidio builds its engine in
+    # validate(), and the Hugging Face classifier loads on validate() or first use.
+    pii_adapter, hap_adapter = PIIAndHAPDetectionFactory.create_adapters(
+        pii=ProviderSelection(provider="presidio"),
+        hap=ProviderSelection(provider="huggingface"),
+    )
+    assert type(pii_adapter).__name__ == "PresidioPIIAdapter"
+    assert type(hap_adapter).__name__ == "HuggingFaceHAPAdapter"
+    assert pii_adapter is not hap_adapter
+
+
+def test_validate_selection_rejects_huggingface_for_pii():
+    errors = PIIAndHAPDetectionFactory.validate_selection(
+        capability=DetectionCapability.PII,
+        selection=ProviderSelection(provider="huggingface", provider_key="pii_provider"),
+    )
+    assert len(errors) == 1
+    assert "Provider 'huggingface' (set via 'pii_provider') does not support PII detection" in errors[0]
 
 
 def test_create_adapters_skips_capability_not_needed():

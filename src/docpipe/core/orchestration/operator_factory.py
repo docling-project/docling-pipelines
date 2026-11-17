@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import os
 import threading
 from typing import ClassVar
@@ -37,7 +40,7 @@ class OperatorFactoryProvider:
 
     @staticmethod
     def get_operator_factory(
-        *, orchestrator: str, package_names: list[str] | None = None, enable_custom_operators: bool = True
+        *, orchestrator: str, package_names: list[str] | None = None, enable_custom_operators: bool | None = None
     ) -> "OperatorFactory":
         """
         Get or create an operator factory with optional custom operator support.
@@ -45,11 +48,14 @@ class OperatorFactoryProvider:
         Parameters:
         - orchestrator: Type of orchestrator (e.g., "python")
         - package_names: Optional list of custom operator package paths
-        - enable_custom_operators: Whether to enable custom operators (default: from env or True)
+        - enable_custom_operators: Whether to enable custom operators (default: from env, else disabled)
 
         Returns:
             OperatorFactory instance
         """
+        enable_custom_operators = OperatorFactory.resolve_enable_custom_operators(
+            enable_custom_operators=enable_custom_operators
+        )
         key, package_names = OperatorFactoryProvider._resolve_factory_key(
             orchestrator=orchestrator,
             package_names=package_names,
@@ -66,7 +72,7 @@ class OperatorFactoryProvider:
 
     @staticmethod
     def refresh_operator_factory(
-        *, orchestrator: str, package_names: list[str] | None = None, enable_custom_operators: bool = True
+        *, orchestrator: str, package_names: list[str] | None = None, enable_custom_operators: bool | None = None
     ) -> "OperatorFactory":
         """
         Refreshes the operator factory by reloading custom operator classes dynamically.
@@ -74,11 +80,14 @@ class OperatorFactoryProvider:
         Parameters:
         - orchestrator: Type of orchestrator (e.g., "python")
         - package_names: Optional list of custom operator package paths
-        - enable_custom_operators: Whether to enable custom operators
+        - enable_custom_operators: Whether to enable custom operators (default: from env, else disabled)
 
         Returns:
             OperatorFactory instance
         """
+        enable_custom_operators = OperatorFactory.resolve_enable_custom_operators(
+            enable_custom_operators=enable_custom_operators
+        )
         key, package_names = OperatorFactoryProvider._resolve_factory_key(
             orchestrator=orchestrator,
             package_names=package_names,
@@ -106,7 +115,7 @@ class OperatorFactory:
         self,
         orchestrator: str,
         package_names: list[str] | None = None,
-        enable_custom_operators: bool = True,
+        enable_custom_operators: bool | None = None,
     ) -> None:
         """
         Initialize the factory with frozenset operators and optional custom packages.
@@ -114,23 +123,16 @@ class OperatorFactory:
         Parameters:
         - orchestrator: the operator classes for the given orchestrator will be loaded
         - package_names: list of module names for custom operators (optional)
-        - enable_custom_operators: whether to load custom operators (default: from env or True)
+        - enable_custom_operators: whether to load custom operators (default: from env, else disabled)
         """
         self.orchestrator = orchestrator
         self.package_names = package_names or []
         self.operators: dict[str, type[AbstractOperator]] = {}
         self._lock = threading.Lock()
 
-        # Determine if custom operators are enabled
-        # Priority: parameter > environment variable > default
-        if enable_custom_operators is None:  # pragma: no cover
-            env_value = os.getenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS)
-            if env_value is not None:
-                enable_custom_operators = env_value.lower() in ("true", "1", "yes")
-            else:
-                enable_custom_operators = DocpipeConstants.ENABLE_CUSTOM_OPERATORS_DEFAULT
-
-        self.enable_custom_operators = enable_custom_operators
+        self.enable_custom_operators = OperatorFactory.resolve_enable_custom_operators(
+            enable_custom_operators=enable_custom_operators
+        )
 
         # Always load OSS operators from frozenset
         self._load_operators_from_frozenset()
@@ -144,6 +146,20 @@ class OperatorFactory:
         else:
             logger.info("No custom operator packages specified")
 
+    @staticmethod
+    def resolve_enable_custom_operators(*, enable_custom_operators: bool | None) -> bool:
+        """Resolve whether custom operators are enabled.
+
+        Priority: explicit argument > DOCPIPE_ENABLE_CUSTOM_OPERATORS environment variable > built-in default
+        (disabled).
+        """
+        if enable_custom_operators is not None:
+            return enable_custom_operators
+        env_value = os.getenv(EnvironmentVariables.DOCPIPE_ENABLE_CUSTOM_OPERATORS)
+        if env_value is not None:
+            return env_value.strip().lower() in ("true", "1", "yes")
+        return DocpipeConstants.ENABLE_CUSTOM_OPERATORS_DEFAULT
+
     def _load_operators_from_frozenset(self):
         """
         Load operators from frozenset registry (OSS + external operators).
@@ -153,7 +169,7 @@ class OperatorFactory:
         """
         from docpipe.core.operators.operator_registry import get_docpipe_operators
 
-        logger.info(f"Loading docpipe operators from frozenset for orchestrator: {self.orchestrator}")
+        logger.info("Loading docpipe operators from frozenset for orchestrator: %s", self.orchestrator)
 
         # Get all operators from registry (may contain duplicates by short_name)
         all_operators = get_docpipe_operators(orchestrator=self.orchestrator)
@@ -165,7 +181,7 @@ class OperatorFactory:
                 if hasattr(operator_class, "is_available") and callable(operator_class.is_available):
                     if not operator_class.is_available():
                         short_name = getattr(operator_class, "short_name", operator_class.__name__)
-                        logger.debug(f"Operator '{short_name}' is not available in current environment, skipping")
+                        logger.debug("Operator '%s' is not available in current environment, skipping", short_name)
                         continue
 
                 # Apply priority-based resolution
@@ -176,10 +192,11 @@ class OperatorFactory:
                     log_prefix="Operator",
                 )
             except Exception as e:
-                logger.error(f"Error processing operator {operator_class.__name__}: {e}", exc_info=True)
+                logger.exception("Error processing operator %s: %s", operator_class.__name__, e)
 
         logger.info(
-            f"Loaded {len(self.operators)} operators from frozenset (docpipe + external, after priority resolution)"
+            "Loaded %d operators from frozenset (docpipe + external, after priority resolution)",
+            len(self.operators),
         )
 
     def _load_custom_operators_from_packages(self, *, clear_cache: bool = False) -> dict[str, type[AbstractOperator]]:
@@ -195,7 +212,7 @@ class OperatorFactory:
             logger.warning("Attempted to load custom operators but feature is disabled")
             return {}
 
-        logger.info(f"Loading custom operators from sources: {self.package_names}")
+        logger.info("Loading custom operators from sources: %s", self.package_names)
 
         try:
             # Use CustomOperatorLoader for unified loading from all sources
@@ -216,11 +233,11 @@ class OperatorFactory:
                     log_prefix="Custom operator",
                 )
 
-            logger.info(f"Successfully loaded {len(custom_operators)} custom operator(s)")
+            logger.info("Successfully loaded %d custom operator(s)", len(custom_operators))
             return custom_operators
 
         except Exception as e:
-            logger.error(f"Failed to load custom operators: {e}", exc_info=True)
+            logger.exception("Failed to load custom operators: %s", e)
             return {}
 
     @staticmethod
@@ -271,7 +288,7 @@ class OperatorFactory:
             - Logs info/warning messages about resolution decisions
         """
         if not hasattr(new_operator, "short_name"):
-            logger.warning(f"{log_prefix} {new_operator.__name__} missing 'short_name' attribute, skipping")
+            logger.warning("%s %s missing 'short_name' attribute, skipping", log_prefix, new_operator.__name__)
             return False
 
         short_name = new_operator.short_name
@@ -286,19 +303,29 @@ class OperatorFactory:
         if existing_operator is None:
             # No conflict, add the operator
             operators_dict[short_name] = new_operator
-            logger.debug(f"Added {log_prefix.lower()}: {short_name}")
+            logger.debug("Added %s: %s", log_prefix.lower(), short_name)
             return True
 
         if should_override:
             logger.info(
-                f"{log_prefix} '{short_name}': {new_operator.__name__} (priority={new_priority}) "
-                f"overrides {existing_operator.__name__} (priority={existing_priority})"
+                "%s '%s': %s (priority=%s) overrides %s (priority=%s)",
+                log_prefix,
+                short_name,
+                new_operator.__name__,
+                new_priority,
+                existing_operator.__name__,
+                existing_priority,
             )
             operators_dict[short_name] = new_operator
             return True
         logger.info(
-            f"{log_prefix} '{short_name}': {new_operator.__name__} (priority={new_priority}) "
-            f"cannot override {existing_operator.__name__} (priority={existing_priority})"
+            "%s '%s': %s (priority=%s) cannot override %s (priority=%s)",
+            log_prefix,
+            short_name,
+            new_operator.__name__,
+            new_priority,
+            existing_operator.__name__,
+            existing_priority,
         )
         return False
 
@@ -377,7 +404,7 @@ def main():  # pragma: no cover
     main entry point into the program; used for unit testing only
     """
     factory = OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON)
-    logger.info(f"Loaded {len(factory.operators)} operators")
+    logger.info("Loaded %d operators", len(factory.operators))
 
     for key, value in factory.operators.items():
         print(f" short_name: {key} ==> class_name: {value.__name__}")

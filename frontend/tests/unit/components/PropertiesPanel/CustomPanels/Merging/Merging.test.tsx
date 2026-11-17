@@ -291,7 +291,7 @@ describe('MergingPanelBody', () => {
           }],
         }],
       },
-    });
+    } as any);
 
     const controller = makeController();
     await act(async () => {

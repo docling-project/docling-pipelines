@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pytest fixtures for ACL operator tests."""
 
 from unittest.mock import AsyncMock, Mock
@@ -10,8 +13,13 @@ from docpipe.core.operators.acl.domain.models import ACLRequest, ACLResponse, Ra
 
 @pytest.fixture
 def sample_acl_config():
-    """Basic configuration for ACL operator (minimal - credentials come from table)."""
+    """Basic configuration for ACL operator (credentials come from the operator's own config)."""
     return {
+        "credentials": {
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",  # pragma: allowlist secret
+            "tenant_id": "test-tenant-id",
+        },
         "provider_config": {"resolve_inheritance": True, "expand_groups": True, "normalize_identities": True},
         "fail_on_error": True,
     }
@@ -19,7 +27,7 @@ def sample_acl_config():
 
 @pytest.fixture
 def sample_document_metadata():
-    """Sample document metadata with credentials (from IngestSourceOperator)."""
+    """Sample document metadata (from IngestSourceOperator); carries no credentials."""
     import json
 
     return json.dumps(
@@ -27,16 +35,13 @@ def sample_document_metadata():
             "document_library_id": "test-drive-id",
             "web_url": "https://contoso.sharepoint.com/sites/mysite/Shared Documents/doc1.pdf",
             "provider": "sharepoint",
-            "client_id": "test-client-id",
-            "client_secret": "test-client-secret",  # pragma: allowlist secret
-            "tenant_id": "test-tenant-id",
         }
     )
 
 
 @pytest.fixture
 def sample_acl_table(sample_document_metadata):
-    """PyArrow table with document data for ACL extraction (includes metadata with credentials)."""
+    """PyArrow table with document data for ACL extraction."""
     data = {
         "id": ["doc1", "doc2", "doc3"],
         "name": ["Document 1.pdf", "Document 2.docx", "Document 3.xlsx"],

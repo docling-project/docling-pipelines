@@ -30,7 +30,7 @@ Docling-pipelines is a modular, operator-based data processing framework designe
 - **PyArrow Data Format**: All data flows through the pipeline as PyArrow tables, ensuring efficient memory usage and interoperability
 - **DAG-Based Workflow Execution**: Flows are defined as JSON configurations representing directed acyclic graphs (DAGs) of operator nodes
 - **Prefect Orchestration**: Workflow execution managed by Prefect with support for both ephemeral (local) and distributed execution via work pools (Docker)
-- **Modern AI/ML Integrations**: Native support for Ollama (LLM operations), Docling (document processing), OpenSearch (vector and scalar storage) and Milvus (vector storage)
+- **Modern AI/ML Integrations**: Native support for Ollama (LLM operations), Docling (document processing), OpenSearch (vector and scalar storage), Milvus (vector storage) and Weaviate (vector storage)
 
 ### Architectural Patterns
 
@@ -59,7 +59,7 @@ This architectural diversity is a deliberate design choice that supports the fra
 | **Storage**             | DuckDB (metadata and tables), Filesystem (metadata only)                                                                                              |
 | **Document Processing** | Docling (with ASR support for audio/video via ffmpeg)                                                                                                 |
 | **LLM Integration**     | Ollama, Watsonx.ai, LiteLLM (unified interface supporting 100+ LLM providers including OpenAI, Anthropic, Google, AWS Bedrock, and more), HuggingFace (native local/API support) |
-| **Vector Storage**      | OpenSearch, Milvus, NMSLIB, Faiss                                                                                                                     |
+| **Vector Storage**      | OpenSearch, Milvus, Weaviate, NMSLIB, Faiss                                                                                                                     |
 | **Language Detection**  | FastText, langdetect                                                                                                                                  |
 | **Web Framework**       | FastAPI (optional)                                                                                                                                    |
 | **Testing**             | pytest, pytest-cov                                                                                                                                    |
@@ -2662,6 +2662,12 @@ graph TB
         SERVICE[PIIHAPService<br/>thin wrapper]
         WATSONXADAPTER[WatsonxPIIAndHAPAdapter<br/>wraps TextDetectionPort]
         LITELLMADAPTER[LiteLLMPIIAndHAPAdapter<br/>wraps LLMInferencePort]
+        HFHAPADAPTER[HuggingFaceHAPAdapter<br/>HAP only, wraps TextDetectionPort]
+    end
+
+    subgraph "Core Adapters and Integrations"
+        HFCORE[HuggingFaceAdapter<br/>sentences, toxic labels, threshold]
+        HFCLIENT[HuggingFaceClassificationClient<br/>model cache, windows, scoring]
     end
 
     subgraph "External Services"
@@ -2669,14 +2675,22 @@ graph TB
         WATSONXAPI[WatsonX.ai /ml/v1/text/detection<br/>IBM Cloud]
     end
 
+    subgraph "Local Models"
+        HFMODEL[Hugging Face classifier<br/>transformers and torch, in-process]
+    end
+
     PIIHAP --> FACTORY
     FACTORY --> PORT
     PORT --> WATSONXADAPTER
     PORT --> LITELLMADAPTER
+    PORT --> HFHAPADAPTER
     PORT --> SERVICE
 
     LITELLMADAPTER --> LITELLMAPI
     WATSONXADAPTER --> WATSONXAPI
+    HFHAPADAPTER --> HFCORE
+    HFCORE --> HFCLIENT
+    HFCLIENT --> HFMODEL
 
     style PIIHAP fill:#ffe1e1
     style FACTORY fill:#ffe1e1
@@ -2684,6 +2698,9 @@ graph TB
     style PORT fill:#fff4e1
     style WATSONXADAPTER fill:#e1ffe1
     style LITELLMADAPTER fill:#e1ffe1
+    style HFHAPADAPTER fill:#e1ffe1
+    style HFCORE fill:#e1f0ff
+    style HFCLIENT fill:#e1f0ff
 ```
 
 **Supported Providers:**
@@ -2700,6 +2717,12 @@ graph TB
    - Anthropic (claude-3-opus, claude-3-sonnet)
    - Azure OpenAI, Cohere, AWS Bedrock, Google Vertex AI
    - Easy provider switching
+
+3. **Hugging Face** (HAP only): local sequence classifier run in-process
+   - Default model `ibm-granite/granite-guardian-hap-38m` at a pinned revision; other classifiers through config
+   - Sentence-level detections with exact offsets, so redaction masks only the flagged sentence
+   - Model loaded once per process and shared across nodes, batches and threads; runs offline from the cache
+   - `HuggingFaceHAPConfig` resolves the HAP defaults before the core `HuggingFaceAdapter` is built
 
 **Configuration Examples:**
 
@@ -2739,6 +2762,22 @@ graph TB
 }
 ```
 
+**Fully local (Presidio PII + Hugging Face HAP):**
+
+```json
+{
+  "type": "pii_and_hap",
+  "name": "pii_hap_local",
+  "config": {
+    "pii_provider": "presidio",
+    "pii_provider_config": {"spacy_model": "en_core_web_sm"},
+    "hap_provider": "huggingface",
+    "hap_provider_config": {},
+    "expected_redactions": ["pii", "hap"]
+  }
+}
+```
+
 **Key Features:**
 
 1. **Detection Types**:
@@ -2754,7 +2793,7 @@ graph TB
    - Switch providers without code changes
    - Configuration-driven provider selection
    - Ollama can be accessed through LiteLLM via an OpenAI-compatible `api_base`
-   - Production deployment with WatsonX or LiteLLM
+   - Production deployment with WatsonX or LiteLLM, or fully local with Presidio (PII) and Hugging Face (HAP)
 
 4. **Extensibility**:
    - Add a new provider with a single file: create the adapter, decorate with `@register_pii_and_hap_detection_adapter`, and it is automatically discoverable
@@ -4632,7 +4671,7 @@ Operators are organized by category (defined in `OperatorCategory` enum). For co
 - **Ingest**: Data source ingestion (local files, S3, SharePoint, etc.)
 - **Functional**: Data transformation (chunking, embeddings, branching, merging)
 - **Quality**: Data quality checks (deduplication, classification, PII detection)
-- **VectorDB**: Vector storage (OpenSearch, Milvus)
+- **VectorDB**: Vector storage (OpenSearch, Milvus, Weaviate)
 - **Storage**: Persistent storage (DocumentSet with DuckDB) and file export to destinations (StorageOutputOperator — filesystem, S3, IBM COS, SharePoint, OneDrive, Google Drive)
 
 **Architecture Highlights:**

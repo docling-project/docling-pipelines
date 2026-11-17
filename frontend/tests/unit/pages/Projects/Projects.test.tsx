@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { Projects } from '@/pages/Projects/Projects';
@@ -234,10 +233,8 @@ describe('Projects page — handlers & coverage', () => {
   // the delete API is called and the Redux store removes the project.
 
   it('delete project success: DELETE API is called and project is removed from store', async () => {
-    let deleteCalled = false;
     server.use(
       http.delete('/api/projects/:id', () => {
-        deleteCalled = true;
         return new HttpResponse(null, { status: 204 });
       })
     );
@@ -353,7 +350,9 @@ describe('Projects page — handlers & coverage', () => {
     }, { timeout: 2000 });
 
     const nameInput = screen.getAllByPlaceholderText('Enter name')[0];
-    fireEvent.change(nameInput, { target: { value: 'Updated Project' } });
+    if (nameInput) {
+      fireEvent.change(nameInput, { target: { value: 'Updated Project' } });
+    }
 
     const saveBtn = screen.getByRole('button', { name: /^save$/i });
     fireEvent.click(saveBtn);
@@ -404,9 +403,12 @@ describe('Projects page — handlers & coverage', () => {
       expect(screen.queryAllByPlaceholderText('Enter name').length).toBeGreaterThan(0);
     }, { timeout: 2000 });
 
-    fireEvent.change(screen.getAllByPlaceholderText('Enter name')[0], {
-      target: { value: 'New Project' },
-    });
+    const projNameInput = screen.getAllByPlaceholderText('Enter name')[0];
+    if (projNameInput) {
+      fireEvent.change(projNameInput, {
+        target: { value: 'New Project' },
+      });
+    }
 
     // Click "Next" button (primary, step 0)
     await waitFor(() => {
@@ -441,9 +443,12 @@ describe('Projects page — handlers & coverage', () => {
       expect(screen.queryAllByPlaceholderText('Enter name').length).toBeGreaterThan(0);
     }, { timeout: 2000 });
 
-    fireEvent.change(screen.getAllByPlaceholderText('Enter name')[0], {
-      target: { value: 'Fail Project' },
-    });
+    const failNameInput = screen.getAllByPlaceholderText('Enter name')[0];
+    if (failNameInput) {
+      fireEvent.change(failNameInput, {
+        target: { value: 'Fail Project' },
+      });
+    }
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /^next$/i })).toBeInTheDocument();

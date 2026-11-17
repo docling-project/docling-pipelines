@@ -93,7 +93,7 @@ Three shared interfaces cover all LLM capabilities:
 | ------------------- | ----------------------------- | ------- |
 | `LLMInferencePort`  | Chat/generation APIs          | Classification, Entity Extraction, Summarization, PII/HAP (LLM mode) |
 | `LLMEmbeddingPort`  | Embedding generation          | Embeddings Operator |
-| `TextDetectionPort` | Specialized detection APIs    | PII/HAP (WatsonX mode) |
+| `TextDetectionPort` | Specialized detection APIs    | PII/HAP (WatsonX mode, Hugging Face HAP) |
 
 ---
 
@@ -147,9 +147,26 @@ src/docpipe/core/ports/llm_embedding_port.py
 src/docpipe/core/ports/text_detection_port.py
 ```
 
-**Purpose**: Specialized interface for PII/HAP detection via WatsonX detection APIs.
+**Purpose**: Specialized interface for detection services that are not chat APIs: the WatsonX
+detection API (PII and HAP) and local Hugging Face sequence classifiers (HAP).
 
-**Used by**: PII/HAP Operator (WatsonX path only)
+**Contract**:
+
+```python
+detect(*, text, detection_types=None, detectors={"hap": {"threshold": 0.8}}) -> {
+    "success": bool,
+    "detections": [  # start/end are character offsets into text
+        {"detection", "detection_type", "score", "start", "end", "text", "evidences"},
+    ],
+    "error": str | None,
+}
+```
+
+A provider-level failure (an unsupported detector, an API error, a model error) returns
+`success: False` with an empty `detections` list instead of raising, and the error message should
+not contain the input text. `validate()` runs the `validate_detection()` hook.
+
+**Used by**: PII/HAP Operator (`watsonx` and `huggingface` providers)
 
 ---
 
@@ -266,6 +283,57 @@ embeddings = adapter.generate_embeddings(
 
 ---
 
+## HuggingFace Adapter
+
+**File**
+
+```text
+src/docpipe/core/adapters/huggingface/huggingface_adapter.py
+```
+
+### Implements Two Ports
+
+```text
+LLMEmbeddingPort      (generate_embeddings, generate_embeddings_batch, get_embedding_dimension)
+TextDetectionPort     (detect)
+```
+
+### Key Features
+
+* **Single adapter** for all Hugging Face capabilities; `model_name` names the embedding model or
+  the classifier, depending on the capability it is built for
+* **Lazy, per-capability clients**: `HuggingFaceLLMClient` (`integrations/huggingface/client.py`)
+  for embeddings and `HuggingFaceClassificationClient`
+  (`integrations/huggingface/classification_client.py`) for detection. Each is created on first
+  use or in its `validate_*` hook, so an adapter built for one capability never loads the other
+  capability's model
+* **HAP detection**: splits text into sentence spans (line breaks, then untrained NLTK Punkt) whose
+  offsets point into the original text, scores each span locally, takes the highest probability
+  among `toxic_labels` and reports spans at or above the threshold as `has_HAP` detections
+* **No HAP defaults**: callers pass the classifier and its `toxic_labels`; the `pii_and_hap`
+  operator resolves its defaults in `HuggingFaceHAPConfig`
+* **Validation**: `validate()` resolves to `validate_embedding()` because `LLMEmbeddingPort` is the
+  first base class. Detection callers call `validate_detection()`, which loads the classifier and
+  checks `toxic_labels` against its labels
+
+### Usage Example
+
+```python
+from docpipe.core.adapters.huggingface import HuggingFaceAdapter
+from docpipe.core.constants.constants import ServiceConstants
+
+adapter = HuggingFaceAdapter(
+    model_name=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_MODEL_ID,
+    revision=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_REVISION,
+    toxic_labels=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_TOXIC_LABELS,
+)
+
+assert adapter.validate_detection()["valid"]
+result = adapter.detect(text="Thanks for the report.", detectors={"hap": {"threshold": 0.8}})
+```
+
+---
+
 # LLM Adapter Factory
 
 **File**
@@ -298,7 +366,7 @@ get_supported_providers(capability="inference")
 | ------------- | --------- | ---------- | -------------- | ----- |
 | `watsonx`     | ✅         | ✅          | ✅              | IBM watsonx.ai — single consolidated adapter |
 | `litellm`     | ✅         | ✅          | ❌              | 100+ providers (Ollama, OpenAI, Anthropic, etc.) |
-| `huggingface` | ❌         | ✅          | ❌              | Local or API-based HuggingFace models |
+| `huggingface` | ❌         | ✅          | ✅              | Embeddings: local or API models. Text detection: local HAP classifier (needs explicit `model_id` and `toxic_labels`) |
 
 ### Usage Examples
 
@@ -343,6 +411,17 @@ adapter = LLMAdapterFactory.create_text_detection_adapter(
         "url": "https://us-south.ml.cloud.ibm.com",
         "container_id": "<your-project-id>",
         "container_kind": "project"
+    }
+)
+
+# HuggingFace text detection (local HAP classifier)
+adapter = LLMAdapterFactory.create_text_detection_adapter(
+    provider="huggingface",
+    model_id="unitary/unbiased-toxic-roberta",
+    provider_config={
+        "toxic_labels": ["toxicity", "severe_toxicity", "insult"],
+        "activation": "sigmoid",
+        "local_files_only": True
     }
 )
 ```
@@ -564,15 +643,19 @@ PIIAndHAPDetectionFactory.create_adapters(pii=..., hap=...)
     ↓
 WatsonxPIIAndHAPAdapter | LiteLLMPIIAndHAPAdapter   (PII + HAP)
 PresidioPIIAdapter                                 (PII only)
+HuggingFaceHAPAdapter                              (HAP only)
     ↓ injected independently
 PIIHAPService(pii_adapter=..., hap_adapter=...)
 ```
 
-The WatsonX and LiteLLM adapters use different underlying ports because of provider API differences:
+The adapters use different underlying ports because of provider API differences:
 - **`WatsonxPIIAndHAPAdapter`**: WatsonX exposes a specialized `/ml/v1/text/detection` API
   (not a standard chat API), so it wraps `TextDetectionPort`.
 - **`LiteLLMPIIAndHAPAdapter`**: LiteLLM uses standard prompt-based inference, so it wraps
   `LLMInferencePort`.
+- **`HuggingFaceHAPAdapter`**: runs a local sequence classifier through `TextDetectionPort`.
+  Its `HuggingFaceHAPConfig` resolves the HAP defaults (model, pinned revision, toxic labels)
+  before calling `LLMAdapterFactory`, so operator metadata shows the effective values.
 
 ## PIIHAPService
 

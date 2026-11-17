@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Fetches live metadata from VectorDB connections for flow enrichment.
 
 Used by FlowEnrichmentService to populate available_resources,
@@ -6,6 +9,8 @@ and stored_resource_metadata on vectordb operator nodes during flow enrichment.
 
 All adapter-specific logic lives in the adapter layer:
   - OpenSearch: adapters/outbound/opensearch/resource_metadata.py
+  - Milvus: adapters/outbound/milvus/resource_metadata.py
+  - Weaviate: adapters/outbound/weaviate/resource_metadata.py
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
 
 logger = get_logger()
 
@@ -34,7 +40,7 @@ def compute_default_feature_mappings(
       2. "id"                                              → "document_id"
       3. "name"                                            → "document_name"
       4. First feature with type="vector"                  → "vector_embeddings"
-      5. [Milvus, add_sparse_vector=True only]
+      5. [providers with server-side BM25 sparse retrieval, add_sparse_vector=True only]
          Feature with type="vector_sparse"                 → "sparse_embeddings"
          content_column                                    → "text"
       6. Remaining mandatory_for_vector_db=True features   → identity mapping
@@ -49,8 +55,8 @@ def compute_default_feature_mappings(
 
     Args:
         available_features: Propagated feature map from the DAG snapshot.
-        add_sparse_vector: When True (Milvus only), adds sparse_embeddings and
-            content_column to the defaults.
+        add_sparse_vector: When True (providers with server-side BM25 sparse
+            retrieval), adds sparse_embeddings and content_column to the defaults.
         content_column: Name of the document content column. Defaults to "content".
             Only used when add_sparse_vector=True.
 
@@ -96,9 +102,9 @@ def compute_default_feature_mappings(
         )
         covered.add(OperatorConstants.Columns.NAME)
 
-    # Rule 4 — first feature with type=vector → "vector_embeddings"
+    # Rule 4 — first feature with type=vector or vector_binary → "vector_embeddings"
     for name, meta in available_features.items():
-        if name not in covered and meta.get(OperatorConstants.Misc.TYPE) == OperatorConstants.Types.TYPE_VECTOR:
+        if name not in covered and is_dense_or_binary_vector_feature(feature_config=meta):
             result.append(
                 {
                     OperatorConstants.Misc.FEATURE_NAME: name,
@@ -108,7 +114,7 @@ def compute_default_feature_mappings(
             covered.add(name)
             break
 
-    # Rule 5 — Milvus sparse path (add_sparse_vector=True only)
+    # Rule 5 — BM25 sparse path (add_sparse_vector=True only)
     if add_sparse_vector:
         for name, meta in available_features.items():
             if (
@@ -146,6 +152,8 @@ class VectorDBMetadataFetcher:
 
     Each adapter's read-only metadata logic lives in its own module:
       - opensearch: adapters/outbound/opensearch/resource_metadata.OpenSearchResourceMetadata
+      - milvus: adapters/outbound/milvus/resource_metadata.MilvusResourceMetadata
+      - weaviate: adapters/outbound/weaviate/resource_metadata.WeaviateResourceMetadata
 
     This class owns only the shared helpers (_normalise_feature_mappings,
     _default_feature_mappings_from_features, _empty_result) and injects them
@@ -176,6 +184,28 @@ class VectorDBMetadataFetcher:
             Dict with five normalised keys. Never raises — returns empty-value
             defaults on any connection failure or unknown adapter.
         """
+        # Imported here: the operator module imports adapters that import this module.
+        from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
+        from docpipe.integrations.secrets.node_config import prepare_operator_config
+        from docpipe.integrations.secrets.resolver import SecretResolutionError
+
+        # References are resolved here, for this connection only. The resolved values
+        # live in this call's locals and never reach the flow definition, the DAG
+        # snapshot or the response. An unresolved reference is never handed to an
+        # adapter: the node returns the empty result instead (spec: enrichment
+        # never connects with an unresolved reference).
+        try:
+            operator_config = prepare_operator_config(operator_class=VectorDBOperator, config=operator_config)
+        except SecretResolutionError as exc:
+            logger.warning(
+                "Secret reference %s (provider %s) could not be resolved during enrichment; "
+                "returning empty VectorDB metadata for adapter %s",
+                exc.config_key,
+                exc.provider or "unknown",
+                adapter_name,
+            )
+            return self._empty_result()
+
         provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
 
         if adapter_name == OperatorConstants.VectorDB.OPENSEARCH:
@@ -198,6 +228,20 @@ class VectorDBMetadataFetcher:
             )
 
             return MilvusResourceMetadata().fetch(
+                provider_config=provider_config,
+                operator_config=operator_config,
+                available_features=available_features,
+                normalise_feature_mappings=self._normalise_feature_mappings,
+                default_feature_mappings_from_features=self._default_feature_mappings_from_features,
+                empty_result=self._empty_result,
+            )
+
+        if adapter_name == OperatorConstants.VectorDB.WEAVIATE:
+            from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
+                WeaviateResourceMetadata,
+            )
+
+            return WeaviateResourceMetadata().fetch(
                 provider_config=provider_config,
                 operator_config=operator_config,
                 available_features=available_features,

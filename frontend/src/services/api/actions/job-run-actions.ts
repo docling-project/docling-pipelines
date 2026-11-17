@@ -5,7 +5,7 @@
  * These call the BFF server which proxies to the Python backend.
  */
 
-import { type AxiosResponse } from 'axios';
+import axios, { type AxiosResponse } from 'axios';
 import { log4js, logUtil } from '@/utils/logger';
 import type {
   JobRunCreateResponse,
@@ -67,7 +67,7 @@ export const getJobRuns = async (params?: {
   job_id?: string;
   status?: string;
   limit?: number;
-}): Promise<AxiosResponse<JobRunListResponse>> => {
+}, signal?: AbortSignal): Promise<AxiosResponse<JobRunListResponse>> => {
   const queryParams = new URLSearchParams();
 
   if (params?.job_id) { queryParams.append('job_id', params.job_id); }
@@ -77,7 +77,7 @@ export const getJobRuns = async (params?: {
   const url = `/api/job_runs${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
 
   try {
-    const response = await apiClient.get<JobRunListResponse>(url, { headers: BFF_HEADERS });
+    const response = await apiClient.get<JobRunListResponse>(url, { headers: BFF_HEADERS, signal });
 
     logUtil.info({
       logger,
@@ -88,11 +88,14 @@ export const getJobRuns = async (params?: {
     return response;
 
   } catch (error) {
-    logUtil.error({
-      logger,
-      message: 'Failed to list job runs',
-      data: error,
-    });
+    // An aborted request is expected (e.g. polling cleanup), not a failure.
+    if (!axios.isCancel(error)) {
+      logUtil.error({
+        logger,
+        message: 'Failed to list job runs',
+        data: error,
+      });
+    }
     throw error;
   }
 };

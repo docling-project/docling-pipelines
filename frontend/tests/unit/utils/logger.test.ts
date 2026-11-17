@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { log4js, logUtil } from '@/utils/logger';
 
 describe('logger', () => {
@@ -22,8 +22,8 @@ describe('logger', () => {
       logUtil.info({ logger, message: 'hello info' });
       expect(spy).toHaveBeenCalled();
       const args = spy.mock.calls[0];
-      expect(String(args[0])).toContain('[INFO]');
-      expect(args[1]).toBe('hello info');
+      expect(String(args?.[0])).toContain('[INFO]');
+      expect(args?.[1]).toBe('hello info');
       spy.mockRestore();
     });
 
@@ -33,7 +33,7 @@ describe('logger', () => {
       const data = { key: 'value' };
       logUtil.info({ logger, message: 'with data', data });
       const args = spy.mock.calls[0];
-      expect(args[2]).toEqual(data);
+      expect(args?.[2]).toEqual(data);
       spy.mockRestore();
     });
 
@@ -41,7 +41,7 @@ describe('logger', () => {
       const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
       const logger = log4js.getLogger('info-nodata');
       logUtil.info({ logger, message: 'no data' });
-      expect(spy.mock.calls[0].length).toBe(2);
+      expect(spy.mock.calls[0]?.length).toBe(2);
       spy.mockRestore();
     });
   });
@@ -51,7 +51,7 @@ describe('logger', () => {
       const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const logger = log4js.getLogger('warn-test');
       logUtil.warn({ logger, message: 'warning' });
-      expect(String(spy.mock.calls[0][0])).toContain('[WARN]');
+      expect(String(spy.mock.calls[0]?.[0])).toContain('[WARN]');
       spy.mockRestore();
     });
   });
@@ -61,7 +61,7 @@ describe('logger', () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       const logger = log4js.getLogger('err-test');
       logUtil.error({ logger, message: 'error happened' });
-      expect(String(spy.mock.calls[0][0])).toContain('[ERROR]');
+      expect(String(spy.mock.calls[0]?.[0])).toContain('[ERROR]');
       spy.mockRestore();
     });
   });

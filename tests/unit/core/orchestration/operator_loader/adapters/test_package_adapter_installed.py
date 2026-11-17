@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """PackageAdapter tests against a real package "installed" into a temporary sys.path entry.
 
 The package directory and its .dist-info (version + docpipe.operators entry points) live in
@@ -16,7 +19,7 @@ import pytest
 
 from docpipe.core.orchestration.operator_loader.adapters.package_adapter import PackageAdapter
 from docpipe.core.orchestration.operator_loader.loader_service import CustomOperatorLoader
-from docpipe.core.orchestration.operator_loader.ports.operator_source import OperatorInfo
+from docpipe.core.orchestration.operator_loader.ports.operator_source import OperatorInfo, TrustClass
 
 _OPERATOR = '''
 
@@ -128,6 +131,11 @@ class TestDiscovery:
         assert operators["extra_op"].module_path == f"{installed}.extra:ExtraOp"
         assert operators["shared_op"].module_path == f"{installed}.operators:SharedOp"
         assert {op.source_location for op in operators.values()} == {f"package:{installed}"}
+
+    def test_package_operators_are_deployer_installed(self, installed: str) -> None:
+        operators = PackageAdapter(package_name=installed).list_operators()
+
+        assert {op.trust_class for op in operators} == {TrustClass.DEPLOYER_INSTALLED}
 
     def test_entry_point_failure_still_allows_module_inspection(self, installed: str, monkeypatch) -> None:
         def _broken_entry_points(**kwargs):

@@ -444,3 +444,17 @@ class TestTextExtractionPageCount:
 
         # Verify - uses native page_count (15) not character-based (10)
         assert doc_pages_processed[0] == 15
+
+
+def test_submit_extraction_passes_effective_extension():
+    from unittest.mock import MagicMock
+
+    adapter = MockTextExtractionAdapter(config={"doc_column": "content"})
+    executor = MagicMock()
+    task = {"doc_name": "wrong.pdf", "binary_content": b"video", "file_extension": ".mkv"}
+    adapter._submit_extraction_task(executor=executor, task=task)
+    assert executor.submit.call_args.kwargs == {
+        "file_path": "wrong.pdf",
+        "binary_content": b"video",
+        "file_extension": ".mkv",
+    }
