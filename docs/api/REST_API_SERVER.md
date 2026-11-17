@@ -45,8 +45,12 @@ on every protected endpoint. See the
 | LDAP | `POST /auth/login` with `username`/`password` | `LDAPConfig` via environment variables |
 | OAuth2 / OIDC | Authorization Code flow with PKCE | See [OAuth2 Authentication](OAUTH2_AUTHENTICATION.md) |
 
+**Prerequisite:** set `JWT_SECRET_KEY` (at least 32 random characters, not a placeholder) before starting the server. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+
+**Bootstrap administrator:** when neither LDAP nor OIDC is configured, set `DOCPIPE_AUTH_BOOTSTRAP_USERNAME` and `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH` (a bcrypt hash; set both or neither) to enable a local `admin` login. It uses the same `POST /auth/login` endpoint and stays active alongside LDAP or OIDC. See [Bootstrap administrator](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md#bootstrap-administrator) for how to generate the hash.
+
 ```bash
-# Obtain a JWT via LDAP login
+# Obtain a JWT via LDAP or bootstrap administrator login
 curl -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "password": "<your-password>"}'

@@ -9,6 +9,8 @@
 # - Ollama installation and model downloads
 # - OpenSearch setup with Podman/Docker
 # - Python virtual environment and dependencies
+# - Authentication settings (.env: JWT_SECRET_KEY, DOCPIPE_AUTH_ENABLED, BFF_URL)
+# - Optional local OpenLDAP with test users alice (editor) and charlie (viewer)
 #
 # Usage:
 #   ./scripts/setup_docling_pipelines_environment.sh [OPTIONS]
@@ -19,6 +21,7 @@
 #   --skip-ollama              Skip Ollama setup
 #   --skip-opensearch          Skip OpenSearch setup
 #   --skip-python              Skip Python environment setup
+#   --with-ldap                Start local OpenLDAP (examples/LDAP) and seed test users
 #   --help                     Show this help message
 ################################################################################
 
@@ -40,6 +43,8 @@ INTERACTIVE_MODE=false
 SKIP_OLLAMA=false
 SKIP_OPENSEARCH=false
 SKIP_PYTHON=false
+WITH_LDAP=false
+LDAP_CONTAINER_NAME="local-ldap"
 DEFAULT_MODELS="granite4,llama3.2,nomic-embed-text"
 OLLAMA_MODELS=""
 
@@ -157,6 +162,9 @@ Options:
     --skip-ollama              Skip Ollama setup
     --skip-opensearch          Skip OpenSearch setup
     --skip-python              Skip Python environment setup
+    --with-ldap                Start local OpenLDAP (examples/LDAP/docker-compose.yml), seed the
+                               test users alice (editor) and charlie (viewer), and write the LDAP
+                               settings to .env
     --help                     Show this help message
 
 Examples:
@@ -171,6 +179,9 @@ Examples:
 
     # Skip specific components
     $0 --skip-ollama --skip-opensearch
+
+    # Also start a local LDAP server with test users
+    $0 --with-ldap
 
 EOF
     exit 0
@@ -201,6 +212,10 @@ parse_arguments() {
                 ;;
             --skip-python)
                 SKIP_PYTHON=true
+                shift
+                ;;
+            --with-ldap)
+                WITH_LDAP=true
                 shift
                 ;;
             --help)
@@ -739,6 +754,241 @@ setup_python_environment() {
     cd "$original_dir"
 }
 
+find_project_root() {
+    if [ -f "pyproject.toml" ]; then
+        echo "."
+    elif [ -f "../pyproject.toml" ]; then
+        echo ".."
+    else
+        echo ""
+    fi
+}
+
+# Read the value of KEY from an env file (empty when unset). Surrounding quotes are removed.
+get_env_value() {
+    local file="$1"
+    local key="$2"
+    local value=""
+
+    if [ -f "$file" ]; then
+        value=$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d'=' -f2- || true)
+    fi
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    echo "$value"
+}
+
+# Set KEY=VALUE in an env file, replacing any active KEY line and keeping commented examples.
+set_env_value() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+
+    if [ -f "$file" ]; then
+        grep -v -E "^${key}=" "$file" > "${file}.tmp" || true
+        mv "${file}.tmp" "$file"
+    fi
+    echo "${key}=${value}" >> "$file"
+}
+
+is_weak_jwt_secret() {
+    local secret="$1"
+    local lowered
+    lowered=$(echo "$secret" | tr '[:upper:]' '[:lower:]')
+
+    if [ "${#secret}" -lt 32 ]; then
+        return 0
+    fi
+    case "$lowered" in
+        *change-this*|*change_this*|*changeme*|*change-me*|*change_me*|*your-secret*|*your_secret*|\
+        *your-jwt-secret*|*your_jwt_secret*|*secret-key-here*|*replace-me*|*replace_me*|*placeholder*|\
+        *local-dev-secret*|\<*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+generate_jwt_secret() {
+    if command_exists python3; then
+        python3 -c "import secrets; print(secrets.token_hex(32))"
+    elif command_exists openssl; then
+        openssl rand -hex 32
+    else
+        return 1
+    fi
+}
+
+setup_auth_env() {
+    print_header "Configuring Authentication"
+
+    local root
+    root=$(find_project_root)
+    if [ -z "$root" ]; then
+        log_warning "pyproject.toml not found. Skipping authentication setup"
+        return 0
+    fi
+
+    local env_file="$root/.env"
+    if [ ! -f "$env_file" ]; then
+        if [ -f "$root/.env.example" ]; then
+            cp "$root/.env.example" "$env_file"
+            log "Created .env from .env.example"
+        else
+            touch "$env_file"
+            log "Created empty .env"
+        fi
+    fi
+
+    local jwt_secret
+    jwt_secret=$(get_env_value "$env_file" "JWT_SECRET_KEY")
+    if [ -z "$jwt_secret" ] || is_weak_jwt_secret "$jwt_secret"; then
+        local new_secret
+        if ! new_secret=$(generate_jwt_secret); then
+            log_error "Cannot generate JWT_SECRET_KEY: neither python3 nor openssl found"
+            return 1
+        fi
+        set_env_value "$env_file" "JWT_SECRET_KEY" "$new_secret"
+        log "Generated a 64-character JWT_SECRET_KEY in .env"
+    else
+        log "JWT_SECRET_KEY already set in .env (kept)"
+    fi
+
+    local auth_enabled
+    auth_enabled=$(get_env_value "$env_file" "DOCPIPE_AUTH_ENABLED")
+    if [ -z "$auth_enabled" ]; then
+        set_env_value "$env_file" "DOCPIPE_AUTH_ENABLED" "true"
+        log "Set DOCPIPE_AUTH_ENABLED=true in .env"
+    else
+        log "DOCPIPE_AUTH_ENABLED=$auth_enabled already set in .env (kept)"
+    fi
+
+    if [ -z "$(get_env_value "$env_file" "BFF_URL")" ]; then
+        set_env_value "$env_file" "BFF_URL" "http://localhost:3001"
+        log "Set BFF_URL=http://localhost:3001 in .env"
+    fi
+
+    save_config "AUTH_ENV_FILE" "$env_file"
+}
+
+# Print the compose command for the detected container runtime (podman-compose or docker compose).
+ldap_compose_command() {
+    local runtime
+    runtime=$(load_config "CONTAINER_RUNTIME")
+    if [ -z "$runtime" ]; then
+        if command_exists podman; then
+            runtime="podman"
+        elif command_exists docker; then
+            runtime="docker"
+        fi
+    fi
+
+    if [ "$runtime" = "podman" ] && command_exists podman-compose; then
+        echo "podman|podman-compose"
+    elif [ "$runtime" = "docker" ] && docker compose version >/dev/null 2>&1; then
+        echo "docker|docker compose"
+    elif [ "$runtime" = "docker" ] && command_exists docker-compose; then
+        echo "docker|docker-compose"
+    else
+        echo ""
+    fi
+}
+
+start_ldap() {
+    print_header "Starting Local LDAP"
+
+    if [ "$WITH_LDAP" = false ]; then
+        return 0
+    fi
+
+    local root
+    root=$(find_project_root)
+    if [ -z "$root" ] || [ ! -f "$root/examples/LDAP/docker-compose.yml" ]; then
+        log_error "examples/LDAP/docker-compose.yml not found"
+        return 1
+    fi
+
+    local resolved
+    resolved=$(ldap_compose_command)
+    if [ -z "$resolved" ]; then
+        log_error "No container runtime with compose support found (need podman + podman-compose, or docker compose)"
+        return 1
+    fi
+    local runtime="${resolved%%|*}"
+    local compose="${resolved#*|}"
+
+    local ldap_dir="$root/examples/LDAP"
+    if [ ! -f "$ldap_dir/.env" ]; then
+        cp "$ldap_dir/.env.example" "$ldap_dir/.env"
+        log "Created examples/LDAP/.env from .env.example"
+    fi
+
+    local admin_password
+    admin_password=$(get_env_value "$ldap_dir/.env" "LDAP_ADMIN_PASSWORD")
+    if [ -z "$admin_password" ]; then
+        log_error "LDAP_ADMIN_PASSWORD is not set in examples/LDAP/.env"
+        return 1
+    fi
+
+    log "Starting OpenLDAP using $compose..."
+    # Export the values so the compose file needs no ":-default" fallbacks.
+    (
+        cd "$ldap_dir"
+        set -a
+        # shellcheck disable=SC1091
+        . ./.env
+        set +a
+        $compose up -d
+    )
+
+    log "Waiting for slapd to be ready..."
+    local count=0
+    local ready=false
+    while [ $count -lt 60 ]; do
+        if "$runtime" exec "$LDAP_CONTAINER_NAME" ldapsearch -x -H ldap://localhost:389 \
+            -D "cn=admin,dc=abc,dc=com" -w "$admin_password" -b "dc=abc,dc=com" -s base dn >/dev/null 2>&1; then
+            ready=true
+            break
+        fi
+        sleep 2
+        count=$((count + 2))
+    done
+
+    if [ "$ready" = false ]; then
+        log_error "slapd did not become ready within 60 seconds"
+        log_info "Check logs with: $runtime logs $LDAP_CONTAINER_NAME"
+        return 1
+    fi
+
+    log "Seeding LDAP users (alice: editors, charlie: viewers)..."
+    local output
+    if output=$("$runtime" exec -i "$LDAP_CONTAINER_NAME" ldapadd -x -H ldap://localhost:389 \
+        -D "cn=admin,dc=abc,dc=com" -w "$admin_password" < "$ldap_dir/abc_users.ldif" 2>&1); then
+        log "LDAP users seeded"
+    elif echo "$output" | grep -q "Already exists"; then
+        log "LDAP users already present"
+    else
+        log_error "Failed to seed LDAP users: $output"
+        return 1
+    fi
+
+    local env_file="$root/.env"
+    [ -f "$env_file" ] || touch "$env_file"
+    set_env_value "$env_file" "LDAP_SERVER" "ldap://localhost:1389"
+    set_env_value "$env_file" "LDAP_BASE_DN" "dc=abc,dc=com"
+    set_env_value "$env_file" "LDAP_USER_DN" "ou=People,dc=abc,dc=com"
+    set_env_value "$env_file" "LDAP_BIND_DN" "cn=admin,dc=abc,dc=com"
+    set_env_value "$env_file" "LDAP_BIND_PASSWORD" "$admin_password"
+    set_env_value "$env_file" "LDAP_GROUP_ATTRIBUTE" "ou"
+    set_env_value "$env_file" "DOCPIPE_AUTH_ROLE_MAPPING_EDITOR" "editors"
+    set_env_value "$env_file" "DOCPIPE_AUTH_ROLE_MAPPING_VIEWER" "viewers"
+    log "LDAP settings written to .env"
+
+    save_config "LDAP_RUNNING" "true"
+}
+
 verify_services() {
     print_header "Verifying Services"
 
@@ -821,7 +1071,44 @@ show_summary() {
         echo ""
     fi
 
+    local summary_root
+    summary_root=$(find_project_root)
+    if [ -n "$summary_root" ] && [ -f "$summary_root/.env" ]; then
+        local env_file="$summary_root/.env"
+        echo -e "${BLUE}Authentication:${NC}"
+        echo "  DOCPIPE_AUTH_ENABLED: $(get_env_value "$env_file" "DOCPIPE_AUTH_ENABLED")"
+        if [ -n "$(get_env_value "$env_file" "JWT_SECRET_KEY")" ]; then
+            echo "  JWT_SECRET_KEY: set in .env (value not shown)"
+        else
+            echo "  JWT_SECRET_KEY: NOT SET (the API refuses to start while auth is enabled)"
+        fi
+        echo "  BFF_URL: $(get_env_value "$env_file" "BFF_URL")"
+        if [ -n "$(get_env_value "$env_file" "LDAP_SERVER")" ]; then
+            echo "  LDAP: $(get_env_value "$env_file" "LDAP_SERVER") (group attribute: $(get_env_value "$env_file" "LDAP_GROUP_ATTRIBUTE"))"
+        fi
+        if [ -n "$(get_env_value "$env_file" "DOCPIPE_AUTH_BOOTSTRAP_USERNAME")" ]; then
+            echo "  Bootstrap administrator: $(get_env_value "$env_file" "DOCPIPE_AUTH_BOOTSTRAP_USERNAME")"
+        else
+            echo "  Bootstrap administrator: not configured (set DOCPIPE_AUTH_BOOTSTRAP_USERNAME and"
+            echo "    DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH in .env to enable a break-glass login)"
+        fi
+        echo ""
+        echo "  Authentication is on by default. To run without it on a local, trusted"
+        echo "  machine, opt out before starting the API:"
+        echo "    export DOCPIPE_AUTH_ENABLED=false"
+        echo ""
+    fi
+
+    if [ "$WITH_LDAP" = true ]; then
+        echo -e "${BLUE}Local LDAP:${NC}"
+        echo "  Server: ldap://localhost:1389 (phpLDAPAdmin: http://localhost:8085)"
+        echo "  alice   / Password123!  (ou: editors -> editor)"
+        echo "  charlie / Password123!  (ou: viewers -> viewer)"
+        echo ""
+    fi
+
     echo -e "${BLUE}Documentation:${NC}"
+    echo "  Authentication Guide: docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md"
     echo "  User Guide: USER_GUIDE_PIPELINE_SETUP.md"
     echo "  Architecture: ARCHITECTURE.md"
     echo "  Sample flows: sample_flows/README.md"
@@ -932,6 +1219,12 @@ main() {
 
     if [ "$SKIP_PYTHON" = false ]; then
         setup_python_environment
+    fi
+
+    setup_auth_env || log_warning "Authentication setup did not complete"
+
+    if [ "$WITH_LDAP" = true ]; then
+        start_ldap || log_warning "Local LDAP setup did not complete"
     fi
 
     verify_services

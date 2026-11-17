@@ -307,20 +307,85 @@ Don't have nvm? Install it from https://github.com/nvm-sh/nvm, or get Node.js 22
 - **Fedora/RHEL**: `sudo dnf module install nodejs:22`
 - **Any OS**: download the v22.15.1 installer from https://nodejs.org/en/download
 
-### Step 2 — Start the FastAPI backend
+### Step 2 — Start a local LDAP server (optional)
+
+Authentication is on by default, and the UI shows a sign-in page. Skip this step if you plan to sign in with the bootstrap administrator (Step 3) or run with `DOCPIPE_AUTH_ENABLED=false`.
+
+From the project root, start OpenLDAP and phpLDAPAdmin from `examples/LDAP`:
+
+```bash
+cd examples/LDAP
+cp .env.example .env   # LDAP_ORGANIZATION, LDAP_DOMAIN, LDAP_ADMIN_PASSWORD
+
+# Podman
+podman-compose up -d
+# or Docker
+docker compose up -d
+```
+
+Wait about 15 seconds for `slapd` to start, then seed the test users `alice` (`ou: editors`) and `charlie` (`ou: viewers`). Replace `changeme` with your `LDAP_ADMIN_PASSWORD` if you changed it:
+
+```bash
+# Podman
+podman exec -i local-ldap ldapadd -x -H ldap://localhost:389 \
+  -D "cn=admin,dc=abc,dc=com" -w changeme < abc_users.ldif
+
+# Docker
+docker exec -i local-ldap ldapadd -x -H ldap://localhost:389 \
+  -D "cn=admin,dc=abc,dc=com" -w changeme < abc_users.ldif
+
+cd ../..   # back to the project root
+```
+
+Both users have the password `Password123!`. `alice` signs in as an editor and `charlie` as a viewer. See [`examples/LDAP/README.md`](examples/LDAP/README.md) for details.
+
+### Step 3 — Start the FastAPI backend
 
 In one terminal, from the project root:
 
 ```bash
 source .venv/bin/activate
+
+# Point the backend at the BFF that `npm run dev` starts, so it does not start its own sidecar
+export BFF_URL=http://localhost:3001
+
+# Required while authentication is on: at least 32 random characters
+export JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+```
+
+Then configure at least one login method:
+
+```bash
+# Option 1: LDAP from Step 2 (alice = editor, charlie = viewer)
+export LDAP_SERVER=ldap://localhost:1389
+export LDAP_BASE_DN=dc=abc,dc=com
+export LDAP_USER_DN=ou=People,dc=abc,dc=com
+export LDAP_BIND_DN=cn=admin,dc=abc,dc=com
+export LDAP_BIND_PASSWORD=changeme
+export LDAP_GROUP_ATTRIBUTE=ou
+export DOCPIPE_AUTH_ROLE_MAPPING_EDITOR=editors
+export DOCPIPE_AUTH_ROLE_MAPPING_VIEWER=viewers
+
+# Option 2: bootstrap administrator (set both variables, or neither)
+export DOCPIPE_AUTH_BOOTSTRAP_USERNAME=admin
+export DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH='<bcrypt-hash>'   # pragma: allowlist secret
+```
+
+Generate the bcrypt hash as described in the [Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md#bootstrap-administrator). For local single-user development on a trusted machine, skip all of the above except `BFF_URL` and turn authentication off instead:
+
+```bash
+export DOCPIPE_AUTH_ENABLED=false
+```
+
+Start the backend:
+
+```bash
 uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
 ```
 
-> **Authentication is on by default.** Before the first start, set `JWT_SECRET_KEY` (at least 32 random characters) and a login method such as the bootstrap administrator, or run `export DOCPIPE_AUTH_ENABLED=false` on a local, trusted machine. See the [Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
-
 > **Do not use `python src/docpipe/api/main.py`** when running the UI in dev mode. That invocation automatically starts a BFF sidecar on port 3001, which conflicts with `npm run dev` (which also starts the BFF). Use `uvicorn` as shown above to avoid the port conflict.
 
-### Step 3 — Start the UI
+### Step 4 — Start the UI
 
 In a second terminal, from the project root:
 
@@ -337,7 +402,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Open your browser to **http://localhost:3000/ui/**.
+Open your browser to **http://localhost:3000/ui/**. With authentication enabled you are redirected to `/ui/login`; sign in as `alice` / `Password123!` (editor), `charlie` / `Password123!` (viewer) or the bootstrap administrator.
 
 > This starts two processes together: a UI server on port 3000 and a backend proxy (BFF) on port 3001. The BFF forwards all `/api/*` requests to FastAPI on port 8080.
 
