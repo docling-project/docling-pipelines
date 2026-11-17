@@ -5,7 +5,7 @@
 
 from abc import ABCMeta
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pyarrow as pa
 from data_processing.transform import AbstractTableTransform
@@ -22,6 +22,9 @@ from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.types import FlowConfig, OperatorMetadata, OperatorOutputMetadata, TransformResult
 from docpipe.utils.infrastructure import get_telemetry_service
 from docpipe.utils.infrastructure.logging import get_logger
+
+if TYPE_CHECKING:
+    from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
 
 logger = get_logger()
 
@@ -68,6 +71,8 @@ class AbstractOperator(AbstractTableTransform, metaclass=_ConfigResolvingMeta): 
     short_name: str
     category: OperatorCategory
     owner: str | None = None  # None indicates custom operator; specific value (e.g., "docpipe") for built-ins
+    # False for terminal operators (e.g. vectordb) whose node exposes no output features to the pipeline.
+    produces_output_features: ClassVar[bool] = True
 
     def __init__(self, config: FlowConfig) -> None:
         super().__init__(config)
@@ -242,6 +247,41 @@ class AbstractOperator(AbstractTableTransform, metaclass=_ConfigResolvingMeta): 
         Returns:
             Empty list by default."""
         return []
+
+    @classmethod
+    def propagate_features(
+        cls,
+        *,
+        operator_config: dict[str, Any],
+        result: "FeaturePropagationResult",
+        node_id: str,
+        parent_results: "list[FeaturePropagationResult]",
+    ) -> None:
+        """Adjust the node's propagated feature metadata for this operator.
+
+        Called by the feature propagator after the operator's declared output features were merged
+        into ``result.feature_metadata``. Override to add, remove, retype or recompute features based on
+        the node's configuration or its parents. Must not instantiate the operator: it runs during flow
+        validation, where untrusted operators are never imported or constructed.
+
+        Args:
+            operator_config: The node's configuration dict.
+            result: Propagation state for this node; mutate it in place.
+            node_id: Identifier of the node being propagated.
+            parent_results: Propagation results of the node's parents (may be empty).
+        """
+
+    @classmethod
+    def get_global_params(cls, *, operator_config: dict[str, Any]) -> dict[str, Any]:
+        """Return flow-wide parameters this node publishes to downstream operators.
+
+        Args:
+            operator_config: The node's configuration dict.
+
+        Returns:
+            Parameter name to value mapping; empty by default.
+        """
+        return {}
 
     @staticmethod
     def get_metadata() -> OperatorMetadata:

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 MergeOperator for combining multiple PyArrow tables.
 
@@ -21,6 +24,8 @@ from docpipe.core.constants.constants import (
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.core.orchestration.feature_propagation.feature_merge import merge_features
+from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.utils.infrastructure.logging import get_logger
@@ -62,6 +67,40 @@ class MergeOperator(AbstractOperator):
             DocpipeConstants.JOB_RUN_ID: self.job_run_id,
         }
         self.input_links: list[dict[str, Any]] = config.get(OperatorConstants.Merge.INPUT_LINKS, [])
+
+    @classmethod
+    def propagate_features(
+        cls,
+        *,
+        operator_config: dict[str, Any],
+        result: FeaturePropagationResult,
+        node_id: str,
+        parent_results: list[FeaturePropagationResult],
+    ) -> None:
+        """Replace the node's features with the merge of its parents' features.
+
+        Does nothing when there are no upstream propagation results.
+        """
+        if not parent_results:
+            return
+        merge_type = operator_config.get(OperatorConstants.Merge.MERGE_TYPE, OperatorConstants.Merge.ROWS)
+        column_option = (
+            operator_config.get(OperatorConstants.Merge.COLUMN_OPTION)
+            if merge_type == OperatorConstants.Merge.COLUMNS
+            else None
+        )
+        input_links = operator_config.get(OperatorConstants.Merge.INPUT_LINKS, [])
+        node_id_to_link_name: dict[str, str] | None = {
+            lnk["node_id_ref"]: lnk[OperatorConstants.Misc.LINK_NAME]
+            for lnk in input_links
+            if lnk.get("node_id_ref") and lnk.get(OperatorConstants.Misc.LINK_NAME)
+        } or None
+        result.feature_metadata = merge_features(
+            parent_results=parent_results,
+            merge_type=merge_type,
+            column_option=column_option,
+            node_id_to_link_name=node_id_to_link_name,
+        )
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:

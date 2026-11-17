@@ -78,7 +78,7 @@ For a `merge` node with upstream branches, propagation SHALL combine branch feat
 
 #### Scenario: Inner join
 - **WHEN** a `merge` node has `merge_type` `columns` with the inner-join column option
-- **THEN** its available features are those present in every branch plus `id`
+- **THEN** only features present in every branch (plus `id`) are available, a common feature appears once plain and once suffixed for the later branch, and branch-exclusive features are excluded
 
 #### Scenario: Full outer join with link names
 - **WHEN** a `merge` node has `merge_type` `columns` with the full-outer-join option and two branches both expose `name`
@@ -93,7 +93,7 @@ For a `merge` node with upstream branches, propagation SHALL combine branch feat
 - **THEN** its available features are its operator-declared and input features unchanged
 
 ### Requirement: Merge duplicate feature names are disambiguated per branch
-For a `merge` node with `merge_type` `columns` and the full-outer-join option, propagation SHALL keep every feature and SHALL suffix the second and later occurrence of a duplicate name with the branch's `input_links` link name, or the branch index when no link name resolves. The inner-join option SHALL keep only features common to all branches plus `id`.
+For a `merge` node with `merge_type` `columns` and the full-outer-join option, propagation SHALL keep every feature and SHALL suffix the second and later occurrence of a duplicate name with the branch's `input_links` link name, or the branch index when no link name resolves. The inner-join option SHALL keep only features common to all branches plus `id`, applying the same suffixing to their later occurrences.
 
 #### Scenario: Link name unavailable
 - **WHEN** a full-outer-join `merge` node has two branches that both expose `name` and no link name resolves for the second branch

@@ -86,6 +86,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
     short_name: str = OperatorConstants.Operators.VECTORDB
     category: OperatorCategory = OperatorCategory.VectorDB
     owner = DocpipeConstants.OWNER_DOCPIPE
+    produces_output_features = False  # terminal operator: exposes no features downstream
 
     def __init__(self, config: dict[str, Any]) -> None:
         """

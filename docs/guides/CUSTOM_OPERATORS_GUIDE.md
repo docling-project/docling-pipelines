@@ -27,6 +27,7 @@
 - [Advanced Topics](#advanced-topics)
   - [get_metadata() - Advanced Configuration](#get_metadata---advanced-configuration)
   - [validate() - Runtime Validation](#validate---runtime-validation)
+  - [Feature Propagation Hooks](#feature-propagation-hooks)
   - [Understanding Features vs Attributes](#understanding-features-vs-attributes)
   - [Package-Based Operators for Distribution](#package-based-operators-for-distribution)
   - [S3 Configuration for Enterprise Deployments](#s3-configuration-for-enterprise-deployments)
@@ -233,6 +234,8 @@ class MyCustomOperator(AbstractOperator):
 | `get_metadata()` | Define configuration schema | During flow authoring/validation |
 | `get_required_features()` | Declare input dependencies | During flow validation |
 | `validate()` | Runtime validation (optional) | Before pipeline execution |
+| `propagate_features()` | Adjust propagated features (optional classmethod) | During flow validation |
+| `get_global_params()` | Publish flow-wide parameters (optional classmethod) | During flow validation |
 
 ---
 
@@ -756,6 +759,105 @@ if self.should_validate_field(field_value=self.api_endpoint):
 - ✅ Provide clear, actionable error messages
 - ✅ Use errors for blocking issues, warnings for non-critical ones
 - ✅ Check feature availability before assuming columns exist
+
+### Feature Propagation Hooks
+
+During flow validation, the feature propagator computes which features (columns) are available at each node. Operator-specific adjustments to that metadata live **on the operator class**, so adding an operator never requires editing the propagator. All three hooks are optional.
+
+| Hook | Kind | Purpose |
+|------|------|---------|
+| `propagate_features()` | `@classmethod` | Add, remove, retype or recompute features for this node after its declared output features were merged |
+| `get_global_params()` | `@classmethod` | Publish flow-wide parameters (for example a model ID) to downstream operators |
+| `produces_output_features` | class attribute (`ClassVar[bool]`, default `True`) | Set to `False` for terminal operators that write to an external store and emit no downstream features |
+
+**Why classmethods?** Propagation runs during flow validation, where operators are never instantiated (and untrusted custom operators are never imported). Hooks must therefore work from the node's configuration dict alone and must not use `self`.
+
+**Hook signatures:**
+
+```python
+from typing import Any
+
+from docpipe.core.operators.abstract_operator import AbstractOperator
+from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
+
+
+class MyCustomOperator(AbstractOperator):
+    @classmethod
+    def propagate_features(
+        cls,
+        *,
+        operator_config: dict[str, Any],
+        result: FeaturePropagationResult,
+        node_id: str,
+        parent_results: list[FeaturePropagationResult],
+    ) -> None:
+        """Mutate ``result`` in place; the return value is ignored."""
+
+    @classmethod
+    def get_global_params(cls, *, operator_config: dict[str, Any]) -> dict[str, Any]:
+        """Return parameter name to value pairs; empty by default."""
+        return {}
+```
+
+**Example: add a feature only when a flag is enabled**
+
+```python
+@classmethod
+def propagate_features(
+    cls,
+    *,
+    operator_config: dict[str, Any],
+    result: FeaturePropagationResult,
+    node_id: str,
+    parent_results: list[FeaturePropagationResult],
+) -> None:
+    if operator_config.get("emit_score", False):
+        result.add_feature(
+            feature_name="custom_score",
+            node_id=node_id,
+            description="Score computed by MyCustomOperator",
+            type="float",
+        )
+```
+
+**Example: drop features from downstream propagation**
+
+```python
+@classmethod
+def propagate_features(
+    cls,
+    *,
+    operator_config: dict[str, Any],
+    result: FeaturePropagationResult,
+    node_id: str,
+    parent_results: list[FeaturePropagationResult],
+) -> None:
+    result.drop_features(
+        node_id=node_id,
+        features=operator_config.get("features_to_drop", []),
+        operator_label="MyCustomOperator",
+    )
+```
+
+`drop_features()` raises a `FlowValidationException` with code `MANDATORY_FEATURES_DROPPED` if a listed feature is tagged `mandatory`.
+
+**Example: terminal operator**
+
+```python
+from typing import ClassVar
+
+from docpipe.core.operators.abstract_operator import AbstractOperator
+
+
+class MySinkOperator(AbstractOperator):
+    short_name: str = "my_sink"
+    produces_output_features: ClassVar[bool] = False
+```
+
+**Notes:**
+- `parent_results` is empty for root nodes and holds one entry per parent for merge-style operators.
+- The built-in `sql_filter`, `embeddings`, `extract_operator`, `merge` and `vectordb` operators use these hooks; see their implementations for reference.
+
 
 ### Package-Based Operators for Distribution
 

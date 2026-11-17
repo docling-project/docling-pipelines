@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Data models for feature propagation.
 
 This module contains the core data structures used to track features
@@ -7,6 +10,12 @@ as they propagate through a DAG flow during validation.
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from docpipe.exceptions.docpipe_exceptions import (
+    ErrorCode,
+    FlowValidationException,
+    ValidationAlert,
+)
 
 
 class FeatureMetadata(BaseModel):
@@ -262,6 +271,41 @@ class FeaturePropagationResult:
             List of mandatory feature names
         """
         return [name for name, meta in self.feature_metadata.items() if "mandatory" in meta.tags]
+
+    def drop_features(self, *, node_id: str, features: list[str], operator_label: str) -> None:
+        """Remove features from downstream propagation and record them for the node.
+
+        Args:
+            node_id: Node whose output drops the features.
+            features: Feature names to drop. An empty list is a no-op.
+            operator_label: Operator name used in the error message (e.g. ``SQLFilter``).
+
+        Raises:
+            FlowValidationException: If any listed feature is mandatory
+                (message code ``MANDATORY_FEATURES_DROPPED``).
+        """
+        if not features:
+            return
+
+        mandatory_features = self.get_mandatory_features()
+        dropped_mandatory = [f for f in features if f in mandatory_features]
+        if dropped_mandatory:
+            raise FlowValidationException(
+                errors=[
+                    ValidationAlert(
+                        ErrorCode.FLOW_VALIDATION_FAILED.value,
+                        f"Cannot drop mandatory features: {dropped_mandatory} in {operator_label} operator",
+                        message_code="MANDATORY_FEATURES_DROPPED",
+                    )
+                ]
+            )
+
+        for feature in features:
+            self.feature_metadata.pop(feature, None)
+
+        features_to_drop = OutputFeaturesToDrop()
+        features_to_drop.add_features(features=features)
+        self.set_output_features_to_drop(node_id=node_id, features_to_drop=features_to_drop)
 
     def filter_internal_features(self, *, features: list[str]) -> list[str]:
         """Remove internal features from a list.
