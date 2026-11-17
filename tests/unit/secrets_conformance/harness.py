@@ -40,6 +40,7 @@ from docpipe.core.models.session_info import create_session_info, get_session_in
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults
 from docpipe.core.orchestration.python.python_orchestrator import PythonOrchestrator
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.integrations import base_llm_client
 from docpipe.integrations.secrets.registry import get_registry
 from docpipe.integrations.secrets.secret_provider import SecretProvider, clear_providers, register_provider
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
@@ -505,6 +506,8 @@ def run_entry(*, entry: Entry, scenario: Scenario, workdir: Path, monkeypatch: p
     mode = {Scenario.CLIENT_FAILURE: "construct", Scenario.MID_RUN_FAILURE: "call"}.get(scenario, "ok")
     clients = FakeClients(mode=mode, text=secret_text)
     clients.install(monkeypatch=monkeypatch)
+    # The LLM client retry decorator sleeps 1s, then 2s, between attempts. Skip the wait; the retries still run.
+    monkeypatch.setattr(base_llm_client.time, "sleep", lambda _seconds: None)
 
     class _Inline:
         @staticmethod
