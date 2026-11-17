@@ -1,0 +1,145 @@
+{
+  "flow_name": "OpenSearch With Credentials From Vault",
+  "flow_id": "opensearch-vault-integration-flow-001",
+  "description": "Ingest, extract, chunk, embed and store in OpenSearch, with the OpenSearch endpoint and credentials read from Vault (vault:// references). See docs/guides/SECRETS_GUIDE.md.",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "enable_micro_batching": true,
+    "micro_batch_size": 10,
+    "storage": "in-memory",
+    "execute_type": "local"
+  },
+  "flow": [
+    {
+      "name": "ingest_documents",
+      "type": "ingest_source",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "./tests/fixtures/invoices"
+          ]
+        },
+        "include_filter": "txt, pdf"
+      }
+    },
+    {
+      "name": "extract_documents",
+      "type": "extract_operator",
+      "depends_on": [
+        "ingest_documents"
+      ],
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        }
+      }
+    },
+    {
+      "name": "generate_doc_id",
+      "type": "doc_id_hash",
+      "depends_on": [
+        "extract_documents"
+      ],
+      "config": {
+        "doc_column": "content",
+        "doc_id_column": "id"
+      }
+    },
+    {
+      "name": "chunk_documents",
+      "type": "chunker",
+      "depends_on": [
+        "generate_doc_id"
+      ],
+      "config": {
+        "doc_column": "content",
+        "chunk_size": 512,
+        "chunk_overlap": 50
+      }
+    },
+    {
+      "name": "generate_embeddings_litellm",
+      "type": "embeddings",
+      "depends_on": [
+        "chunk_documents"
+      ],
+      "config": {
+        "provider": "litellm",
+        "provider_config": {
+          "model_id": "openai/nomic-embed-text",
+          "api_base": "http://localhost:11434/v1",
+          "api_key": "${OLLAMA_API_KEY}"
+        },
+        "doc_column": "content",
+        "embeddings_column": "embeddings"
+      }
+    },
+    {
+      "name": "store_in_opensearch",
+      "type": "vectordb",
+      "depends_on": [
+        "generate_embeddings_litellm"
+      ],
+      "config": {
+        "provider": "opensearch",
+        "vector_dimension": 768,
+        "doc_id_column": "doc_id_hash",
+        "embeddings_column": "embeddings",
+        "provider_config": {
+          "index_name": "docpipe_vault_embeddings",
+          "host": "vault://hashicorp/opensearch/prod#host",
+          "port": 9200,
+          "username": "vault://hashicorp/opensearch/prod#username",
+          "password": "vault://hashicorp/opensearch/prod#password",
+          "use_ssl": true,
+          "verify_certs": true,
+          "batch_size": 100,
+          "engine": "faiss",
+          "algorithm": "hnsw",
+          "space_type": "l2",
+          "engine_parameters": {
+            "ef_construction": 512,
+            "m": 16,
+            "ef_search": 512
+          },
+          "number_of_shards": 1,
+          "number_of_replicas": 0
+        },
+        "feature_mappings": [
+          {
+            "feature_name": "doc_id_hash",
+            "mapped_column_name": "pk"
+          },
+          {
+            "feature_name": "id",
+            "mapped_column_name": "document_id"
+          },
+          {
+            "feature_name": "name",
+            "mapped_column_name": "document_name"
+          },
+          {
+            "feature_name": "content",
+            "mapped_column_name": "text"
+          },
+          {
+            "feature_name": "embeddings",
+            "mapped_column_name": "vector_embeddings"
+          },
+          {
+            "feature_name": "chunk_sequence_number",
+            "mapped_column_name": "chunk_seq"
+          },
+          {
+            "feature_name": "start_index",
+            "mapped_column_name": "chunk_start"
+          }
+        ]
+      }
+    }
+  ]
+}
