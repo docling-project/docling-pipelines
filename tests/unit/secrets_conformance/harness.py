@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -506,8 +507,9 @@ def run_entry(*, entry: Entry, scenario: Scenario, workdir: Path, monkeypatch: p
     mode = {Scenario.CLIENT_FAILURE: "construct", Scenario.MID_RUN_FAILURE: "call"}.get(scenario, "ok")
     clients = FakeClients(mode=mode, text=secret_text)
     clients.install(monkeypatch=monkeypatch)
-    # The LLM client retry decorator sleeps 1s, then 2s, between attempts. Skip the wait; the retries still run.
-    monkeypatch.setattr(base_llm_client.time, "sleep", lambda _seconds: None)
+    # The LLM client retry decorator sleeps 1s, then 2s, between attempts. Skip only that wait (the retries still run):
+    # replace the ``time`` name inside ``base_llm_client`` rather than ``time.sleep``, which is shared by the whole process.
+    monkeypatch.setattr(base_llm_client, "time", SimpleNamespace(sleep=lambda _seconds: None))
 
     class _Inline:
         @staticmethod
