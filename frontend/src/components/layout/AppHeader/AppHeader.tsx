@@ -1,16 +1,18 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
+  Button,
   Header,
   HeaderName,
   HeaderNavigation,
   HeaderMenuItem,
   HeaderGlobalBar,
   HeaderGlobalAction,
-  HeaderMenu,
+  Popover,
+  PopoverContent,
   Tag,
   Theme,
 } from '@carbon/react';
-import { Asleep, Light, Notification } from '@carbon/icons-react';
+import { Asleep, Light, Notification, UserAvatar } from '@carbon/icons-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useIntl } from 'react-intl';
 import { go } from '@/utils';
@@ -33,6 +35,12 @@ import styles from './AppHeader.module.scss';
  * - A notification bell that opens the {@link NotificationHistory} panel.
  *   Shows an unread badge when `state.notifications.unreadCount > 0`.
  * - A theme toggle button (light ↔ dark) in the global actions bar.
+ * - A profile menu as the rightmost global action, rendered only when auth is
+ *   enabled and a user is signed in. The profile button opens a popover
+ *   anchored under it (bottom-end) with the display name, email, role tags and
+ *   a full-width "Sign out" button. The popover closes on sign-out, on outside
+ *   click and on Escape; only Escape returns focus to the profile button, so
+ *   outside clicks and tabbing away keep focus where the user moved it.
  */
 export function AppHeader(): React.JSX.Element {
   const intl = useIntl();
@@ -44,12 +52,34 @@ export function AppHeader(): React.JSX.Element {
 
   const unreadCount = useAppSelector(selectNotificationUnreadCount);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
+  const profileTitleId = useId();
 
   const handleLogoClick = useCallback((): void => { go(navigate, ROUTES.HOME); }, [navigate]);
   const handleNavHome = useCallback((): void => { go(navigate, ROUTES.HOME); }, [navigate]);
   const handleNavProjects = useCallback((): void => { go(navigate, ROUTES.PROJECTS); }, [navigate]);
 
+  const closeProfile = useCallback((): void => { setProfileOpen(false); }, []);
+
+  const dismissProfile = useCallback((): void => {
+    closeProfile();
+    profileButtonRef.current?.focus();
+  }, [closeProfile]);
+
+  // Carbon closes the popover on Escape only while focus is inside its content,
+  // so listen on the window to also cover focus that stays on the profile button.
+  useEffect(() => {
+    if (!profileOpen) { return undefined; }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') { dismissProfile(); }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => { window.removeEventListener('keydown', handleKeyDown); };
+  }, [profileOpen, dismissProfile]);
+
   const handleSignOut = useCallback((): void => {
+    setProfileOpen(false);
     void (async () => {
       await dispatch(logoutUser());
       void navigate(ROUTES.LOGIN);
@@ -85,16 +115,6 @@ export function AppHeader(): React.JSX.Element {
           >
             {intl.formatMessage(messages.navProjects)}
           </HeaderMenuItem>
-          {authEnabled && user && (
-            <HeaderMenu
-              menuLinkName={user.full_name || user.username}
-              aria-label={intl.formatMessage(messages.userMenuLabel)}
-            >
-              <HeaderMenuItem onClick={handleSignOut}>
-                {intl.formatMessage(messages.signOut)}
-              </HeaderMenuItem>
-            </HeaderMenu>
-          )}
         </HeaderNavigation>
         <HeaderGlobalBar className={styles.globalActions}>
           <div className={styles.globalActionSeparator} />
@@ -129,6 +149,63 @@ export function AppHeader(): React.JSX.Element {
           >
             {isDarkMode ? <Light size={20} /> : <Asleep size={20} />}
           </HeaderGlobalAction>
+
+          {/* Profile menu — rightmost global action, only for a signed-in user */}
+          {authEnabled && user && (
+            <>
+              <div className={styles.globalActionSeparator} />
+              <Popover
+                open={profileOpen}
+                onRequestClose={closeProfile}
+                align="bottom-end"
+                caret={false}
+              >
+                <HeaderGlobalAction
+                  ref={profileButtonRef}
+                  aria-label={intl.formatMessage(messages.userMenuLabel)}
+                  aria-expanded={profileOpen}
+                  aria-haspopup="dialog"
+                  onClick={() => { setProfileOpen((open) => !open); }}
+                  isActive={profileOpen}
+                  tooltipAlignment="end"
+                >
+                  <UserAvatar size={20} />
+                </HeaderGlobalAction>
+                {profileOpen && (
+                  <PopoverContent>
+                    <div className={styles.profilePanel} role="dialog" aria-labelledby={profileTitleId}>
+                      <h2 id={profileTitleId} className={styles.profileName}>
+                        {user.full_name || user.username}
+                      </h2>
+                      {user.email && <p className={styles.profileEmail}>{user.email}</p>}
+                      {user.roles.length > 0 && (
+                        <div
+                          className={styles.profileRoles}
+                          role="group"
+                          aria-label={intl.formatMessage(messages.rolesLabel)}
+                        >
+                          {user.roles.map((role) => (
+                            <Tag key={role} type="gray" size="sm">
+                              {role.charAt(0).toUpperCase() + role.slice(1)}
+                            </Tag>
+                          ))}
+                        </div>
+                      )}
+                      <hr className={styles.profileDivider} />
+                      <Button
+                        kind="ghost"
+                        size="md"
+                        className={styles.profileSignOut}
+                        onClick={handleSignOut}
+                      >
+                        {intl.formatMessage(messages.signOut)}
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                )}
+              </Popover>
+            </>
+          )}
         </HeaderGlobalBar>
       </Header>
       </Theme>
