@@ -39,9 +39,8 @@ from typing import Any
 
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.filesystem import get_data_path
-from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.logging import AUDIT_LOGGER_NAME, get_logger
 
-AUDIT_LOGGER_NAME = "docpipe.audit"
 AUDIT_CONFIG_KEY = "audit"
 DEFAULT_AUDIT_FILE_NAME = "docpipe-audit.log"
 
@@ -206,5 +205,47 @@ def emit_audit_record(
         if reason is not None:
             record["reason"] = reason
         get_audit_logger().info("%s", json.dumps(record, separators=(",", ":")))
+    except Exception as exc:
+        _logger.error("Audit record could not be written (%s)", type(exc).__name__)
+
+
+def emit_resolution_audit_record(
+    *,
+    node_name: str,
+    config_key: str,
+    provider: str | None,
+    outcome: str,
+    correlation_id: str,
+) -> None:
+    """Emit one structured JSON record per resolution attempt to the ``docpipe.audit`` logger.
+
+    Never raises, like ``emit_audit_record``: the audit trail does not decide whether a secret resolves.
+
+    Args:
+        node_name: Node name (node).
+        config_key: Config key path (config_key).
+        provider: Provider name (provider), if any.
+        outcome: Resolution outcome, e.g. "resolved", "not permitted".
+        correlation_id: Correlation ID.
+    """
+    try:
+        from docpipe.core.models.session_info import get_session_info
+
+        session_info = get_session_info()
+        record: dict[str, Any] = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "job_id": session_info.job_id,
+            "job_run_id": session_info.job_run_id,
+            "node": node_name,
+            "config_key": config_key,
+            "provider": provider,
+            "outcome": outcome,
+            "correlation_id": correlation_id,
+        }
+        logger = get_audit_logger()
+        if outcome == "not permitted":
+            logger.warning("%s", json.dumps(record, separators=(",", ":")))
+        else:
+            logger.info("%s", json.dumps(record, separators=(",", ":")))
     except Exception as exc:
         _logger.error("Audit record could not be written (%s)", type(exc).__name__)
