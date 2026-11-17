@@ -400,6 +400,9 @@ jobs:
       - name: Run CLI Tests
         run: python -m pytest tests/test_docpipe_cli.py -v
 
+      - name: Measure custom operator isolation overhead (p95 must be at most 2 seconds)
+        run: python scripts/benchmark_isolation_worker.py --samples 20 --budget 2.0
+
       - name: Upload Test Coverage Artifact
         uses: actions/upload-artifact@v4
         if: always()
