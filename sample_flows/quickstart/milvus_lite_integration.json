@@ -4,7 +4,7 @@
   "global_config": {
     "doc_column": "content",
     "disable_validation": false,
-    "force_ingest": false,
+    "force_ingest": true,
     "data_storage_type": "local",
     "execute_type": "local",
     "enable_micro_batching": true

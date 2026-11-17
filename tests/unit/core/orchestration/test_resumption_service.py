@@ -4,6 +4,8 @@
 """Unit tests for node-level failure resumption (ResumptionService on key-value and table storages)."""
 
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import ClassVar
 
 import pyarrow as pa
@@ -192,6 +194,21 @@ class TestFailureCounting:
         )
 
         assert record is None
+
+    def test_parallel_failures_at_different_nodes_are_all_kept(self, store):
+        node_ids = [f"branch-{i}" for i in range(16)]
+        barrier = threading.Barrier(len(node_ids))
+
+        def fail_at(node_id: str) -> None:
+            # A service per call, as the executors create them
+            barrier.wait()
+            service = ResumptionService(record_storage=store, max_retry_attempts=MAX_RETRIES)
+            _fail(service, node_id=node_id, node_name=f"name-{node_id}")
+
+        with ThreadPoolExecutor(max_workers=len(node_ids)) as pool:
+            list(pool.map(fail_at, node_ids))
+
+        assert {node.node_id for node in _existing(store, "d1").failed_nodes} == set(node_ids)
 
     def test_exhausted_reason_names_node_and_original_error(self, service):
         for _ in range(4):

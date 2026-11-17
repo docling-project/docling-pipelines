@@ -13,6 +13,7 @@ resumed at each of them.
 
 import hashlib
 import re
+import threading
 from collections import defaultdict
 from enum import StrEnum
 from typing import Any, Protocol
@@ -34,6 +35,9 @@ SINGLE_BATCH_KEY = "__single__"
 _BRANCH_CRITERIA = "branch_criteria"
 _RECORDS_COLLECTION = "resumption"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+# Serializes the read-modify-write of failure records. Executors create a new service per call and parallel DAG
+# branches run as threads of one process, so the lock must be shared at module level.
+_RECORD_UPDATE_LOCK = threading.Lock()
 
 
 class NodeOutputTableName(Protocol):
@@ -443,26 +447,28 @@ class ResumptionService:
 
         if not doc_name and OperatorConstants.Misc.NAME in rows.column_names:
             doc_name = str(rows[OperatorConstants.Misc.NAME][0].as_py() or "")
-        existing = self._get_record(job_id=job_id, doc_id=doc_id)
-        previous = existing.failed_node(node_id=node_id, node_name=node_name) if existing else None
-        failure_count = previous.failure_count + 1 if previous else 1
-        failed_node = FailedNode(
-            node_id=node_id,
-            node_name=node_name,
-            job_run_id=previous.job_run_id if previous else job_run_id,
-            batch_num=previous.batch_num if previous else batch_num,
-            failure_count=failure_count,
-            error_message=reason,
-            exhausted=failure_count > self._max_retry_attempts,
-        )
-        others = [node for node in existing.failed_nodes if node is not previous] if existing else []
-        record = ResumptionRecord(
-            doc_id=doc_id,
-            doc_name=doc_name,
-            modified_time=self._modified_time(rows=rows),
-            failed_nodes=[*others, failed_node],
-        )
-        self._save_record(job_id=job_id, record=record)
+        modified_time = self._modified_time(rows=rows)
+        with _RECORD_UPDATE_LOCK:
+            existing = self._get_record(job_id=job_id, doc_id=doc_id)
+            previous = existing.failed_node(node_id=node_id, node_name=node_name) if existing else None
+            failure_count = previous.failure_count + 1 if previous else 1
+            failed_node = FailedNode(
+                node_id=node_id,
+                node_name=node_name,
+                job_run_id=previous.job_run_id if previous else job_run_id,
+                batch_num=previous.batch_num if previous else batch_num,
+                failure_count=failure_count,
+                error_message=reason,
+                exhausted=failure_count > self._max_retry_attempts,
+            )
+            others = [node for node in existing.failed_nodes if node is not previous] if existing else []
+            record = ResumptionRecord(
+                doc_id=doc_id,
+                doc_name=doc_name,
+                modified_time=modified_time,
+                failed_nodes=[*others, failed_node],
+            )
+            self._save_record(job_id=job_id, record=record)
         logger.info(
             "Recorded failure %d for a document at node %s (exhausted=%s)",
             failure_count,
@@ -477,17 +483,18 @@ class ResumptionService:
         A record without any failed node left is deleted.
         """
         for doc_id in doc_ids:
-            record = self._get_record(job_id=job_id, doc_id=doc_id)
-            if record is None:
-                continue
-            node = record.failed_node(node_id=node_id, node_name=node_name)
-            if node is None or node.exhausted:
-                continue
-            remaining = [n for n in record.failed_nodes if n is not node]
-            if remaining:
-                self._save_record(job_id=job_id, record=record.model_copy(update={"failed_nodes": remaining}))
-            else:
-                self._delete_record(job_id=job_id, doc_id=doc_id)
+            with _RECORD_UPDATE_LOCK:
+                record = self._get_record(job_id=job_id, doc_id=doc_id)
+                if record is None:
+                    continue
+                node = record.failed_node(node_id=node_id, node_name=node_name)
+                if node is None or node.exhausted:
+                    continue
+                remaining = [n for n in record.failed_nodes if n is not node]
+                if remaining:
+                    self._save_record(job_id=job_id, record=record.model_copy(update={"failed_nodes": remaining}))
+                else:
+                    self._delete_record(job_id=job_id, doc_id=doc_id)
 
     @staticmethod
     def to_deferred_records(*, record: ResumptionRecord) -> list[DeferredRecord]:
@@ -526,8 +533,3 @@ class ResumptionService:
             for node in record.failed_nodes
             if node.exhausted
         )
-
-
-def retry_attempts_from_config(*, config: dict[str, Any]) -> int:
-    """Read ``max_retry_attempts`` from a flow/operator config, falling back to the default."""
-    return int(config.get(DocpipeConstants.MAX_RETRY_ATTEMPTS, DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS))

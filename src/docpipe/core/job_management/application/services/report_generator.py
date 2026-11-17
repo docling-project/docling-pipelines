@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 
 from docpipe.core.job_management.domain.models.job_stats import JobStats
 from docpipe.core.job_management.domain.models.node_stats import NodeStats
+from docpipe.core.orchestration.application.services.resumption_service import RETRIES_EXHAUSTED_PREFIX
 from docpipe.exceptions.docpipe_exceptions import JobRunInvalidStateException, JobRunNotFoundException
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
@@ -35,7 +36,6 @@ logger = get_logger()
 # Constants for report generation
 GENERIC_SKIP_MESSAGE = "Document skipped during processing"
 GENERIC_FAILURE_MESSAGE = "Job failed before document reached destination"
-RETRIES_EXHAUSTED_PREFIX = "Maximum retries exhausted"
 
 
 def _build_node_metadata_list(*, node_stats: dict) -> list[dict]:
