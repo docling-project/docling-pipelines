@@ -1,11 +1,29 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Port interface for operator source adapters.
 
 This port defines the contract that all operator source adapters must implement.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
 from types import ModuleType
+from typing import Any
+
+
+class TrustClass(StrEnum):
+    """How much the platform trusts the code of an operator, decided by where it was loaded from.
+
+    ``PLATFORM`` operators ship in-tree. ``DEPLOYER_INSTALLED`` operators come from a pip package or a path the
+    deployer configured, and are trusted like platform code. ``UNTRUSTED`` operators were uploaded through the API or
+    come from an object-store source; their code is never imported by the discovery path.
+    """
+
+    PLATFORM = "platform"
+    DEPLOYER_INSTALLED = "deployer-installed"
+    UNTRUSTED = "untrusted"
 
 
 @dataclass
@@ -18,6 +36,11 @@ class OperatorInfo:
         module_path: Python module path where operator is defined
         category: Operator category (Extract, Ingest, etc.)
         source_location: Original location where operator was found
+        trust_class: Trust class derived from the source the operator was found in
+        source_file: Absolute path of the operator file; set for untrusted operators, which are described from it
+            without importing it
+        static_metadata: The statically known entries of ``get_metadata()`` (declared secret fields, label, features),
+            read as literals from the source; untrusted operators only
     """
 
     name: str
@@ -25,6 +48,9 @@ class OperatorInfo:
     module_path: str
     category: str
     source_location: str
+    trust_class: TrustClass = TrustClass.DEPLOYER_INSTALLED
+    source_file: str | None = None
+    static_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

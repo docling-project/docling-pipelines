@@ -1,25 +1,41 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Filesystem adapter for loading custom operators from local directories."""
 
-import importlib.util
 import inspect
-import sys
 from pathlib import Path
 from types import ModuleType
 
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.custom_operators.validation import describe_operator_file
 from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.orchestration.operator_loader.adapters.factories.operator_source_factory import (
     register_operator_source,
 )
+from docpipe.core.orchestration.operator_loader.module_import import import_module_from_file
 from docpipe.core.orchestration.operator_loader.ports.operator_source import (
     OperatorInfo,
     OperatorSourcePort,
+    TrustClass,
     ValidationResult,
 )
 from docpipe.core.orchestration.operator_loader.validator import OperatorValidator
+from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def classify_filesystem_path(*, path: Path) -> TrustClass:
+    """Return the trust class of a filesystem operator path.
+
+    The directory the API stores uploaded operators in is untrusted. Any other path was configured by the deployer.
+    """
+    upload_store = Path(get_data_path(sub_dir="/custom_operators")).resolve()
+    if path.resolve().is_relative_to(upload_store):
+        return TrustClass.UNTRUSTED
+    return TrustClass.DEPLOYER_INSTALLED
 
 
 @register_operator_source
@@ -37,11 +53,13 @@ class FilesystemAdapter(OperatorSourcePort):
     ADAPTER_NAME = "filesystem"
     ADAPTER_DISPLAY_NAME = "Local Filesystem"
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, trust_class: TrustClass | None = None):
         """Initialize filesystem adapter.
 
         Args:
             path: Path to directory or Python file containing custom operators
+            trust_class: Trust class of the operators under ``path``. Derived from the path when omitted: the API's
+                upload store is untrusted, any other path is deployer-installed.
         """
         self.path = Path(path).resolve()
         self._loaded_modules: dict[str, ModuleType] = {}
@@ -54,11 +72,13 @@ class FilesystemAdapter(OperatorSourcePort):
             if not self.path.suffix == ".py":
                 raise ValueError(f"File must be a Python file (.py): {self.path}")
             self._is_single_file = True
-            logger.info(f"Initialized filesystem adapter for file: {self.path}")
+            logger.info("Initialized filesystem adapter for file: %s", self.path)
         elif self.path.is_dir():
-            logger.info(f"Initialized filesystem adapter for directory: {self.path}")
+            logger.info("Initialized filesystem adapter for directory: %s", self.path)
         else:
             raise ValueError(f"Path must be a file or directory: {self.path}")
+
+        self.trust_class = trust_class or classify_filesystem_path(path=self.path)
 
     def clear_cache(self):
         """Clear the module cache to force reloading of operators."""
@@ -72,7 +92,7 @@ class FilesystemAdapter(OperatorSourcePort):
 
         # Clear internal cache
         self._loaded_modules.clear()
-        logger.debug(f"Cleared module cache for {self.path}")
+        logger.debug("Cleared module cache for %s", self.path)
 
     def list_operators(self) -> list[OperatorInfo]:
         """Discover all operators in the filesystem path.
@@ -107,7 +127,15 @@ class FilesystemAdapter(OperatorSourcePort):
         """
         operators: list[OperatorInfo] = []
 
+        # Determine relative path for module_path
+        module_path = py_file.name if self._is_single_file else str(py_file.relative_to(self.path))
+
         try:
+            if self.trust_class == TrustClass.UNTRUSTED:
+                # Never import untrusted code: describe it from its AST
+                operators.append(self._describe_untrusted_file(py_file=py_file, module_path=module_path))
+                return operators
+
             # Load module to inspect it
             module = self._load_module_from_file(file_path=py_file)
 
@@ -116,26 +144,37 @@ class FilesystemAdapter(OperatorSourcePort):
 
             for op_class in operator_classes:
                 if hasattr(op_class, OperatorConstants.Misc.SHORT_NAME):
-                    # Determine relative path for module_path
-                    if self._is_single_file:
-                        module_path = py_file.name
-                    else:
-                        module_path = str(py_file.relative_to(self.path))
-
                     op_info = OperatorInfo(
                         name=op_class.__name__,
                         short_name=getattr(op_class, OperatorConstants.Misc.SHORT_NAME),
                         module_path=module_path,
                         category=str(getattr(op_class, OperatorConstants.Misc.CATEGORY)),
                         source_location=f"{self.ADAPTER_NAME}:{self.path}",
+                        trust_class=self.trust_class,
                     )
                     operators.append(op_info)
-                    logger.debug(f"Discovered operator: {op_info.short_name} in {py_file}")
+                    logger.debug("Discovered operator: %s in %s", op_info.short_name, py_file)
 
         except Exception as e:
-            logger.warning(f"Failed to inspect file {py_file}: {e}")
+            logger.warning("Failed to inspect file %s: %s", py_file, e)
 
         return operators
+
+    def _describe_untrusted_file(self, *, py_file: Path, module_path: str) -> OperatorInfo:
+        """Build the operator info of an untrusted file from its AST, without importing it."""
+        described = describe_operator_file(operator_file_path=py_file)
+        op_info = OperatorInfo(
+            name=described["class_name"],
+            short_name=described["short_name"],
+            module_path=module_path,
+            category=described["category"],
+            source_location=f"{self.ADAPTER_NAME}:{self.path}",
+            trust_class=TrustClass.UNTRUSTED,
+            source_file=str(py_file),
+            static_metadata=described["metadata"],
+        )
+        logger.debug("Described untrusted operator: %s in %s", op_info.short_name, py_file)
+        return op_info
 
     def load_operator(self, *, operator_info: OperatorInfo) -> ModuleType:
         """Load operator module from filesystem.
@@ -148,7 +187,11 @@ class FilesystemAdapter(OperatorSourcePort):
 
         Raises:
             Exception: If module loading fails
+            PermissionError: If this adapter's operators are untrusted, which are never imported here
         """
+        if self.trust_class == TrustClass.UNTRUSTED:
+            raise PermissionError(f"Refusing to import untrusted operator '{operator_info.short_name}'")
+
         # Construct full path to module file
         if self._is_single_file:
             module_file = self.path
@@ -161,7 +204,7 @@ class FilesystemAdapter(OperatorSourcePort):
         # Check if already loaded
         cache_key = str(module_file)
         if cache_key in self._loaded_modules:
-            logger.debug(f"Using cached module for {operator_info.short_name}")
+            logger.debug("Using cached module for %s", operator_info.short_name)
             return self._loaded_modules[cache_key]
 
         # Load the module
@@ -183,7 +226,7 @@ class FilesystemAdapter(OperatorSourcePort):
         return OperatorValidator.validate_module(module=module, operator_info=operator_info)
 
     def _load_module_from_file(self, *, file_path: Path) -> ModuleType:
-        """Load a Python module from a file path.
+        """Load a Python module from a file path by executing it.
 
         Args:
             file_path: Path to Python file
@@ -192,30 +235,12 @@ class FilesystemAdapter(OperatorSourcePort):
             Loaded module
 
         Raises:
+            PermissionError: If this adapter's operators are untrusted, which are never executed here
             Exception: If module loading fails
         """
-        # Generate unique module name based on file path
-        module_name = f"custom_operator_{file_path.stem}_{hash(str(file_path))}"
-
-        # Load module spec
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load module spec from {file_path}")
-
-        # Create and execute module
-        module = importlib.util.module_from_spec(spec)
-
-        # Add to sys.modules temporarily for imports to work
-        sys.modules[module_name] = module
-
-        try:
-            spec.loader.exec_module(module)
-        except Exception as e:
-            # Clean up on failure
-            sys.modules.pop(module_name, None)
-            raise ImportError(f"Failed to execute module {file_path}: {e}") from e
-
-        return module
+        if self.trust_class == TrustClass.UNTRUSTED:
+            raise PermissionError(f"Refusing to execute untrusted operator file {file_path}")
+        return import_module_from_file(file_path=file_path)
 
     def _find_operator_classes(self, *, module: ModuleType) -> list[type[AbstractOperator]]:
         """Find all operator classes in a module.
