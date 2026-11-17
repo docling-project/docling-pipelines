@@ -633,6 +633,28 @@ class TestCustomOperatorSecrets:
         assert isinstance(operator, IsolatedOperatorProxy)
         assert provider.calls == []
 
+    def test_executor_with_the_reference_also_at_the_top_level_resolves_once(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], provider: _Provider, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A real run merges the node's config flat into the top level as well; that must not add a second resolution."""
+        from docpipe.core.orchestration.python.python_operator_executor import PythonOperatorExecutor
+
+        _set_isolation(value="process", custom_paths=["hashicorp:custom-ops/team-a/*"])
+        merged = _merged_config(own={"api_key": REFERENCE})
+        merged["api_key"] = REFERENCE
+        executor = PythonOperatorExecutor(name="n2", operator="iso_op", params=merged, enable_custom_operators=True)
+        monkeypatch.setattr(executor.operator_factory, "operators", {"iso_op": descriptor})
+
+        operator = executor.get_operator()
+        _, metadata = operator.transform(_table())
+        report = json.loads(metadata["report"])
+
+        assert isinstance(operator, IsolatedOperatorProxy)
+        assert provider.calls == [("custom-ops/team-a/svc", "token")]
+        assert merged["api_key"] == REFERENCE
+        assert HANDED_OVER_VALUE not in json.dumps(operator.config, default=str)
+        assert report["api_key_revealed"] == HANDED_OVER_VALUE  # pragma: allowlist secret
+
     def test_worker_protocol_carries_secrets_outside_the_config(self) -> None:
         from docpipe.core.orchestration.operator_loader.isolation.proxy import detach_secrets, encode_secrets
         from docpipe.integrations.secrets.secret_value import SecretValue
