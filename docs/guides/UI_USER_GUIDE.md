@@ -26,15 +26,15 @@ The application header contains four primary navigation items:
 
 When authentication is enabled on the backend, the UI asks you to sign in before it shows any page. Administrators configure the login methods, the roles and the group mapping; see the [Authentication and Authorization Guide](AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
 
-When authentication is disabled on the backend, the UI skips the sign-in page, treats you as an administrator and does not show the user menu in the header.
+When authentication is disabled on the backend, the UI skips the login page, treats you as an administrator and does not show the profile icon in the header.
 
 ### Signing in
 
-Open the UI at `/ui`. If you have no session, the UI redirects you to the **Sign in** page at `/ui/login`. The page shows the methods that the backend offers:
+Open the UI at `/ui`. If you have no session, the UI redirects you to the **Log in** page at `/ui/login`. The page shows the methods that the backend offers:
 
-- **Credential form**: enter your username and password and click **Sign in**. Both fields are required. The form is shown only when the backend accepts username and password login.
-- **Provider buttons**: one **Sign in with `<provider>`** button for each configured OIDC identity provider. The button leaves the UI, signs you in at the provider and returns you to the UI. When the page offers both methods, they are separated by **or**.
-- If the backend has no login method configured, the page shows **No sign-in method is currently configured.** Contact your administrator.
+- **Credential form**: enter your username and password and click **Log in**. Both fields are required, and an empty field shows an error when you leave it. After a failed attempt the password is cleared and the cursor returns to the username field. The form is shown only when the backend accepts username and password login.
+- **Provider buttons**: one **Log in with `<provider>`** button for each configured OIDC identity provider. The button leaves the UI, signs you in at the provider and returns you to the UI. When the page offers both methods, they are separated by **or**.
+- If the backend has no login method configured, the page shows **No login method is currently configured.** Contact your administrator.
 - If you fail too many times in a row, the page shows **Too many failed attempts. Please retry later.** Wait and try again.
 
 The session lives in an HttpOnly cookie that the browser sends automatically. The UI never stores your password or a token in the page, in browser storage or in the address bar.
@@ -45,7 +45,7 @@ If you open a deep link while signed out, for example `/ui/projects/123`, the UI
 
 ### Signing out
 
-When authentication is enabled, the header shows your name (or username if no full name is set). Open that menu and choose **Sign out**. The session ends and the **Sign in** page opens.
+When authentication is enabled, the header shows a profile icon at the right end of the bar, after the theme toggle. Select it to open a panel with your name (or username if no full name is set), your email and your roles. Choose **Sign out** in that panel. The session ends and the **Log in** page opens. Press Escape or click outside the panel to close it.
 
 ### When your session expires
 
