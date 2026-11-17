@@ -1,7 +1,11 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Filesystem source adapter implementation."""
 
 import mimetypes
 import os
+import re
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
@@ -16,6 +20,20 @@ from docpipe.core.operators.ingest.ports.outbound.document_source import Documen
 
 from .archive import build_archive_uri, file_extension, is_archive_path, list_archive_entries, read_archive_uri
 from .config import FilesystemSourceConfig
+
+_PERCENT_ESCAPE_PATTERN = re.compile(r"%(?=[0-9A-Fa-f]{2})")
+
+
+def _file_uri(*, path: Path) -> str:
+    """Build the ``file://`` source URL for a local file.
+
+    Readers parse this URL with ``urlparse`` and ``unquote``, so ``#``, ``?`` and a ``%`` that is
+    followed by two hex digits must be percent-encoded, or the path is cut at the fragment or
+    query, or decoded to a different name. Every other character is kept as-is, so the URL (and
+    the document id derived from it) does not change for paths that were already read correctly.
+    """
+    path_str = _PERCENT_ESCAPE_PATTERN.sub("%25", str(path.absolute()))
+    return "file://" + path_str.replace("#", "%23").replace("?", "%3F")
 
 
 @register_source_adapter
@@ -79,7 +97,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                         id=str(root_path.absolute()),
                         name=root_path.name,
                         content=b"",
-                        source_url=f"file://{root_path.absolute()}",
+                        source_url=_file_uri(path=root_path),
                         modified_time=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                         created_time=datetime.fromtimestamp(stat.st_ctime, tz=UTC),
                         mimetype=mimetype,
@@ -127,7 +145,7 @@ class FilesystemSourceAdapter(DocumentSourcePort[FilesystemSourceConfig]):
                             id=str(file_path.absolute()),
                             name=file_path.name,
                             content=b"",
-                            source_url=f"file://{file_path.absolute()}",
+                            source_url=_file_uri(path=file_path),
                             modified_time=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                             created_time=datetime.fromtimestamp(stat.st_ctime, tz=UTC),
                             mimetype=mimetype,
