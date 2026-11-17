@@ -156,7 +156,8 @@ up, make `feature_propagation/__init__.py` re-export lazily via module `__getatt
   lazy package `__init__` fallback (Decision 6).
 - [Subtle ordering change in propagation (drop snapshot, global params, terminal output)] -> keep the propagator's
   step order unchanged; only the body of step "special-case" and the two name checks become hook calls; existing
-  `test_features_propagator.py` runs unmodified as the regression net.
+  `test_features_propagator.py` is the regression net. Its fixtures mock `OperatorMetadata`, so they are updated to
+  return real operator classes from `get_operator_class`; test bodies and assertions are unchanged.
 - [Error message drift for mandatory-drop errors] -> helper takes the operator label; add tests asserting exact
   message and `message_code` for SQLFilter and the generic path.
 - [Custom operator accidentally overrides the hook with an instance method] -> classmethod call on the class would

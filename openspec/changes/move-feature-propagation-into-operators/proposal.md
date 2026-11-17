@@ -65,7 +65,7 @@ they do today.
   Merge and VectorDB operator modules, `src/docpipe/core/orchestration/feature_propagation/` (`features_propagator.py`,
   `models.py`, new merge module, `__init__.py`), and import sites in `flow_validator.py` and
   `flow_enrichment_service.py`.
-- Tests: `tests/unit/core/orchestrator/test_features_propagator.py` stays as the regression net; per-operator hook
+- Tests: `tests/unit/core/orchestrator/test_features_propagator.py` stays as the regression net (only its `OperatorMetadata` mock fixtures change, to return real operator classes from `get_operator_class`); per-operator hook
   tests and an extensibility test (a dummy operator needing no propagator edit) are added.
 - Docs: `docs/guides/CUSTOM_OPERATORS_GUIDE.md`.
 - Risk: import cycles between `abstract_operator`, `operator_metadata`, `operator_factory` and `feature_propagation`
