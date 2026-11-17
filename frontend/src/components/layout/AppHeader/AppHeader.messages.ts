@@ -37,4 +37,8 @@ export const messages = defineMessages({
     id: 'src.components.layout.AppHeader.signOut',
     defaultMessage: 'Sign out',
   },
+  rolesLabel: {
+    id: 'src.components.layout.AppHeader.rolesLabel',
+    defaultMessage: 'Roles',
+  },
 });

@@ -2,65 +2,214 @@
 @use '@carbon/react/scss/type' as *;
 @use '@carbon/react/scss/theme' as *;
 @use '@carbon/react/scss/breakpoint' as *;
+@use '@carbon/react/scss/motion' as *;
 
-.loginContainer {
+// Height of the fixed Carbon <Header> (48px) the split-screen is offset by
+$header-height: $spacing-09;
+
+// Split-screen shell below the fixed header: stacked (compact tagline strip + form) below lg
+.page {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  box-sizing: border-box;
   min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: $header-height;
   background-color: $background;
-  padding: $spacing-05;
-}
 
-.loginCard {
-  width: 100%;
-  max-width: 400px;
-  background-color: $layer-01;
-  padding: $spacing-07;
-  border: 1px solid $border-subtle-01;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-
-  @include breakpoint-down('sm') {
-    padding: $spacing-05;
+  @include breakpoint('lg') {
+    display: grid;
+    grid-template-columns: 11fr 9fr; // ~55% brand / ~45% form
   }
 }
 
-.header {
-  margin-bottom: $spacing-07;
+// Brand panel (rendered inside a Carbon <Theme> zone: g100 in dark mode, g10 in light mode)
+.brandPanel {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: $spacing-05 $spacing-06;
+  background-color: $background;
+  color: $text-primary;
+  border-bottom: 1px solid $border-subtle-01;
+
+  @include breakpoint('md') {
+    padding-inline: $spacing-07;
+  }
+
+  @include breakpoint('lg') {
+    min-height: calc(100dvh - #{$header-height});
+    // Deliberate bottom-left anchor for the tagline
+    padding: $spacing-09 $spacing-09 $spacing-10;
+    border-bottom: 0;
+    border-right: 1px solid $border-subtle-01;
+  }
 }
 
-.appName {
-  @include type-style('heading-05');
+// Artwork layer: only shown once the panel is a full-height column
+.illustrationWrapper {
+  display: none;
+
+  @include breakpoint('lg') {
+    display: block;
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+
+    :global(.clabs--animated-header__lottie-animation--container) {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      max-inline-size: none;
+      display: flex;
+      justify-content: flex-end;
+      align-items: flex-start;
+      overflow: hidden;
+    }
+
+    :global(.clabs--animated-header__lottie-animation) {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: flex-end;
+      align-items: flex-start;
+
+      // Lottie centre-crops the 1312x738 composition; size it to the panel height and
+      // pin it to the right edge so the circle cluster is not clipped by the panel border.
+      // !important is needed to override the inline width/height lottie-web sets on the svg.
+      svg,
+      canvas {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: auto !important;
+        height: 100% !important;
+        aspect-ratio: 1312 / 738;
+        max-width: none;
+      }
+    }
+
+    // Fades the lower-left corner into the zone background so the tagline stays legible over the artwork
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background: linear-gradient(
+        to top right,
+        $background 0%,
+        color-mix(in srgb, #{$background} 72%, transparent) 30%,
+        transparent 65%
+      );
+    }
+  }
+}
+
+.brandContent {
+  position: relative;
+  z-index: 2;
+  max-width: 32rem;
+
+  @media (prefers-reduced-motion: no-preference) {
+    animation: fade-up $duration-moderate-02 motion(entrance, productive) both;
+  }
+}
+
+// Brand headline: compact strip text below lg, large display text at lg
+.tagline {
+  @include type-style('heading-03');
   color: $text-primary;
-  margin-bottom: $spacing-02;
+
+  @include breakpoint('lg') {
+    @include type-style('productive-heading-06');
+  }
+
+  @include breakpoint('xlg') {
+    @include type-style('productive-heading-07');
+  }
+}
+
+// Form panel
+.formPanel {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-07 $spacing-05;
+  background-color: $background;
+  color: $text-primary;
+
+  @include breakpoint('md') {
+    padding: $spacing-09 $spacing-07;
+  }
+}
+
+.formContent {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 25rem;
+  text-align: left;
+
+  @media (prefers-reduced-motion: no-preference) {
+    animation: fade-up $duration-moderate-02 motion(entrance, productive) both;
+  }
+}
+
+.appMark {
+  display: block;
+  margin-bottom: $spacing-06;
+  fill: $icon-primary;
 }
 
 .title {
-  @include type-style('heading-03');
+  @include type-style('heading-04');
+  color: $text-primary;
+}
+
+.helper {
+  @include type-style('body-compact-01');
+  margin-top: $spacing-03;
   color: $text-secondary;
 }
 
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-06;
+.footer {
+  @include type-style('label-01');
+  margin-top: $spacing-09;
+  color: $text-helper;
 }
 
-.submitBtn {
-  margin-top: $spacing-05;
-  width: 100%;
-}
-
+// Carbon notifications cap their width; stretch to the form column
 .notification {
-  margin-bottom: $spacing-06;
+  max-width: 100%;
+  width: 100%;
+  margin: 0;
 }
 
-.providerSection {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-04;
-  margin-top: $spacing-06;
+// Full-width buttons (Carbon caps button width and reserves room for the icon)
+.fullWidthBtn {
+  width: 100%;
+  max-width: none;
+
+  // Inline loading inherits the button text colour (normal and disabled)
+  :global(.cds--inline-loading) {
+    min-block-size: 0;
+  }
+
+  :global(.cds--inline-loading__text) {
+    color: inherit;
+  }
+
+  :global(.cds--loading__stroke) {
+    stroke: currentcolor;
+  }
 }
 
 .divider {
@@ -68,7 +217,6 @@
   align-items: center;
   text-align: center;
   color: $text-secondary;
-  margin-block: $spacing-06;
   @include type-style('label-01');
 
   &::before,
@@ -87,6 +235,14 @@
   }
 }
 
-.providerBtn {
-  width: 100%;
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY($spacing-04);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
