@@ -103,6 +103,7 @@ Real-world scenarios showing practical applications.
 |------|----------|-------------|
 | `invoice_processing.json` | Invoice Processing | Complete invoice workflow with entity extraction and OpenSearch storage |
 | `s3_to_opensearch.json` | Cloud Integration | Ingest from AWS S3, process, and store in OpenSearch |
+| [s3_ingest_vault.json](use_cases/s3_ingest_vault.json) | Secrets from Vault | Ingest from S3 with `access_key` and `secret_key` as `vault://` references; needs `secrets.vault.allowed_paths` |
 | `audio_video_extraction.json` | Audio/Video Transcription | ASR transcription → chunking → embeddings → vector storage |
 | `document_set_management.json` | Document Sets | Demonstrates document_set operator for managing document collections |
 | [local_redacted_indexing.json](use_cases/local_redacted_indexing.json) | Local Redacted Indexing | Redacts PII (Presidio) and HAP (local Hugging Face classifier) before chunking, local embeddings and Milvus Lite, so neither reaches the vector store; no external services. Needs the `presidio` extra and the spaCy model `en_core_web_sm` |
@@ -138,6 +139,7 @@ Complete pipelines demonstrating vector database integrations.
 | `opensearch_integration.json` | OpenSearch | Full pipeline with OpenSearch vector storage |
 | `milvus_integration.json` | Milvus | Full pipeline with Milvus vector storage |
 | `weaviate_integration.json` | Weaviate | Full pipeline with Weaviate vector storage (self-hosted, local server) |
+| [opensearch_vault_integration.json](vectordb/opensearch_vault_integration.json) | OpenSearch | OpenSearch host and credentials as `vault://` references; needs `secrets.vault.allowed_paths` |
 
 **Start here if:** You're setting up vector search or RAG systems.
 
@@ -463,11 +465,13 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | Transcribe audio/video | `use_cases/audio_video_extraction.json` |
 | Process invoices | `use_cases/invoice_processing.json` |
 | Ingest from S3 | `use_cases/s3_to_opensearch.json` |
+| Keep S3 credentials in Vault | [use_cases/s3_ingest_vault.json](use_cases/s3_ingest_vault.json) |
 | Route by quality | `advanced/branching_quality_routing.json` |
 | Parallel processing | `advanced/branching_dual_embeddings_with_ingest_report.json` |
 | Generate and merge dual embeddings | [advanced/branching_dual_embeddings.json](advanced/branching_dual_embeddings.json) |
 | Complex pipeline | `advanced/multi_stage_enrichment.json` |
 | Use OpenSearch | `vectordb/opensearch_integration.json` |
+| Keep OpenSearch credentials in Vault | [vectordb/opensearch_vault_integration.json](vectordb/opensearch_vault_integration.json) |
 | Use Milvus | `vectordb/milvus_integration.json` |
 | Use Weaviate | `vectordb/weaviate_integration.json` |
 | Use serverless Milvus Lite | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
