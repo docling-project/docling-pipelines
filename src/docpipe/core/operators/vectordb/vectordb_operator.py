@@ -23,6 +23,7 @@ from docpipe.utils.core.memmap_file_utils import (
     yield_chunks_from_file,
     yield_embeddings_from_memmap_file,
 )
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
 from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
@@ -166,13 +167,31 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             if self.validating_flow:
                 adapter_config[DocpipeConstants.VALIDATING_FLOW] = self.validating_flow
 
-            self.adapter: VectorStorePort = VectorStoreFactory.create(self.provider, **adapter_config)
-        except DocpipeException:
-            # Already a docpipe exception with its own status/error code and message: do not wrap it again.
-            raise
-        except Exception as e:
+            self.adapter: VectorStorePort
+            self._schema_cls = VectorStoreFactory.get_adapter_class(self.provider).get_config_schema()
+            # While a flow is validated, a reference is replaced by a stand-in. The adapter
+            # connects when it is built, so it is not built then (the attribute stays unset and
+            # validate() reads only the config schema); no server sees the stand-in.
+            if not self._holds_validation_sentinel(config=config):
+                self.adapter = VectorStoreFactory.create(self.provider, **adapter_config)
+        except DocpipeException as e:
+            # Keep the adapter's own status/error code and do not wrap it again. A client library's text can
+            # sit in its message (a connection failure quotes the URI), so it is sanitized; an exception whose
+            # message is already safe is re-raised as it is.
+            safe_message = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            if safe_message == str(e):
+                raise
             raise DocpipeException(
-                message=f"Failed to initialize vector database adapter '{self.provider}': {e!s}",
+                message=safe_message,
+                status_code=e.status_code,
+                error_code=e.error_code,
+                message_code=e.message_code,
+                more_info=e.more_info,
+            ) from e
+        except Exception as e:
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            raise DocpipeException(
+                message=f"Failed to initialize vector database adapter '{self.provider}': {safe_error}",
                 status_code=500,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             ) from e
@@ -182,6 +201,14 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             self.provider,
             extra=self.common_log_arguments,
         )
+
+    @staticmethod
+    def _holds_validation_sentinel(*, config: dict[str, Any]) -> bool:
+        """Return True while a flow is validated and a provider setting is the reference stand-in."""
+        if not config.get(DocpipeConstants.VALIDATING_FLOW):
+            return False
+        provider_config = config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
+        return DocpipeConstants.VALIDATION_SECRET_SENTINEL in provider_config.values()
 
     def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
         """
@@ -198,13 +225,14 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         try:
             self._validate_config(errors=errors, warnings=warnings, available_features=available_features)
         finally:
-            if self.validating_flow:
+            if self.validating_flow and hasattr(self, "adapter"):
                 try:
                     self.adapter.close()
                 except Exception as e:
                     logger.warning("Failed to close adapter after flow validation: %s", e)
 
     def _validate_config(self, *, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
+        """Run the base validation, then validate the config against the operator metadata attributes."""
         super().validate(errors=errors, warnings=warnings, available_features=available_features)
 
         metadata = self.get_metadata()
@@ -216,8 +244,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         # Validate provider_config required fields via the adapter's own Pydantic schema.
         # This keeps VectorDBOperator provider-agnostic: adding a new adapter only requires
         # its config model to declare required fields — no if/elif changes here.
-        schema_cls = self.adapter.get_config_schema()
         try:
+            schema_cls = self.adapter.get_config_schema() if hasattr(self, "adapter") else self._schema_cls
             schema_cls.model_validate(provider_config)
         except ValidationError as exc:
             for error in exc.errors():
@@ -228,16 +256,17 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     errors.append(error["msg"])
 
         # Provider-specific mapping/configuration checks (optional hook; default reports nothing).
-        self.adapter.validate_configuration(errors=errors, warnings=warnings)
+        if hasattr(self, "adapter"):
+            self.adapter.validate_configuration(errors=errors, warnings=warnings)
 
         # Reject index settings that cannot work with the vector kinds produced upstream (e.g. BIN_* without
         # a binary vector feature). Only possible when the validator supplied the propagated feature types.
         feature_types: dict[str, str | None] | None = self.config.get(DocpipeConstants.VALIDATION_FEATURE_TYPES)
-        if feature_types is not None and not errors:
+        if feature_types is not None and not errors and hasattr(self, "adapter"):
             try:
                 self.adapter.validate_vector_feature_types(feature_types=feature_types)
             except DocpipeException as exc:
-                errors.append(str(exc))
+                errors.append(sanitize_exception(exc=exc, config_key=f"{self.short_name}.provider_config"))
 
         # Validate that feature mappings are present.
         feature_mappings: list[dict[str, str]] = self.config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
@@ -304,7 +333,11 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             try:
                 self.adapter.close()
             except Exception as e:
-                logger.warning("Failed to close adapter: %s", e, extra=self.common_log_arguments)
+                logger.warning(
+                    "Failed to close adapter: %s",
+                    sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
+                    extra=self.common_log_arguments,
+                )
 
     def _transform_internal(
         self,
@@ -367,7 +400,11 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         try:
             self.adapter.refresh_index()
         except Exception as e:
-            logger.warning("Failed to refresh index: %s", e, extra=self.common_log_arguments)
+            logger.warning(
+                "Failed to refresh index: %s",
+                sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
+                extra=self.common_log_arguments,
+            )
 
         return [table], metadata
 
@@ -485,7 +522,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 self.adapter.create_index(dimension_mapping=dimension_mapping)
             return True
         except Exception as e:
-            logger.error("Failed to create or validate index: %s", e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error("Failed to create or validate index: %s", safe_error, extra=self.common_log_arguments)
             # Mark all unique documents as failed when index creation fails
             # Use original document IDs (from 'id' column) for consistency
             for doc_hash in unique_doc_ids:
@@ -494,7 +532,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     metadata=metadata,
                     doc_id=original_id,
                     doc_name=doc_hash_to_name.get(doc_hash, original_id),
-                    reason=f"Failed to create index: {e!s}",
+                    reason=f"Failed to create index: {safe_error}",
                 )
             metadata[Metrics.External.PROCESSED_DOCS] = 0
             metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
@@ -671,17 +709,18 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                         chunk_id_to_doc_id[chunk_pk] = doc_id
 
             except Exception as e:
+                safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
                 logger.error(
                     "Error preparing document at row %s: %s",
                     idx,
-                    e,
+                    safe_error,
                     extra=self.common_log_arguments,
                 )
                 self.record_failed_document(
                     metadata=metadata,
                     doc_id=f"row_{idx}",
                     doc_name=row_data.get("name") or f"row_{idx}",
-                    reason=str(e),
+                    reason=safe_error,
                 )
 
         return documents, chunk_id_to_doc_id
@@ -868,7 +907,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         except Exception as e:
             logger.warning(
                 "Stale PK cleanup failed (insert will proceed): %s",
-                e,
+                sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
                 extra=self.common_log_arguments,
             )
 
@@ -951,7 +990,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             return True
 
         except Exception as e:
-            logger.error("Failed to index documents: %s", e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error("Failed to index documents: %s", safe_error, extra=self.common_log_arguments)
             # Mark all documents as failed when the entire indexing operation fails
             # Use original document IDs (from 'id' column) for consistency
             unique_doc_hashes_from_chunks: set[str] = set()
@@ -965,7 +1005,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     metadata=metadata,
                     doc_id=original_id,
                     doc_name=doc_hash_to_name.get(doc_hash, original_id),
-                    reason=f"Indexing operation failed: {e!s}",
+                    reason=f"Indexing operation failed: {safe_error}",
                 )
             metadata[Metrics.External.PROCESSED_DOCS] = 0
             metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
@@ -1034,6 +1074,33 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each vector store config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import (
+            ADAPTER_NAME as MILVUS_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import MilvusConfig
+        from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import (
+            ADAPTER_NAME as OPENSEARCH_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import (
+            ADAPTER_NAME as WEAVIATE_ADAPTER_NAME,
+        )
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import WeaviateConfig
+
+        return build_provider_secret_fields(
+            selector=OperatorConstants.Config.PROVIDER,
+            prefix=OperatorConstants.Config.PROVIDER_CONFIG,
+            classes={
+                OPENSEARCH_ADAPTER_NAME: OpenSearchConfig,
+                MILVUS_ADAPTER_NAME: MilvusConfig,
+                WEAVIATE_ADAPTER_NAME: WeaviateConfig,
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Get metadata about the operator including features and attributes.
 
@@ -1041,6 +1108,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         Provider-specific parameters should be passed via the 'provider_config' configuration.
         """
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": VectorDBOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: VectorDBOperator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: VectorDBOperator.is_available(),

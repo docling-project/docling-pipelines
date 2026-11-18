@@ -142,7 +142,7 @@ Minimum supported server: Weaviate 1.23.6, the floor stated by the pinned `weavi
 Notes:
 
 - **TLS with credentials.** For `on-prem` connections, any `auth_type` other than `none` requires both `secure` and `grpc_secure` (which defaults to `secure`) to be `true`, so credentials are never sent unencrypted.
-- **Credential references.** Credential fields accept a literal value, a `$VAR` or `${VAR}` environment reference, or a `vault://` reference. The flow executor resolves `vault://` references before the operator runs; flow validation skips the server connection when a credential is still a vault placeholder. A string that is all upper case and contains an underscore (for example `MY_TOKEN`) is replaced by the environment variable of the same name when one exists, so use an explicit `$VAR` reference for environment-sourced secrets.
+- **Credential references.** Credential fields accept a literal value, a `$VAR` or `${VAR}` environment reference, or a `vault://` reference; see [Credentials from Vault](#credentials-from-vault). A string that is all upper case and contains an underscore (for example `MY_TOKEN`) is replaced by the environment variable of the same name when one exists, so use an explicit `$VAR` reference for environment-sourced secrets.
 - **Identity property.** The primary feature must be mapped to `pk`. It is stored as a field-tokenized text property and is distinct from the Weaviate object UUID, which the adapter derives deterministically from the chunk key.
 - **Unsupported options.** `schema_template_path` is OpenSearch-only and is ignored with a warning. Access control is not supported: a mapped `allowed_users` is dropped with a warning, and ACL-enforced reads are OpenSearch-only.
 
@@ -437,6 +437,30 @@ Each dense column becomes its own named vector.
 For a sparse-only run, omit the embeddings feature and see the in-memory chunk requirement under [Sparse (BM25) mode](#sparse-bm25-mode-weaviate).
 
 ---
+
+## Credentials from Vault
+
+Connection fields under `provider_config` accept a `vault://` reference as the whole value:
+
+- OpenSearch: `host`, `username`, `password`, `jwt_token`, `aws_region`
+- Milvus: `host`, `uri`, `database`, `username`, `password`, `token`
+- Weaviate: `api_key`, `bearer_token`, `username`, `password`
+
+```json
+{
+  "provider": "opensearch",
+  "provider_config": {
+    "host": "vault://hashicorp/opensearch/prod#host",
+    "username": "vault://hashicorp/opensearch/prod#username",
+    "password": "vault://hashicorp/opensearch/prod#password"  # pragma: allowlist secret
+  }
+}
+```
+
+Naming fields such as `index_name` and `collection_name` never accept a reference. The platform resolves a reference
+only if its path matches `secrets.vault.allowed_paths`, and a literal `host` or `uri` next to a reference must match
+`secrets.vault.allowed_destinations`. See the [Secrets Guide](../../guides/SECRETS_GUIDE.md#declared-secret-fields) and
+the [sample flow](../../../sample_flows/vectordb/opensearch_vault_integration.json).
 
 ## Troubleshooting
 
