@@ -439,10 +439,10 @@ class FlowService(AssetService[Flow]):
             if existing is not None:
                 ensure_can_modify(actor=actor, owner=existing.created_by, action="flow.delete", target=flow_id)
 
-        # Delegate to inherited delete() from AssetService
+        # Delegate to inherited delete() from AssetService; it raises when nothing was
+        # deleted, so reaching the next line means the flow is gone.
         result = self.delete(asset_id=flow_id)
-        if result:
-            self._delete_job_runs_for_flow(flow_id)
+        self._delete_job_runs_for_flow(flow_id)
         return result
 
     def bulk_delete_flows(self, flow_ids: list[str], *, actor: ActorContext) -> dict[str, Any]:

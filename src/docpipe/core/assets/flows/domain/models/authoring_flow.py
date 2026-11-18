@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Domain models for the simplified flow authoring format.
 
 This module defines the user-friendly authoring model that allows users to define
@@ -105,12 +108,8 @@ class AuthoringOperator:
     ) -> list[str]:
         """Validate a branch reference dependency (operator.branch)."""
         errors = []
-        parts = dep.split(OperatorConstants.Misc.BRANCH_SEPARATOR, 1)
-        if len(parts) != 2:
-            errors.append(f"Invalid branch reference '{dep}' in operator '{self.name or 'unnamed'}'")
-            return errors
-
-        operator_name, branch_name = parts
+        # Callers only pass deps containing the separator, so split(..., 1) always yields two parts.
+        operator_name, branch_name = dep.split(OperatorConstants.Misc.BRANCH_SEPARATOR, 1)
 
         # Validate operator exists
         if operator_name not in all_operator_names:
