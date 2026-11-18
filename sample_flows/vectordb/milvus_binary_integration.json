@@ -1,0 +1,123 @@
+{
+  "flow_name": "milvus-binary-embeddings-pipeline",
+  "description": "Binary vector embeddings pipeline for Milvus: Ingest -> Extract -> Chunk -> Binary Quantized Embeddings -> Milvus Binary Vector Index. Binary quantization uses 1-bit sign thresholding, so it works best with zero-centred (normalized) embedding models.",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "storage": "in-memory",
+    "execute_type": "local"
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_documents",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "./sample_documents"
+          ]
+        },
+        "include_filter": "pdf,txt,docx"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_content",
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        },
+        "entity_extraction": {
+          "provider": "none"
+        }
+      },
+      "depends_on": [
+        "ingest_documents"
+      ]
+    },
+    {
+      "type": "chunker",
+      "name": "chunk_documents",
+      "config": {
+        "chunk_type": "semantic",
+        "chunk_size": 512,
+        "chunk_overlap": 50,
+        "semantic_embeddings_model": "nomic-embed-text",
+        "retain_original_content": false
+      },
+      "depends_on": [
+        "extract_content"
+      ]
+    },
+    {
+      "type": "embeddings",
+      "name": "generate_binary_embeddings",
+      "config": {
+        "provider": "litellm",
+        "embeddings_column": "embeddings",
+        "quantization": "binary",
+        "overlap_ratio": 0.1,
+        "provider_config": {
+          "model_id": "openai/nomic-embed-text",
+          "api_base": "http://localhost:11434/v1",
+          "api_key": "${OLLAMA_API_KEY:-ollama}"
+        }
+      },
+      "depends_on": [
+        "chunk_documents"
+      ]
+    },
+    {
+      "type": "vectordb",
+      "name": "store_in_milvus_binary",
+      "config": {
+        "provider": "milvus",
+        "doc_id_column": "doc_id_hash",
+        "add_sparse_vector": false,
+        "provider_config": {
+          "collection_name": "binary_embeddings_collection",
+          "host": "localhost",
+          "port": 19530,
+          "auth_type": "standalone",
+          "username": "${MILVUS_USERNAME}",
+          "password": "${MILVUS_PASSWORD}",
+          "database": "default",
+          "batch_size": 100,
+          "index_type": "BIN_IVF_FLAT",
+          "metric_type": "HAMMING",
+          "index_parameters": {
+            "nlist": 128
+          }
+        },
+        "feature_mappings": [
+          {
+            "feature_name": "doc_id_hash",
+            "mapped_column_name": "pk"
+          },
+          {
+            "feature_name": "content",
+            "mapped_column_name": "text"
+          },
+          {
+            "feature_name": "name",
+            "mapped_column_name": "doc_name"
+          },
+          {
+            "feature_name": "path",
+            "mapped_column_name": "file_path"
+          },
+          {
+            "feature_name": "embeddings",
+            "mapped_column_name": "binary_vector"
+          }
+        ]
+      },
+      "depends_on": [
+        "generate_binary_embeddings"
+      ]
+    }
+  ]
+}

@@ -8,6 +8,8 @@
 
 import React from 'react';
 import { InlineNotification } from '@carbon/react';
+import { useIntl } from 'react-intl';
+import { messages } from './Ededup.messages';
 
 interface EdedupPanelBodyProps {
   controller: any;
@@ -16,11 +18,12 @@ interface EdedupPanelBodyProps {
 // controller is required by the OPERATOR_PANEL_MAP signature but unused here
 
 export function EdedupPanelBody({ controller: _controller }: EdedupPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   return (
     <InlineNotification
       kind="info"
-      title="No configuration required"
-      subtitle="This operator automatically removes exact duplicate documents based on a content hash. No parameters need to be set."
+      title={intl.formatMessage(messages.title)}
+      subtitle={intl.formatMessage(messages.subtitle)}
       lowContrast
       hideCloseButton
     />

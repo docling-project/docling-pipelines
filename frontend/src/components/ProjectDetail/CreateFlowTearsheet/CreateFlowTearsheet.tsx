@@ -9,8 +9,10 @@ import {
   TextInput,
   TextArea,
 } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { CreateFlowFormValues } from '@/types';
 import { TagInput } from '@/components/common';
+import { messages } from './CreateFlowTearsheet.messages';
 import styles from './CreateFlowTearsheet.module.scss';
 
 export type { CreateFlowFormValues };
@@ -35,6 +37,7 @@ export function CreateFlowTearsheet({
   error = null,
   existingNames = [],
 }: CreateFlowTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
   const [flow, setFlow] = useState<CreateFlowFormValues>(EMPTY_FLOW);
   const [nameInvalid, setNameInvalid] = useState(false);
   const [nameDuplicate, setNameDuplicate] = useState(false);
@@ -79,14 +82,14 @@ export function CreateFlowTearsheet({
       preventCloseOnClickOutside
       containerClassName={styles.modal}
     >
-      <ModalHeader title="Create flow" buttonOnClick={handleClose} className={styles.modalHeader} />
+      <ModalHeader title={intl.formatMessage(messages.modalTitle)} buttonOnClick={handleClose} className={styles.modalHeader} />
 
       <ModalBody className={styles.modalBody}>
         <div className={styles.formContent}>
           {error && (
             <InlineNotification
               kind="error"
-              title="Failed to create flow"
+              title={intl.formatMessage(messages.errorTitle)}
               subtitle={error}
               hideCloseButton
               lowContrast
@@ -95,8 +98,8 @@ export function CreateFlowTearsheet({
 
           <TextInput
             id="flow-name"
-            labelText="Name"
-            placeholder="Enter name"
+            labelText={intl.formatMessage(messages.nameLabel)}
+            placeholder={intl.formatMessage(messages.namePlaceholder)}
             value={flow.name}
             onChange={(e) => {
               setFlow((prev) => ({ ...prev, name: e.target.value }));
@@ -107,16 +110,16 @@ export function CreateFlowTearsheet({
             invalid={nameInvalid || nameDuplicate}
             invalidText={
               nameDuplicate
-                ? 'A flow with this name already exists. Please choose a unique name.'
-                : 'Name is required'
+                ? intl.formatMessage(messages.nameDuplicate)
+                : intl.formatMessage(messages.nameRequired)
             }
             disabled={isLoading}
           />
 
           <TextArea
             id="flow-description"
-            labelText="Description (optional)"
-            placeholder="Enter description"
+            labelText={intl.formatMessage(messages.descriptionLabel)}
+            placeholder={intl.formatMessage(messages.descriptionPlaceholder)}
             value={flow.description}
             onChange={(e) => { setFlow((prev) => ({ ...prev, description: e.target.value })); }}
             rows={5}
@@ -125,10 +128,10 @@ export function CreateFlowTearsheet({
 
           <TagInput
             id="flow-tags"
-            labelText="Add tags (optional)"
+            labelText={intl.formatMessage(messages.tagsLabel)}
             tags={flow.tags}
             onChange={(tags) => { setFlow((prev) => ({ ...prev, tags })); }}
-            helperText="Add tags to make flow easier to find. To add tags, separate them with commas and press Enter."
+            helperText={intl.formatMessage(messages.tagsHelperText)}
             disabled={isLoading}
           />
         </div>
@@ -136,10 +139,10 @@ export function CreateFlowTearsheet({
 
       <ModalFooter className={styles.footer}>
         <Button kind="ghost" onClick={handleClose} className={styles.footerCancel} disabled={isLoading}>
-          Cancel
+          {intl.formatMessage(messages.cancel)}
         </Button>
         <Button kind="primary" onClick={handleSubmit} className={styles.footerCreate} disabled={isLoading || nameDuplicate}>
-          {isLoading ? 'Creating...' : 'Create'}
+          {isLoading ? intl.formatMessage(messages.creating) : intl.formatMessage(messages.create)}
         </Button>
       </ModalFooter>
     </ComposedModal>

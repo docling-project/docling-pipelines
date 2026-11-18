@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 OperatorConstants with nested class organization.
 
@@ -67,6 +70,7 @@ class OperatorConstants:
         SQL_FILTER: Final[str] = "sql_filter"
 
         # Storage Operators
+        DOCUMENT_SET: Final[str] = "document_set"
         ENTITY_CURATION_OPERATOR: Final[str] = "entity_curation_operator"
         ENTITY_STORE_OPERATOR: Final[str] = "entity_store"
         OPENSEARCH: Final[str] = "opensearch"
@@ -213,6 +217,9 @@ class OperatorConstants:
         PROVIDER: Final[str] = "provider"
         PROVIDERS: Final[str] = "providers"
         PROVIDER_CONFIG: Final[str] = "provider_config"
+        # Attribute-metadata key naming the sibling field that selects the active provider
+        # for a provider-config attribute (defaults to "provider" when absent).
+        PROVIDER_FIELD: Final[str] = "provider_field"
         PROVIDER_LITELLM: Final[str] = "litellm"
         PROVIDER_WATSONX: Final[str] = "watsonx"
         REQUIRED: Final[str] = "required"
@@ -246,6 +253,7 @@ class OperatorConstants:
         MANDATORY_FOR_VECTOR_DB: Final[str] = "mandatory_for_vector_db"
         NEW_COLLECTION_DEFAULT_FEATURE_MAPPINGS: Final[str] = "new_collection_default_feature_mappings"
         OUTPUT_FEATURES: Final[str] = "output_features"
+        QUANTIZATION: Final[str] = "quantization"
         VALID_COLUMNS: Final[str] = "valid_columns"
         VALID_VALUES: Final[str] = "valid_values"
 
@@ -314,6 +322,14 @@ class OperatorConstants:
         MODEL_ID: Final[str] = "model_id"
         MODEL_NAME: Final[str] = "model_name"
 
+        # Local Hugging Face classifier configuration (hap_provider_config of the huggingface provider)
+        ACTIVATION: Final[str] = "activation"
+        DEVICE: Final[str] = "device"
+        LOCAL_FILES_ONLY: Final[str] = "local_files_only"
+        MAX_LENGTH: Final[str] = "max_length"
+        REVISION: Final[str] = "revision"
+        TOXIC_LABELS: Final[str] = "toxic_labels"
+
         # Classification Configuration
         API_BASE: Final[str] = "api_base"
         DOCUMENT_TYPES: Final[str] = "document_types"
@@ -321,6 +337,7 @@ class OperatorConstants:
         INCLUDE_CONFIDENCE: Final[str] = "include_confidence"
         INCLUDE_REASONING: Final[str] = "include_reasoning"
         MAX_CONTENT_LENGTH: Final[str] = "max_content_length"
+        STRICT_LABEL_MATCHING: Final[str] = "strict_label_matching"
 
         # Watsonx Configuration
         CONTAINER_KIND: Final[str] = "container_kind"
@@ -346,6 +363,9 @@ class OperatorConstants:
         DEFAULT_DOC_COLUMN: Final[str] = "content"  # References Columns.DOC_COLUMN_DEFAULT
         DEFAULT_REQUEST_TIMEOUT: Final[int] = 120
         DEFAULT_MAX_CONTENT_LENGTH: Final[int] = 2000
+        DEFAULT_TEMPERATURE: Final[float] = 0.0
+        DEFAULT_MAX_TOKENS: Final[int] = 500
+        DEFAULT_STRICT_LABEL_MATCHING: Final[bool] = False
 
         # Configuration Keys
         DOC_COLUMN_KEY: Final[str] = "doc_column"  # References Columns.DOC_COLUMN
@@ -400,7 +420,6 @@ class OperatorConstants:
         COLLECTION_NAME: Final[str] = "collection_name"
 
         # Index / collection configuration
-        CREATE_INDEX: Final[str] = "create_index"
         INDEX_MAPPINGS: Final[str] = "index_mappings"
         INDEX_SETTINGS: Final[str] = "index_settings"
         INDEX_TYPE: Final[str] = "index_type"
@@ -410,6 +429,8 @@ class OperatorConstants:
         # Vector Configuration
         ADD_SPARSE_VECTOR: Final[str] = "add_sparse_vector"
         ADD_SPARSE_VECTOR_DEFAULT: Final[bool] = False
+        VECTOR_MODE: Final[str] = "vector_mode"
+        VECTOR_MODE_DEFAULT: Final[str] = "dense"
         SPARSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "sparse_embeddings"
         DENSE_EMBEDDINGS_COLUMN_DEFAULT: Final[str] = "dense_embeddings"
         # Milvus field names (mapped names in collection schema)
@@ -426,7 +447,23 @@ class OperatorConstants:
         # Vector DB General
         OPENSEARCH: Final[str] = "opensearch"
         MILVUS: Final[str] = "milvus"
+        WEAVIATE: Final[str] = "weaviate"
         VECTOR_DB_NAME: Final[str] = "vector_db_name"
+
+        # Weaviate-specific Configuration
+        CONNECTION_TYPE: Final[str] = "connection_type"
+        CONNECTION_TYPE_ON_PREM: Final[str] = "on-prem"
+        CONNECTION_TYPE_CLOUD: Final[str] = "cloud"
+        GRPC_HOST: Final[str] = "grpc_host"
+        GRPC_PORT: Final[str] = "grpc_port"
+        GRPC_SECURE: Final[str] = "grpc_secure"
+        CLUSTER_URL: Final[str] = "cluster_url"
+        BEARER_TOKEN: Final[str] = "bearer_token"  # pragma: allowlist secret
+        DISTANCE_METRIC: Final[str] = "distance_metric"
+        TIMEOUT_INIT: Final[str] = "timeout_init"
+        TIMEOUT_QUERY: Final[str] = "timeout_query"
+        TIMEOUT_INSERT: Final[str] = "timeout_insert"
+        SKIP_INIT_CHECKS: Final[str] = "skip_init_checks"
 
         # Default target field names — adapter-agnostic names used in feature mappings
         DEFAULT_PRIMARY_KEY_FIELD: Final[str] = "pk"
@@ -466,7 +503,6 @@ class OperatorConstants:
         OPENSEARCH_AWS_REGION: Final[str] = "OPENSEARCH_AWS_REGION"
         OPENSEARCH_JWT_TOKEN: Final[str] = "OPENSEARCH_JWT_TOKEN"
         OPENSEARCH_VECTOR_DIMENSION: Final[str] = "OPENSEARCH_VECTOR_DIMENSION"
-        OPENSEARCH_CREATE_INDEX: Final[str] = "OPENSEARCH_CREATE_INDEX"
         OPENSEARCH_INDEX_NAME: Final[str] = "OPENSEARCH_INDEX_NAME"
         OPENSEARCH_DOC_ID_COLUMN: Final[str] = "OPENSEARCH_DOC_ID_COLUMN"
         OPENSEARCH_EMBEDDINGS_COLUMN: Final[str] = "OPENSEARCH_EMBEDDINGS_COLUMN"
@@ -486,7 +522,6 @@ class OperatorConstants:
         MILVUS_SSL_CERTIFICATE: Final[str] = "MILVUS_SSL_CERTIFICATE"
         MILVUS_AUTH_TYPE: Final[str] = "MILVUS_AUTH_TYPE"
         MILVUS_VECTOR_DIMENSION: Final[str] = "MILVUS_VECTOR_DIMENSION"
-        MILVUS_CREATE_INDEX: Final[str] = "MILVUS_CREATE_INDEX"
         MILVUS_COLLECTION_NAME: Final[str] = "MILVUS_COLLECTION_NAME"
         MILVUS_DOC_ID_COLUMN: Final[str] = "MILVUS_DOC_ID_COLUMN"
         MILVUS_EMBEDDINGS_COLUMN: Final[str] = "MILVUS_EMBEDDINGS_COLUMN"
@@ -522,6 +557,7 @@ class OperatorConstants:
         # Complex Data Types
         TYPE_JSON: Final[str] = "json"
         TYPE_VECTOR: Final[str] = "vector"
+        TYPE_VECTOR_BINARY: Final[str] = "vector_binary"
         TYPE_VECTOR_SPARSE: Final[str] = "vector_sparse"
 
     class FileExtensions:
@@ -537,6 +573,30 @@ class OperatorConstants:
         EXT_MD: Final[str] = ".md"
         EXT_TXT: Final[str] = ".txt"
         EXT_HTML: Final[str] = ".html"
+
+        # Additional document formats
+        EXT_CSV: Final[str] = ".csv"
+        EXT_EPUB: Final[str] = ".epub"
+        EXT_EML: Final[str] = ".eml"
+        EXT_MSG: Final[str] = ".msg"
+        EXT_TEX: Final[str] = ".tex"
+        EXT_LATEX: Final[str] = ".latex"
+        EXT_ADOC: Final[str] = ".adoc"
+        EXT_ASCIIDOC: Final[str] = ".asciidoc"
+        EXT_ASC: Final[str] = ".asc"
+        EXT_VTT: Final[str] = ".vtt"
+        EXT_HTM: Final[str] = ".htm"
+        EXT_XHTML: Final[str] = ".xhtml"
+        EXT_MHTML: Final[str] = ".mhtml"
+        EXT_MHT: Final[str] = ".mht"
+        EXT_MARKDOWN: Final[str] = ".markdown"
+        EXT_TEXT: Final[str] = ".text"
+        EXT_QMD: Final[str] = ".qmd"
+        EXT_RMD: Final[str] = ".rmd"
+        EXT_PPTM: Final[str] = ".pptm"
+        EXT_XLSM: Final[str] = ".xlsm"
+        EXT_XLTX: Final[str] = ".xltx"
+        EXT_XLTM: Final[str] = ".xltm"
 
         # Image formats
         EXT_PNG: Final[str] = ".png"
@@ -561,6 +621,11 @@ class OperatorConstants:
         EXT_MP4: Final[str] = ".mp4"
         EXT_AVI: Final[str] = ".avi"
         EXT_MOV: Final[str] = ".mov"
+        EXT_MKV: Final[str] = ".mkv"
+        EXT_WEBM: Final[str] = ".webm"
+
+        # Archive formats (filesystem ingest only)
+        ARCHIVE_EXTENSIONS: Final[list[str]] = [".zip", ".tar", ".tar.gz", ".tgz", ".gz"]
 
         BASE_EXTENSIONS: Final[list[str]] = [
             EXT_PDF,
@@ -579,25 +644,71 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_MARKDOWN,
+            EXT_TEXT,
+            EXT_QMD,
+            EXT_RMD,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
-        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [
+        AUDIO_EXTENSIONS: Final[list[str]] = [
             EXT_WAV,
             EXT_MP3,
             EXT_M4A,
             EXT_AAC,
             EXT_OGG,
             EXT_FLAC,
+        ]
+
+        VIDEO_EXTENSIONS: Final[list[str]] = [
             EXT_MP4,
             EXT_AVI,
             EXT_MOV,
+            EXT_MKV,
+            EXT_WEBM,
         ]
+
+        AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_EXTENSIONS, *VIDEO_EXTENSIONS]
 
         DOCLING_LIBRARY_BASE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
 
         DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS: Final[list[str]] = [*AUDIO_VIDEO_EXTENSIONS]
 
-        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [*BASE_EXTENSIONS]
+        DOCLING_SERVE_EXTENSIONS: Final[list[str]] = [
+            EXT_PDF,
+            EXT_DOCX,
+            EXT_PPTX,
+            EXT_XLSX,
+            EXT_MD,
+            EXT_TXT,
+            EXT_HTML,
+            EXT_PNG,
+            EXT_JPEG,
+            EXT_JPG,
+            EXT_TIFF,
+            EXT_TIF,
+            EXT_BMP,
+            EXT_WEBP,
+            EXT_GIF,
+            EXT_JFIF,
+        ]
 
         DOCLING_ENTITY_EXTENSIONS_PDF_IMAGE_ONLY: Final[list[str]] = [
             EXT_PDF,  # .pdf  → InputFormat.PDF
@@ -626,6 +737,24 @@ class OperatorConstants:
             EXT_WEBP,
             EXT_GIF,
             EXT_JFIF,
+            EXT_CSV,
+            EXT_EPUB,
+            EXT_EML,
+            EXT_MSG,
+            EXT_TEX,
+            EXT_LATEX,
+            EXT_ADOC,
+            EXT_ASCIIDOC,
+            EXT_ASC,
+            EXT_VTT,
+            EXT_HTM,
+            EXT_XHTML,
+            EXT_MHTML,
+            EXT_MHT,
+            EXT_PPTM,
+            EXT_XLSM,
+            EXT_XLTX,
+            EXT_XLTM,
         ]
 
     class Extraction:
@@ -781,6 +910,27 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Payload field constants
         INPUT_FIELD: Final[str] = "input"
         DETECTIONS_FIELD: Final[str] = "detections"
+        DETECTORS_FIELD: Final[str] = "detectors"
+        THRESHOLD_FIELD: Final[str] = "threshold"
+
+        # TextDetectionPort result keys: {"success", "detections", "error"}
+        SUCCESS_FIELD: Final[str] = "success"
+        ERROR_FIELD: Final[str] = "error"
+
+        # Detection record keys (see domain.models.convert_detection_dicts_to_results)
+        DETECTION_FIELD: Final[str] = "detection"
+        DETECTION_TYPE_FIELD: Final[str] = "detection_type"
+        SCORE_FIELD: Final[str] = "score"
+        START_FIELD: Final[str] = "start"
+        END_FIELD: Final[str] = "end"
+        TEXT_FIELD: Final[str] = "text"
+        EVIDENCES_FIELD: Final[str] = "evidences"
+        EVIDENCE_SOURCE_FIELD: Final[str] = "source"
+        EVIDENCE_MODEL_ID_FIELD: Final[str] = "model_id"
+        EVIDENCE_LABEL_FIELD: Final[str] = "label"
+
+        # Detection label reported for a HAP span
+        HAS_HAP_LABEL: Final[str] = "has_HAP"
         DEFAULT_MODEL_NAME: Final[str] = "granite4"
 
         # PII Configuration
@@ -796,6 +946,12 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         HAP_REDACTION_CHARACTER_KEY: Final[str] = "hap_redaction_character"
         HAP_REDACTION_KEY: Final[str] = "hap_redaction"
         HAP_THRESHOLD_KEY: Final[str] = "hap_threshold"
+
+        # Per-capability provider selection (legacy "provider"/"provider_config" sets both)
+        PII_PROVIDER_KEY: Final[str] = "pii_provider"
+        PII_PROVIDER_CONFIG_KEY: Final[str] = "pii_provider_config"
+        HAP_PROVIDER_KEY: Final[str] = "hap_provider"
+        HAP_PROVIDER_CONFIG_KEY: Final[str] = "hap_provider_config"
         MODERATIONS: Final[str] = "moderations"
 
         # Redaction Configuration
@@ -949,6 +1105,16 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         TABLE_NAME: Final[str] = "table_name"
         TARGET_STORE: Final[str] = "target_store"
 
+        # Table storage backends shared by the storage operators
+        BACKEND_DUCKDB: Final[str] = "duckdb"
+        BACKEND_POSTGRES: Final[str] = "postgres"
+        DATA_BACKEND: Final[str] = "data_backend"
+        DATABASE_PATH: Final[str] = "database_path"
+        DEFAULT_DATA_BACKEND: Final[str] = "duckdb"
+        DEFAULT_DATABASE_PATH: Final[str] = ":memory:"
+        SCHEMA: Final[str] = "schema"
+        TABLE_PREFIX: Final[str] = "table_prefix"
+
         # Storage Types
         AWS_STORAGE_TYPE: Final[str] = "amazon_s3"
         COS_STORAGE_TYPE: Final[str] = "bmcos_object_storage"
@@ -1007,6 +1173,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         NORMALIZED_VALUE: Final[str] = "normalized_value"
         OLD_FEATURE: Final[str] = "old_feature"
         ORIGINAL_FEATURE: Final[str] = "original_feature"
+        RESULT_INDEX: Final[str] = "result_index"
         TRANSFORM: Final[str] = "transform"
         TYPE: Final[str] = "type"
         USER_CODE: Final[str] = "user_code"
@@ -1093,6 +1260,8 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         PDF: Final[str] = "application/pdf"
         HTML: Final[str] = "text/html"
         PLAIN: Final[str] = "text/plain"
+        CSV: Final[str] = "text/csv"
+        EML: Final[str] = "message/rfc822"
 
         # Google Workspace Document Types
         GOOGLE_APPS_PREFIX: Final[str] = "application/vnd.google-apps."
@@ -1110,6 +1279,7 @@ Example format: {"customer": {"name": "John Doe", "email": "john@example.com"}, 
         # Adapter Names
         ADAPTER_DUCKDB: Final[str] = "duckdb"
         ADAPTER_FILESYSTEM: Final[str] = "filesystem"
+        ADAPTER_POSTGRES: Final[str] = "postgres"
 
         # Configuration Keys
         DATABASE_PATH: Final[str] = "database_path"

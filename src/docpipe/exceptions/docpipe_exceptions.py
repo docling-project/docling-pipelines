@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom exception types for docpipe flow validation and execution."""
 
 from json import JSONEncoder
@@ -6,8 +9,8 @@ from typing import Any, ClassVar
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.exceptions.error_messages import ValidationMessage
 
-TROUBLESHOOTING_DOCS_URL = "https://github.com/IBM/docling-pipelines/tree/main/TROUBLESHOOTING.md"
-DOCLING_PIPELINES_DOCS_URL = "https://github.com/IBM/docling-pipelines/tree/main/docs"
+TROUBLESHOOTING_DOCS_URL = "https://github.com/docling-project/docling-pipelines/tree/main/TROUBLESHOOTING.md"
+DOCLING_PIPELINES_DOCS_URL = "https://github.com/docling-project/docling-pipelines/tree/main/docs"
 
 
 class DocpipeException(Exception):
@@ -71,7 +74,7 @@ class ValidationAlert(dict):
                 from docpipe.utils.infrastructure.logging import get_logger
 
                 logger = get_logger()
-                logger.warning(msg=f"Invalid attribute name: {key}", stack_info=True)
+                logger.warning("Invalid attribute name: %s", key, stack_info=True)
                 continue
             setattr(self, key, value)
 
@@ -145,18 +148,22 @@ class FlowValidationException(DocpipeException):
         full_traceback = "".join(tb_lines)
         context = f" for job_run_id={job_run_id}" if job_run_id else ""
         logger.error(
-            f"Flow validation failed{context}: {full_traceback}",
+            "Flow validation failed%s: %s",
+            context,
+            full_traceback,
             exc_info=True,
         )
 
         # Log detailed errors and warnings
         if self.errors:
             logger.error(
-                f"Validation errors: {json.dumps([vars(e) if hasattr(e, '__dict__') else e for e in self.errors])}"
+                "Validation errors: %s",
+                json.dumps([vars(e) if hasattr(e, "__dict__") else e for e in self.errors]),
             )
         if self.warnings:
             logger.warning(
-                f"Validation warnings: {json.dumps([vars(w) if hasattr(w, '__dict__') else w for w in self.warnings])}"
+                "Validation warnings: %s",
+                json.dumps([vars(w) if hasattr(w, "__dict__") else w for w in self.warnings]),
             )
 
 
@@ -927,11 +934,35 @@ class CustomOperatorInvalidDataException(DocpipeException):
         self.field_name = field_name
 
 
+class CustomOperatorsDisabledException(DocpipeException):
+    """Exception raised when a custom operator upload is refused because custom operators are disabled."""
+
+    def __init__(self, *, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=409,
+            error_code=ErrorCode.CUSTOM_OPERATORS_DISABLED,
+        )
+
+
+class CustomOperatorUploadForbiddenException(DocpipeException):
+    """Exception raised when the caller is not an allowed custom operator uploader."""
+
+    def __init__(self, *, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=403,
+            error_code=ErrorCode.CUSTOM_OPERATOR_UPLOAD_FORBIDDEN,
+        )
+
+
 __all__ = [
     "ConfigurationError",
     "CustomOperatorAlreadyExistsException",
     "CustomOperatorInvalidDataException",
     "CustomOperatorNotFoundException",
+    "CustomOperatorUploadForbiddenException",
+    "CustomOperatorsDisabledException",
     "DatabaseMigrationException",
     "DependencyError",
     "DocpipeException",

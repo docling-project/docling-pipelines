@@ -1,15 +1,17 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
+"""Validate source configuration and ingest documents through provider adapters."""
+
 import asyncio
 import hashlib
 import importlib
 import itertools
 import json
 import pathlib
-from typing import Any, Iterator, cast
+from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import pyarrow as pa
-
-# Import standard LangChain loaders
-from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 
 from docpipe.core.constants.constants import (
@@ -18,6 +20,7 @@ from docpipe.core.constants.constants import (
     Metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.event_streaming.models import InputEvent
 from docpipe.core.incremental_metadata import get_incremental_update_service
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.ingest.ingest_utils import (
@@ -25,8 +28,15 @@ from docpipe.core.operators.ingest.ingest_utils import (
     is_doc_previously_processed,
 )
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
+
+if TYPE_CHECKING:
+    # Runtime import is intentionally avoided: langchain_core.document_loaders transitively imports
+    # langchain_text_splitters, which eagerly loads torch/transformers/spacy/nltk (several seconds).
+    from langchain_core.document_loaders import BaseLoader
 
 # Microsoft Graph API Constants
 MICROSOFT_LOGIN_URL = "https://login.microsoftonline.com"
@@ -35,13 +45,16 @@ MICROSOFT_GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 MICROSOFT_OAUTH_TOKEN_PATH = "/oauth2/v2.0/token"  # nosec B105 - URL path segment, not a credential
 
 
-class MicrosoftGraphLoader(BaseLoader):
+class MicrosoftGraphLoader:
     """
-    Custom LangChain-compatible loader for Microsoft SharePoint and OneDrive
-    using the Microsoft Graph API with app-only (client credentials) authentication.
+    Duck-typed LangChain-compatible loader (``lazy_load`` / ``load``) for Microsoft SharePoint
+    and OneDrive using the Microsoft Graph API with app-only (client credentials) authentication.
 
     This bypasses LangChain's O365-based loaders which require delegated (user) auth
     and call /me/drives/ endpoints that are incompatible with app-only tokens.
+
+    It deliberately does not subclass ``langchain_core.document_loaders.BaseLoader``: importing
+    that module costs several seconds of unrelated ML-framework imports at operator-registry load.
     """
 
     def __init__(
@@ -196,12 +209,13 @@ class MicrosoftGraphLoader(BaseLoader):
             doc._binary_content = binary_content  # type: ignore[attr-defined]
             return doc
         except Exception as e:
-            logger.error("Failed to download file %s: %s", item.get("name", ""), e, exc_info=True)
+            safe_error = sanitize_exception(exc=e, config_key="ingest_source.provider_config")
+            logger.error("Failed to download file %s: %s", item.get("name", ""), safe_error)
             return Document(
                 page_content="",
                 metadata={
                     "source": item.get("name", ""),
-                    "error": str(e),
+                    "error": safe_error,
                     "drive_id": self.drive_id,
                     "item_id": item.get("id", ""),
                 },
@@ -232,7 +246,8 @@ class MicrosoftGraphLoader(BaseLoader):
                 )
                 folder_item_id = data.get("id")
             except Exception as e:
-                msg = f"Folder path '{self.folder_path}' not found in drive '{self.drive_id}': {e!s}"
+                safe_error = sanitize_exception(exc=e, config_key="ingest_source.provider_config")
+                msg = f"Folder path '{self.folder_path}' not found in drive '{self.drive_id}': {safe_error}"
                 raise ValueError(msg) from e
 
         files = self._list_files(folder_item_id=folder_item_id)
@@ -291,7 +306,7 @@ class IngestSourceOperator(AbstractOperator):
     category: OperatorCategory = OperatorCategory.Ingest
     owner = DocpipeConstants.OWNER_DOCPIPE
 
-    def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
+    def validate(self, *, errors: list[Any], warnings: list[str], available_features: list[str]) -> None:
         """
         Validate operator configuration including adapter-specific requirements.
 
@@ -307,25 +322,24 @@ class IngestSourceOperator(AbstractOperator):
         # Call parent validation for required features
         super().validate(errors=errors, warnings=warnings, available_features=available_features)
 
-        # Validate adapter configuration for adapter-managed providers.
-        # Skip when provider_config contains vault references — either still a
-        # vault:// string (execution path) or already replaced with the
-        # {"__vault_mock__": True} sentinel by the flow validator sanitizer.
-        # In both cases the real values are unavailable here and will be
-        # resolved at execution time.
-        from docpipe.integrations.secrets.secret_provider import is_vault_reference
+        if not self.provider:
+            errors.append(
+                ValidationMessage(
+                    message=ValidationCodeMessages.INGEST_PROVIDER_MISSING.value,
+                    message_code=ValidationCodeMessages.INGEST_PROVIDER_MISSING.name,
+                )
+            )
+            return
 
-        provider_config_has_vault = any(
-            is_vault_reference(v) for v in self.provider_config.values() if isinstance(v, str)
-        ) or self.provider_config.get("__vault_mock__")
-        if self.provider in ADAPTER_MANAGED_PROVIDERS and not provider_config_has_vault:
+        # Validate adapter configuration for adapter-managed providers.
+        if self.provider in ADAPTER_MANAGED_PROVIDERS:
             try:
                 # Attempt to build adapter config to trigger Pydantic validation
                 # This will catch missing required fields like secret_key
                 _, _ = self._build_adapter_config(self.provider)
             except Exception as e:
                 # Extract meaningful error message from Pydantic validation errors
-                error_msg = str(e)
+                error_msg = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
                 # Format Pydantic validation errors more clearly
                 if "validation error" in error_msg.lower():
                     # Extract field-specific errors from Pydantic
@@ -347,7 +361,11 @@ class IngestSourceOperator(AbstractOperator):
         - force_ingest: Force re-ingestion of previously processed documents
         """
         super().__init__(config)
-        self.provider: str = config.get(PROVIDER_KEY, "").lower()
+        provider = config.get(PROVIDER_KEY)
+        if provider is not None and not isinstance(provider, str):
+            msg = "Provider must be a string."
+            raise ValueError(msg)
+        self.provider: str = provider.strip().lower() if provider is not None else ""
         self.max_files: int = config.get(MAX_FILES_KEY, MAX_FILES_DEFAULT_VALUE)
         self.provider_config: dict[str, Any] = dict(config.get(PROVIDER_CONFIG_KEY) or {})
 
@@ -358,6 +376,8 @@ class IngestSourceOperator(AbstractOperator):
         self.supported_extensions: list[str] = [
             f".{ext}" if not ext.startswith(".") else ext for ext in supported_extensions_str.split(",")
         ]
+        if self.provider == "filesystem":
+            self.supported_extensions.extend(OperatorConstants.FileExtensions.ARCHIVE_EXTENSIONS)
 
         # Parse and validate included/excluded extensions
         self.included_extensions: list[str] | None = get_filter_extensions(config.get(INCLUDE_FILTER_KEY))
@@ -380,6 +400,12 @@ class IngestSourceOperator(AbstractOperator):
 
         # Validate extensions
         self._validate_extensions()
+
+        self.input_event: InputEvent | None = None
+        input_event = config.get("input_event")
+        if input_event is not None:
+            self.input_event = InputEvent.model_validate(input_event)
+            self.force_ingest = True
 
     def _validate_extensions(self) -> None:
         """
@@ -418,6 +444,9 @@ class IngestSourceOperator(AbstractOperator):
         Returns:
             Tuple of (list of output tables, metadata dictionary)
         """
+
+        if not self.provider:
+            raise ValueError(ValidationCodeMessages.INGEST_PROVIDER_MISSING.value)
 
         incremental_service = get_incremental_update_service()
         job_id_for_tracking: str = self.context_id or self.job_id or ""
@@ -568,12 +597,15 @@ class IngestSourceOperator(AbstractOperator):
             )
 
         except Exception as e:
-            logger.error("Error loading documents from %s: %s", self.provider, e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error(
+                "Error loading documents from %s: %s", self.provider, safe_error, extra=self.common_log_arguments
+            )
             self.record_failed_document(
                 metadata=metadata,
                 doc_id="loader_error",
                 doc_name=self.provider,
-                reason=f"Failed to load documents: {e!s}",
+                reason=f"Failed to load documents: {safe_error}",
             )
 
         return doc_data
@@ -713,6 +745,12 @@ class IngestSourceOperator(AbstractOperator):
             max_files=self.max_files,
         )
 
+        if self.input_event is not None:
+            # Bind after environment resolution, then validate without rebuilding provider settings.
+            event_config = config.model_dump()
+            adapter.bind_file_reference(provider_config=event_config, file_reference=self.input_event.file_reference)
+            config = type(config).model_validate(event_config)
+
         # Return both adapter and config to avoid creating adapter twice
         return adapter, config
 
@@ -814,12 +852,13 @@ class IngestSourceOperator(AbstractOperator):
             return processed_doc
 
         except Exception as e:
-            logger.error("Error processing document %s: %s", idx, e, extra=self.common_log_arguments)
+            safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            logger.error("Error processing document %s: %s", idx, safe_error, extra=self.common_log_arguments)
             self.record_failed_document(
                 metadata=metadata,
                 doc_id=str(idx),
                 doc_name=doc.metadata.get("source", f"unknown_{idx}"),
-                reason=f"Processing error: {e!s}",
+                reason=f"Processing error: {safe_error}",
             )
             return None
 
@@ -835,7 +874,7 @@ class IngestSourceOperator(AbstractOperator):
         path_parts: list[str] = key.split("/")
         return any(part.startswith(".") and part not in [".", ".."] for part in path_parts)
 
-    def _get_loader(self) -> BaseLoader:
+    def _get_loader(self) -> "BaseLoader":
         """
         Factory method to initialize the correct LangChain loader.
 
@@ -898,6 +937,35 @@ class IngestSourceOperator(AbstractOperator):
             "dropbox": OperatorUtils.model_schema_to_docpipe(schema=DropboxSourceConfig.model_json_schema()),
             "web": OperatorUtils.model_schema_to_docpipe(schema=WebPageSourceConfig.model_json_schema()),
         }
+
+    @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each source adapter config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import BoxSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.config import DropboxSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.filesystem.config import FilesystemSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.google_drive.config import GoogleDriveSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.onedrive.config import OneDriveSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.sharepoint.config import SharePointSourceConfig
+        from docpipe.core.operators.ingest.adapters.outbound.sources.web.config import WebPageSourceConfig
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        return build_provider_secret_fields(
+            selector=PROVIDER_KEY,
+            prefix=PROVIDER_CONFIG_KEY,
+            classes={
+                "filesystem": FilesystemSourceConfig,
+                "s3": S3SourceConfig,
+                "ibm_cos": S3SourceConfig,
+                "google_drive": GoogleDriveSourceConfig,
+                "onedrive": OneDriveSourceConfig,
+                "sharepoint": SharePointSourceConfig,
+                "box_driver": BoxSourceConfig,
+                "dropbox": DropboxSourceConfig,
+                "web": WebPageSourceConfig,
+            },
+        )
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:
@@ -970,6 +1038,8 @@ class IngestSourceOperator(AbstractOperator):
         }
 
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": IngestSourceOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: IngestSourceOperator.category.value,
             OperatorConstants.Misc.LABEL: "Remote Source Ingest",

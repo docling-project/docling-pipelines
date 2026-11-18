@@ -18,13 +18,6 @@ export type ReadabilityAttributeKey =
   typeof READABILITY_ATTRIBUTE[keyof typeof READABILITY_ATTRIBUTE];
 
 /**
- * Human-readable labels for every field in the Readability panel.
- */
-export const READABILITY_LABELS = {
-  SCORE_LIST: 'Readability scores',
-} as const;
-
-/**
  * All valid readability score identifiers.
  * These match the live operator metadata `attributes.readability_score_list.default`
  * and are used as the static fallback when metadata is not yet loaded.
@@ -46,7 +39,8 @@ export const READABILITY_SCORE_OPTIONS = [
 ] as const;
 
 /**
- * Maps score identifiers to their human-readable display names.
+ * Maps score identifiers to their display names. These are named readability
+ * tests and are intentionally not translated.
  */
 export const READABILITY_SCORE_LABELS: Record<string, string> = {
   flesch_ease_textstat: 'Flesch Reading Ease',

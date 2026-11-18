@@ -14,6 +14,8 @@ def mock_llm_adapter():
     adapter = Mock()
     adapter.generate_embeddings_batch.return_value = [[0.1] * 384, [0.2] * 384, [0.3] * 384]
     adapter.get_embedding_dimension.return_value = 384
+    adapter.get_embedding_batch_size.return_value = 32
+    adapter.get_max_concurrent_requests.return_value = 1
     adapter.validate.return_value = {"valid": True, "errors": [], "warnings": []}
     return adapter
 

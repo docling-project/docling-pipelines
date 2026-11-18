@@ -116,7 +116,7 @@ class TestJWTTokenVerification:
             "username": "testuser",
             "exp": datetime.now(UTC) - timedelta(minutes=1),
         }
-        from jose import jwt
+        import jwt
 
         expired_token = jwt.encode(token_data, jwt_config.jwt_secret_key, algorithm=jwt_config.jwt_algorithm)
 
@@ -127,7 +127,7 @@ class TestJWTTokenVerification:
     def test_verify_token_without_username_returns_none(self, *, jwt_config: JWTConfig):
         """Test that verify_token returns None for tokens missing username."""
         token_data = {"email": "test@example.com"}  # Missing username
-        from jose import jwt
+        import jwt
 
         token = jwt.encode(token_data, jwt_config.jwt_secret_key, algorithm=jwt_config.jwt_algorithm)
 

@@ -21,28 +21,14 @@ export const CELL_VALUE_FLOAT_DECIMALS = 4;
 /** Float values above this magnitude are shown as integers (no decimal places). */
 export const CELL_VALUE_FLOAT_THRESHOLD = 1000;
 
-/** Default node status text shown when no node stat exists. */
+/**
+ * Status key used when no node stat exists. Drives the status CSS class and icon
+ * lookup in NodeSummary; the displayed label comes from NodeSummary.messages.ts.
+ */
 export const DEFAULT_NODE_STATUS = 'Not Started';
 
 /** Fallback text shown for execution time when no node stat exists. */
 export const DEFAULT_EXECUTION_TIME = 'N/A';
-
-/** Column headers for the NodeSummary metadata DataTable. */
-export const METADATA_TABLE_HEADERS = [
-  { key: 'name', header: 'Name' },
-  { key: 'value', header: 'Value' },
-];
-
-// ── RunSidePanel tab labels ───────────────────────────────────────────────────
-
-/** Label for the Log Details tab. */
-export const TAB_LABEL_LOG_DETAILS = 'Log Details';
-
-/** Label for the Node Summary tab. */
-export const TAB_LABEL_NODE_SUMMARY = 'Node Summary';
-
-/** Placeholder shown in Node Summary tab when no node is selected. */
-export const NODE_SUMMARY_EMPTY_TEXT = 'Select a node to view details';
 
 // ── RunSidePanel log download ─────────────────────────────────────────────────
 

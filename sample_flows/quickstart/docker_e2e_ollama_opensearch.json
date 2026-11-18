@@ -5,6 +5,7 @@
     "doc_column": "content",
     "disable_validation": false,
     "force_ingest": true,
+    "data_storage_type": "local",
     "storage": "in-memory",
     "execute_type": "local",
     "enable_micro_batching": false
@@ -76,9 +77,6 @@
       "config": {
         "provider": "opensearch",
         "doc_id_column": "doc_id_hash",
-        "embeddings_column": "embeddings",
-        "vector_dimension": 768,
-        "create_index": true,
         "provider_config": {
           "index_name": "docker-e2e-documents",
           "host": "opensearch",

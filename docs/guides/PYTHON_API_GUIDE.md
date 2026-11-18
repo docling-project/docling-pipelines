@@ -193,7 +193,6 @@ def build_flow_definition(input_folder: str, index_name: str) -> dict:
                     "doc_id_column": "doc_id_hash",
                     "embeddings_column": "embeddings",
                     "vector_dimension": 768,
-                    "create_index": True,
                     "provider_config": {
                         "index_name": index_name,
                         "host": "localhost",
@@ -289,7 +288,7 @@ uv pip install jupyter
 
 **Step 2: Start Jupyter Notebook Server**
 
-Note: Provide the full path instead of relative path here - https://github.com/IBM/docling-pipelines/blob/main/sample_flows/quickstart/complete_pipeline_ollama.json
+Note: Provide the full path instead of relative path here - https://github.com/docling-project/docling-pipelines/blob/main/sample_flows/quickstart/complete_pipeline_ollama.json
 
 From the project root directory:
 

@@ -1,6 +1,5 @@
 """OAuth2 authentication routes."""
 
-import logging
 import secrets
 import threading
 import time
@@ -11,13 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.responses import RedirectResponse
 
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.logging import get_logger
 
 from .jwt_handler import JWTClaims, JWTConfig, create_access_token
 from .models import TokenResponse
 from .oauth2_config import OAuth2Config, get_oauth2_config
 from .oauth2_provider import OAuth2Provider, get_oauth2_provider
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth/oauth2", tags=["oauth2"])
 

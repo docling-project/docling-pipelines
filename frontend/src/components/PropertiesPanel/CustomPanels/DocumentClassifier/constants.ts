@@ -31,29 +31,3 @@ export const DOCUMENT_CLASSIFIER_ATTRIBUTE = {
  */
 export type DocumentClassifierAttributeKey =
   typeof DOCUMENT_CLASSIFIER_ATTRIBUTE[keyof typeof DOCUMENT_CLASSIFIER_ATTRIBUTE];
-
-/**
- * Human-readable labels for every field in the Document Classifier panel.
- *
- * Used as:
- * - The child of `DefinitionTooltip` (inline label text)
- * - The `labelText` / `label` prop on Carbon inputs (with `hideLabel` to avoid duplication)
- */
-export const DOCUMENT_CLASSIFIER_LABELS = {
-  PROVIDER: 'Provider',
-  PROVIDER_CONFIG: 'Provider config (JSON)',
-  DOCUMENT_TYPES: 'Document types',
-  CONFIDENCE_THRESHOLD: 'Confidence threshold (1\u201310)',
-  OUTPUT_COLUMN: 'Output column',
-  INCLUDE_CONFIDENCE: 'Include confidence score',
-  INCLUDE_REASONING: 'Include reasoning',
-  DOC_COLUMN: 'Document content column',
-} as const;
-
-/** Description shown at the top of the Provider configuration accordion item. */
-export const PROVIDER_CONFIG_DESCRIPTION = 'Select the LLM provider used for classification and configure its connection settings.';
-
-/** Description shown at the top of the Classification configuration accordion item. */
-export const CLASSIFICATION_CONFIG_DESCRIPTION =
-  'Define the document types the model can classify into and set the minimum confidence '
-  + 'score required to accept a result.';

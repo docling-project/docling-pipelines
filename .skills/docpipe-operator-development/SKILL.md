@@ -24,6 +24,8 @@ Use `.skills/docpipe-custom-operator/SKILL.md` when a consumer supplies the oper
 
 ## Inspect before implementing
 
+If modifying an operator that already has a spec under `openspec/specs/backend/` (for example `ededup-operator`), read that spec first and follow the OpenSpec change workflow described in `AGENTS.md` before writing code.
+
 Read:
 
 - `src/docpipe/core/operators/abstract_operator.py`;

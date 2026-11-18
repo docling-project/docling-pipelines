@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service that bridges execution context to OpenLineage events."""
 
 import traceback
@@ -10,7 +13,7 @@ from docpipe.core.lineage.domain.models.event_type import LineageEventType
 from docpipe.core.lineage.domain.models.job import LineageJob
 from docpipe.core.lineage.domain.models.run import LineageRun
 from docpipe.core.lineage.domain.ports.lineage_publisher import LineagePublisherPort
-from docpipe.core.lineage.utils import _CREDENTIALS_KEYS, LineageUtils
+from docpipe.core.lineage.utils import LineageUtils
 from docpipe.core.orchestration.models.execution_event_context import (
     FlowAbortContext,
     FlowCompleteContext,
@@ -23,6 +26,7 @@ from docpipe.core.orchestration.models.execution_event_context import (
     NodeStartContext,
     NodeTableSummary,
 )
+from docpipe.integrations.secrets.registry import scrub, scrub_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -90,10 +94,12 @@ class LineageService:
         inputs = []
         if context.ingested_table is not None:
             dataset_name = context.ingest_source_name or context.ingest_node_id or "ingest"
+            namespace = context.ingest_source_namespace or self._namespace
             inputs = [
                 self._build_dataset_from_summary(
                     summary=NodeTableSummary.from_table(context.ingested_table),
                     name=dataset_name,
+                    namespace=namespace,
                 )
             ]
         self._publish(event_type=LineageEventType.RUNNING, run=run, job=job, inputs=inputs)
@@ -118,15 +124,25 @@ class LineageService:
             status=context.status,
             facets=run_facets,
         )
-        base_name = context.ingest_dataset_name or context.flow_name or "output"
-        outputs = [
-            self._build_dataset_from_summary(
-                summary=NodeTableSummary.from_table(t),
-                name=f"{base_name}/output_{i}",
-            )
-            for i, t in enumerate(context.output_tables)
-            if t is not None
-        ]
+        outputs = []
+        if context.sink_datasets:
+            # Each sink carries the summary of its own output, so branching flows with
+            # different sink schemas report the right facets for every sink.
+            outputs = [
+                self._build_dataset_from_summary(summary=sink.summary, name=sink.name, namespace=sink.namespace)
+                for sink in context.sink_datasets
+            ]
+        else:
+            base_name = context.flow_name or "output"
+            outputs = [
+                self._build_dataset_from_summary(
+                    summary=NodeTableSummary.from_table(t),
+                    name=f"{base_name}/output_{i}" if len(context.output_tables) > 1 else f"{base_name}/output",
+                    namespace=LineageConstants.NAMESPACE_INMEMORY,
+                )
+                for i, t in enumerate(context.output_tables)
+                if t is not None
+            ]
         self._publish(event_type=LineageEventType.COMPLETE, run=run, job=job, outputs=outputs)
 
     def emit_flow_fail(self, *, context: FlowFailContext) -> None:
@@ -169,19 +185,23 @@ class LineageService:
         )
         inputs = []
         if context.input_summary is not None:
-            # Ingest nodes carry their source path as the input dataset name
-            # (e.g. filesystem://./tests/fixtures/customer_support_docs) so the
-            # Marquez graph shows where data originates.  All other nodes use the
-            # predecessor's output dataset name to stitch the chain together.
             if context.ingest_source_dataset_name:
                 input_name = context.ingest_source_dataset_name
+                namespace = context.ingest_source_dataset_namespace or self._namespace
             else:
                 input_name = self._build_node_input_dataset_name(
                     flow_name=context.flow_name,
                     predecessor_node_ids=context.predecessor_node_ids,
                     node_name=context.node_name,
                 )
-            inputs = [self._build_dataset_from_summary(summary=context.input_summary, name=input_name)]
+                namespace = LineageConstants.NAMESPACE_INMEMORY
+            inputs = [
+                self._build_dataset_from_summary(
+                    summary=context.input_summary,
+                    name=input_name,
+                    namespace=namespace,
+                )
+            ]
         self._publish(event_type=LineageEventType.START, run=run, job=job, inputs=inputs)
 
     def emit_node_complete(self, *, context: NodeCompleteContext) -> None:
@@ -196,20 +216,38 @@ class LineageService:
                     flow_name=context.flow_name,
                     job_run_id=context.job_run_id,
                 ),
-                **self._build_node_stats_facet(metadata=context.metadata),
+                **self._build_node_stats_facet(
+                    metadata=context.metadata, secret_field_names=context.secret_field_names
+                ),
             },
         )
-        outputs = [
-            self._build_dataset_from_summary(
-                summary=s,
-                name=self._build_node_output_dataset_name(
-                    flow_name=context.flow_name,
-                    node_name=context.node_name,
-                    index=i,
-                ),
+        outputs = []
+        if context.sink_dataset_name:
+            sink_ns = context.sink_dataset_namespace or self._namespace
+            for i, s in enumerate(context.output_summaries):
+                name = context.sink_dataset_name if i == 0 else f"{context.sink_dataset_name}_{i}"
+                outputs.append(
+                    self._build_dataset_from_summary(
+                        summary=s,
+                        name=name,
+                        namespace=sink_ns,
+                    )
+                )
+        # A sink with downstream operators passes its table onward. The downstream node's START input is
+        # the in-memory dataset named after this node, so it must also be emitted here or the edge is lost.
+        if not context.sink_dataset_name or context.has_downstream:
+            outputs.extend(
+                self._build_dataset_from_summary(
+                    summary=s,
+                    name=self._build_node_output_dataset_name(
+                        flow_name=context.flow_name,
+                        node_name=context.node_name,
+                        index=i,
+                    ),
+                    namespace=LineageConstants.NAMESPACE_INMEMORY,
+                )
+                for i, s in enumerate(context.output_summaries)
             )
-            for i, s in enumerate(context.output_summaries)
-        ]
         self._publish(event_type=LineageEventType.COMPLETE, run=run, job=job, outputs=outputs)
 
     def emit_node_fail(self, *, context: NodeFailContext) -> None:
@@ -237,7 +275,13 @@ class LineageService:
                 predecessor_node_ids=context.predecessor_node_ids,
                 node_name=context.node_name,
             )
-            inputs = [self._build_dataset_from_summary(summary=context.input_summary, name=input_name)]
+            inputs = [
+                self._build_dataset_from_summary(
+                    summary=context.input_summary,
+                    name=input_name,
+                    namespace=LineageConstants.NAMESPACE_INMEMORY,
+                )
+            ]
         self._publish(event_type=LineageEventType.FAIL, run=run, job=job, inputs=inputs)
 
     def emit_node_skip(self, *, context: NodeSkipContext) -> None:
@@ -273,6 +317,13 @@ class LineageService:
         inputs: list[LineageDataset] | None = None,
         outputs: list[LineageDataset] | None = None,
     ) -> None:
+        run.facets = scrub_value(run.facets)
+        job.facets = scrub_value(job.facets)
+        job.name = scrub(job.name)
+        for dataset in (*(inputs or ()), *(outputs or ())):
+            dataset.facets = scrub_value(dataset.facets)
+            dataset.name = scrub(dataset.name)
+            dataset.namespace = scrub(dataset.namespace)
         self._publisher.publish(event_type=event_type, run=run, job=job, inputs=inputs, outputs=outputs)
 
     def _build_flow_job(
@@ -356,10 +407,16 @@ class LineageService:
             return f"{flow_name}/{node_name}/output"
         return f"{flow_name}/{node_name}/output_{index}"
 
-    def _build_dataset_from_summary(self, *, summary: NodeTableSummary, name: str) -> LineageDataset:
+    def _build_dataset_from_summary(
+        self,
+        *,
+        summary: NodeTableSummary,
+        name: str,
+        namespace: str | None = None,
+    ) -> LineageDataset:
         """Build a dataset from a lightweight NodeTableSummary (no live Arrow data required)."""
         return LineageDataset(
-            namespace=self._namespace,
+            namespace=namespace or self._namespace,
             name=name,
             facets={
                 "schema": {
@@ -400,7 +457,9 @@ class LineageService:
             }
         }
 
-    def _build_node_stats_facet(self, *, metadata: dict[str, Any]) -> dict[str, Any]:
+    def _build_node_stats_facet(
+        self, *, metadata: dict[str, Any], secret_field_names: frozenset[str] = frozenset()
+    ) -> dict[str, Any]:
         """Build a ``docpipeStats`` run facet from an operator's output metadata dict.
 
         Includes all scalar (int, float, str, bool) values from the metadata that
@@ -408,6 +467,9 @@ class LineageService:
         both universal metrics (processedDocs, nodeStatus) and operator-specific
         ones (totalChunks, docsBeforeFilter, chunksIndexedSuccessfully, etc.)
         without any operator needing to know lineage exists.
+
+        A key is dropped when :meth:`LineageUtils.is_secret_statistic_key` says so: declared by the node's
+        operator as secret-capable, or on the fixed credential list.
         """
         if not metadata:
             return {}
@@ -417,7 +479,7 @@ class LineageService:
             if key in _INTERNAL_LINEAGE_KEYS:
                 continue
             # Skip credential keys — operator metadata must not leak secrets.
-            if key.lower() in _CREDENTIALS_KEYS:
+            if LineageUtils.is_secret_statistic_key(key=key, secret_field_names=secret_field_names):
                 continue
             # Only include scalar values — skip tables, lists, nested dicts.
             if not isinstance(value, (int, float, str, bool)):

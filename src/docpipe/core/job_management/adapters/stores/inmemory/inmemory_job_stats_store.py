@@ -114,9 +114,9 @@ class InMemoryJobStatsStore(JobStatsStore):
             try:
                 # Deep copy to prevent external mutations
                 self._job_stats[job_run_id] = deepcopy(job_stats)
-                logger.debug(f"Stored job stats: job_run_id={job_run_id}")
+                logger.debug("Stored job stats: job_run_id=%s", job_run_id)
             except Exception as e:
-                logger.error(f"Failed to store job stats: {e}")
+                logger.error("Failed to store job stats: %s", e)
                 raise JobStatsStoreWriteException(
                     message=f"Failed to store job stats: {e}", job_run_id=job_run_id, operation="store_job_stats"
                 ) from e
@@ -161,9 +161,9 @@ class InMemoryJobStatsStore(JobStatsStore):
                 # Store in nested structure (None is valid key for non-batch records)
                 self._node_stats[job_run_id][node_id][batch_id] = deepcopy(node_stats)
 
-                logger.debug(f"Stored node stats: job_run_id={job_run_id}, node_id={node_id}, batch_id={batch_id}")
+                logger.debug("Stored node stats: job_run_id=%s, node_id=%s, batch_id=%s", job_run_id, node_id, batch_id)
             except Exception as e:
-                logger.error(f"Failed to store node stats: {e}")
+                logger.error("Failed to store node stats: %s", e)
                 raise JobStatsStoreWriteException(
                     message=f"Failed to store node stats: {e}", job_run_id=job_run_id, operation="store_node_stats"
                 ) from e
@@ -195,7 +195,7 @@ class InMemoryJobStatsStore(JobStatsStore):
                     # Deep copy to prevent external mutations
                     result.append(deepcopy(node_stats))
 
-            logger.debug(f"Retrieved {len(result)} node stats records: job_run_id={job_run_id}")
+            logger.debug("Retrieved %s node stats records: job_run_id=%s", len(result), job_run_id)
             return result
 
     def get_batch_node_stats(self, *, job_run_id: str) -> dict[str, dict[str, NodeStats]]:
@@ -229,7 +229,7 @@ class InMemoryJobStatsStore(JobStatsStore):
                 if batch_dict:  # Only include nodes with batch records
                     result[node_id] = batch_dict
 
-            logger.debug(f"Retrieved batch node stats: job_run_id={job_run_id}, nodes={len(result)}")
+            logger.debug("Retrieved batch node stats: job_run_id=%s, nodes=%s", job_run_id, len(result))
             return result
 
     def get_failed_docs_for_batch(self, *, job_run_id: str, batch_id: str) -> list[str]:
@@ -271,9 +271,9 @@ class InMemoryJobStatsStore(JobStatsStore):
                     # Store in nested structure
                     self._node_stats[job_run_id][node_id][batch_id] = deepcopy(node_stats)
 
-                logger.debug(f"Bulk stored {len(node_stats_list)} node stats: job_run_id={job_run_id}")
+                logger.debug("Bulk stored %s node stats: job_run_id=%s", len(node_stats_list), job_run_id)
             except Exception as e:
-                logger.error(f"Failed to bulk store node stats: {e}")
+                logger.error("Failed to bulk store node stats: %s", e)
                 raise JobStatsStoreWriteException(
                     message=f"Failed to bulk store node stats: {e}",
                     job_run_id=job_run_id,
@@ -313,7 +313,7 @@ class InMemoryJobStatsStore(JobStatsStore):
         with lock:
             job_stats = self._job_stats.get(job_run_id)
             if not job_stats:
-                logger.warning(f"Job stats not found for atomic update: {job_run_id}")
+                logger.warning("Job stats not found for atomic update: %s", job_run_id)
                 return
 
             # CRITICAL: Deep copy before mutation to maintain immutability
@@ -342,7 +342,7 @@ class InMemoryJobStatsStore(JobStatsStore):
             # Atomic replacement of stored object
             self._job_stats[job_run_id] = job_stats
 
-            logger.debug(f"Atomic update applied: job_run_id={job_run_id}")
+            logger.debug("Atomic update applied: job_run_id=%s", job_run_id)
 
     def get_node_stats_by_batch_and_node(
         self, job_run_id: str, node_id: str, batch_id: str | None = None
@@ -385,27 +385,15 @@ class InMemoryJobStatsStore(JobStatsStore):
             if job_run_id not in self._job_stats:
                 raise JobStatsStoreDeleteException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
-            try:
-                # Delete job stats
-                del self._job_stats[job_run_id]
+            # Plain dict deletes of keys checked under the same lock cannot fail
+            del self._job_stats[job_run_id]
+            self._node_stats.pop(job_run_id, None)
 
-                # Delete all associated node stats
-                if job_run_id in self._node_stats:
-                    del self._node_stats[job_run_id]
+            # Clean up lock (prevents memory leak)
+            with self._global_lock:
+                self._job_locks.pop(job_run_id, None)
 
-                # Clean up lock (optional, prevents memory leak)
-                with self._global_lock:
-                    if job_run_id in self._job_locks:
-                        del self._job_locks[job_run_id]
-
-                logger.info(f"Deleted job stats: job_run_id={job_run_id}")
-            except JobStatsStoreDeleteException:
-                raise
-            except Exception as e:
-                logger.error(f"Failed to delete job stats: {e}")
-                raise JobStatsStoreDeleteException(
-                    message=f"Failed to delete job stats: {e}", job_run_id=job_run_id
-                ) from e
+            logger.info("Deleted job stats: job_run_id=%s", job_run_id)
 
     def clear(self) -> None:
         """
@@ -430,6 +418,22 @@ class InMemoryJobStatsStore(JobStatsStore):
         """
         with self._global_lock:
             return list(self._job_stats.keys())
+
+    @staticmethod
+    def _matches_job_run_filters(
+        job_stats: JobStats,
+        *,
+        job_id: str | None,
+        job_ids_set: set[str] | None,
+        status: ExecutionStatus | str | None,
+    ) -> bool:
+        if job_id and job_stats.job_id != job_id:
+            return False
+        if job_ids_set and job_stats.job_id not in job_ids_set:
+            return False
+        if status and job_stats.status != status:
+            return False
+        return True
 
     def list_job_runs(
         self,
@@ -458,12 +462,7 @@ class InMemoryJobStatsStore(JobStatsStore):
             result = []
 
             for job_stats in self._job_stats.values():
-                # Apply filters
-                if job_id and job_stats.job_id != job_id:
-                    continue
-                if job_ids_set and job_stats.job_id not in job_ids_set:
-                    continue
-                if status and job_stats.status != status:
+                if not self._matches_job_run_filters(job_stats, job_id=job_id, job_ids_set=job_ids_set, status=status):
                     continue
 
                 # Deep copy to prevent external mutations
@@ -474,3 +473,30 @@ class InMemoryJobStatsStore(JobStatsStore):
 
             # Apply limit
             return result[:limit]
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+        """
+        job_ids_set = set(job_ids) if job_ids else None
+
+        with self._global_lock:
+            return sum(
+                1
+                for job_stats in self._job_stats.values()
+                if self._matches_job_run_filters(job_stats, job_id=job_id, job_ids_set=job_ids_set, status=status)
+            )

@@ -167,7 +167,6 @@ def opensearch_config(opensearch_container):
         OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
         OperatorConstants.Columns.EMBEDDINGS_COLUMN: "embeddings",
         OperatorConstants.VectorDB.VECTOR_DIMENSION: 384,
-        OperatorConstants.VectorDB.CREATE_INDEX: True,
         OperatorConstants.Config.AVAILABLE_FEATURES: {
             "doc_id_hash": {
                 "name": "Document ID",
@@ -305,7 +304,7 @@ class TestOpenSearchWithDockerCompose:
         """Test checking if index exists"""
         operator = VectorDBOperator(opensearch_config)
 
-        # Index should exist after operator initialization (if create_index=True)
+        # Index should exist after operator initialization
         # We can verify by checking document count (will return 0 if index exists)
         count = operator.get_document_count()
         assert count >= 0  # Index exists if we can get a count

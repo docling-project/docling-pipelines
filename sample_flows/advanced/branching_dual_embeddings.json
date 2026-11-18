@@ -136,7 +136,6 @@
         "provider": "opensearch",
         "index_name": "dual-embeddings-index",
         "doc_id_column": "doc_id_hash",
-        "create_index": true,
         "provider_config": {
           "host": "localhost",
           "port": 9200,

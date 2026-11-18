@@ -1726,6 +1726,24 @@ class TestBuildDocToBatchMappingBatchPath:
 class TestReadParquetFile:
     """Lines 774-822 — _read_parquet_file file-not-found and error paths."""
 
+    @pytest.mark.parametrize("batch_num", [None, 0])
+    def test_reads_parquet_from_configured_data_path(self, *, tmp_path, monkeypatch, batch_num):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        monkeypatch.setenv("DOCPIPE_DATA_PATH", str(tmp_path))
+        job_stats = JobStats(job_id="j1", job_run_id="r1", status=ExecutionStatus.COMPLETED, node_stats={})
+        dag_nodes = [{"id": INGEST_NODE_ID, "name": "ingest-local", "input_edges": []}]
+        generator = JobReportGenerator(job_stats=job_stats, dag_nodes=dag_nodes)
+        output_dir = tmp_path / "j1" / "r1" / "data" / "ingest_local_0"
+        if batch_num is not None:
+            output_dir /= str(batch_num)
+        output_dir.mkdir(parents=True)
+        document = {"id": "doc-1", "name": "invoice.pdf", "modified_time": "2026-10-08"}
+        pq.write_table(pa.Table.from_pylist([document]), output_dir / "output.parquet")
+
+        assert generator._read_parquet_file(INGEST_NODE_ID, batch_num=batch_num) == {"doc-1": document}
+
     def test_returns_empty_dict_when_parquet_file_not_found(self, tmp_path):
         """Returns {} when the expected parquet path does not exist."""
         job_stats = JobStats(job_id="j1", job_run_id="r1", status=ExecutionStatus.COMPLETED, node_stats={})

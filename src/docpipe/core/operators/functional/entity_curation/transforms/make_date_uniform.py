@@ -1,6 +1,7 @@
-import re
 from datetime import UTC, datetime
 from typing import Any
+
+import re2 as re
 
 
 def make_date_uniform(*, date_str: Any) -> str | None:

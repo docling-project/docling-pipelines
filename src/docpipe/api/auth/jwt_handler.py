@@ -1,14 +1,16 @@
 """JWT token handling module."""
 
-import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-logger = logging.getLogger(__name__)
+from docpipe.utils.infrastructure.logging import get_logger
+
+logger = get_logger(__name__)
 
 _JWT_SECRET_MIN_LENGTH = 32
 
@@ -76,14 +78,21 @@ def verify_token(token: str, config: JWTConfig) -> dict | None:
         Decoded token payload if valid, None otherwise
     """
     try:
-        payload: dict[str, Any] = jwt.decode(token, config.jwt_secret_key, algorithms=[config.jwt_algorithm])
+        # Every token issued by create_access_token carries "exp"; refuse tokens
+        # without it so a correctly-signed token can never be valid forever.
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            config.jwt_secret_key,
+            algorithms=[config.jwt_algorithm],
+            options={"require": ["exp"]},
+        )
         username: Any | None = payload.get(JWTClaims.USERNAME)
         if username is None:
             logger.warning("Token missing username claim")
             return None
         logger.debug("Token verified for user: %s", username)
         return payload
-    except JWTError as e:
+    except PyJWTError as e:
         logger.warning("JWT verification failed: %s", e)
         return None
     except Exception as e:

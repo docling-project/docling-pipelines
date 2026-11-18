@@ -1,6 +1,53 @@
 """Unit tests for IngestSourceOperator validation functionality."""
 
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
+from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
+
+
+@pytest.mark.parametrize("config", [{}, {"provider": None}, {"provider": ""}, {"provider": " \t\n "}])
+def test_missing_provider_returns_actionable_validation_error(config):
+    """Incomplete selections report a structured alert instead of constructor errors."""
+    operator = IngestSourceOperator(config)
+    errors: list[Any] = []
+    operator.validate(errors=errors, warnings=[], available_features=[])
+
+    assert errors == [
+        ValidationMessage(
+            message=ValidationCodeMessages.INGEST_PROVIDER_MISSING.value,
+            message_code="INGEST_PROVIDER_MISSING",
+        )
+    ]
+
+
+@pytest.mark.parametrize("config", [{}, {"provider": None}, {"provider": ""}, {"provider": " \t\n "}])
+def test_missing_provider_rejects_execution_before_storage_access(config):
+    """Execution still requires a provider when flow validation is bypassed."""
+    operator = IngestSourceOperator(config)
+    with patch("docpipe.core.operators.ingest.ingest_source.get_incremental_update_service") as storage:
+        with pytest.raises(ValueError, match="Provider not added"):
+            operator.transform(None)
+        storage.assert_not_called()
+
+
+def test_provider_normalization_preserves_valid_configuration():
+    """Provider selections remain case-insensitive and ignore surrounding whitespace."""
+    operator = IngestSourceOperator({"provider": "  FiLeSyStEm  ", "provider_config": {"paths": ["/tmp"]}})
+    errors: list[Any] = []
+    operator.validate(errors=errors, warnings=[], available_features=[])
+    assert operator.provider == "filesystem"
+    assert errors == []
+
+
+@pytest.mark.parametrize("provider", [123, False, [], {}])
+def test_non_string_provider_reports_clear_type_error(provider):
+    """Malformed values must not expose an AttributeError."""
+    with pytest.raises(ValueError, match="Provider must be a string"):
+        IngestSourceOperator({"provider": provider})
 
 
 class TestIngestSourceOperatorValidation:

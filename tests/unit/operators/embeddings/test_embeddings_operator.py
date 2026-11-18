@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Comprehensive unit tests for refactored EmbeddingsOperator using unified LLM adapters.
 
@@ -23,6 +26,7 @@ from docpipe.core.operators.functional.embeddings import EmbeddingsOperator
 from docpipe.core.operators.functional.embeddings.adapters.outbound.factories.llm_adapter_factory import (
     LLMAdapterFactory,
 )
+from docpipe.utils.operators.vectordb_utils import detect_vector_dimension
 
 
 # Test Fixtures
@@ -98,6 +102,8 @@ def mock_llm_adapter():
     adapter = Mock()
     adapter.generate_embeddings_batch.return_value = [[0.1] * 384, [0.2] * 384, [0.3] * 384]
     adapter.get_embedding_dimension.return_value = 384
+    adapter.get_embedding_batch_size.return_value = 32
+    adapter.get_max_concurrent_requests.return_value = 1
     adapter.validate.return_value = {"valid": True, "errors": [], "warnings": []}
     return adapter
 
@@ -814,6 +820,8 @@ class TestEmbeddingsErrorHandling:
     ):
         """Test per-document error tracking."""
         # Make second document fail
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -842,6 +850,8 @@ class TestEmbeddingsErrorHandling:
     ):
         """Test that processing continues after individual document failures."""
         # Make first document fail, others succeed
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -898,6 +908,8 @@ class TestEmbeddingsMetadataValidation:
     ):
         """Test metadata includes failed_docs count."""
         # Make one document fail
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -1005,6 +1017,8 @@ class TestEmbeddingsOperatorIntegration:
     def test_mixed_success_and_failure_documents(self, mock_factory, litellm_config, mock_llm_adapter):
         """Test processing with mix of successful and failed documents."""
         # Make every other document fail
+        # One text per request so each provider call carries exactly one document
+        mock_llm_adapter.get_embedding_batch_size.return_value = 1
         call_count = [0]
 
         def mock_batch_embeddings(texts):
@@ -1115,11 +1129,11 @@ class TestEmbeddingsOperatorDimAndCaching:
 
     @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
     def test_zero_vector_uses_model_dimension_not_hardcoded_384(self, mock_factory, litellm_config, mock_llm_adapter):
-        """Empty-text zero-vector inside _create_embeddings must use the model's actual output dimension.
+        """Empty-text zero-vector inside _embed_documents must use the model's actual output dimension.
 
         The zero-vector path is reached when a text entry is empty/whitespace inside the
-        text list passed to _create_embeddings (not at the document level).  We test
-        _create_embeddings directly so we can control which slot is empty.
+        text list passed to _embed_documents (not at the document level).  We test
+        _embed_documents directly so we can control which slot is empty.
         """
         mock_factory.return_value = mock_llm_adapter
 
@@ -1133,11 +1147,7 @@ class TestEmbeddingsOperatorDimAndCaching:
         operator._embedding_dim = model_dim
 
         # Pass two texts: one real, one whitespace-only (triggers the zero-vector branch)
-        result = operator._create_embeddings(
-            text=["Real content", "   "],
-            model_name=operator.model_id,
-            overlap_ratio=operator.overlap_ratio,
-        )
+        result = operator._embed_documents(texts_per_doc=[["Real content", "   "]])[0]
 
         assert len(result) == 2
         zero_vec = result[1]
@@ -1159,11 +1169,7 @@ class TestEmbeddingsOperatorDimAndCaching:
         assert operator._embedding_dim is None
 
         # All-whitespace list: every entry hits the zero-vector branch, nothing seeds _embedding_dim
-        result = operator._create_embeddings(
-            text=["   "],
-            model_name=operator.model_id,
-            overlap_ratio=operator.overlap_ratio,
-        )
+        result = operator._embed_documents(texts_per_doc=[["   "]])[0]
 
         assert len(result) == 1
         assert len(result[0]) == 384, "Should fall back to 384 when no model dimension is known yet"
@@ -1186,6 +1192,64 @@ class TestEmbeddingsProviderSchemas:
         schemas = EmbeddingsOperator._get_embeddings_provider_schemas()
         for name, schema in schemas.items():
             assert "properties" in schema, f"Schema for {name} missing 'properties'"
+
+    @pytest.mark.parametrize(
+        ("provider", "batch_size", "max_concurrent_requests"),
+        [("litellm", 32, 4), ("watsonx", 800, 1)],
+    )
+    def test_metadata_exposes_request_shaping_options(self, provider, batch_size, max_concurrent_requests):
+        providers = EmbeddingsOperator.get_metadata()["attributes"]["provider_config"]["providers"]
+        properties = providers[provider]["properties"]
+
+        assert properties["batch_size"]["default"] == batch_size
+        assert properties["batch_size"]["min_value"] == 1
+        assert properties["batch_size"]["type"] == "int64"
+        assert properties["max_concurrent_requests"]["default"] == max_concurrent_requests
+        assert properties["max_concurrent_requests"]["min_value"] == 1
+        assert properties["max_concurrent_requests"]["type"] == "int64"
+        assert "model_id" in properties
+
+    @pytest.mark.parametrize(
+        ("provider", "batch_size", "max_concurrent_requests"),
+        [("litellm", 32, 4), ("watsonx", 800, 1)],
+    )
+    def test_schema_defaults_match_factory_defaults(self, provider, batch_size, max_concurrent_requests):
+        from docpipe.core.adapters.llm_adapter_factory import LLMAdapterFactory
+
+        with (
+            patch("docpipe.core.adapters.litellm.litellm_adapter.LiteLLMLLMClient") as litellm_client,
+            patch("docpipe.core.adapters.watsonx.watsonx_adapter.WatsonXClient"),
+        ):
+            litellm_client.return_value.batch_size = 32
+            adapter = LLMAdapterFactory.create_embedding_adapter(
+                provider=provider, model_id="m", provider_config={"api_key": "k"}
+            )
+
+        assert adapter.get_embedding_batch_size() == batch_size
+        assert adapter.get_max_concurrent_requests() == max_concurrent_requests
+
+    def test_shared_inference_schemas_do_not_offer_embedding_options(self):
+        from docpipe.core.operators.shared.llm_provider_config import LLMProviderConfig, WatsonxProviderConfig
+
+        for config_cls in (LLMProviderConfig, WatsonxProviderConfig):
+            properties = config_cls.model_json_schema()["properties"]
+            assert "batch_size" not in properties
+            assert "max_concurrent_requests" not in properties
+
+    @pytest.mark.parametrize("bad_value", [0, -1])
+    def test_embedding_schemas_reject_non_positive_values(self, bad_value):
+        from pydantic import ValidationError
+
+        from docpipe.core.operators.shared.llm_provider_config import (
+            LLMEmbeddingProviderConfig,
+            WatsonxEmbeddingProviderConfig,
+        )
+
+        for config_cls in (LLMEmbeddingProviderConfig, WatsonxEmbeddingProviderConfig):
+            with pytest.raises(ValidationError):
+                config_cls(batch_size=bad_value)
+            with pytest.raises(ValidationError):
+                config_cls(max_concurrent_requests=bad_value)
 
 
 class TestEmbeddingsParseChunkedContent:
@@ -1293,6 +1357,132 @@ class TestEmbeddingsBuildChunkText:
         chunk = {"chunk": "Clean Content with <tag>"}
         result = EmbeddingsOperator._build_chunk_text_for_embedding(chunk=chunk)
         assert result == "Clean Content with <tag>"
+
+
+class TestEmbeddingsQuantization:
+    """Tests for EmbeddingsOperator binary quantization support."""
+
+    def test_quantize_vectors_to_binary_empty(self):
+        result = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[])
+        assert result == []
+
+    def test_quantize_vectors_to_binary_known_pattern(self):
+        # 8 floats: positive should be 1 bit, zero/negative 0 bit
+        # [1.0, -1.0, 0.5, -0.2, 0.0, 3.0, -2.0, 1.0] -> bits: 1, 0, 1, 0, 0, 1, 0, 1 -> 0b10100101 = 0xA5 = 165
+        vectors = [[1.0, -1.0, 0.5, -0.2, 0.0, 3.0, -2.0, 1.0]]
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=vectors)
+        assert len(quantized) == 1
+        assert isinstance(quantized[0], bytes)
+        assert len(quantized[0]) == 1
+        assert quantized[0][0] == 0b10100101
+
+    def test_quantize_vectors_to_binary_dimension_packing(self):
+        # 16-dim float vector -> 2 bytes
+        v1 = [1.0] * 8 + [-1.0] * 8
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[v1])
+        assert len(quantized) == 1
+        assert len(quantized[0]) == 2
+        assert quantized[0][0] == 0xFF
+        assert quantized[0][1] == 0x00
+
+        # 384-dim float vector -> 48 bytes
+        v384 = [0.5] * 384
+        quantized_384 = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[v384])
+        assert len(quantized_384) == 1
+        assert len(quantized_384[0]) == 48
+        assert all(b == 0xFF for b in quantized_384[0])
+
+    def test_quantize_non_multiple_of_8_dimension_pads_to_whole_bytes(self):
+        # 250 dims -> ceil(250 / 8) = 32 bytes -> 256 bits, a valid BINARY_VECTOR dimension
+        quantized = EmbeddingsOperator._quantize_vectors_to_binary(vectors=[[1.0] * 250])
+        assert len(quantized[0]) == 32
+        table = pa.table({"embeddings": pa.array(quantized, type=pa.binary())})
+        assert detect_vector_dimension(table=table, embeddings_column="embeddings") == 256
+
+    @pytest.mark.parametrize("quantization", ["none", "binary", "ubinary", "BINARY", "None"])
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_init_with_valid_quantization(self, mock_factory, litellm_config, mock_llm_adapter, quantization):
+        mock_factory.return_value = mock_llm_adapter
+        op = EmbeddingsOperator({**litellm_config, "quantization": quantization})
+        assert op.quantization == quantization.lower()
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_ubinary_output_is_identical_to_binary(
+        self, mock_factory, litellm_config, mock_llm_adapter, sample_pyarrow_table
+    ):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [1.0, -1.0, 0.5, -0.5] * 96
+        outputs = {}
+        for quantization in ("binary", "ubinary"):
+            op = EmbeddingsOperator({**litellm_config, "quantization": quantization})
+            tables, _ = op.transform(sample_pyarrow_table)
+            outputs[quantization] = tables[0]["embeddings"].to_pylist()
+        assert outputs["binary"] == outputs["ubinary"]
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_init_with_invalid_quantization_raises(self, mock_factory, litellm_config, mock_llm_adapter):
+        from docpipe.exceptions.docpipe_exceptions import DocpipeException
+
+        mock_factory.return_value = mock_llm_adapter
+        cfg = {**litellm_config, "quantization": "int8"}
+        with pytest.raises(DocpipeException) as exc_info:
+            EmbeddingsOperator(cfg)
+        assert "Invalid quantization 'int8'" in str(exc_info.value)
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_transform_with_binary_quantization_single_doc(
+        self, mock_factory, litellm_config, mock_llm_adapter, sample_pyarrow_table
+    ):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [1.0, -1.0] * 192  # 384 dims
+        cfg = {**litellm_config, "quantization": "binary"}
+        op = EmbeddingsOperator(cfg)
+
+        tables, _ = op.transform(sample_pyarrow_table)
+        assert len(tables) == 1
+        result_table = tables[0]
+        assert "embeddings" in result_table.column_names
+
+        # Each document row should have bytes instead of list of floats
+        embeddings_col = result_table["embeddings"].to_pylist()
+        assert len(embeddings_col) == len(sample_pyarrow_table)
+        for item in embeddings_col:
+            assert isinstance(item, bytes)
+            assert len(item) == 48  # 384 / 8 bytes
+
+    @patch("docpipe.core.adapters.llm_adapter_factory.LLMAdapterFactory.create_embedding_adapter")
+    def test_transform_with_binary_quantization_chunked_doc(self, mock_factory, litellm_config, mock_llm_adapter):
+        mock_factory.return_value = mock_llm_adapter
+        mock_llm_adapter.create_embedding.return_value = [0.5] * 384
+        cfg = {**litellm_config, "quantization": "binary"}
+        op = EmbeddingsOperator(cfg)
+
+        chunked_table = pa.Table.from_pydict(
+            {
+                "id": ["doc1", "doc2"],
+                "name": ["file1.txt", "file2.txt"],
+                "content": ["text one", "text two"],
+                "doc_id_hash": ["hash1", "hash2"],
+                "chunked_content": [
+                    [{"chunk": "chunk 1", "start_index": 0}, {"chunk": "chunk 2", "start_index": 10}],
+                    [{"chunk": "chunk 3", "start_index": 0}],
+                ],
+            }
+        )
+
+        tables, _ = op.transform(chunked_table)
+        assert len(tables) == 1
+        result_table = tables[0]
+        embeddings_col = result_table["embeddings"].to_pylist()
+        assert len(embeddings_col) == 2
+        # Chunked docs return a list of chunk embeddings (each chunk embedding is bytes)
+        assert len(embeddings_col[0]) == 2
+        assert len(embeddings_col[1]) == 1
+        for chunk_embeddings in embeddings_col:
+            assert isinstance(chunk_embeddings, list)
+            for chunk_emb in chunk_embeddings:
+                assert isinstance(chunk_emb, bytes)
+                assert len(chunk_emb) == 48
 
 
 if __name__ == "__main__":

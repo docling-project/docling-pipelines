@@ -1,15 +1,16 @@
 """FastAPI dependencies for authentication."""
 
-import logging
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2AuthorizationCodeBearer
 
+from docpipe.utils.infrastructure.logging import get_logger
+
 from .jwt_handler import JWTClaims, JWTConfig, verify_token
 from .models import User
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 security = HTTPBearer()
 

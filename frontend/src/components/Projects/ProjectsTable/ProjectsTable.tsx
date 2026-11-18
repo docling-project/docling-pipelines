@@ -2,7 +2,9 @@ import React, { useMemo, useState } from 'react';
 import type { ProjectRow } from '@/types';
 import { Button, OverflowMenu, OverflowMenuItem, Tag } from '@carbon/react';
 import { Add, Renew } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { SharedDataTable, EditDetailsModal, DeleteModal } from '@/components/common';
+import { messages } from './ProjectsTable.messages';
 import styles from './ProjectsTable.module.scss';
 
 /**
@@ -71,16 +73,6 @@ function renderTagsCell(tags: string[]): React.JSX.Element {
   );
 }
 
-/** Column definitions for Carbon `DataTable`. The `actions` column has no header text. */
-const TABLE_HEADERS = [
-  { key: 'name',         header: 'Name'          },
-  { key: 'flows',        header: 'Flows'         },
-  { key: 'tags',         header: 'Tag'           },
-  { key: 'lastModified', header: 'Last modified', isSortable: true },
-  { key: 'createdOn',    header: 'Created on',    isSortable: true },
-  { key: 'actions',      header: ''              },
-];
-
 /**
  * Searchable data table for the projects list. Built on {@link SharedDataTable}.
  *
@@ -104,6 +96,16 @@ export function ProjectsTable({
   onDeleteProject,
   onEditProject,
 }: ProjectsTableProps): React.JSX.Element {
+  const intl = useIntl();
+  /** Column definitions for Carbon `DataTable`. The `actions` column has no header text. */
+  const tableHeaders = [
+    { key: 'name',         header: intl.formatMessage(messages.headerName)         },
+    { key: 'flows',        header: intl.formatMessage(messages.headerFlows)        },
+    { key: 'tags',         header: intl.formatMessage(messages.headerTag)          },
+    { key: 'lastModified', header: intl.formatMessage(messages.headerLastModified), isSortable: true },
+    { key: 'createdOn',    header: intl.formatMessage(messages.headerCreatedOn),    isSortable: true },
+    { key: 'actions',      header: ''                                              },
+  ];
   const [deleteTarget, setDeleteTarget] = useState<ProjectRow | null>(null);
   const [editTarget, setEditTarget] = useState<ProjectRow | null>(null);
 
@@ -149,10 +151,10 @@ export function ProjectsTable({
   return (
     <div className={styles.tableWrapper}>
       <SharedDataTable
-        headers={TABLE_HEADERS}
+        headers={tableHeaders}
         rows={tableRows}
         searchable
-        searchPlaceholder="Search"
+        searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
         paginated={false}
         loading={isLoading}
         size="lg"
@@ -172,7 +174,7 @@ export function ProjectsTable({
               kind="ghost"
               size="lg"
               renderIcon={Renew}
-              iconDescription="Refresh"
+              iconDescription={intl.formatMessage(messages.refreshDescription)}
               hasIconOnly
               onClick={onRefresh}
               className={styles.refreshButton}
@@ -185,7 +187,7 @@ export function ProjectsTable({
               onClick={onNewProject}
               className={styles.newProjectButton}
             >
-              New project
+              {intl.formatMessage(messages.newProject)}
             </Button>
           </>
         )}
@@ -210,19 +212,19 @@ export function ProjectsTable({
                 <OverflowMenu
                   size="sm"
                   flipped
-                  iconDescription="Row actions"
+                  iconDescription={intl.formatMessage(messages.rowActionsDescription)}
                   selectorPrimaryFocus=".cds--overflow-menu-options__option"
                 >
                   <OverflowMenuItem
-                    itemText="Edit project"
+                    itemText={intl.formatMessage(messages.actionEditProject)}
                     onClick={() => { setEditTarget(original); }}
                   />
                   <OverflowMenuItem
-                    itemText="View project"
+                    itemText={intl.formatMessage(messages.actionViewProject)}
                     onClick={() => { onOpenProject(row.id); }}
                   />
                   <OverflowMenuItem
-                    itemText="Delete"
+                    itemText={intl.formatMessage(messages.actionDelete)}
                     isDelete
                     hasDivider
                     onClick={() => { handleDeleteClick(original); }}
@@ -237,7 +239,7 @@ export function ProjectsTable({
 
       <EditDetailsModal
         open={editTarget !== null}
-        title="Edit project details"
+        title={intl.formatMessage(messages.editProjectTitle)}
         initialValues={{
           name: editTarget?.name ?? '',
           description: editTarget?.description ?? '',

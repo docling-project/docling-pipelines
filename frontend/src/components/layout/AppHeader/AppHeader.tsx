@@ -11,12 +11,14 @@ import {
 } from '@carbon/react';
 import { Asleep, Light, Notification } from '@carbon/icons-react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useIntl } from 'react-intl';
 import { go } from '@/utils';
 import { useTheme } from '@/hooks';
 import { useAppSelector } from '@/hooks/useAppSelector';
 import { selectNotificationUnreadCount } from '@/selectors';
 import { ROUTES, APP_INFO } from '@/config';
 import { NotificationHistory } from '@/components/common';
+import { messages } from './AppHeader.messages';
 import styles from './AppHeader.module.scss';
 
 /**
@@ -30,6 +32,7 @@ import styles from './AppHeader.module.scss';
  * - A theme toggle button (light ↔ dark) in the global actions bar.
  */
 export function AppHeader(): React.JSX.Element {
+  const intl = useIntl();
   const { isDarkMode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -56,18 +59,18 @@ export function AppHeader(): React.JSX.Element {
         <span className={styles.betaTag}>
           <Tag type="teal" size="sm">Beta</Tag>
         </span>
-        <HeaderNavigation aria-label="Main navigation">
+        <HeaderNavigation aria-label={intl.formatMessage(messages.mainNavLabel)}>
           <HeaderMenuItem
             onClick={handleNavHome}
             isActive={location.pathname === ROUTES.HOME}
           >
-            Home
+            {intl.formatMessage(messages.navHome)}
           </HeaderMenuItem>
           <HeaderMenuItem
             onClick={handleNavProjects}
             isActive={location.pathname === ROUTES.PROJECTS}
           >
-            Projects
+            {intl.formatMessage(messages.navProjects)}
           </HeaderMenuItem>
         </HeaderNavigation>
         <HeaderGlobalBar className={styles.globalActions}>
@@ -78,8 +81,8 @@ export function AppHeader(): React.JSX.Element {
             <HeaderGlobalAction
               aria-label={
                 unreadCount > 0
-                  ? `Notifications (${unreadCount} unread)`
-                  : 'Notifications'
+                  ? intl.formatMessage(messages.notificationsUnread, { count: unreadCount })
+                  : intl.formatMessage(messages.notifications)
               }
               onClick={() => { setHistoryOpen((o) => !o); }}
               isActive={historyOpen}
@@ -96,7 +99,7 @@ export function AppHeader(): React.JSX.Element {
 
           <div className={styles.globalActionSeparator} />
           <HeaderGlobalAction
-            aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={isDarkMode ? intl.formatMessage(messages.switchToLight) : intl.formatMessage(messages.switchToDark)}
             onClick={toggleTheme}
             className={styles.themeButton}
             tooltipAlignment="end"

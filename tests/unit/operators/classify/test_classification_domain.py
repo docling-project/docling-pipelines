@@ -4,12 +4,16 @@ Unit tests for classification domain models.
 Tests ClassificationRequest, ClassificationResponse, and build_classification_prompt.
 """
 
+import json
+
 import pytest
 
 from docpipe.core.operators.quality.classification.domain.models import (
     ClassificationRequest,
     ClassificationResponse,
     build_classification_prompt,
+    parse_classification_response,
+    resolve_document_type,
 )
 
 
@@ -204,3 +208,62 @@ class TestBuildClassificationPrompt:
         assert "Example" in prompt or "example" in prompt
         assert "{" in prompt  # JSON example should be present
         assert "}" in prompt
+
+
+@pytest.mark.unit
+class TestResolveDocumentType:
+    """resolve_document_type maps an LLM label onto the configured spelling."""
+
+    @pytest.mark.parametrize(
+        ("label", "expected"),
+        [
+            ("Purchase Order", "Purchase Order"),
+            ("purchase order", "Purchase Order"),
+            ("purchase_order", "Purchase Order"),
+            ("PURCHASE  ORDER", "Purchase Order"),
+            ("invoice", "invoice"),
+        ],
+    )
+    def test_matches_ignoring_case_space_and_underscore(self, label, expected):
+        assert resolve_document_type(label=label, document_types=["Purchase Order", "invoice"]) == expected
+
+    def test_dict_types_use_keys(self):
+        types = {"Pay Stub": "A pay stub", "invoice": "An invoice"}
+        assert resolve_document_type(label="pay_stub", document_types=types) == "Pay Stub"
+
+    def test_returns_none_when_no_match(self):
+        assert resolve_document_type(label="memo", document_types=["invoice"]) is None
+
+    def test_exact_match_wins_over_folded_match(self):
+        assert resolve_document_type(label="a_b", document_types=["a b", "a_b"]) == "a_b"
+
+
+@pytest.mark.unit
+class TestParseClassificationResponse:
+    """parse_classification_response turns raw LLM text into a ClassificationResponse."""
+
+    def test_parses_valid_json(self):
+        response = parse_classification_response(
+            response_text='{"document_type": " Invoice ", "confidence": 9, "reasoning": "r"}'
+        )
+        assert response.success is True
+        assert response.document_type == "Invoice"
+        assert response.confidence == 9
+        assert response.reasoning == "r"
+
+    @pytest.mark.parametrize(("raw", "expected"), [(15, 10), (0, 1), ("8.7", 8)])
+    def test_clamps_confidence(self, raw, expected):
+        text = json.dumps({"document_type": "x", "confidence": raw})
+        assert parse_classification_response(response_text=text).confidence == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [None, "", "   ", "not json", '{"confidence": 5}', '{"document_type": null, "confidence": 5}'],
+    )
+    def test_raises_value_error_for_unusable_text(self, text):
+        with pytest.raises(ValueError):
+            parse_classification_response(response_text=text)
+
+    def test_raises_value_error_for_non_numeric_confidence(self):
+        with pytest.raises(ValueError, match="Invalid confidence value"):
+            parse_classification_response(response_text='{"document_type": "x", "confidence": "high"}')

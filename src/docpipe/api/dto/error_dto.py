@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """REST API standard error response DTOs.
 
 These models implement an industry-standard error response format following
@@ -49,6 +52,9 @@ ErrorCode = Literal[
     "flow_validation_failed",
     "flow_execution_failed",
     "prefect_flow_failed",
+    # Event mapping operations
+    "event_mapping_not_found",
+    "event_mapping_already_exists",
     # Configuration and external service error codes
     "invalid_configuration",
     "external_service_error",
@@ -59,8 +65,10 @@ ErrorCode = Literal[
     "sql_filter_error",
     # Custom Operator error codes
     "custom_operator_not_found",
+    "custom_operator_upload_forbidden",
     "custom_operator_already_exists",
     "custom_operator_invalid_data",
+    "custom_operators_disabled",
     # Project error codes
     "project_not_found",
     "project_already_exists",

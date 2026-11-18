@@ -11,6 +11,7 @@ from docpipe.utils.infrastructure.config import (
     get_env_bool,
     get_env_int,
     get_env_var,
+    get_milvus_config,
     get_opensearch_config,
 )
 
@@ -24,7 +25,7 @@ class TestGetOpensearchConfig:
             config = get_opensearch_config()
 
             # Operator-level params
-            assert config[OperatorConstants.VectorDB.CREATE_INDEX] is True
+            assert "create_index" not in config
             assert config[OperatorConstants.Columns.DOC_ID_COLUMN] == "doc_id_hash"
 
             # Provider-specific params and resource name are in provider_config
@@ -53,7 +54,6 @@ class TestGetOpensearchConfig:
             "OPENSEARCH_SPACE_TYPE": "cosine",
             "OPENSEARCH_VECTOR_DIMENSION": "768",
             "OPENSEARCH_BATCH_SIZE": "200",
-            "OPENSEARCH_CREATE_INDEX": "false",
             "OPENSEARCH_INDEX_NAME": "custom_index",
             "OPENSEARCH_DOC_ID_COLUMN": "custom_id",
             "OPENSEARCH_EMBEDDINGS_COLUMN": "custom_embeddings",
@@ -63,7 +63,6 @@ class TestGetOpensearchConfig:
             config = get_opensearch_config()
 
             # Operator-level params
-            assert config[OperatorConstants.VectorDB.CREATE_INDEX] is False
             assert config[OperatorConstants.Columns.DOC_ID_COLUMN] == "custom_id"
 
             # Provider-specific params and resource name are in provider_config
@@ -147,6 +146,111 @@ class TestGetOpensearchConfig:
             # Default values for unset variables
             assert provider_config[OperatorConstants.VectorDB.USE_SSL] is False
             assert provider_config[OperatorConstants.VectorDB.ENGINE] == "faiss"
+
+
+class TestGetMilvusConfig:
+    """Test Milvus configuration loading."""
+
+    def test_get_milvus_config_defaults(self):
+        """Test that default configuration values are returned."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = get_milvus_config()
+
+            # Operator-level params; create_index is no longer configurable
+            assert "create_index" not in config
+            assert config[OperatorConstants.VectorDB.VECTOR_DIMENSION] == 384
+            assert config[OperatorConstants.Columns.DOC_ID_COLUMN] == "doc_id_hash"
+            assert config[OperatorConstants.Columns.EMBEDDINGS_COLUMN] == "embeddings"
+
+            # Provider-specific params and resource name are in provider_config
+            provider_config = config[OperatorConstants.Config.PROVIDER_CONFIG]
+            assert provider_config[OperatorConstants.VectorDB.COLLECTION_NAME] == "docpipe_test"
+            assert provider_config[OperatorConstants.VectorDB.AUTH_TYPE] == "standalone"
+            assert provider_config[OperatorConstants.VectorDB.HOST] == "localhost"
+            assert provider_config[OperatorConstants.VectorDB.PORT] == 19530
+            assert provider_config[OperatorConstants.VectorDB.DATABASE] == "default"
+            assert provider_config[OperatorConstants.VectorDB.INDEX_TYPE] == "HNSW"
+            assert provider_config[OperatorConstants.VectorDB.METRIC_TYPE] == "L2"
+            assert provider_config[OperatorConstants.Config.BATCH_SIZE] == 100
+
+    def test_get_milvus_config_omits_unset_optional_values(self):
+        """Test that optional connection and auth values are omitted when not set."""
+        with patch.dict(os.environ, {}, clear=True):
+            provider_config = get_milvus_config()[OperatorConstants.Config.PROVIDER_CONFIG]
+
+            for key in (
+                OperatorConstants.VectorDB.URI,
+                OperatorConstants.VectorDB.USERNAME,
+                OperatorConstants.VectorDB.PASSWORD,
+                OperatorConstants.VectorDB.TOKEN,
+                OperatorConstants.VectorDB.SSL,
+                OperatorConstants.VectorDB.SSL_CERTIFICATE,
+            ):
+                assert key not in provider_config
+
+    def test_get_milvus_config_with_custom_values(self):
+        """Test configuration with custom environment variables."""
+        custom_env = {
+            "MILVUS_AUTH_TYPE": "grpc",
+            "MILVUS_HOST": "milvus-host",
+            "MILVUS_PORT": "19531",
+            "MILVUS_DATABASE": "custom_db",
+            "MILVUS_INDEX_TYPE": "IVF_FLAT",
+            "MILVUS_METRIC_TYPE": "COSINE",
+            "MILVUS_BATCH_SIZE": "250",
+            "MILVUS_URI": "https://milvus.example.com:443",
+            "MILVUS_USERNAME": "admin",
+            "MILVUS_PASSWORD": "secret",  # pragma: allowlist secret
+            "MILVUS_TOKEN": "iam-token",
+            "MILVUS_SSL": "true",
+            "MILVUS_SSL_CERTIFICATE": "/certs/ca.pem",
+            "MILVUS_VECTOR_DIMENSION": "768",
+            "MILVUS_COLLECTION_NAME": "custom_collection",
+            "MILVUS_DOC_ID_COLUMN": "custom_id",
+            "MILVUS_EMBEDDINGS_COLUMN": "custom_embeddings",
+        }
+
+        with patch.dict(os.environ, custom_env, clear=True):
+            config = get_milvus_config()
+
+            assert config[OperatorConstants.VectorDB.VECTOR_DIMENSION] == 768
+            assert config[OperatorConstants.Columns.DOC_ID_COLUMN] == "custom_id"
+            assert config[OperatorConstants.Columns.EMBEDDINGS_COLUMN] == "custom_embeddings"
+
+            provider_config = config[OperatorConstants.Config.PROVIDER_CONFIG]
+            assert provider_config[OperatorConstants.VectorDB.COLLECTION_NAME] == "custom_collection"
+            assert provider_config[OperatorConstants.VectorDB.AUTH_TYPE] == "grpc"
+            assert provider_config[OperatorConstants.VectorDB.HOST] == "milvus-host"
+            assert provider_config[OperatorConstants.VectorDB.PORT] == 19531
+            assert provider_config[OperatorConstants.VectorDB.DATABASE] == "custom_db"
+            assert provider_config[OperatorConstants.VectorDB.INDEX_TYPE] == "IVF_FLAT"
+            assert provider_config[OperatorConstants.VectorDB.METRIC_TYPE] == "COSINE"
+            assert provider_config[OperatorConstants.Config.BATCH_SIZE] == 250
+            assert provider_config[OperatorConstants.VectorDB.URI] == "https://milvus.example.com:443"
+            assert provider_config[OperatorConstants.VectorDB.USERNAME] == "admin"
+            assert (
+                provider_config[OperatorConstants.VectorDB.PASSWORD] == "secret"  # pragma: allowlist secret
+            )
+            assert provider_config[OperatorConstants.VectorDB.TOKEN] == "iam-token"
+            assert provider_config[OperatorConstants.VectorDB.SSL] is True
+            assert provider_config[OperatorConstants.VectorDB.SSL_CERTIFICATE] == "/certs/ca.pem"
+
+    def test_get_milvus_config_ssl_boolean_variations(self):
+        """Test that various boolean string values are parsed correctly for SSL."""
+        test_cases = [("true", True), ("1", True), ("yes", True), ("on", True), ("false", False), ("no", False)]
+
+        for value, expected in test_cases:
+            with patch.dict(os.environ, {"MILVUS_SSL": value}, clear=True):
+                provider_config = get_milvus_config()[OperatorConstants.Config.PROVIDER_CONFIG]
+                assert provider_config[OperatorConstants.VectorDB.SSL] is expected
+
+    def test_get_milvus_config_ignores_legacy_create_index_env(self):
+        """The removed MILVUS_CREATE_INDEX variable no longer affects the config."""
+        with patch.dict(os.environ, {"MILVUS_CREATE_INDEX": "false"}, clear=True):
+            config = get_milvus_config()
+
+            assert "create_index" not in config
+            assert "create_index" not in config[OperatorConstants.Config.PROVIDER_CONFIG]
 
 
 class TestGetEnvVar:
@@ -390,7 +494,6 @@ class TestEdgeCases:
             "OPENSEARCH_SPACE_TYPE": "l2",
             "OPENSEARCH_VECTOR_DIMENSION": "384",
             "OPENSEARCH_BATCH_SIZE": "100",
-            "OPENSEARCH_CREATE_INDEX": "true",
             "OPENSEARCH_INDEX_NAME": "test",
             "OPENSEARCH_DOC_ID_COLUMN": "id",
             "OPENSEARCH_EMBEDDINGS_COLUMN": "emb",

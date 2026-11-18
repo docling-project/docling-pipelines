@@ -3,20 +3,22 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        COMPUTE_BACKEND: cpu
     ports:
       - "8080:8080"
     environment:
       BFF_URL: http://bff:3001
-      DOCPIPE_CONFIG_PATH: /opt/app-root/docling-pipelines-config.yaml
+      DOCPIPE_DATA_PATH: /data
+      FLOW_REPOSITORY_BASE_DIR: /data/flows
+      PROJECT_REPOSITORY_BASE_DIR: /data/projects
       HF_HOME: /data/models/huggingface
       OLLAMA_HOST: http://ollama:11434
       OPENSEARCH_HOST: opensearch
       OPENSEARCH_USERNAME: admin
       OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:?Set OPENSEARCH_PASSWORD}
     volumes:
-      - ./docling-pipelines-config.yaml:/opt/app-root/docling-pipelines-config.yaml:ro
       - docpipe-data:/data
-      - docpipe-data:/opt/app-root/data
       - ../tests/fixtures/invoices:/documents:ro
       - ../sample_documents:/opt/app-root/src/sample_documents:ro
     depends_on:
@@ -57,7 +59,7 @@ services:
     volumes:
       - opensearch-data:/usr/share/opensearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent -u \"admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD\" http://localhost:9200/_cluster/health >/dev/null"]
+      test: ["CMD-SHELL", "curl --fail --silent --show-error -u \"admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD\" --output /dev/null http://localhost:9200/_cluster/health"]
       interval: 10s
       timeout: 5s
       retries: 12

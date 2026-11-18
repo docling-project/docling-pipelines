@@ -9,10 +9,10 @@ or column joins.
 import pyarrow as pa
 import pytest
 
-from docpipe.core.constants.constants import Metrics
+from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.functional.merge import MergeOperator
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -726,3 +726,89 @@ def test_column_merge_high_dimensional_embeddings_remap_correctly():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# Flow validation, pass-through and unsupported configurations
+# ---------------------------------------------------------------------------
+
+_TWO_LINKS = [{"link_name": "a"}, {"link_name": "b"}]
+
+
+def test_validate_is_skipped_while_validating_the_flow():
+    """During flow validation the link and merge-type checks are deferred to execution."""
+    operator = MergeOperator({"validating_flow": True, "input_links": [], "merge_type": None})
+    errors: list = []
+
+    operator.validate(errors=errors, warnings=[], available_features=[])
+
+    assert errors == []
+
+
+def test_transform_requires_two_input_links():
+    operator = MergeOperator({"merge_type": "rows", "input_links": [{"link_name": "a"}]})
+
+    with pytest.raises(FlowExecutionFailedException, match="At least two input links are required") as exc:
+        operator.transform(make_table())
+
+    assert exc.value.status_code == 400
+
+
+def test_transform_without_tables_passes_the_input_through():
+    table = make_table(num_rows=4)
+
+    tables, metadata = make_operator().transform(table)
+
+    assert tables == [table]
+    assert metadata[Metrics.External.PROCESSED_DOCS] == 4
+
+
+def test_transform_with_only_empty_tables_returns_an_empty_table():
+    empty = make_table(num_rows=0)
+
+    tables, metadata = make_operator().transform(empty, tables={"a": empty, "b": empty})
+
+    assert [t.num_rows for t in tables] == [0]
+    assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.COMPLETED_WITH_WARNINGS.value
+    assert metadata[Metrics.External.PROCESSED_DOCS] == 0
+
+
+@pytest.mark.parametrize(
+    ("merge_type", "column_option"),
+    [("zip", None), ("columns", "left_join")],
+    ids=["unknown-merge-type", "unknown-column-option"],
+)
+def test_transform_rejects_unsupported_configuration(merge_type, column_option):
+    operator = MergeOperator({"merge_type": merge_type, "column_option": column_option, "input_links": _TWO_LINKS})
+    tables = {"a": make_table(id_prefix="a"), "b": make_table(id_prefix="b")}
+
+    with pytest.raises(DocpipeException, match=f"Unsupported merge configuration: {merge_type}, {column_option}"):
+        operator.transform(tables["a"], tables=tables)
+
+
+# ---------------------------------------------------------------------------
+# Column merge with columns that cannot be joined (list types)
+# ---------------------------------------------------------------------------
+
+
+def _column_merge() -> MergeOperator:
+    return MergeOperator({"merge_type": "columns", "column_option": "inner_join", "input_links": _TWO_LINKS})
+
+
+def test_column_merge_suffixes_clashing_unsupported_columns():
+    left = pa.table({"id": ["1", "2"], "tags": [["x"], ["y"]]})
+    right = pa.table({"id": ["2", "1"], "tags": [["b2"], ["b1"]]})
+
+    tables, _ = _column_merge().transform(left, tables={"a": left, "b": right})
+
+    merged = tables[0].sort_by("id")
+    assert merged.column("tags").to_pylist() == [["x"], ["y"]]
+    assert merged.column("tags_b").to_pylist() == [["b1"], ["b2"]]
+
+
+def test_column_merge_rejects_duplicate_name_after_suffixing():
+    left = pa.table({"id": ["1"], "tags": [["x"]], "tags_b": [["y"]]})
+    right = pa.table({"id": ["1"], "tags": [["z"]]})
+
+    with pytest.raises(DocpipeException, match="Duplicate unsupported column after suffixing: tags_b"):
+        _column_merge().transform(left, tables={"a": left, "b": right})

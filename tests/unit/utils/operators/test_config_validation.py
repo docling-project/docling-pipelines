@@ -352,3 +352,41 @@ class TestValidateConfigFromMetadataEdgeCases:
         config = {"provider": "watsonx"}
         validate_config_from_metadata(config=config, attributes=_make_provider_attributes(), errors=errors)
         assert errors == []
+
+
+def _make_capability_provider_attributes() -> dict:
+    """Return ATTRIBUTES with a 'pii_provider_config' selected by 'pii_provider' via PROVIDER_FIELD."""
+    attributes = _make_provider_attributes(allow_extra_litellm=False)
+    attributes["pii_provider_config"] = {
+        **attributes[OperatorConstants.Config.PROVIDER_CONFIG],
+        OperatorConstants.Config.PROVIDER_FIELD: "pii_provider",
+    }
+    return attributes
+
+
+class TestValidateConfigFromMetadataProviderField:
+    """PROVIDER_FIELD selects which sibling field names the active provider."""
+
+    def test_capability_config_validated_against_capability_provider(self) -> None:
+        errors: list[str] = []
+        config = {
+            "provider": "litellm",
+            "pii_provider": "watsonx",
+            "pii_provider_config": {"url": "https://x", "api_base": "http://y"},
+        }
+        validate_config_from_metadata(config=config, attributes=_make_capability_provider_attributes(), errors=errors)
+        assert errors == []
+
+    def test_capability_config_unknown_key_reported_for_capability_provider(self) -> None:
+        errors: list[str] = []
+        config = {"provider": "watsonx", "pii_provider": "litellm", "pii_provider_config": {"url": "https://x"}}
+        validate_config_from_metadata(config=config, attributes=_make_capability_provider_attributes(), errors=errors)
+        assert len(errors) == 1
+        assert "pii_provider_config: unknown key 'url' for provider 'litellm'" in errors[0]
+
+    def test_capability_config_falls_back_to_provider_when_field_unset(self) -> None:
+        errors: list[str] = []
+        config = {"provider": "litellm", "pii_provider_config": {"container_id": "c"}}
+        validate_config_from_metadata(config=config, attributes=_make_capability_provider_attributes(), errors=errors)
+        assert len(errors) == 1
+        assert "for provider 'litellm'" in errors[0]

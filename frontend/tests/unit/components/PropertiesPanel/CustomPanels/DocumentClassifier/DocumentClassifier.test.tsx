@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import { screen, act, fireEvent, waitFor } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { DocumentClassifierPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocumentClassifier/DocumentClassifier';
 
 // Mock the document classes API
@@ -20,34 +21,34 @@ describe('DocumentClassifierPanelBody', () => {
   });
 
   it('renders without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <DocumentClassifierPanelBody controller={makeController()} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders with a null controller gracefully', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <DocumentClassifierPanelBody controller={null as any} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('shows loading indicator initially while fetching document classes', () => {
-    render(<DocumentClassifierPanelBody controller={makeController()} />);
+    renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders after document classes load (empty list)', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders provider dropdown', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     // Provider dropdown should be present
     const providerDropdown = document.getElementById('document-classifier-provider');
@@ -59,7 +60,7 @@ describe('DocumentClassifierPanelBody', () => {
     vi.mocked(getDocumentClasses).mockRejectedValueOnce(new Error('API error'));
 
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
 
     await waitFor(() => {
@@ -72,7 +73,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders with stored provider value', async () => {
     await act(async () => {
-      render(
+      renderWithProviders(
         <DocumentClassifierPanelBody
           controller={makeController({
             getPropertyValue: vi.fn((p: { name: string }) =>
@@ -87,7 +88,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders with stored confidence_threshold value', async () => {
     await act(async () => {
-      render(
+      renderWithProviders(
         <DocumentClassifierPanelBody
           controller={makeController({
             getPropertyValue: vi.fn((p: { name: string }) => {
@@ -111,7 +112,7 @@ describe('DocumentClassifierPanelBody', () => {
     } as any);
 
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
 
     await waitFor(() => {
@@ -122,13 +123,14 @@ describe('DocumentClassifierPanelBody', () => {
   it('calls updatePropertyValue when a field changes', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
 
     // Find any input and change it
     const inputs = document.querySelectorAll('input:not([type="checkbox"])');
-    if (inputs.length > 0) {
-      fireEvent.change(inputs[0], { target: { value: '0.5' } });
+    const firstInput = inputs[0];
+    if (firstInput) {
+      fireEvent.change(firstInput, { target: { value: '0.5' } });
     }
     // Component rendered without crash
     expect(document.body).toBeInTheDocument();
@@ -136,7 +138,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders with use_llm_provider toggle', async () => {
     await act(async () => {
-      render(
+      renderWithProviders(
         <DocumentClassifierPanelBody
           controller={makeController({
             getPropertyValue: vi.fn((p: { name: string }) => {
@@ -153,7 +155,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders provider dropdown element', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('provider')).toBeTruthy();
   });
@@ -161,7 +163,7 @@ describe('DocumentClassifierPanelBody', () => {
   it('calls updatePropertyValue when provider dropdown changes', async () => {
     const controller = makeController();
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     // Simulate internal Dropdown onChange by finding the button and asserting component present
     expect(document.getElementById('provider')).toBeTruthy();
@@ -182,7 +184,7 @@ describe('DocumentClassifierPanelBody', () => {
       ),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     // The dropdown renders with available items
     expect(document.getElementById('provider')).toBeTruthy();
@@ -195,21 +197,21 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders Provider configuration accordion item', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(screen.getByText('Provider configuration')).toBeInTheDocument();
   });
 
   it('renders Classification configuration accordion item', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(screen.getByText('Classification configuration')).toBeInTheDocument();
   });
 
   it('renders provider dropdown and accordion structure', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     // Provider dropdown exists
     expect(document.getElementById('provider')).toBeTruthy();
@@ -219,7 +221,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders provider dropdown', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('provider')).toBeTruthy();
   });
@@ -228,7 +230,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('shows InlineLoading while classes are loading', () => {
     // Before act resolves, component is in loading state
-    render(<DocumentClassifierPanelBody controller={makeController()} />);
+    renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     // InlineLoading renders "Loading document types..."
     const loading = screen.queryByText(/Loading document types/i);
     // It may have already resolved — either is valid
@@ -240,7 +242,7 @@ describe('DocumentClassifierPanelBody', () => {
     vi.mocked(getDocumentClasses).mockRejectedValueOnce(new Error('Network error'));
 
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
 
     await waitFor(() => {
@@ -256,7 +258,7 @@ describe('DocumentClassifierPanelBody', () => {
 
     const controller = makeController();
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
 
     await waitFor(() => {
@@ -283,7 +285,7 @@ describe('DocumentClassifierPanelBody', () => {
     } as any);
 
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
 
     await waitFor(() => {
@@ -295,7 +297,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders confidence_threshold number input', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('confidence_threshold')).toBeTruthy();
   });
@@ -308,7 +310,7 @@ describe('DocumentClassifierPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     const input = document.querySelector('input#confidence_threshold') as HTMLInputElement | null;
     if (input) {
@@ -326,7 +328,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders output_column text input', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('output_column')).toBeTruthy();
   });
@@ -339,7 +341,7 @@ describe('DocumentClassifierPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     const input = document.querySelector('input#output_column') as HTMLInputElement | null;
     if (input) {
@@ -357,7 +359,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders include_confidence toggle', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('include_confidence')).toBeTruthy();
   });
@@ -370,7 +372,7 @@ describe('DocumentClassifierPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     const toggle = document.getElementById('include_confidence');
     if (toggle) {
@@ -386,7 +388,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders include_reasoning toggle', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('include_reasoning')).toBeTruthy();
   });
@@ -399,7 +401,7 @@ describe('DocumentClassifierPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     const toggle = document.getElementById('include_reasoning');
     if (toggle) {
@@ -417,7 +419,7 @@ describe('DocumentClassifierPanelBody', () => {
 
   it('renders doc_column text input', async () => {
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={makeController()} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={makeController()} />);
     });
     expect(document.getElementById('doc_column')).toBeTruthy();
   });
@@ -430,7 +432,7 @@ describe('DocumentClassifierPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     const input = document.querySelector('input#doc_column') as HTMLInputElement | null;
     if (input) {
@@ -452,7 +454,7 @@ describe('DocumentClassifierPanelBody', () => {
       }),
     });
     await act(async () => {
-      render(<DocumentClassifierPanelBody controller={controller} />);
+      renderWithProviders(<DocumentClassifierPanelBody controller={controller} />);
     });
     const input = document.querySelector('input#output_column') as HTMLInputElement | null;
     if (input) {

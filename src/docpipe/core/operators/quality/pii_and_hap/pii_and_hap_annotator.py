@@ -1,11 +1,15 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
-PII and HAP Detection Annotator using Ollama/OpenAI-compatible/WatsonX APIs.
+PII and HAP Detection Annotator.
 
 Detects Personally Identifiable Information (PII) and Hate, Abuse, and Profanity (HAP)
-content in documents using local LLM models via Ollama or OpenAI-compatible APIs (like vLLM) or WatsonX APIs..
+content in documents.  PII and HAP detection are served by independently selectable
+providers (``pii_provider`` / ``hap_provider``): multi-capable providers such as WatsonX
+and LiteLLM (Ollama, OpenAI-compatible APIs) can serve both, while single-capability
+providers such as Presidio (PII only) serve one.  The legacy ``provider`` /
+``provider_config`` keys remain supported and select the provider for both.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorC
 from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.factories.pii_and_hap_detection_factory import (
     PIIAndHAPDetectionFactory,
 )
+from docpipe.core.operators.quality.pii_and_hap.domain.models import DetectionCapability, ProviderSelection
 from docpipe.core.operators.quality.pii_and_hap.pii_and_hap_helper import (
     DEFAULT_HAP_THRESHOLD_VALUE,
     DEFAULT_PII_THRESHOLD_VALUE,
@@ -58,6 +63,20 @@ PROVIDER_DEFAULT = "litellm"  # Default to LiteLLM (can access Ollama via api_ba
 PROVIDER_WATSONX = "watsonx"
 PROVIDER_LITELLM = "litellm"
 
+# Per-capability provider config keys: capability -> (provider key, provider config key)
+CAPABILITY_PROVIDER_KEYS: dict[DetectionCapability, tuple[str, str]] = {
+    DetectionCapability.PII: (
+        OperatorConstants.PIIHAP.PII_PROVIDER_KEY,
+        OperatorConstants.PIIHAP.PII_PROVIDER_CONFIG_KEY,
+    ),
+    DetectionCapability.HAP: (
+        OperatorConstants.PIIHAP.HAP_PROVIDER_KEY,
+        OperatorConstants.PIIHAP.HAP_PROVIDER_CONFIG_KEY,
+    ),
+}
+# Key added to each entry of the "providers" metadata map listing its capabilities
+PROVIDER_CAPABILITIES_KEY = "capabilities"
+
 # Configuration keys
 DISPLAY_PII_KEY = "display_pii"
 BATCH_SIZE_KEY = "batch_size"
@@ -69,12 +88,16 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
     """
     Extract PII and HAP information from ingested documents.
 
-    This operator uses local LLM models (via Ollama/WatsonX/LiteLLM APIs)
-    for both PII and HAP detection.
+    PII and HAP detection are delegated to independently injected adapters
+    (``PIIDetectionPort`` / ``HAPDetectionPort``).  Only the capabilities listed in
+    ``expected_redactions`` are configured, validated and invoked.
 
     Attributes:
-        provider (str): Detection provider (watsonx or litellm)
-        provider_config (dict): Provider-specific configuration
+        provider (str): Legacy shorthand provider; used for any capability without
+            its own ``pii_provider`` / ``hap_provider`` (default ``litellm``)
+        pii_selection (ProviderSelection | None): Resolved PII provider (None if PII not expected)
+        hap_selection (ProviderSelection | None): Resolved HAP provider (None if HAP not expected)
+        provider_config (dict): Legacy shorthand provider configuration
             - model_id (str): Model identifier for the provider
             - api_base (str): API endpoint URL (for litellm)
             - api_key (str): Authentication key
@@ -112,9 +135,12 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
     min_chunk_size: int
     max_chunk_size: int
     provider_config: dict[str, Any]
+    pii_selection: ProviderSelection | None
+    hap_selection: ProviderSelection | None
+    provider_selection_errors: list[str]
     extractor: GuardRailsPIIAndHAPExtractor
     common_log_arguments: dict[str, Any]
-    pii_hap_service: PIIHAPService
+    pii_hap_service: PIIHAPService | None
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -194,45 +220,140 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
         # Validate configuration
         self._validate_config()
 
-        # Initialize service
-        self.pii_hap_service = self._initialize_pii_hap_service()
-
-        # Initialize extractor and logging
-        self.extractor = GuardRailsPIIAndHAPExtractor(config)
         self.common_log_arguments = {
             DocpipeConstants.JOB_ID: self.job_id,
             DocpipeConstants.JOB_RUN_ID: self.job_run_id,
         }
 
+        # Resolve one provider per capability actually needed by expected_redactions
+        self.pii_selection = (
+            PIIAndHAPAnnotator._resolve_provider_selection(config=config, capability=DetectionCapability.PII)
+            if DetectionCapability.PII in self.expected_redactions
+            else None
+        )
+        self.hap_selection = (
+            PIIAndHAPAnnotator._resolve_provider_selection(config=config, capability=DetectionCapability.HAP)
+            if DetectionCapability.HAP in self.expected_redactions
+            else None
+        )
+        self.provider_selection_errors = PIIAndHAPAnnotator._get_provider_selection_errors(
+            pii_selection=self.pii_selection, hap_selection=self.hap_selection
+        )
+
+        # Fail fast on provider/capability mismatches before any document is processed.
+        # While validating a flow, the errors are reported through validate() instead.
+        if self.provider_selection_errors and not self.validating_flow:
+            raise ValueError("; ".join(self.provider_selection_errors))
+        self.pii_hap_service = None if self.provider_selection_errors else self._initialize_pii_hap_service()
+
+        # Initialize extractor
+        self.extractor = GuardRailsPIIAndHAPExtractor(config)
+
+    @staticmethod
+    def _resolve_provider_selection(*, config: dict[str, Any], capability: DetectionCapability) -> ProviderSelection:
+        """Resolve the provider and provider config used for one capability.
+
+        Precedence:
+            1. ``<capability>_provider`` when set, else the legacy ``provider``, else ``litellm``.
+            2. ``<capability>_provider_config`` when non-empty; otherwise the legacy
+               ``provider_config`` if ``provider`` is unset or names the same provider;
+               otherwise an empty dict (the legacy config belongs to another provider).
+
+        Args:
+            config: Operator configuration.
+            capability: Capability to resolve.
+
+        Returns:
+            The resolved provider selection.
+        """
+        provider_key, provider_config_key = CAPABILITY_PROVIDER_KEYS[capability]
+        legacy_provider = config.get(PROVIDER) or None
+        specific_provider = config.get(provider_key) or None
+
+        if specific_provider:
+            provider, used_provider_key = str(specific_provider), provider_key
+        elif legacy_provider:
+            provider, used_provider_key = str(legacy_provider), PROVIDER
+        else:
+            provider, used_provider_key = PROVIDER_DEFAULT, PROVIDER
+
+        specific_config = config.get(provider_config_key) or None
+        provider_config: Any
+        if specific_config:
+            provider_config, used_config_key = specific_config, provider_config_key
+        elif legacy_provider is None or str(legacy_provider).lower() == provider.lower():
+            provider_config = config.get(OperatorConstants.Config.PROVIDER_CONFIG) or {}
+            used_config_key = OperatorConstants.Config.PROVIDER_CONFIG
+        else:
+            provider_config, used_config_key = {}, provider_config_key
+
+        return ProviderSelection(
+            provider=provider,
+            provider_config=dict(provider_config) if isinstance(provider_config, dict) else {},
+            provider_key=used_provider_key,
+            provider_config_key=used_config_key,
+        )
+
+    @staticmethod
+    def _get_provider_selection_errors(
+        *, pii_selection: ProviderSelection | None, hap_selection: ProviderSelection | None
+    ) -> list[str]:
+        """Return registry/capability errors for the resolved selections (no adapter is built)."""
+        errors: list[str] = []
+        if pii_selection is not None:
+            errors.extend(
+                PIIAndHAPDetectionFactory.validate_selection(
+                    capability=DetectionCapability.PII, selection=pii_selection
+                )
+            )
+        if hap_selection is not None:
+            errors.extend(
+                PIIAndHAPDetectionFactory.validate_selection(
+                    capability=DetectionCapability.HAP, selection=hap_selection
+                )
+            )
+        return errors
+
+    def _describe_providers(self) -> str:
+        """Return a short 'pii=<provider>, hap=<provider>' description for logs."""
+        parts = []
+        if self.pii_selection is not None:
+            parts.append(f"pii={self.pii_selection.provider}")
+        if self.hap_selection is not None:
+            parts.append(f"hap={self.hap_selection.provider}")
+        return ", ".join(parts) if parts else "none"
+
     def _initialize_pii_hap_service(self) -> PIIHAPService:
         """Initialize the PII/HAP detection service.
 
-        Calls ``PIIAndHAPDetectionFactory`` to resolve the provider, then injects
-        the resulting adapter into ``PIIHAPService``.
+        Calls ``PIIAndHAPDetectionFactory`` to build one adapter per required
+        capability (shared when both resolve to the same provider and config), then
+        injects them into ``PIIHAPService``, which validates them (fail-fast).
 
         Returns:
             PIIHAPService: Initialized detection service.
 
         Raises:
-            ValueError: If the provider is not registered or configuration is invalid.
+            ValueError: If a provider is not registered or lacks a required capability.
+            DocpipeException: If adapter validation fails.
         """
+        providers = self._describe_providers()
         try:
-            adapter = PIIAndHAPDetectionFactory.create(
-                self.provider,
-                model_id=self.model_name or "",
-                provider_config=dict(self.provider_config),
+            pii_adapter, hap_adapter = PIIAndHAPDetectionFactory.create_adapters(
+                pii=self.pii_selection,
+                hap=self.hap_selection,
             )
-            service = PIIHAPService(adapter=adapter)
+            service = PIIHAPService(pii_adapter=pii_adapter, hap_adapter=hap_adapter)
             logger.info(
-                "Successfully initialized %s PII/HAP service",
-                self.provider,
+                "Successfully initialized PII/HAP service (%s)",
+                providers,
                 extra=self.common_log_arguments,
             )
             return service
         except Exception as e:
             logger.error(
-                "Failed to initialize PII/HAP service for provider '%s': %s",
-                self.provider,
+                "Failed to initialize PII/HAP service (%s): %s",
+                providers,
                 e,
                 extra=self.common_log_arguments,
             )
@@ -254,27 +375,94 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
             raise ValueError(msg)
 
     @staticmethod
-    def _get_piihap_provider_schemas() -> dict[str, Any]:
-        """Return per-provider JSON Schema dicts for the provider_config field.
+    def _get_piihap_provider_schemas(*, capability: DetectionCapability | None = None) -> dict[str, Any]:
+        """Return per-provider JSON Schema dicts for a provider config field.
 
         Iterates the ``PIIAndHAPDetectionFactory`` registry and calls
-        ``get_config_schema()`` on each registered adapter class — adding a new
-        provider requires only registering the adapter.
+        ``get_config_schema()`` on each registered adapter class - adding a new
+        provider requires only registering the adapter.  Each entry also lists the
+        provider's ``capabilities`` (``['pii']``, ``['hap']`` or both).
+
+        Args:
+            capability: When given, only providers supporting it are included.
         """
         from docpipe.core.operators.operator_utils import OperatorUtils
-        from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.factories.pii_and_hap_detection_factory import (
-            PIIAndHAPDetectionFactory,
-        )
 
+        schemas: dict[str, Any] = {}
+        for name in PIIAndHAPDetectionFactory.list_adapters(capability=capability):
+            adapter_class = PIIAndHAPDetectionFactory.get_adapter_class(name)
+            if adapter_class is None:
+                continue
+            schemas[name] = OperatorUtils.model_schema_to_docpipe(
+                schema=adapter_class.get_config_schema().model_json_schema(),
+                overrides={PROVIDER_CAPABILITIES_KEY: adapter_class.get_capabilities()},
+            )
+        return schemas
+
+    @staticmethod
+    def _get_capability_provider_attributes(*, capability: DetectionCapability) -> dict[str, Any]:
+        """Return metadata for ``<capability>_provider`` and ``<capability>_provider_config``."""
+        provider_key, provider_config_key = CAPABILITY_PROVIDER_KEYS[capability]
+        label = capability.value.upper()
+        capable_providers = PIIAndHAPDetectionFactory.list_adapters(capability=capability)
         return {
-            name: OperatorUtils.model_schema_to_docpipe(schema=adapter_class.get_config_schema().model_json_schema())
-            for name, adapter_class in PIIAndHAPDetectionFactory._registry.items()
+            provider_key: {
+                OperatorConstants.Misc.NAME: f"{label} Provider",
+                OperatorConstants.Config.DESCRIPTION: (
+                    f"Provider used for {label} detection ({', '.join(capable_providers)}). "
+                    f"Overrides '{PROVIDER}' for {label} only; when unset, '{PROVIDER}' is used."
+                ),
+                OperatorConstants.Config.REQUIRED: False,
+                OperatorConstants.Config.VALID_VALUES: capable_providers,
+                OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
+            },
+            provider_config_key: {
+                OperatorConstants.Misc.NAME: f"{label} Provider Configuration",
+                OperatorConstants.Config.DESCRIPTION: (
+                    f"Configuration for the {label} provider. Fields vary by provider - see the 'providers' "
+                    f"schema. When empty, '{OperatorConstants.Config.PROVIDER_CONFIG}' is used if '{PROVIDER}' "
+                    f"is unset or names the same provider."
+                ),
+                OperatorConstants.Config.REQUIRED: False,
+                OperatorConstants.Config.DEFAULT: {},
+                OperatorConstants.Misc.TYPE: AttributeDataTypes.JSON,
+                OperatorConstants.Config.PROVIDERS: PIIAndHAPAnnotator._get_piihap_provider_schemas(
+                    capability=capability
+                ),
+                OperatorConstants.Config.PROVIDER_FIELD: provider_key,
+            },
         }
+
+    @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each detection adapter config class's secret-capable declarations.
+
+        Covers the shared ``provider``/``provider_config`` pair and the per-capability
+        ``pii_provider``/``hap_provider`` pairs.
+        """
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        classes: dict[str, type] = {}
+        for name in PIIAndHAPDetectionFactory.list_adapters():
+            adapter_class = PIIAndHAPDetectionFactory.get_adapter_class(name)
+            if adapter_class is not None:
+                classes[name] = adapter_class.get_config_schema()
+
+        result: dict[str, dict[str, list[str]]] = {}
+        pairs = [(PROVIDER, OperatorConstants.Config.PROVIDER_CONFIG)]
+        pairs.extend(CAPABILITY_PROVIDER_KEYS.values())
+        for provider_key, provider_config_key in pairs:
+            result.update(
+                build_provider_secret_fields(selector=provider_key, prefix=provider_config_key, classes=classes)
+            )
+        return result
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Return operator metadata for SDK."""
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": PIIAndHAPAnnotator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: PIIAndHAPAnnotator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: PIIAndHAPAnnotator.is_available(),
@@ -451,12 +639,15 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                 PROVIDER: {
                     OperatorConstants.Misc.NAME: "Provider",
                     OperatorConstants.Config.DESCRIPTION: (
-                        f"Detection provider ({PROVIDER_WATSONX}, {PROVIDER_LITELLM}). "
+                        f"Detection provider for every expected redaction without its own "
+                        f"'{OperatorConstants.PIIHAP.PII_PROVIDER_KEY}' / '{OperatorConstants.PIIHAP.HAP_PROVIDER_KEY}' "
+                        f"({', '.join(PIIAndHAPDetectionFactory.list_adapters())}). It must support every expected "
+                        f"redaction it serves - see 'capabilities' in the 'providers' schema (presidio is PII only). "
                         f"Note: Ollama can be accessed via {PROVIDER_LITELLM} with api_base='http://localhost:11434/v1'"
                     ),
                     OperatorConstants.Config.REQUIRED: False,
                     OperatorConstants.Config.DEFAULT: PROVIDER_DEFAULT,
-                    OperatorConstants.Config.VALID_VALUES: [PROVIDER_WATSONX, PROVIDER_LITELLM],
+                    OperatorConstants.Config.VALID_VALUES: PIIAndHAPDetectionFactory.list_adapters(),
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
                 },
                 OperatorConstants.Config.PROVIDER_CONFIG: {
@@ -467,6 +658,11 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.JSON,
                     OperatorConstants.Config.PROVIDERS: PIIAndHAPAnnotator._get_piihap_provider_schemas(),
                 },
+                # ------------------------
+                # Per-capability providers (override provider / provider_config)
+                # ------------------------
+                **PIIAndHAPAnnotator._get_capability_provider_attributes(capability=DetectionCapability.PII),
+                **PIIAndHAPAnnotator._get_capability_provider_attributes(capability=DetectionCapability.HAP),
             },
         }
 
@@ -521,8 +717,11 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                     )
 
     def _perform_detections_for_single_document(self, doc_info: dict[str, Any]) -> dict[str, Any]:
-        """Perform PII/HAP detection for a single document using the configured adapter."""
+        """Perform PII/HAP detection for a single document using the configured adapters."""
         try:
+            if self.pii_hap_service is None:
+                raise ValueError("PII/HAP service is not initialized: " + "; ".join(self.provider_selection_errors))
+            providers = self._describe_providers()
             all_detections: list[Any] = []
             doc_content_chunks = split_text_into_chunks(
                 text=doc_info["doc_contents"].as_py(),
@@ -535,7 +734,8 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
 
                 # Log detection processing
                 logger.info(
-                    f"Processing PII/HAP detection with {self.provider} provider.",
+                    "Processing PII/HAP detection with providers: %s",
+                    providers,
                     extra=self.common_log_arguments,
                 )
 
@@ -545,7 +745,8 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                 # Log detection count for this chunk
                 detection_count = len(response.detections) if response.detections else 0
                 logger.debug(
-                    f"Chunk returned {detection_count} detections",
+                    "Chunk returned %s detections",
+                    detection_count,
                     extra=self.common_log_arguments,
                 )
 
@@ -569,7 +770,7 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
             return doc_info
 
         except Exception as exc:
-            logger.error(f"PII/HAP detection failed: {exc}", extra=self.common_log_arguments)
+            logger.error("PII/HAP detection failed: %s", exc, extra=self.common_log_arguments)
             doc_info.update({"status_code": 500, "error_detail": str(exc), "success": False})
             return doc_info
 
@@ -625,7 +826,9 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
         # Process documents in parallel
         with ThreadPoolExecutor(max_workers=self.batch_size, thread_name_prefix="PIIAndHAPExecutor") as executor:
             logger.info(
-                f"Submitting {len(doc_info_list)} documents to executor in batches of {self.batch_size}",
+                "Submitting %s documents to executor in batches of %s",
+                len(doc_info_list),
+                self.batch_size,
                 extra=self.common_log_arguments,
             )
 
@@ -646,14 +849,16 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
             if not doc_info["success"]:
                 e = doc_info["error_detail"]
                 logger.error(
-                    f"PII and HAP detection failed with error: {e}",
+                    "PII and HAP detection failed with error: %s",
+                    e,
                     extra=self.common_log_arguments,
                 )
                 idx = doc_info["idx"]
                 actual_file_name = name_column[idx]
                 _id = id_column[idx]
                 logger.error(
-                    f"PII and HAP extraction failed. {actual_file_name} is removed",
+                    "PII and HAP extraction failed. %s is removed",
+                    actual_file_name,
                     extra=self.common_log_arguments,
                 )
                 self._populate_remove_row_id_and_index(
@@ -673,7 +878,11 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                 columns_to_add = self.extractor.column_values(fields_to_redact)
                 for detection_dict in doc_info["processed_response"]["detections"]:
                     logger.debug(
-                        f"Detection type: {detection_dict.get('detection')}, score: {detection_dict.get('score')}, position: {detection_dict.get('start')}-{detection_dict.get('end')}",
+                        "Detection type: %s, score: %s, position: %s-%s",
+                        detection_dict.get("detection"),
+                        detection_dict.get("score"),
+                        detection_dict.get("start"),
+                        detection_dict.get("end"),
                         extra=self.common_log_arguments,
                     )
                     detected_field = get_detected_field(detection_dict, fields_to_redact)
@@ -707,19 +916,22 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
                 metadata[Metrics.External.PROCESSED_DOCS] += 1
 
                 logger.info(
-                    f"PII and HAP extraction completed for doc: {table['name'][doc_info['idx']]}",
+                    "PII and HAP extraction completed for doc: %s",
+                    table["name"][doc_info["idx"]],
                     extra=self.common_log_arguments,
                 )
             except Exception as exc:
                 logger.error(
-                    f"PII and HAP detection failed with error: {exc}",
+                    "PII and HAP detection failed with error: %s",
+                    exc,
                     extra=self.common_log_arguments,
                 )
                 idx = doc_info["idx"]
                 actual_file_name = name_column[idx]
                 _id = id_column[idx]
                 logger.error(
-                    f"PII and HAP extraction failed. {actual_file_name} is removed",
+                    "PII and HAP extraction failed. %s is removed",
+                    actual_file_name,
                     extra=self.common_log_arguments,
                 )
                 self._populate_remove_row_id_and_index(
@@ -771,28 +983,91 @@ class PIIAndHAPAnnotator(AbstractOperator):  # type: ignore[misc]
         attributes = metadata.get(OperatorConstants.Config.ATTRIBUTES, {})
         validate_config_from_metadata(config=self.config, attributes=attributes, errors=errors)
 
-        # Validate provider-specific requirements from provider_config
-        if self.should_validate_field(field_value=self.provider_config):
-            if not self.provider_config:
-                errors.append(f"provider_config is required for provider '{self.provider}'")
-            elif not isinstance(self.provider_config, dict):
-                errors.append(f"provider_config must be a dictionary, got {type(self.provider_config).__name__}")
-            else:
-                model_id = self.provider_config.get(OperatorConstants.Config.MODEL_ID)
-                if not model_id or not isinstance(model_id, str):
-                    errors.append("provider_config.model_id is required and must be a non-empty string")
+        # Provider/capability checks are structural (registry lookup only), so they run
+        # in both the flow-validation and execution phases.
+        errors.extend(self.provider_selection_errors)
 
-                if self.provider == PROVIDER_WATSONX:
-                    required_keys = ["api_key", "url", "container_kind", "container_id"]
-                    missing_keys = [key for key in required_keys if key not in self.provider_config]
-                    if missing_keys:
-                        errors.append(
-                            f"WatsonX provider requires {', '.join(required_keys)} in provider_config. "
-                            f"Missing: {', '.join(missing_keys)}"
-                        )
+        # Validate provider-specific requirements of each selected provider's config
+        if self.should_validate_field(field_value=self.provider_config):
+            self._validate_provider_configs(errors=errors)
 
         if len(errors) > 0:
-            logger.error(errors)
+            logger.error("PII/HAP operator validation failed: %s", errors)
+
+    def _validate_provider_configs(self, *, errors: list[str]) -> None:
+        """Append per-provider config errors for every selected capability provider.
+
+        When PII and HAP resolve to the same provider and config key (e.g. the legacy
+        ``provider`` / ``provider_config`` shorthand) the config is checked only once.
+        A capability provider that falls back to the shared ``provider_config`` while
+        ``provider`` is unset also gets its unknown keys checked here, because the
+        metadata-driven check cannot tell which provider that shared config is for.
+        """
+        config_keys = (
+            OperatorConstants.Config.PROVIDER_CONFIG,
+            OperatorConstants.PIIHAP.PII_PROVIDER_CONFIG_KEY,
+            OperatorConstants.PIIHAP.HAP_PROVIDER_CONFIG_KEY,
+        )
+        for key in config_keys:
+            value = self.config.get(key)
+            if value is not None and not isinstance(value, dict):
+                errors.append(f"{key} must be a dictionary, got {type(value).__name__}")
+
+        if self.provider_selection_errors:
+            return
+        checked: set[tuple[str, str]] = set()
+        legacy_provider = self.config.get(PROVIDER)
+        for capability, selection in (
+            (DetectionCapability.PII, self.pii_selection),
+            (DetectionCapability.HAP, self.hap_selection),
+        ):
+            if selection is None:
+                continue
+            signature = (selection.provider.lower(), selection.provider_config_key)
+            if signature in checked:
+                continue
+            checked.add(signature)
+            adapter_class = PIIAndHAPDetectionFactory.get_adapter_class(selection.provider)
+            if adapter_class is not None:
+                errors.extend(
+                    adapter_class.validate_provider_config(
+                        provider_config=selection.provider_config,
+                        config_key=selection.provider_config_key,
+                    )
+                )
+            if not legacy_provider:
+                errors.extend(PIIAndHAPAnnotator._shared_config_key_errors(capability=capability, selection=selection))
+
+    @staticmethod
+    def _shared_config_key_errors(*, capability: DetectionCapability, selection: ProviderSelection) -> list[str]:
+        """Check the shared ``provider_config`` keys against a provider that falls back to it.
+
+        Only applies while ``provider`` is unset: then ``validate_config_from_metadata``
+        cannot tell which provider the shared config belongs to.  Providers whose schema
+        allows extra keys yield no errors.
+
+        Returns:
+            The unknown-key errors plus a hint naming ``<capability>_provider_config``.
+        """
+        if selection.provider_config_key != OperatorConstants.Config.PROVIDER_CONFIG:
+            return []
+        from docpipe.utils.operators.config_validation import validate_provider_config_keys
+
+        key_errors: list[str] = []
+        validate_provider_config_keys(
+            provider_config=selection.provider_config,
+            provider_schemas=PIIAndHAPAnnotator._get_piihap_provider_schemas(capability=capability),
+            active_provider=selection.provider.lower(),
+            full_path=OperatorConstants.Config.PROVIDER_CONFIG,
+            errors=key_errors,
+        )
+        if key_errors:
+            capability_config_key = CAPABILITY_PROVIDER_KEYS[capability][1]
+            key_errors.append(
+                f"'{OperatorConstants.Config.PROVIDER_CONFIG}' is shared by the capability providers because "
+                f"'{PROVIDER}' is unset; set '{capability_config_key}' to configure '{selection.provider}' separately"
+            )
+        return key_errors
 
     def _populate_remove_row_id_and_index(
         self,

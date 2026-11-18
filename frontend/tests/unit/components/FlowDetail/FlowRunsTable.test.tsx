@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { FlowRunsTable } from '@/components/FlowDetail/FlowRunsTable/FlowRunsTable';
 import type { RunRow } from '@/components/FlowDetail/FlowRunsTable/FlowRunsTable';
@@ -109,8 +108,9 @@ describe('FlowRunsTable', () => {
     renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
     // run-3 is in_progress — click its overflow menu
-    if (overflowMenus.length >= 3) {
-      fireEvent.click(overflowMenus[2]);
+    const targetMenu = overflowMenus[2];
+    if (targetMenu) {
+      fireEvent.click(targetMenu);
       const cancelItem = screen.queryByText('Cancel run');
       expect(cancelItem ?? document.body).toBeInTheDocument();
     } else {
@@ -122,8 +122,9 @@ describe('FlowRunsTable', () => {
     renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
     // run-1 is 'run' (completed) — should have Delete
-    if (overflowMenus.length >= 1) {
-      fireEvent.click(overflowMenus[0]);
+    const targetMenu = overflowMenus[0];
+    if (targetMenu) {
+      fireEvent.click(targetMenu);
       const deleteItem = screen.queryByText('Delete');
       expect(deleteItem ?? document.body).toBeInTheDocument();
     } else {
@@ -161,8 +162,9 @@ describe('FlowRunsTable', () => {
     const { onCancelRun } = renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
     // run-3 at index 2 is in_progress
-    if (overflowMenus.length >= 3) {
-      fireEvent.click(overflowMenus[2]);
+    const targetMenu = overflowMenus[2];
+    if (targetMenu) {
+      fireEvent.click(targetMenu);
       const cancelItem = screen.queryByText('Cancel run') as HTMLElement | null;
       if (cancelItem) {
         fireEvent.click(cancelItem);
@@ -202,8 +204,9 @@ describe('FlowRunsTable', () => {
     // Table sorts by epoch DESC → run-5 (most recent) is at index 0
     const { onViewRun } = renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
-    if (overflowMenus.length >= 1) {
-      fireEvent.click(overflowMenus[0]);
+    const targetMenu = overflowMenus[0];
+    if (targetMenu) {
+      fireEvent.click(targetMenu);
       const viewRunItem = screen.queryByText('View run') as HTMLElement | null;
       if (viewRunItem) {
         fireEvent.click(viewRunItem);
@@ -220,8 +223,9 @@ describe('FlowRunsTable', () => {
     // Table sorts by epoch DESC → run-5 is at index 0 (status 'cancelled'), has Delete
     const { onDeleteRun } = renderTable();
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
-    if (overflowMenus.length >= 1) {
-      fireEvent.click(overflowMenus[0]);
+    const targetMenu = overflowMenus[0];
+    if (targetMenu) {
+      fireEvent.click(targetMenu);
       const deleteItem = screen.queryByText('Delete') as HTMLElement | null;
       if (deleteItem) {
         fireEvent.click(deleteItem);
@@ -259,8 +263,9 @@ describe('FlowRunsTable', () => {
     ];
     renderTable({ runs: inProgressRun });
     const overflowMenus = document.querySelectorAll('.cds--overflow-menu');
-    if (overflowMenus.length >= 1) {
-      fireEvent.click(overflowMenus[0]);
+    const targetMenu = overflowMenus[0];
+    if (targetMenu) {
+      fireEvent.click(targetMenu);
       expect(screen.queryByText('Delete')).toBeNull();
       const cancelItem = screen.queryByText('Cancel run');
       expect(cancelItem ?? document.body).toBeInTheDocument();

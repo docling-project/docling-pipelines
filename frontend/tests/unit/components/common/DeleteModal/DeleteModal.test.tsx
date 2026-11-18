@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import React from 'react';
 import { DeleteModal } from '@/components/common/DeleteModal/DeleteModal';
 
@@ -12,7 +13,7 @@ function renderDeleteModal(props: Partial<Parameters<typeof DeleteModal>[0]> = {
     onDelete: vi.fn(() => Promise.resolve()),
     ...props,
   };
-  return { ...render(React.createElement(DeleteModal, defaults)), ...defaults };
+  return { ...renderWithProviders(React.createElement(DeleteModal, defaults)), ...defaults };
 }
 
 describe('DeleteModal', () => {

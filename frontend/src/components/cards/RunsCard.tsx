@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect } from 'react';
 import { type CarbonIconType, Renew, CheckmarkFilled, ErrorFilled } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { useAppDispatch, useAppSelector } from '@/hooks';
 import { getJobRuns } from '@/services/api';
 import { setJobRuns, setLoading, setError } from '@/slices/jobRunSlice';
@@ -7,6 +8,7 @@ import { selectJobRunsArray, selectJobRunLoading, selectJobRunError } from '@/se
 import { makeSelectFlowName } from '@/selectors/flowSelectors';
 import type { JobRun } from '@/types';
 import { HomeCard } from '../HomeCard';
+import { messages } from './RunsCard.messages';
 import cardStyles from '../HomeCard/HomeCard.module.scss';
 import styles from './RunsCard.module.scss';
 
@@ -49,15 +51,17 @@ function formatRunTime(epochSeconds: number): string {
  * `jobId` (= flow_id) so each row can resolve its own name without an extra fetch.
  */
 function RunRow({ run }: { run: JobRun }): React.JSX.Element {
+  const intl = useIntl();
   const storeFlowName = useAppSelector(makeSelectFlowName(String(run.jobId ?? '')));
   const flowName = run.flowName ?? storeFlowName;
   const { Icon, className: iconClass } = getStatusIcon(String(run.status ?? ''));
   const startEpoch = run.startTime ? Math.floor(new Date(run.startTime).getTime() / 1000) : 0;
   const isSuccess = ['completed', 'success'].includes((run.status ?? '').toLowerCase());
   const label = flowName ?? String(run.jobId ?? '').slice(0, 8);
-  const outcomeMessage = isSuccess
-    ? `Execution of "${label}" flow at ${formatRunTime(startEpoch)} completed.`
-    : `Execution of "${label}" flow at ${formatRunTime(startEpoch)} failed.`;
+  const outcomeMessage = intl.formatMessage(
+    isSuccess ? messages.runCompleted : messages.runFailed,
+    { label, time: formatRunTime(startEpoch) }
+  );
 
   return (
     <div className={styles.runRow}>
@@ -80,6 +84,7 @@ function RunRow({ run }: { run: JobRun }): React.JSX.Element {
  * - Capped at 5 rows; no "View all" link (runs are project-scoped).
  */
 export function RunsCard(): React.JSX.Element {
+  const intl = useIntl();
   const dispatch = useAppDispatch();
 
   const runs = useAppSelector(selectJobRunsArray);
@@ -103,12 +108,12 @@ export function RunsCard(): React.JSX.Element {
         dispatch(setJobRuns(map));
       })
       .catch(() => {
-        dispatch(setError('Failed to load runs.'));
+        dispatch(setError(intl.formatMessage(messages.loadError)));
       })
       .finally(() => {
         dispatch(setLoading(false));
       });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   useEffect(() => {
     fetchRuns();
@@ -123,7 +128,7 @@ export function RunsCard(): React.JSX.Element {
   let cardChildren: React.ReactNode = null;
 
   if (loading) {
-    cardChildren = <p className={cardStyles.itemLoading}>Loading runs...</p>;
+    cardChildren = <p className={cardStyles.itemLoading}>{intl.formatMessage(messages.loading)}</p>;
   } else if (error) {
     cardChildren = <p className={cardStyles.itemError}>{error}</p>;
   } else if (rows.length > 0) {
@@ -140,12 +145,12 @@ export function RunsCard(): React.JSX.Element {
 
   return (
     <HomeCard
-      title="Runs"
+      title={intl.formatMessage(messages.title)}
       headerIcon={Renew}
-      headerIconDescription="Refresh runs"
+      headerIconDescription={intl.formatMessage(messages.refreshDescription)}
       onHeaderAction={fetchRuns}
-      emptyTitle="No runs"
-      emptySubtitle="Runs will be listed here."
+      emptyTitle={intl.formatMessage(messages.emptyTitle)}
+      emptySubtitle={intl.formatMessage(messages.emptySubtitle)}
     >
       {cardChildren}
     </HomeCard>

@@ -6,17 +6,20 @@
 
 import React from 'react';
 import { InlineNotification } from '@carbon/react';
+import { useIntl } from 'react-intl';
+import { messages } from './DocQuality.messages';
 
 interface DocQualityPanelBodyProps {
   controller: any;
 }
 
 export function DocQualityPanelBody({ controller: _controller }: DocQualityPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   return (
     <InlineNotification
       kind="info"
-      title="No configuration required"
-      subtitle="This operator automatically computes document quality metrics. No parameters need to be set."
+      title={intl.formatMessage(messages.title)}
+      subtitle={intl.formatMessage(messages.subtitle)}
       lowContrast
       hideCloseButton
     />

@@ -135,5 +135,5 @@ The following features were deprecated in vX.Y and are now removed:
 If you encounter problems during migration:
 
 1. Check the [Troubleshooting Guide](../../TROUBLESHOOTING.md).
-2. Search [GitHub Issues](https://github.com/IBM/docling-pipelines/issues).
+2. Search [GitHub Issues](https://github.com/docling-project/docling-pipelines/issues).
 3. Open a new issue with the label `migration` if your problem is not already tracked.

@@ -98,6 +98,14 @@
   gap: $spacing-02;
 }
 
+// Carbon accordion reserves 25% right padding at >=640px for text readability.
+// Apply to form accordions so inputs use the full available width.
+.fullWidthAccordion {
+  :global(.cds--accordion__content) {
+    padding-inline-end: $spacing-05;
+  }
+}
+
 // Stacked fields inside an AccordionItem
 .accordionContent {
   display: flex;

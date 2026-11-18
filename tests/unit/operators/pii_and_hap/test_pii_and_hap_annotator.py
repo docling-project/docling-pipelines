@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for PII and HAP Annotator operator.
 
@@ -13,12 +16,17 @@ Tests verify the same output format as the enterprise version, including:
 - Column naming conventions
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
 
+from docpipe.core.adapters.huggingface import huggingface_adapter
+from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.operators.quality.pii_and_hap import pii_and_hap_annotator
+from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.huggingface import adapter as hf_hap_adapter_module
 from docpipe.core.operators.quality.pii_and_hap.domain.models import (
     DetectionResult,
     PIIHAPDetectionResponse,
@@ -35,6 +43,8 @@ from docpipe.core.operators.quality.pii_and_hap.pii_and_hap_helper import (
     initialize_table_columns,
     update_table,
 )
+from docpipe.core.operators.quality.pii_and_hap.services import pii_hap_service
+from docpipe.integrations.huggingface.classification_client import WindowScores
 
 
 def mock_detect_pii_hap(payload: dict):
@@ -1177,6 +1187,140 @@ def test_helper_guardrails_extractor_redact_batch():
     ]
     redacted_text = extractor.redact_batch(content_text_only, text_detections, ["pii"])
     assert redacted_text == "Contact ***** at ***** office"
+
+
+# ---------------------------------------------------------------------------
+# huggingface HAP provider, end to end through the annotator
+# (real HuggingFaceHAPAdapter, core HuggingFaceAdapter and PIIHAPService;
+# only the local classification model is replaced by a fake)
+# ---------------------------------------------------------------------------
+
+_HF_TOXIC_PHRASES = ("worthless idiot", "moron")
+# A document containing this marker makes the fake classifier raise, simulating a model error.
+_HF_SCORING_FAILURE_MARKER = "[simulate-scoring-failure]"
+
+
+class _FakeHAPClassifier:
+    """Stand-in for HuggingFaceClassificationClient: fixed scores per sentence, no model."""
+
+    def get_labels(self) -> tuple[str, ...]:
+        """Return the default model's labels."""
+        return ("LABEL_0", "LABEL_1")
+
+    def score_spans(self, *, text: str, spans: list[tuple[int, int]]) -> list[WindowScores]:
+        """Score spans containing a toxic phrase 0.95 and everything else 0.01; fail on the failure marker."""
+        if _HF_SCORING_FAILURE_MARKER in text:
+            raise ValueError(f"tokenizer failed on: {text}")
+        scores = []
+        for start, end in spans:
+            toxic = 0.95 if any(phrase in text[start:end] for phrase in _HF_TOXIC_PHRASES) else 0.01
+            scores.append(WindowScores(start=start, end=end, probabilities={"LABEL_0": 1 - toxic, "LABEL_1": toxic}))
+        return scores
+
+
+@pytest.fixture
+def huggingface_hap_operator_factory():
+    """Build pii_and_hap operators that use the huggingface HAP provider with a fake model."""
+    with patch.object(huggingface_adapter, "HuggingFaceClassificationClient", return_value=_FakeHAPClassifier()):
+
+        def build(**overrides):
+            config = {
+                "doc_column": "content",
+                "hap_provider": "huggingface",
+                "expected_redactions": ["HAP"],
+                "hap_threshold": 0.8,
+                "hap_redaction": False,
+                **overrides,
+            }
+            return PIIAndHAPAnnotator(config)
+
+        yield build
+
+
+def _hf_table(contents: list[str]) -> pa.Table:
+    return pa.Table.from_pydict(
+        {
+            "id": [f"doc-{index}" for index in range(len(contents))],
+            "content": contents,
+            "name": [f"file{index}.md" for index in range(len(contents))],
+        }
+    )
+
+
+_HF_DOCS = [
+    "Thanks for the report.\nYou are a worthless idiot. Go away, moron.",
+    "All good here. See you tomorrow.",
+    "Meeting notes:\n- You are a worthless idiot.\n- Next steps.",
+]
+
+
+def test_huggingface_hap_counts_per_document_and_in_metadata(huggingface_hap_operator_factory):
+    operator = huggingface_hap_operator_factory()
+    input_table = _hf_table(_HF_DOCS)
+
+    (table,), metadata = operator.transform(input_table)
+
+    assert table.column_names == [*input_table.column_names, "hap"]
+    assert table.schema.field("hap").type == pa.int64()
+    assert table["hap"].to_pylist() == [2, 0, 1]
+    assert metadata[METADATA_HAP_FIELD_NAME] == 3
+    assert table["content"].to_pylist() == _HF_DOCS
+
+
+def test_huggingface_hap_redaction_masks_only_the_flagged_sentence(huggingface_hap_operator_factory):
+    operator = huggingface_hap_operator_factory(hap_redaction=True, hap_redaction_character="#")
+    content = _HF_DOCS[2]
+    # A Markdown list item is one span, so its "- " marker is masked with the sentence
+    toxic = "- You are a worthless idiot."
+
+    (table,), _ = operator.transform(_hf_table([content]))
+
+    assert table["content"].to_pylist() == [content.replace(toxic, "#" * len(toxic))]
+    assert table["content"][0].as_py().count("\n") == content.count("\n")
+
+
+def test_huggingface_hap_scoring_failure_removes_only_that_document(huggingface_hap_operator_factory):
+    operator = huggingface_hap_operator_factory(partial_ingest=True)
+    failing = f"{_HF_SCORING_FAILURE_MARKER} secret customer sentence."
+
+    (table,), metadata = operator.transform(_hf_table([_HF_DOCS[0], failing, _HF_DOCS[2]]))
+
+    assert table["id"].to_pylist() == ["doc-0", "doc-2"]
+    assert table["hap"].to_pylist() == [2, 1]
+    assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.COMPLETED_WITH_ERRORS.value
+    assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+    (failed,) = metadata[Metrics.External.FAILED_DOCS]
+    assert "Hugging Face HAP detection failed: ValueError while scoring with model" in str(failed)
+    assert "secret customer sentence" not in str(failed)
+
+
+def test_huggingface_hap_debug_logs_contain_no_document_text(huggingface_hap_operator_factory, caplog):
+    operator = huggingface_hap_operator_factory(partial_ingest=True)
+    contents = [_HF_DOCS[0], f"{_HF_SCORING_FAILURE_MARKER} secret customer sentence."]
+    loggers = [
+        logging.getLogger(name)
+        for name in (
+            pii_and_hap_annotator.__name__,
+            huggingface_adapter.__name__,
+            hf_hap_adapter_module.__name__,
+            pii_hap_service.__name__,
+        )
+    ]
+    previous_levels = [module_logger.level for module_logger in loggers]
+    for module_logger in loggers:
+        module_logger.addHandler(caplog.handler)
+        module_logger.setLevel(logging.DEBUG)
+    try:
+        operator.transform(_hf_table(contents))
+    finally:
+        for module_logger, level in zip(loggers, previous_levels, strict=True):
+            module_logger.removeHandler(caplog.handler)
+            module_logger.setLevel(level)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(record.levelno == logging.DEBUG for record in caplog.records)
+    for fragment in ("worthless idiot", "Go away", "Thanks for the report", "secret customer sentence"):
+        assert all(fragment not in message for message in messages), fragment
 
 
 if __name__ == "__main__":

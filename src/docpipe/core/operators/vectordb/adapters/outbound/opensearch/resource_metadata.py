@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenSearch-specific resource metadata fetcher for flow enrichment.
 
 Fetches live index metadata from an OpenSearch connection: available indices,
@@ -12,6 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -28,6 +33,11 @@ class OpenSearchResourceMetadata:
     All helper methods are stateless and accept the already-fetched mapping
     dict so get_mapping() is called at most once per fetch() invocation.
     """
+
+    @staticmethod
+    def project_mappable_features(*, available_features: dict[str, Any]) -> dict[str, Any]:
+        """Project OpenSearch mappable features (all features are mappable)."""
+        return dict(available_features)
 
     def fetch(
         self,
@@ -62,8 +72,10 @@ class OpenSearchResourceMetadata:
         """
         from docpipe.core.operators.vectordb.adapters.outbound.opensearch.client import OpenSearchClient
 
+        provider_config = reveal_value(provider_config)
+
         if not provider_config.get(OperatorConstants.VectorDB.HOST):
-            logger.debug("OpenSearch provider_config missing host — skipping metadata fetch")
+            logger.debug("OpenSearch provider_config missing host - skipping metadata fetch")
             return empty_result()
 
         try:
@@ -120,7 +132,10 @@ class OpenSearchResourceMetadata:
                 OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: stored_resource_metadata,
             }
         except Exception as exc:
-            logger.warning("Failed to fetch OpenSearch metadata: %s", exc)
+            logger.warning(
+                "Failed to fetch OpenSearch metadata: %s",
+                sanitize_exception(exc=exc, config_key="provider_config"),
+            )
             return empty_result()
 
     @staticmethod

@@ -27,6 +27,7 @@ from docpipe.cli.docpipe_cli import (
 )
 from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.orchestration.global_config_metadata import EXECUTION_CONTROL
 
 
 @pytest.fixture
@@ -263,6 +264,55 @@ class TestMainCLI:
         main()
 
         mock_list_ops.assert_called_once_with(verbose=True, summary_only=False)
+
+    @pytest.mark.parametrize(
+        ("cli_args", "expected_category", "expected_verbose"),
+        [
+            (["list-global-config"], None, False),
+            (["--category", EXECUTION_CONTROL, "list-global-config"], EXECUTION_CONTROL, False),
+            (["list-global-config", "--category", EXECUTION_CONTROL], EXECUTION_CONTROL, False),
+            (["--verbose", "list-global-config"], None, True),
+            (["list-global-config", "--verbose"], None, True),
+            (
+                ["--verbose", "--category", EXECUTION_CONTROL, "list-global-config"],
+                EXECUTION_CONTROL,
+                True,
+            ),
+            (
+                ["list-global-config", "--verbose", "--category", EXECUTION_CONTROL],
+                EXECUTION_CONTROL,
+                True,
+            ),
+        ],
+        ids=[
+            "defaults-summary",
+            "category-before-summary",
+            "category-after-summary",
+            "verbose-before-detailed",
+            "verbose-after-detailed",
+            "options-before-detailed",
+            "options-after-detailed",
+        ],
+    )
+    @patch("docpipe.utils.global_config.display.list_global_config")
+    def test_list_global_config_option_ordering(
+        self,
+        mock_list_global_config,
+        monkeypatch,
+        cli_args,
+        expected_category,
+        expected_verbose,
+    ):
+        """Explicit options are preserved on either side of the subcommand."""
+        mock_list_global_config.return_value = "Global config output"
+        monkeypatch.setattr("sys.argv", ["docling-pipelines", *cli_args])
+
+        main()
+
+        mock_list_global_config.assert_called_once_with(
+            category=expected_category,
+            verbose=expected_verbose,
+        )
 
     @patch("sys.argv", ["docling-pipelines"])
     def test_missing_flow_file_error(self):

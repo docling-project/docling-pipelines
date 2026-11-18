@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { ACLPanelBody } from '@/components/PropertiesPanel/CustomPanels/ACL/ACL';
 
 function makeController(overrides: Record<string, unknown> = {}) {
@@ -13,18 +14,18 @@ function makeController(overrides: Record<string, unknown> = {}) {
 
 describe('ACLPanelBody', () => {
   it('renders provider_config textarea', () => {
-    render(<ACLPanelBody controller={makeController()} />);
+    renderWithProviders(<ACLPanelBody controller={makeController()} />);
     // JsonTextArea renders a textarea with this id
     expect(document.getElementById('provider_config')).not.toBeNull();
   });
 
   it('renders fail_on_error toggle', () => {
-    render(<ACLPanelBody controller={makeController()} />);
+    renderWithProviders(<ACLPanelBody controller={makeController()} />);
     expect(document.getElementById('fail_on_error')).not.toBeNull();
   });
 
   it('defaults fail_on_error to true (checked)', () => {
-    render(<ACLPanelBody controller={makeController()} />);
+    renderWithProviders(<ACLPanelBody controller={makeController()} />);
     // Carbon Toggle renders a <button role="switch"> with aria-checked
     const toggle = document.querySelector('[id="fail_on_error"]');
     // Toggle element exists — checked state verified via aria or just presence
@@ -39,26 +40,26 @@ describe('ACLPanelBody', () => {
         p.name === 'fail_on_error' ? false : undefined
       ),
     });
-    render(<ACLPanelBody controller={controller} />);
+    renderWithProviders(<ACLPanelBody controller={controller} />);
     const toggle = document.getElementById('fail_on_error') as HTMLInputElement;
     expect(toggle.checked).toBeFalsy();
   });
 
   it('calls updatePropertyValue when fail_on_error toggle clicked', () => {
     const update = vi.fn();
-    render(<ACLPanelBody controller={makeController({ updatePropertyValue: update })} />);
+    renderWithProviders(<ACLPanelBody controller={makeController({ updatePropertyValue: update })} />);
     const toggle = document.getElementById('fail_on_error') as HTMLElement;
     fireEvent.click(toggle);
     expect(update).toHaveBeenCalledWith({ name: 'fail_on_error' }, false);
   });
 
   it('renders Provider configuration label', () => {
-    render(<ACLPanelBody controller={makeController()} />);
+    renderWithProviders(<ACLPanelBody controller={makeController()} />);
     expect(screen.getAllByText('Provider configuration').length).toBeGreaterThan(0);
   });
 
   it('renders Fail on error label', () => {
-    render(<ACLPanelBody controller={makeController()} />);
+    renderWithProviders(<ACLPanelBody controller={makeController()} />);
     expect(screen.getAllByText('Fail on error').length).toBeGreaterThan(0);
   });
 });

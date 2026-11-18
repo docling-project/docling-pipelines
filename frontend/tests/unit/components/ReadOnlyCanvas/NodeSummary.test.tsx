@@ -1,48 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
-import React from 'react';
+import { screen, fireEvent, act } from '@testing-library/react';
+import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { NodeSummary } from '@/components/ReadOnlyCanvas/RunSidePanel/NodeSummary/NodeSummary';
 import type { NodeMetadataItem, JobStats } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 import { CELL_VALUE_MAX_LENGTH } from '@/constants/runSidePanel';
+import { createMockJobStats, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
 
 function makeJobStats(
   nodeId: string,
-  nodeStatus = JOB_RUN_STATUS.COMPLETED
+  nodeStatus: string = JOB_RUN_STATUS.COMPLETED
 ): JobStats {
-  return {
-    job_id: 'job-1',
-    job_run_id: 'run-1',
-    status: JOB_RUN_STATUS.COMPLETED,
-    message: '',
-    start_time: 0,
-    end_time: 0,
-    duration: 10,
-    heartbeat_timestamp: null,
-    total_docs: 5,
-    processed_docs: 5,
-    completed_docs: 5,
-    failed_docs: 0,
-    skipped_docs: 0,
-    deleted_doc_count: 0,
-    total_pages_processed: 0,
-    page_type_stats: null,
-    execution_time: null,
-    orchestrator: 'python',
-    container_kind: null,
-    container_id: null,
-    flow_id: null,
-    user_id: null,
-    account_id: null,
-    user_entitlements: null,
-    report_status: null,
-    report_generation_started_at: null,
-    report_generation_completed_at: null,
+  return createMockJobStats({
     node_stats: {
-      [nodeId]: { name: 'My Node', node_status: nodeStatus },
+      [nodeId]: createMockNodeStats({ id: nodeId, name: 'My Node', node_status: nodeStatus }),
     },
-    batch_node_stats: {},
-  };
+  });
 }
 
 function makeNodeMeta(
@@ -65,7 +38,7 @@ describe('NodeSummary', () => {
   // ── 1. Renders without crashing ───────────────────────────────────────────
   it('renders without crashing with minimal props', () => {
     const id = 'node-1';
-    const { container } = render(
+    const { container } = renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id)}
@@ -77,7 +50,7 @@ describe('NodeSummary', () => {
   // ── 2. Displays the node name from job_stats ──────────────────────────────
   it('displays the node name from job_stats', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id)}
@@ -89,7 +62,7 @@ describe('NodeSummary', () => {
   // ── 3. Displays the operator type ────────────────────────────────────────
   it('displays the operator type', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id)}
@@ -102,7 +75,7 @@ describe('NodeSummary', () => {
   // ── 4. Status badge: Completed ────────────────────────────────────────────
   it('shows Completed status badge', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.COMPLETED)}
@@ -114,7 +87,7 @@ describe('NodeSummary', () => {
   // ── 5. Status badge: Failed ───────────────────────────────────────────────
   it('shows Failed status badge', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.FAILED)}
@@ -126,7 +99,7 @@ describe('NodeSummary', () => {
   // ── 6. Status badge: Running ──────────────────────────────────────────────
   it('shows Running status badge', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.RUNNING)}
@@ -138,7 +111,7 @@ describe('NodeSummary', () => {
   // ── 7. Status badge: Starting ─────────────────────────────────────────────
   it('shows Starting status badge with InProgress icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.STARTING)}
@@ -150,7 +123,7 @@ describe('NodeSummary', () => {
   // ── 8. Status badge: Canceling ───────────────────────────────────────────
   it('shows Canceling status badge with InProgress icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.CANCELING)}
@@ -162,7 +135,7 @@ describe('NodeSummary', () => {
   // ── 9. Status badge: Canceled ────────────────────────────────────────────
   it('shows Canceled status badge with CircleDash icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.CANCELED)}
@@ -174,7 +147,7 @@ describe('NodeSummary', () => {
   // ── 10. Status badge: Pending ────────────────────────────────────────────
   it('shows Pending status badge with CircleDash icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.PENDING)}
@@ -186,7 +159,7 @@ describe('NodeSummary', () => {
   // ── 11. Status badge: Skipped ────────────────────────────────────────────
   it('shows Skipped status badge with CircleDash icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.SKIPPED)}
@@ -198,7 +171,7 @@ describe('NodeSummary', () => {
   // ── 12. Status badge: Warning ────────────────────────────────────────────
   it('shows Warning status badge with WarningFilled icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, 'Warning')}
@@ -210,7 +183,7 @@ describe('NodeSummary', () => {
   // ── 13. Status badge: CompletedWithErrors ────────────────────────────────
   it('shows CompletedWithErrors status badge with WarningFilled icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.COMPLETED_WITH_ERRORS)}
@@ -222,7 +195,7 @@ describe('NodeSummary', () => {
   // ── 14. Status badge: CompletedWithWarnings ──────────────────────────────
   it('shows CompletedWithWarnings status badge with WarningFilled icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, JOB_RUN_STATUS.COMPLETED_WITH_WARNINGS)}
@@ -234,7 +207,7 @@ describe('NodeSummary', () => {
   // ── 15. Status badge: succeeded (alias) ──────────────────────────────────
   it('shows succeeded status badge with CheckmarkFilled icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, 'Succeeded')}
@@ -246,7 +219,7 @@ describe('NodeSummary', () => {
   // ── 16. Status badge: unknown status → no icon ───────────────────────────
   it('shows unknown status badge without a Carbon icon', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={makeJobStats(id, 'SomeNewStatus')}
@@ -260,7 +233,7 @@ describe('NodeSummary', () => {
     const id = 'node-1';
     const jobStats = makeJobStats(id);
     jobStats.node_stats = {};
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={jobStats}
@@ -273,7 +246,7 @@ describe('NodeSummary', () => {
   it('shows operator as title when no nodeStat name', () => {
     const id = 'node-no-stat';
     const jobStats = makeJobStats('other-node');
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id)}
         jobStats={jobStats}
@@ -288,7 +261,7 @@ describe('NodeSummary', () => {
   it('shows "No metadata available" when no metadata and no nodeStat', () => {
     const id = 'node-no-stat';
     const jobStats = makeJobStats('other-node');
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, {})}
         jobStats={jobStats}
@@ -300,7 +273,7 @@ describe('NodeSummary', () => {
   // ── 20. Renders metadata table with string value rows ─────────────────────
   it('renders metadata table with string value rows', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { documents_in_scope: '100', processed_docs: '90' })}
         jobStats={makeJobStats(id)}
@@ -313,7 +286,7 @@ describe('NodeSummary', () => {
   // ── 21. Renders metadata with numeric float value ─────────────────────────
   it('renders metadata table with numeric float value (formatted)', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { score: 0.12345 })}
         jobStats={makeJobStats(id)}
@@ -325,7 +298,7 @@ describe('NodeSummary', () => {
   // ── 22. Renders metadata with large numeric value (integer) ─────────────
   it('renders metadata with large integer value (>= threshold)', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { total_pages: 5000 })}
         jobStats={makeJobStats(id)}
@@ -338,7 +311,7 @@ describe('NodeSummary', () => {
   // ── 23. Renders metadata with object value as JSON string ─────────────────
   it('renders metadata table with object value as JSON string', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { config: { key: 'value' } })}
         jobStats={makeJobStats(id)}
@@ -350,7 +323,7 @@ describe('NodeSummary', () => {
   // ── 24. Renders metadata with null value ──────────────────────────────────
   it('renders metadata with null value as empty string', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { empty_field: null })}
         jobStats={makeJobStats(id)}
@@ -362,7 +335,7 @@ describe('NodeSummary', () => {
   // ── 25. Renders metadata with undefined value ─────────────────────────────
   it('renders metadata with undefined value gracefully', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { missing_field: undefined })}
         jobStats={makeJobStats(id)}
@@ -375,7 +348,7 @@ describe('NodeSummary', () => {
   it('truncates long string values in metadata cells', () => {
     const id = 'node-1';
     const longValue = 'A'.repeat(CELL_VALUE_MAX_LENGTH + 10);
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { long_field: longValue })}
         jobStats={makeJobStats(id)}
@@ -392,7 +365,7 @@ describe('NodeSummary', () => {
     const id = 'node-1';
     // Build an object whose JSON representation exceeds CELL_VALUE_MAX_LENGTH
     const bigObj = { key: 'a'.repeat(CELL_VALUE_MAX_LENGTH) };
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { big_obj: bigObj })}
         jobStats={makeJobStats(id)}
@@ -404,7 +377,7 @@ describe('NodeSummary', () => {
   // ── 28. Filters node_status key from metadata rows ────────────────────────
   it('filters node_status key from metadata rows', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { node_status: 'Completed', docs_count: 10 })}
         jobStats={makeJobStats(id)}
@@ -418,7 +391,7 @@ describe('NodeSummary', () => {
   // ── 29. Filters node_id, nodeId, id, ID keys from metadata rows ───────────
   it('filters out node_id, nodeId, id, ID from metadata rows', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, {
           node_id: 'x',
@@ -439,7 +412,7 @@ describe('NodeSummary', () => {
   it('shows clickable count for skipped_docs array with items', () => {
     const id = 'node-1';
     const skipped = [{ id: 'doc-1', name: 'file.pdf', reason: 'too short' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
         jobStats={makeJobStats(id)}
@@ -454,7 +427,7 @@ describe('NodeSummary', () => {
   it('opens skipped docs tearsheet when count link is clicked', () => {
     const id = 'node-1';
     const skipped = [{ id: 'doc-1', name: 'file.pdf', reason: 'too short' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
         jobStats={makeJobStats(id)}
@@ -472,7 +445,7 @@ describe('NodeSummary', () => {
   it('opens skipped docs tearsheet via View icon button', () => {
     const id = 'node-1';
     const skipped = [{ id: 'doc-1', name: 'file.pdf', reason: 'too short' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
         jobStats={makeJobStats(id)}
@@ -491,11 +464,11 @@ describe('NodeSummary', () => {
 
   // ── 33. Closes skipped docs tearsheet ─────────────────────────────────────
   // Smoke test only — SharedTearsheet portals to theme element which is not
-  // available in a bare render() context; just verify the click does not crash.
+  // available in a bare renderWithProviders() context; just verify the click does not crash.
   it('closes skipped docs tearsheet when tearsheet close is triggered', () => {
     const id = 'node-1';
     const skipped = [{ id: 'doc-1', name: 'file.pdf', reason: 'too short' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
         jobStats={makeJobStats(id)}
@@ -513,7 +486,7 @@ describe('NodeSummary', () => {
   it('shows clickable count for failed_docs array with items', () => {
     const id = 'node-1';
     const failed = [{ id: 'doc-2', name: 'broken.pdf', reason: 'parse error' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { failed_docs: failed })}
         jobStats={makeJobStats(id)}
@@ -528,7 +501,7 @@ describe('NodeSummary', () => {
   it('opens failed docs tearsheet when count link is clicked', () => {
     const id = 'node-1';
     const failed = [{ id: 'doc-2', name: 'broken.pdf', reason: 'parse error' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { failed_docs: failed })}
         jobStats={makeJobStats(id)}
@@ -547,7 +520,7 @@ describe('NodeSummary', () => {
     const id = 'node-1';
     const failed = [{ id: 'doc-2', name: 'broken.pdf', reason: 'parse error' }];
     await act(async () => {
-      render(
+      renderWithProviders(
         <NodeSummary
           nodeMetadata={makeNodeMeta(id, { failed_docs: failed })}
           jobStats={makeJobStats(id)}
@@ -566,7 +539,7 @@ describe('NodeSummary', () => {
   // ── 37. Shows 0 string for empty skipped_docs array ───────────────────────
   it('shows 0 string for empty skipped_docs array', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: [] })}
         jobStats={makeJobStats(id)}
@@ -580,7 +553,7 @@ describe('NodeSummary', () => {
   // ── 38. Shows 0 string for empty failed_docs array ────────────────────────
   it('shows 0 string for empty failed_docs array', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { failed_docs: [] })}
         jobStats={makeJobStats(id)}
@@ -595,7 +568,7 @@ describe('NodeSummary', () => {
   it('parses doc array using file_name field', () => {
     const id = 'node-1';
     const docs = [{ id: 'doc-1', file_name: 'report.pdf', reason: 'too large' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: docs })}
         jobStats={makeJobStats(id)}
@@ -610,7 +583,7 @@ describe('NodeSummary', () => {
   it('parses doc array using document_id field', () => {
     const id = 'node-1';
     const docs = [{ document_id: 'doc-uuid', fileName: 'data.csv', reason: 'format' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: docs })}
         jobStats={makeJobStats(id)}
@@ -624,7 +597,7 @@ describe('NodeSummary', () => {
   // ── 41. parseDocArray with non-array → treated as non-doc key ─────────────
   it('treats non-array skipped_docs value as a regular metadata row', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: 'not an array' })}
         jobStats={makeJobStats(id)}
@@ -650,7 +623,7 @@ describe('NodeSummary', () => {
     try {
       const id = 'node-1';
       const skipped = [{ id: 'doc-1', name: 'file.pdf', reason: 'short' }];
-      render(
+      renderWithProviders(
         <NodeSummary
           nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
           jobStats={makeJobStats(id)}
@@ -683,7 +656,7 @@ describe('NodeSummary', () => {
       { id: 'doc-1', name: 'file1.pdf', reason: 'too short' },
       { id: 'doc-2', name: 'file2.pdf', reason: 'invalid format' },
     ];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
         jobStats={makeJobStats(id)}
@@ -701,7 +674,7 @@ describe('NodeSummary', () => {
   it('handles doc item with empty id gracefully', () => {
     const id = 'node-1';
     const skipped = [{ id: '', name: 'noIdFile.pdf', reason: 'missing' }];
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { skipped_docs: skipped })}
         jobStats={makeJobStats(id)}
@@ -718,7 +691,7 @@ describe('NodeSummary', () => {
   // ── 45. formatNumericValue: integer value ─────────────────────────────────
   it('formats integer numeric values without decimal places', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { count: 42 })}
         jobStats={makeJobStats(id)}
@@ -731,7 +704,7 @@ describe('NodeSummary', () => {
   it('formats float values below threshold to 4 decimal places', () => {
     const id = 'node-1';
     // 0.123456789 → toFixed(4) → "0.1235" → Number("0.1235") → "0.1235"
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { ratio: 0.123456789 })}
         jobStats={makeJobStats(id)}
@@ -749,7 +722,7 @@ describe('NodeSummary', () => {
   // ── 47. formatNumericValue: large float above threshold → no decimals ──────
   it('formats large float values above threshold as integer', () => {
     const id = 'node-1';
-    render(
+    renderWithProviders(
       <NodeSummary
         nodeMetadata={makeNodeMeta(id, { big_float: 5000.99 })}
         jobStats={makeJobStats(id)}

@@ -21,7 +21,6 @@ class TestMultiModelEmbeddings:
         """Configuration for VectorDB operator with multiple embedding columns."""
         return {
             OperatorConstants.Config.PROVIDER: "opensearch",
-            OperatorConstants.VectorDB.CREATE_INDEX: True,
             OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
             OperatorConstants.Config.AVAILABLE_FEATURES: {
                 "doc_id_hash": {
@@ -273,7 +272,6 @@ class TestMilvusMultiModelInterface:
         """Configuration for Milvus adapter."""
         return {
             OperatorConstants.Config.PROVIDER: "milvus",
-            OperatorConstants.VectorDB.CREATE_INDEX: True,
             OperatorConstants.Columns.DOC_ID_COLUMN: "doc_id_hash",
             OperatorConstants.Config.AVAILABLE_FEATURES: {
                 "doc_id_hash": {

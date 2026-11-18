@@ -4,10 +4,10 @@ Provides all standard readability formulas using pyphen and basic regex for toke
 """
 
 import math
-import re
 from pathlib import Path
 from typing import Any
 
+import re2 as re
 from pyphen import Pyphen
 
 from docpipe.utils.infrastructure.logging import get_logger
@@ -26,8 +26,20 @@ DIFFICULT_WORDS = "difficult_words"
 
 def split_sentences(text: str) -> list[str]:
     """Split text into sentences using regex."""
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [s for s in sentences if s]
+    # RE2 does not support lookbehind; split on sentence-ending punctuation followed by
+    # whitespace, then reassemble each sentence with its trailing punctuation mark.
+    parts = re.split(r"([.!?])\s+", text.strip())
+    sentences = []
+    i = 0
+    while i < len(parts):
+        if i + 1 < len(parts) and parts[i + 1] in ".!?":
+            sentences.append(parts[i] + parts[i + 1])
+            i += 2
+        else:
+            if parts[i]:
+                sentences.append(parts[i])
+            i += 1
+    return sentences
 
 
 # Load easy words list

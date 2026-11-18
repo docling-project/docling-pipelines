@@ -2,6 +2,7 @@
 
 - Jojo Joseph - jjojo@in.ibm.com
 - Aditya Rohan Singh - adityars@ibm.com
+- Adrian Lee - adrian.lee@ibm.com
 - Anudeep Dunaboyina - anudeep.dunaboyina@ibm.com
 - Aravind NK - aravind.nk@ibm.com
 - Ashok Kumar Angadi - asangadi@in.ibm.com
@@ -15,6 +16,5 @@
 - Remya P - remya.p@ibm.com
 - Sahil Berwal - Sahil.Berwal@ibm.com
 - Sanchit Rote - Sanchit.Rote@ibm.com
-- Yash Bopardikar - ybopard@us.ibm.com
 
-Maintainers can be contacted at [docling_pipeline_team-dg@ibm.com](mailto:docling_pipeline_team-dg@ibm.com).
+Maintainers can be contacted at [docling_pipeline_team@wwpdl.vnet.ibm.com](mailto:docling_pipeline_team@wwpdl.vnet.ibm.com).

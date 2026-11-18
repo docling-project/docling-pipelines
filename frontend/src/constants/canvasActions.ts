@@ -128,17 +128,6 @@ export const CANVAS_ACTIONS = {
  */
 export type CanvasAction = typeof CANVAS_ACTIONS[keyof typeof CANVAS_ACTIONS];
 
-// ── Read-only canvas UI labels ────────────────────────────────────────────────
-
-/** Label shown on the Back button in the read-only canvas toolbar. */
-export const LABEL_BACK = 'Back';
-
-/** Label shown on the read-only mode pill in the toolbar. */
-export const LABEL_READ_ONLY_MODE = 'Read-only mode';
-
-/** Label shown on the Node Summary context menu item. */
-export const LABEL_NODE_SUMMARY = 'Node Summary';
-
 // ── Job run asset reference ───────────────────────────────────────────────────
 
 /** asset_ref_type value used when creating a job run for a UDP flow. */

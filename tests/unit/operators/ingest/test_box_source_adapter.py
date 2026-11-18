@@ -692,6 +692,57 @@ class TestBoxFetchBinaryContent:
 
 
 # ---------------------------------------------------------------------------
+# bind_file_reference
+# ---------------------------------------------------------------------------
+
+
+class TestBoxBindFileReference:
+    def test_valid_file_reference_sets_file_id(self):
+        """A non-empty file_reference is set as file_id without any Box API call."""
+        provider_config = {"credentials_json_path": "/tmp/box.json", "folder_id": "123"}
+
+        BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="file99")
+
+        assert provider_config["file_id"] == "file99"
+
+    def test_credentials_are_untouched(self):
+        """bind_file_reference only adds file_id; it never reads or rewrites credentials."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="file1")
+
+        assert provider_config["credentials_json_path"] == "/tmp/box.json"
+        assert "credentials_json" not in provider_config
+
+    def test_empty_file_reference_raises_value_error(self):
+        """An empty file_reference raises a clear ValueError."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        with pytest.raises(ValueError, match="non-empty Box file ID"):
+            BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="")
+
+        assert "file_id" not in provider_config
+
+    def test_blank_file_reference_raises_value_error(self):
+        """A whitespace-only file_reference raises a clear ValueError."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        with pytest.raises(ValueError, match="non-empty Box file ID"):
+            BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="   ")
+
+        assert "file_id" not in provider_config
+
+    def test_none_file_reference_raises_value_error(self):
+        """A None file_reference raises a clear ValueError, not an AttributeError."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        with pytest.raises(ValueError, match="non-empty Box file ID"):
+            BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=None)
+
+        assert "file_id" not in provider_config
+
+
+# ---------------------------------------------------------------------------
 # box/auth.py — get_box_client
 # ---------------------------------------------------------------------------
 

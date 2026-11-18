@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
 import { go } from '@/utils';
 import { Tag } from '@carbon/react';
@@ -21,6 +22,7 @@ import {
 import { useAppDispatch, useAppSelector, useTheme, useNotify } from '@/hooks';
 import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
 import { ROUTES, generateRoute } from '@/config';
+import { messages } from './ProjectDetail.messages';
 import styles from './ProjectDetail.module.scss';
 
 /**
@@ -41,6 +43,7 @@ import styles from './ProjectDetail.module.scss';
  * the Refresh button triggers a full re-fetch.
  */
 export function ProjectDetail(): React.JSX.Element | null {
+  const intl = useIntl();
   // project_id in the URL is the raw UUID from the API (e.g. "abc-123").
   const { project_id: projectId } = useParams<{ project_id: string }>();
   const navigate = useNavigate();
@@ -76,10 +79,14 @@ export function ProjectDetail(): React.JSX.Element | null {
         removeEntry(`project-${projectId}`);
         const axiosErr = err as { response?: { status?: number } };
         if (axiosErr?.response?.status === 404) {
-          go(navigate, ROUTES.ERROR, { state: { message: 'Project not found.', statusCode: 404 }, replace: true });
+          go(navigate, ROUTES.ERROR, {
+            state: { message: intl.formatMessage(messages.projectNotFound), statusCode: 404 },
+            replace: true,
+          });
         } else {
-          dispatch(setError('Failed to load project. Please try again.'));
-          go(navigate, ROUTES.ERROR, { state: { message: 'Failed to load project. Please try again.', statusCode: 500 }, replace: true });
+          const loadErrorMessage = intl.formatMessage(messages.projectLoadError);
+          dispatch(setError(loadErrorMessage));
+          go(navigate, ROUTES.ERROR, { state: { message: loadErrorMessage, statusCode: 500 }, replace: true });
         }
       })
       .finally(() => {
@@ -105,12 +112,12 @@ export function ProjectDetail(): React.JSX.Element | null {
         dispatch(setFlows(flowsMap));
       })
       .catch(() => {
-        dispatch(setFlowsError('Failed to load flows. Please try again.'));
+        dispatch(setFlowsError(intl.formatMessage(messages.flowsLoadError)));
       })
       .finally(() => {
         dispatch(setFlowsLoading(false));
       });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   useEffect(() => {
     if (project?.id) { fetchFlows(project.id); }
@@ -167,14 +174,14 @@ export function ProjectDetail(): React.JSX.Element | null {
       const newRow = flowMapper.fromResponse(response.data);
       dispatch(setFlow({ flowId: newRow.flow_id, flow: newRow }));
       setCreateFlowOpen(false);
-      notify.success(`${values.name} created successfully.`);
+      notify.success(intl.formatMessage(messages.createFlowSuccess, { name: values.name }));
       if (response.data.flow_id) {
         go(navigate, generateRoute.canvas(response.data.flow_id, project?.id ?? projectId ?? ''));
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      const message = err instanceof Error ? err.message : intl.formatMessage(messages.unexpectedError);
       setCreateFlowError(message);
-      notify.error('Failed to create flow', { subtitle: message });
+      notify.error(intl.formatMessage(messages.createFlowError), { subtitle: message });
     } finally {
       setCreateFlowLoading(false);
     }
@@ -189,11 +196,11 @@ export function ProjectDetail(): React.JSX.Element | null {
   };
 
   const handleDeleteFlow = (flowId: string): Promise<void> => {
-    const flowName = flows.find((f) => f.flow_id === flowId)?.name ?? 'Flow';
+    const flowName = flows.find((f) => f.flow_id === flowId)?.name ?? intl.formatMessage(messages.defaultFlowName);
     return deleteFlow(flowId)
       .then((): void => {
         dispatch(removeFlow(flowId));
-        notify.success(`${flowName} deleted successfully.`);
+        notify.success(intl.formatMessage(messages.deleteFlowSuccess, { name: flowName }));
         // Decrement the project's flow count in the store so the header reflects
         // the deletion without a full re-fetch.
         if (project) {
@@ -204,7 +211,7 @@ export function ProjectDetail(): React.JSX.Element | null {
         }
       })
       .catch((err: unknown) => {
-        notify.error(`${flowName} failed to delete.`);
+        notify.error(intl.formatMessage(messages.deleteFlowError, { name: flowName }));
         throw err;
       });
   };
@@ -216,10 +223,10 @@ export function ProjectDetail(): React.JSX.Element | null {
     patchFlow(flowId, flowMapper.toPatchRequest(updates))
       .then((): void => {
         dispatch(updateFlow({ flowId, updates: { name: updates.name, description: updates.description, tags: updates.tags } }));
-        notify.success(`${updates.name} updated successfully.`);
+        notify.success(intl.formatMessage(messages.updateFlowSuccess, { name: updates.name }));
       })
       .catch((err: unknown) => {
-        notify.error('Failed to update flow');
+        notify.error(intl.formatMessage(messages.updateFlowError));
         throw err;
       });
 
@@ -250,9 +257,24 @@ export function ProjectDetail(): React.JSX.Element | null {
             <div className={styles.detailsRow}>
               <p className={styles.description}>{project.description ?? ''}</p>
               <div className={styles.meta}>
-                <p className={styles.metaItem}>{'Created: '}<strong>{createdOn}</strong></p>
-                <p className={styles.metaItem}>{'Last updated: '}<strong>{lastUpdated}</strong></p>
-                <p className={styles.metaItem}>{'Flows: '}<strong>{project.flowCount}</strong></p>
+                <p className={styles.metaItem}>
+                  {intl.formatMessage(messages.created, {
+                    date: createdOn,
+                    b: (chunks: React.ReactNode) => <b>{chunks}</b>,
+                  })}
+                </p>
+                <p className={styles.metaItem}>
+                  {intl.formatMessage(messages.lastUpdated, {
+                    date: lastUpdated,
+                    b: (chunks: React.ReactNode) => <b>{chunks}</b>,
+                  })}
+                </p>
+                <p className={styles.metaItem}>
+                  {intl.formatMessage(messages.flows, {
+                    count: project.flowCount,
+                    b: (chunks: React.ReactNode) => <b>{chunks}</b>,
+                  })}
+                </p>
               </div>
             </div>
           )}
@@ -265,7 +287,7 @@ export function ProjectDetail(): React.JSX.Element | null {
             </div>
             <button
               type="button"
-              aria-label={collapsed ? 'Expand project details' : 'Collapse project details'}
+              aria-label={intl.formatMessage(collapsed ? messages.expandDetails : messages.collapseDetails)}
               onClick={() => { setCollapsed((c) => !c); }}
             >
               {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
@@ -292,9 +314,9 @@ export function ProjectDetail(): React.JSX.Element | null {
               illustrationTheme={isDarkMode ? 'dark' : 'light'}
               illustrationPosition="top"
               size="sm"
-              title="No flows created"
+              title={intl.formatMessage(messages.emptyTitle)}
               action={{
-                text: 'Create flow',
+                text: intl.formatMessage(messages.createFlow),
                 onClick: handleCreateFlow,
                 renderIcon: Add,
                 kind: 'tertiary',

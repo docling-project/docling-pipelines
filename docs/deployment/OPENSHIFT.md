@@ -41,7 +41,7 @@ oc whoami
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/IBM/docling-pipelines.git
+git clone https://github.com/docling-project/docling-pipelines.git
 cd docling-pipelines
 ```
 
@@ -69,7 +69,7 @@ Notes:
 ./scripts/deploy-openshift.sh
 
 # Or specify custom project name and Git repository
-./scripts/deploy-openshift.sh my-docpipe-project https://github.com/IBM/docling-pipelines.git main
+./scripts/deploy-openshift.sh my-docpipe-project https://github.com/docling-project/docling-pipelines.git main
 ```
 
 ### 4. Monitor Deployment
@@ -106,7 +106,7 @@ curl -k https://$DOCPIPE_URL/health
 
 **Parameters:**
 - `project-name` (optional): OpenShift project name (default: `docpipe`)
-- `git-repo-url` (optional): Git repository URL (default: `https://github.com/IBM/docling-pipelines.git`)
+- `git-repo-url` (optional): Git repository URL (default: `https://github.com/docling-project/docling-pipelines.git`)
 - `git-branch` (optional): Git branch to deploy (default: `main`)
 
 ### What the Script Does
@@ -167,7 +167,7 @@ oc new-project docpipe --display-name="Docling Pipelines" \
 ### 2. Create Application from Git
 
 ```bash
-oc new-app python:3.12~https://github.com/IBM/docling-pipelines.git \
+oc new-app python:3.12~https://github.com/docling-project/docling-pipelines.git \
   --name=docpipe-app \
   --strategy=source \
   --context-dir=. \
@@ -205,7 +205,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/IBM/docling-pipelines.git
+      uri: https://github.com/docling-project/docling-pipelines.git
       ref: main
   strategy:
     type: Source
@@ -522,7 +522,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/IBM/docling-pipelines.git
+      uri: https://github.com/docling-project/docling-pipelines.git
   strategy:
     type: Docker
     dockerStrategy:

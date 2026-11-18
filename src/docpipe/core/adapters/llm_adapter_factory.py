@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unified adapter factory for LLM operations across all providers.
 
 This module provides a centralized factory for creating adapters for:
@@ -5,22 +8,26 @@ This module provides a centralized factory for creating adapters for:
 - Embedding generation
 - Text detection (PII/HAP)
 
-Supports two providers:
-- WatsonX: IBM watsonx.ai models
+Supports three providers:
+- WatsonX: IBM watsonx.ai models (inference, embeddings, PII/HAP text detection)
 - LiteLLM: Unified interface for 100+ LLM providers including Ollama, HuggingFace, OpenAI, etc.
+- HuggingFace: local models (embeddings, and HAP text detection with a sequence classifier)
 """
 
-import logging
 from typing import Any, ClassVar
 
 from docpipe.core.adapters.huggingface import HuggingFaceAdapter
 from docpipe.core.adapters.litellm import LiteLLMAdapter
 from docpipe.core.adapters.watsonx import WatsonXAdapter
+from docpipe.core.constants.constants import ProviderConstants, ServiceConstants
+from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
 from docpipe.core.ports.text_detection_port import TextDetectionPort
+from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LLMAdapterFactory:
@@ -32,7 +39,8 @@ class LLMAdapterFactory:
       * Ollama (via OpenAI-compatible API with model prefix 'openai/')
       * HuggingFace API (via API with model prefix 'huggingface/')
       * OpenAI, Anthropic, Cohere, AWS Bedrock, Google Vertex AI, and 90+ more
-    - HuggingFace: Direct HuggingFace support with local model inference or API
+    - HuggingFace: Direct HuggingFace support with local model inference or API, and local
+      HAP text detection with a sequence-classification model
 
     Each provider has a single consolidated adapter that provides all capabilities.
     """
@@ -44,7 +52,28 @@ class LLMAdapterFactory:
     EMBEDDING_PROVIDERS: ClassVar[set[str]] = {"watsonx", "litellm", "huggingface"}
 
     # Supported providers for text detection
-    TEXT_DETECTION_PROVIDERS: ClassVar[set[str]] = {"watsonx"}
+    TEXT_DETECTION_PROVIDERS: ClassVar[set[str]] = {ProviderConstants.WATSONX, ProviderConstants.HUGGINGFACE}
+
+    @staticmethod
+    def _positive_int_option(*, provider_config: dict[str, Any], key: str, default: int) -> int:
+        """Read a positive integer option from provider_config, falling back to ``default``.
+
+        Missing values use the default silently. Invalid values (non-integers, booleans,
+        zero or negative numbers) are reported by the operator's validate(); here they fall
+        back to the default with a warning so adapter construction never fails on them.
+        """
+        value = provider_config.get(key)
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            logger.warning(
+                "Ignoring invalid provider_config.%s=%r; using default %s",
+                key,
+                value,
+                default,
+            )
+            return default
+        return value
 
     @staticmethod
     def create_inference_adapter(
@@ -88,6 +117,7 @@ class LLMAdapterFactory:
                 }
             )
         """
+        provider_config = reveal_value(provider_config)
         provider = provider.lower()
 
         if provider not in LLMAdapterFactory.INFERENCE_PROVIDERS:
@@ -105,7 +135,7 @@ class LLMAdapterFactory:
                 container_id=provider_config.get("project_id") or provider_config.get("container_id"),
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
-                timeout=provider_config.get("timeout", 120),
+                timeout=provider_config.get("timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS),
             )
         if provider == "litellm":
             # Extract connection-level config (stream, timeout) for the HTTP client
@@ -177,6 +207,7 @@ class LLMAdapterFactory:
                 }
             )
         """
+        provider_config = reveal_value(provider_config)
         provider = provider.lower()
 
         if provider not in LLMAdapterFactory.EMBEDDING_PROVIDERS:
@@ -194,13 +225,33 @@ class LLMAdapterFactory:
                 container_id=provider_config.get("project_id") or provider_config.get("container_id"),
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
-                timeout=provider_config.get("timeout", 120),
+                timeout=provider_config.get("timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS),
+                embedding_batch_size=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.BATCH_SIZE,
+                    default=ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE,
+                ),
+                embedding_max_concurrent_requests=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.MAX_CONCURRENT_REQUESTS,
+                    default=ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS,
+                ),
             )
         if provider == "litellm":
             return LiteLLMAdapter(
                 model_name=model_id,
                 api_key=provider_config.get("api_key"),
                 api_base=provider_config.get("api_base"),
+                batch_size=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.BATCH_SIZE,
+                    default=ServiceConstants.DEFAULT_EMBEDDINGS_BATCH_SIZE,
+                ),
+                max_concurrent_requests=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.MAX_CONCURRENT_REQUESTS,
+                    default=ServiceConstants.DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS,
+                ),
             )
         if provider == "huggingface":
             return HuggingFaceAdapter(
@@ -208,7 +259,11 @@ class LLMAdapterFactory:
                 use_local=provider_config.get("use_local", True),
                 api_token=provider_config.get("api_token") or provider_config.get("api_key"),
                 device=provider_config.get("device"),
-                batch_size=provider_config.get("batch_size", 32),
+                batch_size=LLMAdapterFactory._positive_int_option(
+                    provider_config=provider_config,
+                    key=OperatorConstants.Config.BATCH_SIZE,
+                    default=ServiceConstants.DEFAULT_EMBEDDINGS_BATCH_SIZE,
+                ),
             )
         raise ValueError(f"Provider '{provider}' not yet implemented for embeddings")
 
@@ -222,9 +277,11 @@ class LLMAdapterFactory:
         """Create a text detection adapter for the specified provider.
 
         Args:
-            provider: Provider name (currently only 'watsonx' is supported)
+            provider: Provider name ('watsonx' or 'huggingface')
             model_id: Model identifier for the provider
-            provider_config: Provider-specific configuration dictionary
+            provider_config: Provider-specific configuration dictionary.  For 'huggingface'
+                it must contain ``toxic_labels``; the other keys are optional.  Callers
+                resolve HAP defaults (the pii_and_hap operator does it in its config model).
 
         Returns:
             Adapter instance with TextDetectionPort interface (detect methods)
@@ -245,6 +302,16 @@ class LLMAdapterFactory:
                     "temperature": 0.0
                 }
             )
+
+            # Hugging Face local HAP detection with a sequence classifier
+            adapter = LLMAdapterFactory.create_text_detection_adapter(
+                provider="huggingface",
+                model_id="unitary/unbiased-toxic-roberta",
+                provider_config={
+                    "toxic_labels": ["toxicity", "severe_toxicity", "insult"],
+                    "activation": "sigmoid",
+                }
+            )
         """
         provider = provider.lower()
 
@@ -254,22 +321,67 @@ class LLMAdapterFactory:
                 f"Supported providers: {LLMAdapterFactory.TEXT_DETECTION_PROVIDERS}"
             )
 
+        if provider == ProviderConstants.HUGGINGFACE:
+            return LLMAdapterFactory._create_huggingface_text_detection_adapter(
+                model_id=model_id, provider_config=provider_config or {}
+            )
+
         if not model_id:
             raise ValueError("model_id cannot be empty")
 
         if not provider_config:
             raise ValueError("provider_config cannot be empty")
 
-        if provider == "watsonx":
+        if provider == ProviderConstants.WATSONX:
             return WatsonXAdapter(
                 model_name=model_id,
                 api_key=provider_config.get("api_key"),
                 container_id=provider_config.get("project_id") or provider_config.get("container_id"),
                 api_base=provider_config.get("url") or provider_config.get("api_base"),
                 container_kind=provider_config.get("container_kind"),
-                timeout=provider_config.get("timeout", 120),
+                timeout=provider_config.get("timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS),
             )
         raise ValueError(f"Provider '{provider}' not yet implemented for text detection")
+
+    @staticmethod
+    def _create_huggingface_text_detection_adapter(
+        *, model_id: str, provider_config: dict[str, Any]
+    ) -> TextDetectionPort:
+        """Build a detection-configured ``HuggingFaceAdapter`` from explicit values.
+
+        Holds no HAP defaults: callers pass the model and its toxic labels (the
+        pii_and_hap operator resolves them in ``HuggingFaceHAPConfig``).
+
+        Raises:
+            ValueError: If ``model_id`` is empty or ``toxic_labels`` is missing.
+        """
+        config = OperatorConstants.Config
+        if not model_id:
+            raise ValueError("model_id cannot be empty")
+        toxic_labels = provider_config.get(config.TOXIC_LABELS)
+        if not toxic_labels:
+            raise ValueError(
+                f"'{config.TOXIC_LABELS}' is required for model '{model_id}'. "
+                f"{ServiceConstants.HUGGINGFACE_HAP_TOXIC_LABELS_HINT}"
+            )
+        return HuggingFaceAdapter(
+            model_name=model_id,
+            revision=provider_config.get(config.REVISION),
+            toxic_labels=tuple(toxic_labels),
+            activation=provider_config.get(config.ACTIVATION) or ServiceConstants.HUGGINGFACE_ACTIVATION_AUTO,
+            max_length=LLMAdapterFactory._positive_int_option(
+                provider_config=provider_config,
+                key=config.MAX_LENGTH,
+                default=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_MAX_LENGTH,
+            ),
+            batch_size=LLMAdapterFactory._positive_int_option(
+                provider_config=provider_config,
+                key=config.BATCH_SIZE,
+                default=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_BATCH_SIZE,
+            ),
+            device=provider_config.get(config.DEVICE),
+            local_files_only=bool(provider_config.get(config.LOCAL_FILES_ONLY, False)),
+        )
 
     @staticmethod
     def get_supported_providers(*, capability: str = "inference") -> set[str]:

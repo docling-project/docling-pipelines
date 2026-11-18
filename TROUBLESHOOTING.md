@@ -9,6 +9,7 @@ This comprehensive guide helps you diagnose and resolve common issues when worki
    - [Installation & Setup](#installation--setup)
    - [Ollama Issues](#ollama-issues)
    - [OpenSearch Issues](#opensearch-issues)
+   - [Weaviate Issues](#weaviate-issues)
    - [Pipeline Execution](#pipeline-execution)
    - [Import/Path Errors](#importpath-errors)
    - [Job Stats and Execution Tracking](#job-stats-and-execution-tracking)
@@ -182,12 +183,12 @@ uv sync --extra dev
 
 ---
 
-#### Issue: `fasttext-wheel` Build Failure on macOS 15+ (Sequoia / Tahoe)
+#### Issue: `fasttext-numpy2` Build Failure on macOS 15+ (Sequoia / Tahoe)
 
 **Symptoms:**
 
 ```
-× Failed to build `fasttext-wheel==0.9.2`
+× Failed to build `fasttext-numpy2==0.10.4`
 ...
 fatal error: 'istream' file not found
 error: command '/usr/bin/c++' failed with exit code 1
@@ -195,9 +196,10 @@ error: command '/usr/bin/c++' failed with exit code 1
 
 **Cause:**
 
-`fasttext-wheel` 0.9.2 compiles a C++ extension from source. On macOS 15+ with clang 17, the
-compiler no longer resolves the C++ standard library headers at the deployment target hardcoded
-by `fasttext-wheel` (`-mmacosx-version-min=11.0`). No pre-built binary is available for arm64.
+`fasttext-numpy2` 0.10.4 compiles a C++ extension from source on macOS because no pre-built
+macOS or arm64 wheel is published on PyPI (only Linux `manylinux` wheels are available). On
+macOS 15+ with clang 17, the compiler no longer resolves C++ standard library headers at the
+deployment target hardcoded in the build (`-mmacosx-version-min=11.0`).
 
 **Solution:**
 
@@ -265,11 +267,11 @@ Job run exists on the submitter but worker updates do not appear in job status A
 - worker environment does not receive the same job stats backend configuration
 
 **Solutions:**
-1. Check job management configuration via environment variables and confirm the selected backend matches your deployment model.
+1. Check `job_management.storage` (or `global_storage`) in `docling-pipelines-config.yaml` and confirm the selected backend matches your deployment model.
 2. For distributed execution, prefer PostgreSQL job stats storage.
 3. If using filesystem storage, configure a shared filesystem path visible to both submitter and workers.
-4. Ensure worker environments inherit the same effective backend configuration and connection settings.
-5. If needed, override config explicitly with `DOCPIPE_STORAGE_BACKEND`, `DOCPIPE_FRAMEWORK_TYPE`, `DOCPIPE_JOB_STATS_BASE_DIR`, and PostgreSQL env variables.
+4. Ensure workers can read the same config file (`DOCPIPE_CONFIG_PATH`) and receive the same connection settings. Without it a worker falls back to the in-memory backend.
+5. Backend type and framework are set only in the config file. `DOCPIPE_STORAGE_BACKEND` and `DOCPIPE_FRAMEWORK_TYPE` no longer override it. `DOCPIPE_JOB_STATS_BASE_DIR` and the `DOCPIPE_POSTGRES_*` variables still apply.
 6. Review [`docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md`](docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md) for distributed storage guidance.
 
 ---
@@ -1094,6 +1096,76 @@ docling-pipelines --flow-file sample_flows/vectordb/milvus_integration.json
 
 **Reference:**
 - [IBM watsonx.data Documentation](https://www.ibm.com/docs/en/watsonxdata/standard/2.3.x?topic=milvus-unable-access-from-non-vm-macos-system)
+
+---
+
+### Weaviate Issues
+
+For the full `provider_config` field list, see the [VectorDB operator README](docs/operators/vectordb/vectordb_readme.md#weaviate-provider_config-fields).
+
+#### Issue: Weaviate Configuration Rejected for TLS
+
+**Symptoms:**
+- Error: `secure and grpc_secure must both be true when auth_type is not 'none'; credentials must not be sent over an unencrypted connection`
+- Flow validation fails before any connection is attempted
+
+**Cause:**
+- An `on-prem` connection sets `auth_type` to `api_key`, `bearer_token`, or `client_password` while `secure` or `grpc_secure` is `false`. `grpc_secure` defaults to the value of `secure`.
+
+**Solution:**
+
+```json
+"provider_config": {
+  "connection_type": "on-prem",
+  "host": "weaviate.example.com",
+  "secure": true,
+  "grpc_secure": true,
+  "auth_type": "api_key",
+  "api_key": "$WEAVIATE_API_KEY"
+}
+```
+
+Use `auth_type: "none"` only for local, anonymous servers.
+
+#### Issue: Invalid Weaviate Collection Name
+
+**Symptoms:**
+- Error: `collection_name must start with an uppercase ASCII letter and contain only ASCII letters, digits, and underscores`
+
+**Cause:**
+- Weaviate requires collection names to match `^[A-Z][_0-9A-Za-z]*$`.
+
+**Solution:**
+- Rename the collection, for example `documentChunks` to `DocumentChunks`. Hyphens, spaces, and leading digits are not allowed.
+
+#### Issue: Weaviate Connection Failed (gRPC)
+
+**Symptoms:**
+- Error: `Failed to connect to Weaviate at '<host>:<port>'`, although the HTTP port responds
+
+**Cause:**
+- The Weaviate client needs both the HTTP port and the gRPC port. The gRPC port (default `50051`) is not published or is blocked.
+
+**Solution:**
+
+```bash
+curl http://localhost:8080/v1/.well-known/ready
+nc -vz localhost 50051
+```
+
+Publish port 50051, or set `grpc_host` and `grpc_port` in `provider_config` when gRPC is exposed on a different host or port.
+
+#### Issue: Sparse-Only Run Fails Every Document
+
+**Symptoms:**
+- `add_sparse_vector: true` with no embeddings operator; all documents are recorded as failed
+
+**Cause:**
+- Sparse-only runs currently require in-memory chunks. The standard extract, chunker, vectordb pipeline produces memory-mapped chunks, which are only read together with an embeddings column.
+
+**Solution:**
+- Add an embeddings operator so the run is hybrid (dense plus BM25), or keep chunks in memory upstream.
+- Set `add_sparse_vector` at the top level of the node `config`; setting it only inside `provider_config` does not enable sparse-only runs.
 
 ---
 

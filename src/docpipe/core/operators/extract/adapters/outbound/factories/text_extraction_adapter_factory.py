@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating text extraction adapters.
 
 This factory creates appropriate text extraction adapter instances based on the
@@ -9,9 +12,12 @@ extraction provider and configuration. It supports multiple extraction strategie
 import logging
 from typing import Any, ClassVar
 
+import re2 as re
+
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.extract.domain.models import DoclingServeConfig, TextExtractionMode
 from docpipe.core.operators.extract.ports.outbound.text_extraction import TextExtractionPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -217,7 +223,7 @@ class TextExtractionAdapterFactory:
             if accelerator and gpu_device is None:
                 gpu_device = TextExtractionAdapterFactory._auto_detect_device()
                 if gpu_device is not None:
-                    logger.info("No accelerator device specified — auto-detected: %s", gpu_device)
+                    logger.info("No accelerator device specified - auto-detected: %s", gpu_device)
                 else:
                     logger.warning(
                         "Accelerator block present but no GPU device found via torch. "
@@ -327,6 +333,7 @@ class TextExtractionAdapterFactory:
         Raises:
             ValueError: If provider is unsupported or config is invalid
         """
+        text_extraction_config = reveal_value(text_extraction_config)
         # Build adapter-specific configuration from nested text_extraction config
         adapter_config = TextExtractionAdapterFactory.build_adapter_config(
             mode=mode, text_extraction_config=text_extraction_config
@@ -344,6 +351,12 @@ class TextExtractionAdapterFactory:
             gpu_device = adapter_config.get(OperatorConstants.Extraction.DEVICE)
 
             if use_vlm:
+                if gpu_device:
+                    TextExtractionAdapterFactory._validate_gpu_config(
+                        adapter_config=adapter_config,
+                        max_workers=max_workers,
+                        use_processes=use_processes,
+                    )
                 TextExtractionAdapterFactory._validate_vlm_config(adapter_config)
                 logger.info(
                     "Creating DoclingAdapter with VLM enabled (preset: %s) and %s workers",
@@ -405,8 +418,6 @@ class TextExtractionAdapterFactory:
         Raises:
             ValueError: If any GPU constraint is violated
         """
-        import re
-
         gpu_device = adapter_config.get(OperatorConstants.Extraction.DEVICE)
 
         # Normalise and validate device string.

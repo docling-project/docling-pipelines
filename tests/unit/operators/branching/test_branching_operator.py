@@ -902,3 +902,160 @@ class TestTransform:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# 11. validate() — remaining rules
+# ---------------------------------------------------------------------------
+
+FEATURES = ["id", "name", "content", "score", "language", "word_count"]
+
+
+def _validate(operator: BranchingOperator) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    operator.validate(errors, warnings, available_features=FEATURES)
+    return errors, warnings
+
+
+class TestValidateRules:
+    def test_validation_is_deferred_while_validating_the_flow(self):
+        operator = BranchingOperator({"validating_flow": True, "branches": []})
+
+        assert _validate(operator) == ([], [])
+
+    def test_missing_branches_is_an_error(self):
+        errors, _ = _validate(make_operator([]))
+
+        assert errors == ["branch_criteria parameter is missing"]
+
+    def test_unconditional_branches_with_empty_json_criteria_skip_criteria_checks(self):
+        branches = [
+            make_branch(link_id="b1", link_name="copy_a", criteria_json={"criteria_list": []}),
+            make_branch(link_id="b2", link_name="copy_b", criteria_json={"criteria_list": []}),
+        ]
+
+        assert _validate(make_operator(branches)) == ([], [])
+
+    def test_json_criteria_with_unknown_column(self):
+        branches = [
+            make_branch(
+                link_id="b1", link_name="high", criteria_json={"variable": "rank", "operator": ">", "value": 3}
+            ),
+            make_branch(link_id="b2", link_name="rest", criteria_list=["score <= 3"]),
+        ]
+
+        errors, _ = _validate(make_operator(branches))
+
+        assert len(errors) == 1
+        assert errors[0].startswith("Invalid features in filter criteria - rank.")
+
+    def test_blank_criteria_entries_are_ignored(self):
+        branches = [
+            make_branch(link_id="b1", link_name="high", criteria_list=["  ", "score > 3"]),
+            make_branch(link_id="b2", link_name="low", criteria_list=["score <= 3"]),
+        ]
+
+        assert _validate(make_operator(branches))[0] == []
+
+    @pytest.mark.parametrize(
+        ("criteria", "message"),
+        [
+            ("rank > 3", "invalid features found: {'rank'}"),
+            ("score > 3; DROP TABLE t", "Please use valid criteria expression"),
+            ("score%2 = 0", "Please use valid criteria expression"),
+            ("score >", "Please use valid criteria expression"),
+        ],
+        ids=["unknown-column", "statement-separator", "modulo", "parse-error"],
+    )
+    def test_invalid_criteria_expression(self, criteria, message):
+        branches = [
+            make_branch(link_id="b1", link_name="first", criteria_list=[criteria]),
+            make_branch(link_id="b2", link_name="second", criteria_list=["score <= 3"]),
+        ]
+
+        errors, _ = _validate(make_operator(branches))
+
+        assert len(errors) == 1
+        assert errors[0].startswith(f"Invalid branching criteria expression: {criteria},")
+        assert message in errors[0]
+
+
+class TestAnalyzeWhereClause:
+    @pytest.mark.parametrize(
+        ("clause", "expected"),
+        [
+            ("score > 3 AND language = 'en'", (True, ["score", "language"])),
+            ("t.score > 3 AND score < 9", (True, ["score"])),
+            ("   ", (False, [])),
+            (f"{'x' * 129} = 1", (True, [])),
+        ],
+        ids=["columns", "qualified-and-duplicate", "blank", "name-too-long"],
+    )
+    def test_analyze_where_clause(self, clause, expected):
+        assert make_operator([]).analyze_where_clause(clause_str=clause) == expected
+
+
+# ---------------------------------------------------------------------------
+# 12. Skipped and failed documents across branches
+# ---------------------------------------------------------------------------
+
+
+class TestSkippedAndFailedDocsAcrossBranches:
+    """A document counts as skipped or failed only if every branch skipped or failed it."""
+
+    def test_doc_skipped_by_one_branch_but_kept_by_another_is_not_skipped(self):
+        branches = [
+            make_branch(link_id="b1", link_name="high", criteria_list=["score > 3"]),
+            make_branch(link_id="b2", link_name="all", criteria_list=["score > 0"]),
+        ]
+
+        _, metadata = make_operator(branches).runner(make_table())
+
+        assert metadata[Metrics.External.SKIPPED_DOCS_COUNT] == 0
+
+    # Without a "name" column the SQL filter cannot list the documents it filters out, so a
+    # branch that drops rows fails all of its documents; a branch that keeps every row does not.
+
+    def test_docs_failing_in_every_branch_are_failed(self):
+        branches = [
+            make_branch(link_id="b1", link_name="high", criteria_list=["score > 3"]),
+            make_branch(link_id="b2", link_name="low", criteria_list=["score <= 3"]),
+        ]
+
+        _, metadata = make_operator(branches).runner(make_table().drop_columns(["name"]))
+
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 6
+
+    def test_docs_failing_in_only_one_branch_are_not_failed(self):
+        branches = [
+            make_branch(link_id="b1", link_name="high", criteria_list=["score > 3"]),
+            make_branch(link_id="b2", link_name="all", criteria_list=["score > 0"]),
+        ]
+
+        _, metadata = make_operator(branches).runner(make_table().drop_columns(["name"]))
+
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
+
+
+# ---------------------------------------------------------------------------
+# 13. Tables without an id column
+# ---------------------------------------------------------------------------
+
+
+class TestTablesWithoutIdColumn:
+    @pytest.mark.parametrize(
+        "branch",
+        [
+            make_branch(link_id="b1", link_name="copy"),
+            make_branch(link_id="b1", link_name="high", criteria_list=["score > 3"]),
+        ],
+        ids=["unconditional", "conditional"],
+    )
+    def test_branches_without_id_column_count_no_processed_docs(self, branch):
+        table = make_table().drop_columns(["id"])
+
+        result_tables, metadata = make_operator([branch]).runner(table)
+
+        assert result_tables[0].num_rows > 0
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 0

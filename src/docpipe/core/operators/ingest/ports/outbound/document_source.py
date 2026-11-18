@@ -30,6 +30,11 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
     SOURCE_DESCRIPTION: str | None = None  # Brief description
     SOURCE_VERSION: str = "1.0.0"  # Semantic version
 
+    @classmethod
+    def bind_file_reference(cls, *, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Update provider settings for a file event, or reject unsupported providers."""
+        raise NotImplementedError(f"Source adapter '{cls.SOURCE_NAME or cls.__name__}' does not support file events")
+
     @abstractmethod
     async def fetch_documents(self, config: Any) -> AsyncGenerator[Document, None]:
         """

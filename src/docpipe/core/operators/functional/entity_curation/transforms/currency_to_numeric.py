@@ -1,5 +1,8 @@
-import re
+"""Entity curation transform: monetary amounts (with magnitude suffixes) to plain decimal strings."""
+
 from decimal import Decimal
+
+import re2 as re
 
 
 def currency_to_numeric(*, amount: str | None, locale: str = "en_US") -> str | None:
@@ -138,18 +141,13 @@ def currency_to_numeric(*, amount: str | None, locale: str = "en_US") -> str | N
     pattern = r"(" + "|".join(escaped_patterns) + r")\s*$"
 
     # Extract magnitude suffix if present
-    magnitude_match = re.search(pattern, amount, re.IGNORECASE)
+    magnitude_match = re.search("(?i)" + pattern, amount)
     multiplier = Decimal("1")
 
     if magnitude_match:
         suffix = magnitude_match.group(1)
-        # Try case-insensitive match for Latin scripts
-        suffix_upper = suffix.upper()
-        if suffix_upper in magnitude_map:
-            multiplier = magnitude_map[suffix_upper]
-        elif suffix in magnitude_map:
-            # For non-Latin scripts (exact match)
-            multiplier = magnitude_map[suffix]
+        # All keys are upper case (upper() leaves non-Latin scripts unchanged)
+        multiplier = magnitude_map.get(suffix.upper(), multiplier)
         # Remove the suffix from the amount
         amount = amount[: magnitude_match.start()].strip()
 

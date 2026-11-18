@@ -8,13 +8,12 @@ import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { Dropdown, TextInput } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import {
-  DOCUMENT_SET_ATTRIBUTE as ATTR,
-  DOCUMENT_SET_LABELS as LABEL,
-} from './constants';
+import { DOCUMENT_SET_ATTRIBUTE as ATTR } from './constants';
+import { messages } from './DocumentSet.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface DocumentSetPanelBodyProps {
@@ -24,6 +23,7 @@ interface DocumentSetPanelBodyProps {
 export function DocumentSetPanelBody({
   controller,
 }: DocumentSetPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Read operator attribute metadata from Redux ──
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -90,20 +90,21 @@ export function DocumentSetPanelBody({
           <RequiredParamTooltip
             paramId={ATTR.DOCUMENT_SET_NAME}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.DOCUMENT_SET_NAME]?.description ?? 'Name of the document set to create or update.'}
+            definition={nodeAttributes[ATTR.DOCUMENT_SET_NAME]?.description
+              ?? intl.formatMessage(messages.documentSetNameDescription)}
           >
-            {LABEL.DOCUMENT_SET_NAME}
+            {intl.formatMessage(messages.documentSetName)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="document_set_name"
-          labelText={LABEL.DOCUMENT_SET_NAME}
+          labelText={intl.formatMessage(messages.documentSetName)}
           hideLabel
           required
           placeholder="research_papers"
           value={documentSetName}
           invalid={documentSetName.trim() === '' || documentSetNameValidation.isInvalid}
-          invalidText="This is a required parameter."
+          invalidText={intl.formatMessage(messages.requiredParameter)}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-call
             controller?.updatePropertyValue?.({ name: ATTR.DOCUMENT_SET_NAME }, e.target.value);
@@ -117,16 +118,17 @@ export function DocumentSetPanelBody({
           <RequiredParamTooltip
             paramId={ATTR.DESCRIPTION}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.DESCRIPTION]?.description ?? 'Human-readable description of the document set.'}
+            definition={nodeAttributes[ATTR.DESCRIPTION]?.description
+              ?? intl.formatMessage(messages.descriptionHelp)}
           >
-            {LABEL.DESCRIPTION}
+            {intl.formatMessage(messages.description)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="description"
-          labelText={LABEL.DESCRIPTION}
+          labelText={intl.formatMessage(messages.description)}
           hideLabel
-          placeholder="Processed research papers"
+          placeholder={intl.formatMessage(messages.descriptionPlaceholder)}
           value={description}
           invalid={descriptionValidation.isInvalid}
           invalidText={descriptionValidation.errorMessage}
@@ -143,14 +145,15 @@ export function DocumentSetPanelBody({
           <RequiredParamTooltip
             paramId={ATTR.METADATA}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.METADATA]?.description ?? 'Arbitrary JSON object stored as document set metadata.'}
+            definition={nodeAttributes[ATTR.METADATA]?.description
+              ?? intl.formatMessage(messages.metadataDescription)}
           >
-            {LABEL.METADATA}
+            {intl.formatMessage(messages.metadata)}
           </RequiredParamTooltip>
         </div>
         <JsonTextArea
           id="metadata-param"
-          labelText={LABEL.METADATA}
+          labelText={intl.formatMessage(messages.metadata)}
           storedValue={metadataStored}
           placeholder='{"department": "finance", "year": 2024}'
           onChange={(value) => {
@@ -166,14 +169,15 @@ export function DocumentSetPanelBody({
           <RequiredParamTooltip
             paramId={ATTR.DOCUMENT_SET_ID}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.DOCUMENT_SET_ID]?.description ?? 'UUID of an existing document set to update instead of creating a new one.'}
+            definition={nodeAttributes[ATTR.DOCUMENT_SET_ID]?.description
+              ?? intl.formatMessage(messages.documentSetIdDescription)}
           >
-            {LABEL.DOCUMENT_SET_ID}
+            {intl.formatMessage(messages.documentSetId)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="document_set_id"
-          labelText={LABEL.DOCUMENT_SET_ID}
+          labelText={intl.formatMessage(messages.documentSetId)}
           hideLabel
           placeholder="123e4567-e89b-12d3-a456-426614174000"
           value={documentSetId}
@@ -192,14 +196,15 @@ export function DocumentSetPanelBody({
           <RequiredParamTooltip
             paramId={ATTR.DATABASE_PATH}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.DATABASE_PATH]?.description ?? 'File path for the DuckDB database.'}
+            definition={nodeAttributes[ATTR.DATABASE_PATH]?.description
+              ?? intl.formatMessage(messages.databasePathDescription)}
           >
-            {LABEL.DATABASE_PATH}
+            {intl.formatMessage(messages.databasePath)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="database_path"
-          labelText={LABEL.DATABASE_PATH}
+          labelText={intl.formatMessage(messages.databasePath)}
           hideLabel
           placeholder="data/duckdb/document_sets.duckdb"
           value={databasePath}
@@ -218,16 +223,17 @@ export function DocumentSetPanelBody({
           <RequiredParamTooltip
             paramId={ATTR.DATA_BACKEND}
             nodeAttributes={nodeAttributes}
-            definition={nodeAttributes[ATTR.DATA_BACKEND]?.description ?? 'Data store backend for PyArrow table data.'}
+            definition={nodeAttributes[ATTR.DATA_BACKEND]?.description
+              ?? intl.formatMessage(messages.dataBackendDescription)}
           >
-            {LABEL.DATA_BACKEND}
+            {intl.formatMessage(messages.dataBackend)}
           </RequiredParamTooltip>
         </div>
         <Dropdown
           id="data_backend"
-          titleText={LABEL.DATA_BACKEND}
+          titleText={intl.formatMessage(messages.dataBackend)}
           hideLabel
-          label="Select backend"
+          label={intl.formatMessage(messages.selectBackend)}
           items={dataBackendItems}
           selectedItem={dataBackend}
           onChange={({ selectedItem }: { selectedItem: string | null }) => {

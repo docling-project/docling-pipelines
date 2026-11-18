@@ -1,15 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
 
 describe('JsonTextArea', () => {
   it('renders a textarea with the given id', () => {
-    render(<JsonTextArea id="my-json" labelText="Config" storedValue={null} onChange={vi.fn()} />);
+    renderWithProviders(<JsonTextArea id="my-json" labelText="Config" storedValue={null} onChange={vi.fn()} />);
     expect(document.getElementById('my-json')).not.toBeNull();
   });
 
   it('shows serialized storedValue when no raw edit is in progress', () => {
-    render(
+    renderWithProviders(
       <JsonTextArea
         id="cfg"
         labelText="Config"
@@ -23,14 +24,14 @@ describe('JsonTextArea', () => {
   });
 
   it('is empty when storedValue is null', () => {
-    render(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={vi.fn()} />);
+    renderWithProviders(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={vi.fn()} />);
     const ta = document.getElementById('cfg') as HTMLTextAreaElement;
     expect(ta.value).toBe('');
   });
 
   it('calls onChange with parsed object for valid JSON input', () => {
     const onChange = vi.fn();
-    render(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={onChange} />);
+    renderWithProviders(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={onChange} />);
     const ta = document.getElementById('cfg') as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: '{"a":1}' } });
     expect(onChange).toHaveBeenCalledWith({ a: 1 });
@@ -38,7 +39,7 @@ describe('JsonTextArea', () => {
 
   it('calls onChange with null for empty input', () => {
     const onChange = vi.fn();
-    render(<JsonTextArea id="cfg" labelText="Config" storedValue={{ a: 1 }} onChange={onChange} />);
+    renderWithProviders(<JsonTextArea id="cfg" labelText="Config" storedValue={{ a: 1 }} onChange={onChange} />);
     const ta = document.getElementById('cfg') as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: '' } });
     expect(onChange).toHaveBeenCalledWith(null);
@@ -46,14 +47,14 @@ describe('JsonTextArea', () => {
 
   it('does not call onChange for invalid JSON', () => {
     const onChange = vi.fn();
-    render(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={onChange} />);
+    renderWithProviders(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={onChange} />);
     const ta = document.getElementById('cfg') as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: 'not-json' } });
     expect(onChange).not.toHaveBeenCalled();
   });
 
   it('shows error message after blur with invalid JSON', () => {
-    render(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={vi.fn()} />);
+    renderWithProviders(<JsonTextArea id="cfg" labelText="Config" storedValue={null} onChange={vi.fn()} />);
     const ta = document.getElementById('cfg') as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: 'invalid' } });
     fireEvent.blur(ta);
@@ -61,7 +62,7 @@ describe('JsonTextArea', () => {
   });
 
   it('renders external invalid text when invalid prop is provided', () => {
-    render(
+    renderWithProviders(
       <JsonTextArea
         id="cfg"
         labelText="Config"
@@ -75,7 +76,7 @@ describe('JsonTextArea', () => {
   });
 
   it('applies placeholder when provided', () => {
-    render(
+    renderWithProviders(
       <JsonTextArea
         id="cfg"
         labelText="Config"

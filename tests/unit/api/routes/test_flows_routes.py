@@ -1121,3 +1121,29 @@ class TestParameterValidation:
         # Assert
         assert response.status_code == 200
         override_service.get_flow.assert_called_once_with(valid_uuid)
+
+
+class TestBulkDeleteFlows:
+    """DELETE /flows?flow_ids=..."""
+
+    def test_passes_trimmed_ids_and_returns_service_result(self, client, override_service) -> None:
+        result = {
+            "deleted": ["flow-1"],
+            "failed": [{"flow_id": "flow-2", "error": "Flow not found"}],
+            "total_requested": 2,
+            "total_deleted": 1,
+            "total_failed": 1,
+        }
+        override_service.bulk_delete_flows.return_value = result
+
+        response = client.delete("/flows", params={"flow_ids": "flow-1,flow-2"})
+
+        assert response.status_code == 200
+        assert response.json() == result
+        override_service.bulk_delete_flows.assert_called_once_with(["flow-1", "flow-2"])
+
+    def test_malformed_id_list_returns_400(self, client, override_service) -> None:
+        response = client.delete("/flows", params={"flow_ids": "flow-1,,flow 2"})
+
+        assert response.status_code == 400
+        override_service.bulk_delete_flows.assert_not_called()

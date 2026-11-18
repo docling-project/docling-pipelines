@@ -78,8 +78,8 @@ class LangdetectAdapter(LanguageServicePort):
             return LanguageDetectionResult(language_code=language_code, confidence=confidence)
 
         except LangDetectException as e:
-            logger.error(f"Language detection failed (langdetect error): {e}")
+            logger.error("Language detection failed (langdetect error): %s", e)
             raise ExternalServiceError(f"Language detection failed: {e}") from e
         except Exception as e:
-            logger.error(f"Unexpected error during language detection: {e}")
+            logger.error("Unexpected error during language detection: %s", e)
             raise ExternalServiceError(f"Unexpected error during language detection: {e}") from e

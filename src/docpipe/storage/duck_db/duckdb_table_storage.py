@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """DuckDB storage implementation for PyArrow tables."""
 
 import re
@@ -8,12 +11,15 @@ from typing import Any, ClassVar
 import duckdb
 import pyarrow as pa
 
-from docpipe.storage.exceptions import StorageException, StorageValidationError
+from docpipe.storage.exceptions import StorageConnectionError, StorageException, StorageValidationError
 from docpipe.storage.interfaces.table_storage_port import TableStoragePort
 from docpipe.utils.duckdb import DuckDBConnectionManager
 from docpipe.utils.infrastructure.logging import get_logger
 
 _IN_MEMORY_DB = ":memory:"
+
+# Statements that only read; execute_query opens a file database read-only for them.
+_READ_ONLY_STATEMENTS = ("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA", "SUMMARIZE", "VALUES", "FROM")
 
 logger = get_logger(__name__)
 
@@ -108,14 +114,14 @@ class DuckDBTableStorage(TableStoragePort):
             return
 
         cls._validated_paths.add(db_path)
-        logger.info(f"Using DuckDB database at: {db_path}")
+        logger.info("Using DuckDB database at: %s", db_path)
 
         if db_path == _IN_MEMORY_DB:
             return
 
         db_dir = Path(db_path).parent
         if not db_dir.exists():
-            logger.warning(f"Database directory does not exist: {db_dir}")
+            logger.warning("Database directory does not exist: %s", db_dir)
             logger.info("Directory will be created on first write")
 
     def __init__(self, *, database_path: str) -> None:
@@ -139,7 +145,7 @@ class DuckDBTableStorage(TableStoragePort):
         self.database_path = database_path
         self.connection_manager = DuckDBConnectionManager()
         self._initialized = True
-        logger.info(f"Initialized DuckDBTableStorage at: {database_path}")
+        logger.info("Initialized DuckDBTableStorage at: %s", database_path)
 
     def _validate_table_name(self, *, table_name: str) -> None:
         """
@@ -221,7 +227,7 @@ class DuckDBTableStorage(TableStoragePort):
 
             with self.connection_manager.get_connection(self.database_path) as conn:
                 conn.execute(create_table_sql)
-                logger.info(f"Created data table: {table_name}")
+                logger.info("Created data table: %s", table_name)
         except StorageException:
             raise
         except duckdb.Error as e:
@@ -265,7 +271,7 @@ class DuckDBTableStorage(TableStoragePort):
                 conn.execute(upsert_sql)
                 conn.unregister("temp_data")
 
-                logger.debug(f"Upserted {len(data)} rows into {table_name}")
+                logger.debug("Upserted %s rows into %s", len(data), table_name)
         except StorageException:
             raise
         except duckdb.Error as e:
@@ -275,7 +281,7 @@ class DuckDBTableStorage(TableStoragePort):
 
     def read_data(self, *, table_name: str, limit: int | None = None, offset: int | None = None) -> pa.Table:
         """
-        Read data from a table with pagination support.
+        Read data from a table with pagination support, ordered by ``id``.
 
         Args:
             table_name: Name of the table to read from
@@ -293,18 +299,23 @@ class DuckDBTableStorage(TableStoragePort):
             quoted_table = self._quote_identifier(identifier=table_name)
             query = f"SELECT * FROM {quoted_table}"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
 
-            if limit is not None:
-                query += f" LIMIT {limit}"
-            if offset is not None:
-                query += f" OFFSET {offset}"
-
             read_only = self.database_path != _IN_MEMORY_DB
             with self.connection_manager.get_connection(self.database_path, read_only=read_only) as conn:
+                # Without an order, pages read with LIMIT and OFFSET are not stable.
+                id_column = conn.execute(
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = ? AND column_name = 'id'",
+                    [table_name],
+                ).fetchone()
+                if id_column and id_column[0] > 0:
+                    query += ' ORDER BY "id"'
+                if limit is not None:
+                    query += f" LIMIT {limit}"
+                if offset is not None:
+                    query += f" OFFSET {offset}"
+
                 result = conn.execute(query).fetch_arrow_table()
-                logger.debug(f"Read {len(result)} rows from {table_name} (limit={limit}, offset={offset})")
+                logger.debug("Read %s rows from %s (limit=%s, offset=%s)", len(result), table_name, limit, offset)
                 return result
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to read data from {table_name}: {e}") from e
         except Exception as e:
@@ -328,10 +339,8 @@ class DuckDBTableStorage(TableStoragePort):
             quoted_table = self._quote_identifier(identifier=table_name)
             with self.connection_manager.get_connection(self.database_path) as conn:
                 conn.execute(f"DROP TABLE IF EXISTS {quoted_table}")
-                logger.info(f"Deleted table: {table_name}")
+                logger.info("Deleted table: %s", table_name)
                 return True
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to delete table {table_name}: {e}") from e
         except Exception as e:
@@ -346,8 +355,15 @@ class DuckDBTableStorage(TableStoragePort):
 
         Returns:
             True if table exists, False otherwise
+
+        Raises:
+            StorageConnectionError: If the database cannot be read, so a failed check is
+                never taken for a missing table.
         """
         self._validate_table_name(table_name=table_name)
+        # A database file that does not exist yet has no tables; the first write creates it.
+        if self.database_path != _IN_MEMORY_DB and not Path(self.database_path).exists():
+            return False
         try:
             read_only = self.database_path != _IN_MEMORY_DB
             with self.connection_manager.get_connection(self.database_path, read_only=read_only) as conn:
@@ -358,8 +374,7 @@ class DuckDBTableStorage(TableStoragePort):
                 result = conn.execute(query, [table_name]).fetchone()
                 return result[0] > 0 if result else False
         except Exception as e:
-            logger.error(f"Failed to check if table {table_name} exists: {e}")
-            return False
+            raise StorageConnectionError(message=f"Failed to check if table {table_name} exists: {e}") from e
 
     def get_row_count(self, *, table_name: str) -> int:
         """
@@ -382,8 +397,6 @@ class DuckDBTableStorage(TableStoragePort):
                 count_query = f"SELECT COUNT(*) as total FROM {quoted_table}"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
                 count_result = conn.execute(count_query).fetchone()
                 return count_result[0] if count_result else 0
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to get row count for {table_name}: {e}") from e
         except Exception as e:
@@ -393,6 +406,9 @@ class DuckDBTableStorage(TableStoragePort):
         """
         Execute a SQL query and return results as PyArrow table.
 
+        A file database is opened read-only for statements that only read, and
+        read-write for others, so writes are committed as in PostgresTableStorage.
+
         Args:
             query: SQL query to execute
             params: Optional query parameters
@@ -401,13 +417,14 @@ class DuckDBTableStorage(TableStoragePort):
             Query results as PyArrow table
         """
         try:
-            read_only = self.database_path != _IN_MEMORY_DB
+            first_keyword = query.lstrip().split(maxsplit=1)[0].upper() if query.strip() else ""
+            read_only = self.database_path != _IN_MEMORY_DB and first_keyword in _READ_ONLY_STATEMENTS
             with self.connection_manager.get_connection(self.database_path, read_only=read_only) as conn:
                 if params:
                     result = conn.execute(query, params).fetch_arrow_table()
                 else:
                     result = conn.execute(query).fetch_arrow_table()
-                logger.debug(f"Executed query, returned {len(result)} rows")
+                logger.debug("Executed query, returned %s rows", len(result))
                 return result
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to execute query: {e}") from e
@@ -435,8 +452,6 @@ class DuckDBTableStorage(TableStoragePort):
                 query = f"SELECT * FROM {quoted_table} LIMIT 1"  # nosec B608 — table_name is validated and quoted via _quote_identifier()
                 result = conn.execute(query).fetch_arrow_table()
                 return result.schema
-        except StorageException:
-            raise
         except duckdb.Error as e:
             raise StorageException(message=f"Failed to get schema for {table_name}: {e}") from e
         except Exception as e:
@@ -457,12 +472,15 @@ class DuckDBTableStorage(TableStoragePort):
             if type_check(pa_type):
                 return duckdb_type
 
-        logger.warning(f"Unknown PyArrow type {pa_type}, defaulting to VARCHAR")
+        logger.warning("Unknown PyArrow type %s, defaulting to VARCHAR", pa_type)
         return "VARCHAR"
 
     def _handle_schema_evolution(self, *, table_name: str, new_schema: pa.Schema) -> None:
         """
         Handle schema evolution by adding new columns if needed.
+
+        An integer column that receives float values becomes ``DOUBLE``; otherwise DuckDB
+        would round the values to integers.
 
         Args:
             table_name: Name of the table
@@ -473,10 +491,22 @@ class DuckDBTableStorage(TableStoragePort):
         new_columns = set(new_schema.names)
 
         columns_to_add = new_columns - current_columns
+        columns_to_widen = [
+            field.name
+            for field in new_schema
+            if field.name in current_columns
+            and pa.types.is_integer(current_schema.field(field.name).type)
+            and (pa.types.is_floating(field.type) or pa.types.is_decimal(field.type))
+        ]
 
-        if columns_to_add:
+        if columns_to_add or columns_to_widen:
             quoted_table = self._quote_identifier(identifier=table_name)
             with self.connection_manager.get_connection(self.database_path) as conn:
+                for col_name in columns_to_widen:
+                    quoted_col = self._quote_identifier(identifier=col_name)
+                    conn.execute(f"ALTER TABLE {quoted_table} ALTER COLUMN {quoted_col} SET DATA TYPE DOUBLE")
+                    logger.info("Widened column %s of %s to DOUBLE", col_name, table_name)
+
                 for col_name in columns_to_add:
                     self._validate_column_name(column_name=col_name)
                     quoted_col = self._quote_identifier(identifier=col_name)
@@ -486,4 +516,4 @@ class DuckDBTableStorage(TableStoragePort):
 
                     alter_sql = f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_col} {duckdb_type}"
                     conn.execute(alter_sql)
-                    logger.info(f"Added column {col_name} to {table_name}")
+                    logger.info("Added column %s to %s", col_name, table_name)

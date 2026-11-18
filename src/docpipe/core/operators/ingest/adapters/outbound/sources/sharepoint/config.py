@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for SharePoint source adapter."""
 
 from typing import ClassVar
@@ -15,6 +18,14 @@ class SharePointSourceConfig(BaseModel):
     - Clear documentation of required/optional fields
     - Azure AD app-only authentication (client credentials flow)
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "client_id",
+        "client_secret",
+        "tenant_id",
+        "document_library_id",
+    )
 
     # Azure AD App Registration credentials (app-only authentication)
     client_id: str = Field(..., description="Azure AD application (client) ID", json_schema_extra={"sensitive": True})
@@ -34,7 +45,12 @@ class SharePointSourceConfig(BaseModel):
 
     file_path: str | None = Field(
         None,
-        description="Specific SharePoint file path or URL to ingest. Can be a direct path or a SharePoint URL. If provided, only this file is processed.",
+        description=(
+            "SharePoint item to ingest on its own. A non-URL value is a Microsoft Graph drive item id. "
+            "An http(s) value is a SharePoint file URL with an id or sourcedoc query parameter. "
+            "If provided, only this file is processed. "
+            "File events for the sharepoint provider set this from file_reference."
+        ),
     )
 
     # Behavior configuration

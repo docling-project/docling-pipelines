@@ -22,6 +22,7 @@ from docpipe.core.assets.document_sets.application.services.document_set_service
 )
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.storage.factory import StorageFactory
 
 
@@ -444,3 +445,201 @@ class TestUpdateDocumentSet:
         """Test updating with empty ID."""
         with pytest.raises(DocpipeException):
             service.update_document_set(document_set_id="", description="Updated")
+
+
+def _metadata_repository(*, repository_class: type[DuckDBAssetRepository], database_path: str) -> DuckDBAssetRepository:
+    """Build a DuckDB metadata repository of the given (sub)class, like the metadata_repository fixture."""
+    key_value_storage = StorageFactory.create_key_value_storage(storage_type="duckdb", database_path=database_path)
+    repo = repository_class(asset_type=DocumentSet, key_value_storage=key_value_storage, database_path=database_path)
+    repo._collection = "document_sets"
+    return repo
+
+
+class _ConcurrentCreateRepository(DuckDBAssetRepository):
+    """Another process saves a document set with the same name just before our save."""
+
+    def save(self, *, asset):
+        super().save(asset=DocumentSet(name=asset.name, description="created concurrently"))
+        return super().save(asset=asset)
+
+
+class _ConcurrentCreateAndDeleteRepository(DuckDBAssetRepository):
+    """Another process creates a set with the same name and deletes it again before we can look it up."""
+
+    def save(self, *, asset):
+        competitor = super().save(asset=DocumentSet(name=asset.name))
+        try:
+            return super().save(asset=asset)
+        finally:
+            super().delete(asset_id=competitor.asset_id)
+
+
+class _ConcurrentDeleteRepository(DuckDBAssetRepository):
+    """Another process deletes the document set just before our delete.
+
+    Our delete then finds nothing and reports False, as the AssetRepository port specifies.
+    (The DuckDB repository itself still reports True for unknown IDs, see #291.)
+    """
+
+    def delete(self, *, asset_id):
+        super().delete(asset_id=asset_id)
+        return False
+
+
+class _UnavailableRepository(DuckDBAssetRepository):
+    """save() fails with the configured error."""
+
+    error: Exception = DocpipeException("repository unavailable", status_code=503)
+
+    def save(self, *, asset):
+        raise self.error
+
+
+class _LockedDataStore(DuckDBDocumentSetStorage):
+    """The backing table cannot be dropped."""
+
+    def delete(self, *, attachment_ref):
+        raise OSError("table is locked")
+
+
+class TestConcurrencyAndFailures:
+    """Races with other writers and failing ports."""
+
+    def test_create_returns_set_created_concurrently(self, *, temp_duckdb_path, data_store, attachment_repository):
+        repo = _metadata_repository(repository_class=_ConcurrentCreateRepository, database_path=temp_duckdb_path)
+        service = DocumentSetService(
+            metadata_repository=repo, data_store=data_store, attachment_repository=attachment_repository
+        )
+
+        created = service.create_document_set(name="Shared Set", description="ours")
+
+        assert created.description == "created concurrently"
+        assert [d.asset_id for d in repo.find_all()] == [created.asset_id]
+
+    def test_create_conflict_with_vanished_set_is_reraised(
+        self, *, temp_duckdb_path, data_store, attachment_repository
+    ):
+        repo = _metadata_repository(
+            repository_class=_ConcurrentCreateAndDeleteRepository, database_path=temp_duckdb_path
+        )
+        service = DocumentSetService(
+            metadata_repository=repo, data_store=data_store, attachment_repository=attachment_repository
+        )
+
+        with pytest.raises(DocpipeException) as exc:
+            service.create_document_set(name="Fleeting Set", description=None)
+
+        assert exc.value.status_code == 409
+        assert repo.find_all() == []
+
+    @pytest.mark.parametrize(
+        ("error", "status_code", "error_code"),
+        [
+            (DocpipeException("repository unavailable", status_code=503), 503, None),
+            (OSError("disk full"), 500, ErrorCode.DOCUMENT_SET_STORAGE_ERROR),
+        ],
+        ids=["docpipe-error", "unexpected-error"],
+    )
+    def test_create_save_failures(
+        self, *, temp_duckdb_path, data_store, attachment_repository, error, status_code, error_code
+    ):
+        repo = _metadata_repository(repository_class=_UnavailableRepository, database_path=temp_duckdb_path)
+        repo.error = error
+        service = DocumentSetService(
+            metadata_repository=repo, data_store=data_store, attachment_repository=attachment_repository
+        )
+
+        with pytest.raises(DocpipeException) as exc:
+            service.create_document_set(name="Unsaved Set", description=None)
+
+        assert exc.value.status_code == status_code
+        if error_code is None:
+            assert exc.value is error
+        else:
+            assert exc.value.error_code == error_code
+            assert "disk full" in str(exc.value)
+
+    def test_delete_reports_not_found_when_deleted_concurrently(
+        self, *, temp_duckdb_path, data_store, attachment_repository
+    ):
+        repo = _metadata_repository(repository_class=_ConcurrentDeleteRepository, database_path=temp_duckdb_path)
+        service = DocumentSetService(
+            metadata_repository=repo, data_store=data_store, attachment_repository=attachment_repository
+        )
+        doc_set = service.create_document_set(name="Short Lived", description=None)
+
+        with pytest.raises(DocpipeException) as exc:
+            service.delete_document_set(document_set_id=doc_set.asset_id)
+
+        assert (exc.value.status_code, exc.value.error_code) == (404, ErrorCode.DOCUMENT_SET_NOT_FOUND)
+
+    def test_delete_keeps_records_when_data_cannot_be_deleted(
+        self, *, temp_duckdb_path, metadata_repository, attachment_repository, sample_table
+    ):
+        table_storage = StorageFactory.create_table_storage(storage_type="duckdb", database_path=temp_duckdb_path)
+        service = DocumentSetService(
+            metadata_repository=metadata_repository,
+            data_store=_LockedDataStore(table_storage=table_storage, database_path=temp_duckdb_path),
+            attachment_repository=attachment_repository,
+        )
+        doc_set = service.create_document_set(name="Locked Set", description=None)
+        service.store_data(document_set_id=doc_set.asset_id, data=sample_table)
+
+        with pytest.raises(OSError, match="table is locked"):
+            service.delete_document_set(document_set_id=doc_set.asset_id, delete_data=True)
+
+        assert service.get_document_set(document_set_id=doc_set.asset_id).asset_id == doc_set.asset_id
+        assert service.get_attachment_ref(document_set_id=doc_set.asset_id) is not None
+
+    def test_store_data_failure_is_reraised(self, *, service, sample_table):
+        doc_set = service.create_document_set(name="Typed Set", description=None)
+        service.store_data(document_set_id=doc_set.asset_id, data=sample_table)
+        incompatible = pa.table({"id": ["doc4"], "size": ["not a number"]})
+
+        with pytest.raises(DocpipeException, match="Failed to upsert data into typed_set"):
+            service.store_data(document_set_id=doc_set.asset_id, data=incompatible)
+
+        assert service.get_document_set(document_set_id=doc_set.asset_id).total_documents == 3
+
+
+class TestServiceEdgeCases:
+    """Inputs at the edges of the service methods."""
+
+    def test_delete_document_set_without_stored_data(self, *, service):
+        doc_set = service.create_document_set(name="Empty Set", description=None)
+
+        assert service.get_attachment_ref(document_set_id=doc_set.asset_id) is None
+        assert service.delete_document_set(document_set_id=doc_set.asset_id) is True
+        assert service.exists_by_name(name="Empty Set") is False
+
+    @pytest.mark.parametrize(
+        ("changes", "description", "metadata"),
+        [
+            ({"description": "new"}, "new", {"k": "v"}),
+            ({"metadata": {"k": "new"}}, "old", {"k": "new"}),
+            ({}, "old", {"k": "v"}),
+        ],
+        ids=["description-only", "metadata-only", "nothing"],
+    )
+    def test_update_keeps_fields_that_are_not_given(self, *, service, changes, description, metadata):
+        doc_set = service.create_document_set(name="Partial Set", description="old", metadata={"k": "v"})
+
+        updated = service.update_document_set(document_set_id=doc_set.asset_id, **changes)
+
+        assert (updated.description, updated.metadata) == (description, metadata)
+
+    def test_store_empty_table(self, *, service):
+        doc_set = service.create_document_set(name="No Rows", description=None)
+        empty = pa.table({"id": pa.array([], pa.string())})
+
+        updated = service.store_data(document_set_id=doc_set.asset_id, data=empty)
+
+        assert updated.total_documents == 0
+        assert service.get_attachment_ref(document_set_id=doc_set.asset_id) is not None
+
+    @pytest.mark.parametrize("method", ["preview_data", "compute_and_update_metrics"])
+    def test_blank_document_set_id(self, *, service, method):
+        with pytest.raises(DocpipeException, match="document_set_id cannot be empty") as exc:
+            getattr(service, method)(document_set_id="  ")
+
+        assert exc.value.status_code == 400

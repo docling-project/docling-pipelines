@@ -93,7 +93,7 @@ Three shared interfaces cover all LLM capabilities:
 | ------------------- | ----------------------------- | ------- |
 | `LLMInferencePort`  | Chat/generation APIs          | Classification, Entity Extraction, Summarization, PII/HAP (LLM mode) |
 | `LLMEmbeddingPort`  | Embedding generation          | Embeddings Operator |
-| `TextDetectionPort` | Specialized detection APIs    | PII/HAP (WatsonX mode) |
+| `TextDetectionPort` | Specialized detection APIs    | PII/HAP (WatsonX mode, Hugging Face HAP) |
 
 ---
 
@@ -147,9 +147,26 @@ src/docpipe/core/ports/llm_embedding_port.py
 src/docpipe/core/ports/text_detection_port.py
 ```
 
-**Purpose**: Specialized interface for PII/HAP detection via WatsonX detection APIs.
+**Purpose**: Specialized interface for detection services that are not chat APIs: the WatsonX
+detection API (PII and HAP) and local Hugging Face sequence classifiers (HAP).
 
-**Used by**: PII/HAP Operator (WatsonX path only)
+**Contract**:
+
+```python
+detect(*, text, detection_types=None, detectors={"hap": {"threshold": 0.8}}) -> {
+    "success": bool,
+    "detections": [  # start/end are character offsets into text
+        {"detection", "detection_type", "score", "start", "end", "text", "evidences"},
+    ],
+    "error": str | None,
+}
+```
+
+A provider-level failure (an unsupported detector, an API error, a model error) returns
+`success: False` with an empty `detections` list instead of raising, and the error message should
+not contain the input text. `validate()` runs the `validate_detection()` hook.
+
+**Used by**: PII/HAP Operator (`watsonx` and `huggingface` providers)
 
 ---
 
@@ -266,6 +283,57 @@ embeddings = adapter.generate_embeddings(
 
 ---
 
+## HuggingFace Adapter
+
+**File**
+
+```text
+src/docpipe/core/adapters/huggingface/huggingface_adapter.py
+```
+
+### Implements Two Ports
+
+```text
+LLMEmbeddingPort      (generate_embeddings, generate_embeddings_batch, get_embedding_dimension)
+TextDetectionPort     (detect)
+```
+
+### Key Features
+
+* **Single adapter** for all Hugging Face capabilities; `model_name` names the embedding model or
+  the classifier, depending on the capability it is built for
+* **Lazy, per-capability clients**: `HuggingFaceLLMClient` (`integrations/huggingface/client.py`)
+  for embeddings and `HuggingFaceClassificationClient`
+  (`integrations/huggingface/classification_client.py`) for detection. Each is created on first
+  use or in its `validate_*` hook, so an adapter built for one capability never loads the other
+  capability's model
+* **HAP detection**: splits text into sentence spans (line breaks, then untrained NLTK Punkt) whose
+  offsets point into the original text, scores each span locally, takes the highest probability
+  among `toxic_labels` and reports spans at or above the threshold as `has_HAP` detections
+* **No HAP defaults**: callers pass the classifier and its `toxic_labels`; the `pii_and_hap`
+  operator resolves its defaults in `HuggingFaceHAPConfig`
+* **Validation**: `validate()` resolves to `validate_embedding()` because `LLMEmbeddingPort` is the
+  first base class. Detection callers call `validate_detection()`, which loads the classifier and
+  checks `toxic_labels` against its labels
+
+### Usage Example
+
+```python
+from docpipe.core.adapters.huggingface import HuggingFaceAdapter
+from docpipe.core.constants.constants import ServiceConstants
+
+adapter = HuggingFaceAdapter(
+    model_name=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_MODEL_ID,
+    revision=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_REVISION,
+    toxic_labels=ServiceConstants.DEFAULT_HUGGINGFACE_HAP_TOXIC_LABELS,
+)
+
+assert adapter.validate_detection()["valid"]
+result = adapter.detect(text="Thanks for the report.", detectors={"hap": {"threshold": 0.8}})
+```
+
+---
+
 # LLM Adapter Factory
 
 **File**
@@ -298,7 +366,7 @@ get_supported_providers(capability="inference")
 | ------------- | --------- | ---------- | -------------- | ----- |
 | `watsonx`     | ✅         | ✅          | ✅              | IBM watsonx.ai — single consolidated adapter |
 | `litellm`     | ✅         | ✅          | ❌              | 100+ providers (Ollama, OpenAI, Anthropic, etc.) |
-| `huggingface` | ❌         | ✅          | ❌              | Local or API-based HuggingFace models |
+| `huggingface` | ❌         | ✅          | ✅              | Embeddings: local or API models. Text detection: local HAP classifier (needs explicit `model_id` and `toxic_labels`) |
 
 ### Usage Examples
 
@@ -343,6 +411,17 @@ adapter = LLMAdapterFactory.create_text_detection_adapter(
         "url": "https://us-south.ml.cloud.ibm.com",
         "container_id": "<your-project-id>",
         "container_kind": "project"
+    }
+)
+
+# HuggingFace text detection (local HAP classifier)
+adapter = LLMAdapterFactory.create_text_detection_adapter(
+    provider="huggingface",
+    model_id="unitary/unbiased-toxic-roberta",
+    provider_config={
+        "toxic_labels": ["toxicity", "severe_toxicity", "insult"],
+        "activation": "sigmoid",
+        "local_files_only": True
     }
 )
 ```
@@ -408,8 +487,12 @@ src/docpipe/core/operators/quality/classification/document_classifier.py
 
 ```text
 DocumentClassifierOperator
-    ↓
-ClassificationService  (src/docpipe/core/operators/quality/classification/classification_service.py)
+    ↓ depends on
+ClassificationPort  (src/docpipe/core/operators/quality/classification/ports/outbound/classification_port.py)
+    ↑ resolved by
+ClassificationAdapterFactory  (registry + provider aliases)
+    ↓ from_config()
+StandardLLMClassificationAdapter  (src/docpipe/core/operators/quality/classification/adapters/outbound/standard_llm_adapter.py)
     ↓ calls LLMAdapterFactory.create_inference_adapter()
     ↓ holds
 LLMInferencePort
@@ -417,31 +500,21 @@ LLMInferencePort
 WatsonXAdapter / LiteLLMAdapter
 ```
 
-## ClassificationService
+## StandardLLMClassificationAdapter
 
 **File**
 
 ```text
-src/docpipe/core/operators/quality/classification/classification_service.py
+src/docpipe/core/operators/quality/classification/adapters/outbound/standard_llm_adapter.py
 ```
 
-**Responsibilities**: prompt building, LLM call, response parsing, validation.
+**Responsibilities**: config validation, `LLMInferencePort` construction (in `from_config()`),
+prompt building, LLM call, response parsing.
 
-**Actual constructor signature**:
-
-```python
-ClassificationService(
-    *,
-    model_id: str,
-    provider_name: str,
-    provider_config: dict[str, Any] | None = None,
-    temperature: float = 0.0,
-    max_tokens: int = 500,
-)
-```
-
-`provider_config` is passed directly to `LLMAdapterFactory`. `temperature` and `max_tokens`
-are separate parameters, not fields inside `provider_config`.
+`provider_config` is passed directly to `LLMAdapterFactory`. It is required for `litellm` and
+optional for `watsonx` (which falls back to `WATSONX_*` environment variables). `temperature` and
+`max_tokens` are read from `provider_config`, defaulting to
+`OperatorConstants.Classification.DEFAULT_TEMPERATURE` / `DEFAULT_MAX_TOKENS`.
 
 ## Flow JSON example
 
@@ -554,26 +627,35 @@ src/docpipe/core/operators/quality/pii_and_hap/pii_and_hap_annotator.py
 
 ## Architecture — Decorator-Based Adapter Registry
 
-Each provider adapter self-registers with `PIIAndHAPDetectionFactory` via
-`@register_pii_and_hap_detection_adapter` and encapsulates its own detection path behind
-the unified `PIIAndHAPDetectionPort` interface:
+Detection is split by capability into two ports, so single-capability providers fit:
+`PIIDetectionPort.detect_pii()` and `HAPDetectionPort.detect_hap()`, both with `validate()`.
+`PIIAndHAPDetectionPort` inherits both and derives them from one `detect(payload=...)` call.
+Each adapter declares `SUPPORTS_PII` / `SUPPORTS_HAP`, self-registers with
+`PIIAndHAPDetectionFactory` via `@register_pii_and_hap_detection_adapter`, and the factory
+rejects flags that do not match the implemented ports:
 
 ```text
-PIIAndHAPAnnotator._initialize_pii_hap_service()
+PIIAndHAPAnnotator.__init__()
+    ↓ resolve pii_provider / hap_provider (legacy "provider" sets both)
+PIIAndHAPDetectionFactory.validate_selection()   (fail-fast capability check)
     ↓
-PIIAndHAPDetectionFactory.create(provider)
+PIIAndHAPDetectionFactory.create_adapters(pii=..., hap=...)
     ↓
-WatsonxPIIAndHAPAdapter  |  LiteLLMPIIAndHAPAdapter
-(each implements PIIAndHAPDetectionPort.detect() + validate())
-    ↓ injected
-PIIHAPService (thin wrapper — no if/elif, no factory calls)
+WatsonxPIIAndHAPAdapter | LiteLLMPIIAndHAPAdapter   (PII + HAP)
+PresidioPIIAdapter                                 (PII only)
+HuggingFaceHAPAdapter                              (HAP only)
+    ↓ injected independently
+PIIHAPService(pii_adapter=..., hap_adapter=...)
 ```
 
-The two adapters use different underlying ports because of provider API differences:
+The adapters use different underlying ports because of provider API differences:
 - **`WatsonxPIIAndHAPAdapter`**: WatsonX exposes a specialized `/ml/v1/text/detection` API
   (not a standard chat API), so it wraps `TextDetectionPort`.
 - **`LiteLLMPIIAndHAPAdapter`**: LiteLLM uses standard prompt-based inference, so it wraps
   `LLMInferencePort`.
+- **`HuggingFaceHAPAdapter`**: runs a local sequence classifier through `TextDetectionPort`.
+  Its `HuggingFaceHAPConfig` resolves the HAP defaults (model, pinned revision, toxic labels)
+  before calling `LLMAdapterFactory`, so operator metadata shows the effective values.
 
 ## PIIHAPService
 
@@ -586,12 +668,13 @@ src/docpipe/core/operators/quality/pii_and_hap/services/pii_hap_service.py
 **Actual constructor signature**:
 
 ```python
-PIIHAPService(*, adapter: PIIAndHAPDetectionPort)
+PIIHAPService(*, pii_adapter: PIIDetectionPort | None = None, hap_adapter: HAPDetectionPort | None = None)
 ```
 
-Receives a pre-built `PIIAndHAPDetectionPort` instance via constructor injection. Calls
-`adapter.validate()` at construction time (fail-fast) then delegates all detection to
-`adapter.detect()`. Contains no provider branching.
+Receives pre-built adapters via constructor injection and calls `validate()` once per distinct
+adapter at construction time (fail-fast). Per request it invokes only the capabilities present in
+the payload's `detectors` (derived from `expected_redactions`); when one dual-capability adapter
+serves both, it makes a single combined `detect()` call. Contains no provider branching.
 
 ## Flow JSON example
 

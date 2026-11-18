@@ -89,7 +89,6 @@
         "vector_dimension": 768,
         "doc_id_column": "doc_id_hash",
         "embeddings_column": "embeddings",
-        "create_index": "true",
         "provider_config": {
           "index_name": "docpipe_litellm_embeddings",
           "host": "localhost",

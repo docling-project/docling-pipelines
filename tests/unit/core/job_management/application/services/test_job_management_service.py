@@ -1,11 +1,19 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for JobManagementService."""
 
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 import pytest
 
 from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus
+from docpipe.core.job_management.adapters.frameworks.default_job_run_manager import DefaultJobRunManager
+from docpipe.core.job_management.adapters.services.job_tracker_service import JobTrackerService
+from docpipe.core.job_management.adapters.stores.inmemory.inmemory_job_stats_store import InMemoryJobStatsStore
 from docpipe.core.job_management.application.services.job_management_service import JobManagementService
+from docpipe.core.job_management.application.services.node_stats_aggregator import NodeStatsAggregator
 from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
@@ -57,6 +65,10 @@ class DummyJobRunItem:
         self.job_run_id = payload.get(DocpipeConstants.JOB_RUN_ID)
         self.flow_id = payload.get(DocpipeConstants.FLOW_ID)
         self.flow_name = payload.get(DocpipeConstants.FLOW_NAME)
+        self.status = payload.get(DocpipeConstants.STATUS)
+        self.start_time = payload.get(DocpipeConstants.START_TIME, 0)
+        self.end_time = payload.get(DocpipeConstants.END_TIME, 0)
+        self.duration = payload.get(DocpipeConstants.DURATION, 0)
 
     def model_dump(self, *, include: set[str]):
         return {key: self.payload[key] for key in include if key in self.payload}
@@ -230,6 +242,54 @@ class TestJobManagementService:
         assert result["total"] == 1
         assert result["list"][0][DocpipeConstants.JOB_RUN_ID] == "run-1"
         assert result["list"][0][DocpipeConstants.FLOW_NAME] == "My Test Flow"
+
+    def test_list_job_runs_computes_live_duration_for_running_job(self):
+        """In-progress runs report elapsed time since start instead of the stored 0."""
+        start = int(datetime.now(tz=UTC).timestamp()) - 30
+        dummy_run = DummyJobRunItem(
+            {
+                DocpipeConstants.JOB_RUN_ID: "run-3",
+                DocpipeConstants.JOB_ID: "job-1",
+                DocpipeConstants.STATUS: ExecutionStatus.RUNNING.value,
+                DocpipeConstants.START_TIME: start,
+                DocpipeConstants.END_TIME: 0,
+                DocpipeConstants.DURATION: 0,
+            }
+        )
+        dummy_run.flow_name = "Flow"
+        self.job_stats_service.list_job_runs.return_value = [dummy_run]
+
+        result = self.service.list_job_runs(job_id="job-1")
+
+        assert 30 <= result["list"][0][DocpipeConstants.DURATION] <= 35
+
+    @pytest.mark.parametrize(
+        ("status", "start", "end", "stored", "expected"),
+        [
+            (ExecutionStatus.COMPLETED, 100, 107, 7, 7),
+            (ExecutionStatus.COMPLETED, 100, 107, 0, 7),
+            (ExecutionStatus.FAILED, 100, 0, 0, 0),
+            (ExecutionStatus.PENDING, 0, 0, 0, 0),
+        ],
+    )
+    def test_list_job_runs_duration_for_finished_or_unstarted_runs(self, status, start, end, stored, expected):
+        """Finished runs keep stored/derived duration and never grow against the clock."""
+        dummy_run = DummyJobRunItem(
+            {
+                DocpipeConstants.JOB_RUN_ID: "run-4",
+                DocpipeConstants.JOB_ID: "job-1",
+                DocpipeConstants.STATUS: status.value,
+                DocpipeConstants.START_TIME: start,
+                DocpipeConstants.END_TIME: end,
+                DocpipeConstants.DURATION: stored,
+            }
+        )
+        dummy_run.flow_name = "Flow"
+        self.job_stats_service.list_job_runs.return_value = [dummy_run]
+
+        result = self.service.list_job_runs(job_id="job-1")
+
+        assert result["list"][0][DocpipeConstants.DURATION] == expected
 
     def test_list_job_runs_flow_name_none_when_not_set(self):
         """Test list_job_runs returns None for flow_name when no snapshot exists."""
@@ -649,6 +709,8 @@ class TestFlowIdentityAPIPath:
         submit_call = self.executor.submit.call_args
         passed_session_info = submit_call.args[1]
         assert passed_session_info.flow_id == "5f429668-ded4-41b5-80b9-f1d6278dc07a"
+        assert passed_session_info.job_id == "job-abc"
+        assert passed_session_info.job_run_id == "run-abc"
 
     @patch("docpipe.core.assets.flows.domain.models.authoring_flow.AuthoringFlow.from_dict")
     @patch("docpipe.core.assets.flows.application.services.authoring_compiler.AuthoringCompiler.compile")
@@ -724,3 +786,96 @@ class TestFlowIdentityAPIPath:
 
         self.flow_service.get_flow.assert_not_called()
         assert result["list"][0][DocpipeConstants.FLOW_NAME] is None
+
+    def test_list_job_runs_total_equals_count_on_short_page(self):
+        """A short page sets total to count and lists runs once."""
+        runs = [_dummy_run(job_run_id=f"run-{index}") for index in range(3)]
+        self.job_stats_service.list_job_runs.return_value = runs
+
+        result = self.service.list_job_runs(job_id="flow-1", limit=10)
+
+        assert result["count"] == 3
+        assert result["total"] == 3
+        assert len(result["list"]) == 3
+        self.job_stats_service.list_job_runs.assert_called_once_with(job_id="flow-1", status=None, limit=10)
+        self.job_stats_service.count_job_runs.assert_not_called()
+
+    def test_list_job_runs_total_comes_from_count_when_page_is_full(self):
+        """A full page reads total from count_job_runs, including matches past any list cap."""
+        page = [_dummy_run(job_run_id=f"run-{index}") for index in range(5)]
+        self.job_stats_service.list_job_runs.return_value = page
+        self.job_stats_service.count_job_runs.return_value = 100_001
+
+        result = self.service.list_job_runs(job_id="flow-1", status=ExecutionStatus.RUNNING, limit=5)
+
+        assert result["count"] == 5
+        assert result["total"] == 100_001
+        assert [item[DocpipeConstants.JOB_RUN_ID] for item in result["list"]] == [f"run-{index}" for index in range(5)]
+        self.job_stats_service.list_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+            limit=5,
+        )
+        self.job_stats_service.count_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+        )
+
+    def test_list_job_runs_total_equals_count_when_page_fills_limit(self):
+        """A page that fills the limit still takes total from count_job_runs."""
+        page = [_dummy_run(job_run_id=f"run-{index}") for index in range(5)]
+        self.job_stats_service.list_job_runs.return_value = page
+        self.job_stats_service.count_job_runs.return_value = 5
+
+        result = self.service.list_job_runs(job_id="flow-1", status=ExecutionStatus.RUNNING, limit=5)
+
+        assert result["count"] == 5
+        assert result["total"] == 5
+        assert len(result["list"]) == 5
+        self.job_stats_service.list_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+            limit=5,
+        )
+        self.job_stats_service.count_job_runs.assert_called_once_with(
+            job_id="flow-1",
+            status=ExecutionStatus.RUNNING,
+        )
+
+
+def _dummy_run(*, job_run_id: str, job_id: str = "flow-1") -> DummyJobRunItem:
+    item = DummyJobRunItem(
+        {
+            DocpipeConstants.JOB_RUN_ID: job_run_id,
+            DocpipeConstants.JOB_ID: job_id,
+            DocpipeConstants.STATUS: ExecutionStatus.RUNNING.value,
+            DocpipeConstants.MESSAGE: "",
+        }
+    )
+    item.flow_name = "Flow One"
+    return item
+
+
+def test_list_job_runs_total_counts_matches_beyond_the_page():
+    """OpenSpec job-runs list. limit 5 with 20 stored runs returns count 5 and total 20."""
+    store = InMemoryJobStatsStore()
+    aggregator = NodeStatsAggregator(job_stats_store=store)
+    tracker = JobTrackerService(job_stats_store=store, node_stats_aggregator=aggregator)
+    for index in range(20):
+        tracker.start_tracking_job(
+            job_id="flow-1",
+            job_run_id=f"{index:08x}-0000-4000-8000-000000000000",
+            flow_id="flow-1",
+            flow_name="Flow One",
+        )
+    service = JobManagementService(
+        job_stats_service=tracker,
+        job_run_manager=DefaultJobRunManager(job_stats_service=tracker),
+        flow_service=Mock(),
+    )
+
+    result = service.list_job_runs(job_id="flow-1", limit=5)
+
+    assert result["count"] == 5
+    assert result["total"] == 20
+    assert len(result["list"]) == 5

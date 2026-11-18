@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for AbstractOrchestrator."""
 
 from unittest.mock import MagicMock, Mock, patch
@@ -317,20 +320,28 @@ class TestPopulateIngestSourceConfig:
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
         assert OperatorConstants.Config.INGEST_SOURCE not in global_config
 
-    def test_provider_config_stored_in_global_config(self, orchestrator):
+    def test_only_naming_facts_stored_in_global_config(self, orchestrator):
         global_config: dict = {}
         ingest_operator = {
+            OperatorConstants.Columns.ID: "n1",
+            OperatorConstants.Columns.NAME: "ingest",
             OperatorConstants.Misc.OPERATOR: "ingest_source",
             OperatorConstants.Config.CONFIG: {
-                OperatorConstants.Config.PROVIDER_CONFIG: {"bucket": "b", "access_key": "KEY"},
+                OperatorConstants.Config.PROVIDER_CONFIG: {
+                    "bucket": "b",
+                    "prefix": "docs/",
+                    "access_key": "KEY",  # pragma: allowlist secret
+                    "endpoint_url": "https://example.test",
+                },
+                "include_filter": "pdf",
             },
         }
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
-        provider_config = global_config[OperatorConstants.Config.INGEST_SOURCE][
-            OperatorConstants.Config.PROVIDER_CONFIG
-        ]
-        assert "access_key" in provider_config
-        assert "bucket" in provider_config
+        ingest_source = global_config[OperatorConstants.Config.INGEST_SOURCE]
+        assert ingest_source[OperatorConstants.Config.PROVIDER_CONFIG] == {"prefix": "docs/"}
+        assert ingest_source["include_filter"] == "pdf"
+        assert ingest_source["node_id"] == "n1"
+        assert "KEY" not in str(ingest_source)
 
 
 @pytest.mark.unit
@@ -449,3 +460,49 @@ class TestOrchestratorFactory:
 
         with pytest.raises(ValueError, match="must not be empty"):
             OrchestratorFactory.register_orchestrators(orchestrators={})
+
+
+@pytest.mark.unit
+class TestRecordSinkDataset:
+    """Sinks are shared across micro-batches on one orchestrator instance."""
+
+    NS = "opensearch://localhost:9200"
+
+    def test_starts_empty_without_hasattr_guard(self, orchestrator):
+        assert orchestrator.sink_datasets == {}
+
+    def test_same_sink_across_batches_is_one_entry_with_summed_rows(self, orchestrator):
+        for rows in (3, 4, 5):
+            orchestrator._record_sink_dataset(
+                namespace=self.NS, name="idx", tables=[pa.table({"id": [str(i) for i in range(rows)]})]
+            )
+        assert list(orchestrator.sink_datasets) == [(self.NS, "idx")]
+        assert orchestrator.sink_datasets[(self.NS, "idx")].summary.row_count == 12
+
+    def test_distinct_sinks_keep_their_own_schema(self, orchestrator):
+        orchestrator._record_sink_dataset(namespace=self.NS, name="a", tables=[pa.table({"id": ["1"]})])
+        orchestrator._record_sink_dataset(
+            namespace=self.NS, name="b", tables=[pa.table({"id": ["1", "2"], "extra": [1, 2]})]
+        )
+        assert [c for c, _ in orchestrator.sink_datasets[(self.NS, "a")].summary.schema_fields] == ["id"]
+        assert [c for c, _ in orchestrator.sink_datasets[(self.NS, "b")].summary.schema_fields] == ["id", "extra"]
+        assert orchestrator.sink_datasets[(self.NS, "b")].summary.row_count == 2
+
+    def test_no_table_records_nothing(self, orchestrator):
+        orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[])
+        orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[None])
+        assert orchestrator.sink_datasets == {}
+
+    def test_concurrent_batches_do_not_lose_rows(self, orchestrator):
+        import threading
+
+        def run_batch():
+            orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[pa.table({"id": ["1", "2"]})])
+
+        threads = [threading.Thread(target=run_batch) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(orchestrator.sink_datasets) == 1
+        assert orchestrator.sink_datasets[(self.NS, "idx")].summary.row_count == 40

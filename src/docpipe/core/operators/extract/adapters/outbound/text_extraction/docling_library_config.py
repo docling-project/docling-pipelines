@@ -1,6 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config model for the Docling Library text extraction adapter."""
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,8 +73,8 @@ class StandardPipelineConfig(BaseModel):
     accelerator: AcceleratorConfig | None = Field(
         default=None,
         description=(
-            "GPU accelerator options for PDF and image processing. When present, one DocumentConverter "
-            "is built at adapter init and reused across all documents. "
+            "GPU accelerator options for PDF and image processing. When present, the GPU DocumentConverter "
+            "is pooled process-wide and reused across documents and micro-batches. "
             "Requires max_workers=1 and use_processes=false. Cannot be combined with vlm_pipeline."
         ),
     )
@@ -83,6 +86,12 @@ class DoclingLibraryConfig(BaseModel):
     Describes the fields the user writes inside ``text_extraction.provider_config``
     when selecting the ``docling_library`` provider in an Extract operator node.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "vlm_pipeline.engine_options.api_key",
+        "vlm_pipeline.engine_options.api_base",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
