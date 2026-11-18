@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """PyArrow table handling utilities for reading, writing, and transforming Parquet tables."""
 
 from abc import ABC, abstractmethod
@@ -76,11 +79,9 @@ class BaseParquetTableHandler(ABC):
         """
         Delete rows from a Parquet table based on a filter function.
         """
-        self.logger.info(f"Deleting rows from: {path} table")
+        self.logger.info("Deleting rows from: %s table", path)
         table = self.read_table(path=path)
-        if not table:
-            return
-        if table.num_rows == 0:
+        if table is None or table.num_rows == 0:
             return
         delete_mask = delete_filter_fn(table)
 
@@ -92,7 +93,7 @@ class BaseParquetTableHandler(ABC):
 
         updated_table = table.filter(keep_mask)
         self.save_table(path=path, table=updated_table)
-        self.logger.info(f"Deleted {table.num_rows - updated_table.num_rows} rows.")
+        self.logger.info("Deleted %s rows.", table.num_rows - updated_table.num_rows)
 
     @abstractmethod
     def delete_file(self, *, path):
@@ -117,11 +118,11 @@ class CpdParquetTableHandler(BaseParquetTableHandler):
         """
         Read a Parquet table from File storage and optionally filter rows.
         """
-        self.logger.info(f"Reading table from: {path}")
+        self.logger.info("Reading table from: %s", path)
         lock = FileLock(_lock_path(path=path), timeout=LOCK_TIMEOUT)
         with lock:
             if not Path(path).exists():
-                self.logger.debug(f"Table not found from: {path}")
+                self.logger.debug("Table not found from: %s", path)
                 return None
             return pq.read_table(path, columns=columns, filters=filters)
 
@@ -131,7 +132,7 @@ class CpdParquetTableHandler(BaseParquetTableHandler):
         Replaces memmap file paths with actual data before saving.
         """
         try:
-            self.logger.info(f"Saving table to: {path}")
+            self.logger.info("Saving table to: %s", path)
 
             # Replace memmap paths with actual data before saving to parquet
             table = replace_memmap_paths_combined(table=table)
@@ -139,20 +140,20 @@ class CpdParquetTableHandler(BaseParquetTableHandler):
             with FileLock(_lock_path(path=path), timeout=LOCK_TIMEOUT):
                 pq.write_table(table, path)
         except Exception as exc:
-            self.logger.error(str(exc), exc_info=True, stack_info=True)
+            self.logger.exception(str(exc), stack_info=True)
 
     def delete_file(self, *, path):
         """Delete file."""
         try:
-            self.logger.info(f"Deleting file: {path}")
+            self.logger.info("Deleting file: %s", path)
             with FileLock(_lock_path(path=path), timeout=LOCK_TIMEOUT):
                 if Path(path).exists():
                     Path(path).unlink()
-                    self.logger.info(f"File deleted successfully {path}")
+                    self.logger.info("File deleted successfully %s", path)
                 else:
                     self.logger.warning("File does not exist.")
         except Exception as exc:
-            self.logger.error(str(exc), exc_info=True, stack_info=True)
+            self.logger.exception(str(exc), stack_info=True)
 
 
 def get_parquet_table_handler() -> BaseParquetTableHandler:
