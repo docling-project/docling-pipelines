@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for rate limiter utilities."""
 
 import os
@@ -306,6 +309,38 @@ class TestEnsureGlobalConcurrencyLimit:
             assert result is True
             mock_client.update_global_concurrency_limit.assert_not_called()
 
+    @pytest.mark.requires_prefect
+    def test_ensure_limit_tolerates_concurrent_update_failure(self):
+        """A failed update (another worker updated simultaneously) still reports success and does not create."""
+        with patch("prefect.client.orchestration.get_client") as mock_get_client:
+            mock_client = Mock()
+            mock_get_client.return_value.__enter__.return_value = mock_client
+            existing_limit = Mock(limit=5, slot_decay_per_second=2.0)
+            mock_client.read_global_concurrency_limit_by_name.return_value = existing_limit
+            mock_client.update_global_concurrency_limit.side_effect = RuntimeError("conflict")
+
+            result = ensure_global_concurrency_limit(limit_name="test-limit", limit=10, slot_decay_per_second=5.0)
+
+            assert result is True
+            mock_client.update_global_concurrency_limit.assert_called_once()
+            mock_client.create_global_concurrency_limit.assert_not_called()
+
+    @pytest.mark.requires_prefect
+    def test_ensure_limit_tolerates_create_race(self):
+        """ObjectAlreadyExists on create (another worker won the race) still reports success."""
+        from prefect.exceptions import ObjectAlreadyExists, ObjectNotFound
+
+        with patch("prefect.client.orchestration.get_client") as mock_get_client:
+            mock_client = Mock()
+            mock_get_client.return_value.__enter__.return_value = mock_client
+            mock_client.read_global_concurrency_limit_by_name.side_effect = ObjectNotFound(http_exc=Exception("404"))
+            mock_client.create_global_concurrency_limit.side_effect = ObjectAlreadyExists(http_exc=Exception("409"))
+
+            result = ensure_global_concurrency_limit(limit_name="test-limit", limit=10, slot_decay_per_second=5.0)
+
+            assert result is True
+            mock_client.create_global_concurrency_limit.assert_called_once()
+
     def test_ensure_limit_handles_import_error(self):
         """Test handling when Prefect is not available."""
         with patch("prefect.client.orchestration.get_client", side_effect=ImportError("No prefect")):
@@ -396,7 +431,6 @@ class TestRateLimitedDecorator:
         @rate_limited(limit_name="test", rate=10.0, use_prefect=False)
         def my_function():
             """My docstring."""
-            pass
 
         assert my_function.__name__ == "my_function"
         assert my_function.__doc__ == "My docstring."

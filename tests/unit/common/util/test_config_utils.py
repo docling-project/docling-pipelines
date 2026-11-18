@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for configuration utilities.
 Tests for environment configuration loading and parsing.
@@ -509,3 +512,22 @@ class TestEdgeCases:
             assert (
                 provider_config[OperatorConstants.VectorDB.PASSWORD] == "pass"  # pragma: allowlist secret
             )
+
+
+class TestGetOpensearchConfigJwt:
+    """Test JWT token handling in OpenSearch configuration."""
+
+    def test_jwt_token_is_added_when_set(self):
+        """OPENSEARCH_JWT_TOKEN is passed through to provider_config."""
+        env = {OperatorConstants.VectorDB.OPENSEARCH_JWT_TOKEN: "fake-jwt"}  # pragma: allowlist secret
+        with patch.dict(os.environ, env, clear=True):
+            provider_config = get_opensearch_config()[OperatorConstants.Config.PROVIDER_CONFIG]
+
+        assert provider_config[OperatorConstants.VectorDB.JWT_TOKEN] == "fake-jwt"  # pragma: allowlist secret
+
+    def test_jwt_token_is_omitted_when_unset(self):
+        """Without OPENSEARCH_JWT_TOKEN no jwt_token key is present."""
+        with patch.dict(os.environ, {}, clear=True):
+            provider_config = get_opensearch_config()[OperatorConstants.Config.PROVIDER_CONFIG]
+
+        assert OperatorConstants.VectorDB.JWT_TOKEN not in provider_config

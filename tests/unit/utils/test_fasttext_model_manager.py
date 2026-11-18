@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for FastTextModelManager._download_model().
 
 All network I/O is mocked — no real HTTP or disk operations.
@@ -73,3 +76,71 @@ class TestFastTextModelManagerDownload:
         with patch("urllib.request.urlretrieve", side_effect=Exception("network failure")):
             with pytest.raises(RuntimeError, match="Download failed"):
                 manager._download_model(model_path=model_path)
+
+
+@pytest.fixture
+def fresh_manager_cls():
+    """Yield FastTextModelManager with a cleared singleton, restoring the previous instance afterwards."""
+    from docpipe.utils.infrastructure.fasttext_model_manager import FastTextModelManager
+
+    saved = FastTextModelManager._instance
+    FastTextModelManager._instance = None
+    try:
+        yield FastTextModelManager
+    finally:
+        FastTextModelManager._instance = saved
+
+
+class TestFastTextModelManagerLifecycle:
+    """Tests for singleton creation, idempotent loading and reference-counted release."""
+
+    def test_instance_created_by_another_thread_while_waiting_is_reused(self, fresh_manager_cls):
+        """If another thread creates the singleton while this one waits for the lock, that instance is returned."""
+        created_elsewhere = object.__new__(fresh_manager_cls)
+        created_elsewhere._initialized = True
+
+        class _RacingLock:
+            """Lock stand-in that simulates the other thread finishing first."""
+
+            def __enter__(self):
+                fresh_manager_cls._instance = created_elsewhere
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+        with patch.object(fresh_manager_cls, "_lock", _RacingLock()):
+            assert fresh_manager_cls() is created_elsewhere
+
+    def test_load_model_is_a_noop_when_already_loaded(self, fresh_manager_cls):
+        """_load_model neither imports fasttext nor reloads when a model is present."""
+        manager = fresh_manager_cls()
+        loaded = object()
+        manager._model = loaded
+
+        with patch.dict("sys.modules", {"fasttext": None}):
+            manager._load_model()  # would raise ImportError if it tried to import fasttext
+
+        assert manager._model is loaded
+
+    def test_release_keeps_model_while_references_remain(self, fresh_manager_cls):
+        """Releasing one of two references keeps the model loaded."""
+        manager = fresh_manager_cls()
+        loaded = object()
+        manager._model = loaded
+        manager._ref_count = 2
+
+        manager.release_model()
+
+        assert manager.get_ref_count() == 1
+        assert manager._model is loaded
+
+    def test_release_with_zero_references_only_warns(self, fresh_manager_cls):
+        """An unmatched release does not go negative and logs a warning."""
+        manager = fresh_manager_cls()
+
+        with patch("docpipe.utils.infrastructure.fasttext_model_manager.logger") as mock_logger:
+            manager.release_model()
+
+        assert manager.get_ref_count() == 0
+        mock_logger.warning.assert_called_once_with("Attempted to release FastText model with zero reference count")
