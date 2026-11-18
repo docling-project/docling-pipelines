@@ -25,7 +25,15 @@ Every route other than `/login` and the error page SHALL be wrapped in `Protecte
 - **THEN** a loading indicator is shown and no redirect occurs yet
 
 ### Requirement: Header user menu
-When auth is enabled the application header SHALL show the signed-in user's name and a sign-out action. Choosing sign-out SHALL end the session and navigate to `/login`. When auth is disabled the menu SHALL NOT be shown.
+When auth is enabled the application header SHALL show a profile button as its rightmost global action, after the theme toggle. Selecting it SHALL open a panel under the button with the signed-in user's display name (full name, or the username when there is none), email, role tags and a sign-out action. The panel SHALL close on sign-out, on an outside click and on Escape. Choosing sign-out SHALL end the session and navigate to `/login`. When auth is disabled the menu SHALL NOT be shown.
+
+#### Scenario: Profile panel
+- **WHEN** a signed-in user selects the profile button
+- **THEN** the panel shows the user's name, email and roles and a sign-out action
+
+#### Scenario: Panel dismissed
+- **WHEN** the panel is open and the user presses Escape or clicks outside it
+- **THEN** the panel closes
 
 #### Scenario: Sign out
 - **WHEN** the user chooses sign-out
