@@ -17,7 +17,7 @@ dotenv.config();
 // Fail fast when the upstream URL is missing — misconfiguration should surface
 // immediately at startup rather than silently proxying to an undefined host.
 if (!process.env.BACKEND_API_URL) {
-  logger.fatal('BACKEND_API_URL is not set — BFF cannot proxy requests to the backend. Exiting.');
+  logUtil.error({ logger, message: 'BACKEND_API_URL is not set — BFF cannot proxy requests to the backend. Exiting.' });
   process.exit(1);
 }
 
@@ -38,12 +38,12 @@ validationRoutes(router);
 app.use('/api', router);
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'docling-pipelines-bff' });
 });
 
 // Error handling middleware
-app.use((err: Error & { status?: number }, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logUtil.error({ logger, message: 'BFF Error', data: err.message });
   res.status((err as { status?: number }).status || 500).json({
     error: err.message || 'Internal server error',
