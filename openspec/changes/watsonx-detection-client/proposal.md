@@ -8,10 +8,10 @@ The adapter also has a latent validation bug. It extends `LLMInferencePort`, `LL
 
 ## What Changes
 
-- Add `WatsonxDetectionClient` in `src/docpipe/integrations/watsonx/detection_client.py`. It owns the `/ml/v1/text/detection` URL, the `version` query parameter, the `<container_kind>_id` payload field, the retry settings, IAM token caching and the token reset on 401/403, and returns the `detections` list.
+- Add `WatsonxDetectionClient` in `src/docpipe/integrations/watsonx/detection_client.py`. It owns the `/ml/v1/text/detection` URL, the `version` query parameter, the `<container_kind>_id` payload field, the retry settings, IAM authentication via `IAMTokenManager`, and returns the `detections` list.
 - `WatsonXAdapter` creates the client lazily, like `embedding_client`, so constructing the adapter makes no network call. `detect()` and `detect_entities()` only map `TextDetectionPort` calls onto it. `_call_watsonx_detection_api`, `_get_access_token` and the `_access_token` attribute are removed from the adapter.
 - `WatsonxPIIAndHAPAdapter.validate()` calls `self._adapter.validate_detection()` explicitly, so its validation result reports `context: "detection"`.
-- No change to detection behavior: same endpoint, `version` value, retry settings, token refresh on 401/403, errors and result dicts.
+- No change to detection behavior: same endpoint, `version` value, retry settings, errors and result dicts.
 - Layer affected: backend-only. No REST route, operator parameter, storage adapter, frontend, BFF or Redux change.
 
 ## Capabilities
@@ -36,5 +36,5 @@ None.
 - New: `src/docpipe/integrations/watsonx/detection_client.py`, `tests/unit/integrations/watsonx/test_detection_client.py`.
 - Modified: `src/docpipe/core/adapters/watsonx/watsonx_adapter.py`, `src/docpipe/core/operators/quality/pii_and_hap/adapters/outbound/watsonx/adapter.py`.
 - Modified tests: `tests/unit/core/adapters/watsonx/test_watsonx_adapter.py` (the detection tests patch `RestClient` and read `adapter._access_token` on the adapter module), `tests/unit/core/adapters/watsonx/test_watsonx_adapter_embeddings_validation.py` (`TestWatsonXDetectionGuards` calls `adapter._get_access_token()`), `tests/unit/operators/pii_and_hap/test_watsonx_adapter.py` (validation regression test).
-- Dependencies: none. The client keeps using `WatsonxPipelineOptionsProvider._get_iam_access_token` and `RestClient` as today.
+- Dependencies: none. The client uses `IAMTokenManager` and `RestClient`.
 - Ordering: archive after `add-huggingface-hap-provider`.

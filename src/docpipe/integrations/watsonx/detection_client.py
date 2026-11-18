@@ -6,35 +6,32 @@ WatsonX text detection client for IBM watsonx.ai.
 
 Calls the native ``/ml/v1/text/detection`` REST endpoint (PII/HAP detectors).
 The client owns the endpoint path, the API version, the container id payload
-field, retry settings, and IAM token caching with reset on 401/403.
+field, retry settings, and IAM authentication via IAMTokenManager.
 """
 
 from typing import Any
 from urllib.parse import urljoin
 
+from docpipe.core.constants.constants import ServiceConstants
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, ExternalServiceError
-from docpipe.integrations.docling.vlm_pipeline_options_provider import WatsonxPipelineOptionsProvider
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.utils.infrastructure.iam_token_manager import IAMTokenManager
 
 # WatsonX API version for text detection endpoint
 WATSONX_API_VERSION = "2024-07-29"
 
-# Default request timeout in seconds
-DEFAULT_TIMEOUT_SECONDS = 120
-
 _DETECTION_PATH = "/ml/v1/text/detection"
 _DETECTIONS_FIELD = "detections"
-_AUTH_FAILURE_STATUS_CODES = (401, 403)
 
 
 class WatsonxDetectionClient:
     """WatsonX REST client for the text detection API.
 
     One ``RestClient`` is created without a token and reused for every call.
-    The IAM token is cached on the instance and sent as a per-call
-    ``Authorization`` header, so a refreshed token takes effect without
-    rebuilding the REST client. Construction makes no network call; the IAM
-    token is fetched on the first ``detect()`` call.
+    Authentication is managed by ``IAMTokenManager``, which auto-refreshes tokens
+    before expiry and supports both IBM Cloud and MCSP IAM endpoints.
+    Construction makes no network call; the IAM token is fetched on the first
+    ``detect()`` call.
     """
 
     def __init__(
@@ -44,23 +41,23 @@ class WatsonxDetectionClient:
         api_base: str | None = None,
         container_id: str | None = None,
         container_kind: str | None = None,
-        timeout: int = DEFAULT_TIMEOUT_SECONDS,
+        timeout: int = ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize the detection client.
 
         Args:
-            api_key: IBM Cloud API key (exchanged for an IAM access token on first use)
+            api_key: IBM Cloud or MCSP API key (exchanged for an IAM access token on first use)
             api_base: WatsonX API base URL
             container_id: Container ID (project_id or space_id)
             container_kind: Container kind used as the payload field prefix ("project" or "space")
-            timeout: Request timeout in seconds (default: ``DEFAULT_TIMEOUT_SECONDS``)
+            timeout: Request timeout in seconds (default: ``ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS``)
         """
         self.api_key = api_key
         self.api_base = api_base
         self.container_id = container_id
         self.container_kind = container_kind
         self.timeout = timeout
-        self._access_token: str | None = None
+        self._token_manager: IAMTokenManager | None = None
 
         config = RestClientConfig(
             timeout=timeout,
@@ -72,18 +69,14 @@ class WatsonxDetectionClient:
         self._rest_client = RestClient(config=config)
 
     def _get_access_token(self) -> str:
-        """Get or fetch the cached IAM access token.
-
-        A local variable is returned instead of re-reading.
-        No lock is used; at worst the token is fetched more than once.
-        """
+        """Get or refresh the IAM access token via IAMTokenManager."""
         if not self.api_key:
             raise ValueError("WatsonX API key is required for text detection")
-        token = self._access_token
-        if not token:
-            token = WatsonxPipelineOptionsProvider._get_iam_access_token(api_key=self.api_key)
-            self._access_token = token
-        return token
+        if not self.api_base:
+            raise ValueError("WatsonX API base URL is required for text detection")
+        if self._token_manager is None:
+            self._token_manager = IAMTokenManager(api_key=self.api_key, watsonx_url=self.api_base)
+        return self._token_manager.get_token()
 
     def detect(self, *, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Call the WatsonX native text detection API.
@@ -126,10 +119,6 @@ class WatsonxDetectionClient:
             detections = result.get(_DETECTIONS_FIELD, [])
             return detections if isinstance(detections, list) else []
         except ExternalServiceError as exc:
-            # Only refresh token on authentication errors (401, 403)
-            # For other errors (network, payload issues), preserve the token
-            if exc.status_code in _AUTH_FAILURE_STATUS_CODES:
-                self._access_token = None
             raise DocpipeException(
                 message=f"Failed to call WatsonX detection API: {exc!s}",
                 status_code=exc.status_code or 500,

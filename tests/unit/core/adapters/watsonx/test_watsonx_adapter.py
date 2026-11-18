@@ -267,11 +267,11 @@ class TestWatsonXTextDetection:
     @pytest.fixture
     def mock_iam_token(self):
         """Mock IAM token retrieval."""
-        with patch(
-            "docpipe.integrations.watsonx.detection_client.WatsonxPipelineOptionsProvider._get_iam_access_token"
-        ) as mock_token:
-            mock_token.return_value = "test-access-token"
-            yield mock_token
+        with patch("docpipe.integrations.watsonx.detection_client.IAMTokenManager") as mock_manager_class:
+            mock_manager = Mock()
+            mock_manager.get_token.return_value = "test-access-token"
+            mock_manager_class.return_value = mock_manager
+            yield mock_manager
 
     @pytest.fixture
     def adapter(self, mock_iam_token):
@@ -476,26 +476,18 @@ class TestWatsonXTextDetection:
         assert "project_id" in payload
         assert payload["project_id"] == "test-project-id"
 
-    def test_detect_token_refresh_on_auth_error(self, adapter, mock_rest_client, mock_iam_token):
-        """Test that access token is refreshed on authentication errors."""
-        from docpipe.exceptions.docpipe_exceptions import ExternalServiceError
-
+    def test_detect_calls_get_token_per_request(self, adapter, mock_rest_client, mock_iam_token):
+        """Test that get_token is called per detection request."""
         text = "Test text"
-        mock_rest_client.call_rest_json.side_effect = [
-            ExternalServiceError(message="Unauthorized", status_code=401),
-            {"detections": []},
-        ]
+        mock_rest_client.call_rest_json.return_value = {"detections": []}
 
         result = adapter.detect(text=text)
-
-        assert result["success"] is False
-        assert mock_iam_token.call_count == 1
-
-        # Token was cleared by the 401, so the next call fetches a new one
-        result = adapter.detect(text=text)
-
         assert result["success"] is True
-        assert mock_iam_token.call_count == 2
+        assert mock_iam_token.get_token.call_count == 1
+
+        result = adapter.detect(text=text)
+        assert result["success"] is True
+        assert mock_iam_token.get_token.call_count == 2
 
     def test_construction_makes_no_network_call(self, mock_rest_client, mock_iam_token):
         """Constructing the adapter must not request an IAM token or call the detection API."""
@@ -508,5 +500,5 @@ class TestWatsonXTextDetection:
                 container_kind="project",
             )
 
-        mock_iam_token.assert_not_called()
+        mock_iam_token.get_token.assert_not_called()
         mock_rest_client.call_rest_json.assert_not_called()

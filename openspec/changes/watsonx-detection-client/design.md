@@ -29,7 +29,7 @@ The `add-huggingface-hap-provider` change (PR #622, archived first) already sets
 
 New file `src/docpipe/integrations/watsonx/detection_client.py`. The name follows the rule that integration clients are named after the external capability, not the core port that uses them. `/ml/v1/text/detection` is a detection API.
 
-Constructor (keyword-only): `api_key`, `api_base`, `container_id`, `container_kind`, `timeout`. One public method, `detect(*, payload) -> list[dict]`, which takes the `input` and `detectors` payload and returns the `detections` list. It owns the endpoint path, the API `version` constant (moved from `WatsonXAdapter.WATSONX_API_VERSION`), the container id payload field, retry settings, token caching and token reset.
+Constructor (keyword-only): `api_key`, `api_base`, `container_id`, `container_kind`, `timeout`. One public method, `detect(*, payload) -> list[dict]`, which takes the `input` and `detectors` payload and returns the `detections` list. It owns the endpoint path, the API `version` constant (moved from `WatsonXAdapter.WATSONX_API_VERSION`), the container id payload field, retry settings, and IAM authentication via `IAMTokenManager`.
 
 Precondition checks (`api_base`, `container_kind`/`container_id`, `api_key`) and their `ValueError` messages move with the code. Existing tests that match those messages keep working because the adapter still surfaces them through `detect()` as a failed result.
 
@@ -43,13 +43,11 @@ Alternatives considered:
 
 The adapter drops `_access_token`, `_get_access_token`, `_call_watsonx_detection_api`, `WATSONX_API_VERSION` and the imports only they used (`urljoin`, `RestClient`, `RestClientConfig`, `RestMethod`, `WatsonxPipelineOptionsProvider`, `ExternalServiceError`).
 
-### D3. Token handling stays in the client; one `RestClient` is reused
+### D3. Token handling via `IAMTokenManager`; one `RestClient` is reused
 
-The client keeps the IAM token in an instance attribute and resets it on 401/403 only, exactly as now. Instead of building a `RestClient` with `auth_token=...` on every call, it builds one `RestClient` without a token and passes `headers={"Authorization": f"Bearer {token}"}` per call. `RestClient._build_headers` only adds its own header when `Authorization` is not already present, so the per-call header wins, and a refreshed token takes effect without rebuilding the client. This removes a `requests.Session` per call and keeps the token reset simple.
+The client delegates IAM authentication to `IAMTokenManager`, which handles thread-safe token caching and proactive auto-refresh prior to expiration across both IBM Cloud and MCSP environments. Instead of building a `RestClient` with `auth_token=...` on every call, it builds one `RestClient` without a token and passes `headers={"Authorization": f"Bearer {token}"}` per call from `IAMTokenManager.get_token()`. `RestClient._build_headers` only adds its own header when `Authorization` is not already present, so the per-call header wins, and refreshed tokens take effect immediately without rebuilding the client.
 
-Token fetch is not locked, as today. Two threads that both find no token fetch one each and the last write wins; both tokens are valid, so the cost is one extra IAM request. A lock would add behavior the issue does not ask for.
-
-The client is shared across the PII/HAP annotator's `ThreadPoolExecutor` worker threads. `RestClient` keeps no per-call state (headers are built per call and the session is not mutated), and the token read uses a local variable so a concurrent 401/403 reset cannot produce `Bearer None`. A threaded unit test covers concurrent `detect()` calls.
+The client is shared across the PII/HAP annotator's `ThreadPoolExecutor` worker threads. `RestClient` keeps no per-call state (headers are built per call and the session is not mutated), and `IAMTokenManager` handles thread-safe caching. A threaded unit test covers concurrent `detect()` calls.
 
 ### D4. Explicit `validate_detection()` call in the operator adapter
 
@@ -71,7 +69,7 @@ Alternatives considered:
 ## Risks / Trade-offs
 
 - [Tests patch `RestClient` and read `_access_token` on the adapter module] -> Move those tests to patch the client module and read the client's token attribute. `test_watsonx_adapter.py::TestWatsonXTextDetection` and `test_watsonx_adapter_embeddings_validation.py::TestWatsonXDetectionGuards` are the known cases; a missed `mock.patch` string fails at test time, so run both modules after the change.
-- [Reusing one `RestClient` changes retry state sharing] -> `RestClient` holds only configuration and a `requests.Session`; its retry wrapper is stateless per call, so reuse is safe. The client keeps 3 attempts and the same waits. The shared client is used from the annotator's worker threads; no per-call state is kept, the token read uses a local variable to avoid a reset race, and a threaded unit test covers concurrent `detect()` calls.
+- [Reusing one `RestClient` changes retry state sharing] -> `RestClient` holds only configuration and a `requests.Session`; its retry wrapper is stateless per call, so reuse is safe. The client keeps 3 attempts and the same waits. The shared client is used from the annotator's worker threads; no per-call state is kept, and a threaded unit test covers concurrent `detect()` calls.
 - [`validate()` result shape differs between the early-return branch and the delegated one] -> Out of scope; both already lack `context` in the early-return branch.
 - [Spec delta targets a capability created by PR #622] -> Archive this change after `add-huggingface-hap-provider`. If the order flips, `openspec archive` cannot find the target spec.
 

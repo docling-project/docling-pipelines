@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docpipe.core.constants.constants import ServiceConstants
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, ExternalServiceError
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.rest_client import RestMethod
 from docpipe.integrations.watsonx.detection_client import (
-    DEFAULT_TIMEOUT_SECONDS,
     WATSONX_API_VERSION,
     WatsonxDetectionClient,
 )
@@ -35,10 +35,12 @@ def mock_rest_client():
 
 @pytest.fixture
 def mock_iam_token():
-    """Patch the IAM token call so no network request is made."""
-    with patch(f"{MODULE}.WatsonxPipelineOptionsProvider._get_iam_access_token") as mock_token:
-        mock_token.side_effect = ["token-1", "token-2", "token-3"]
-        yield mock_token
+    """Patch IAMTokenManager in the client module and yield the mocked manager instance."""
+    with patch(f"{MODULE}.IAMTokenManager") as mock_manager_class:
+        mock_manager = MagicMock()
+        mock_manager.get_token.side_effect = ["token-1", "token-2", "token-3", "token-4"]
+        mock_manager_class.return_value = mock_manager
+        yield mock_manager
 
 
 @pytest.fixture
@@ -134,9 +136,8 @@ class TestRequest:
         with patch(f"{MODULE}.RestClient") as mock_class:
             client = WatsonxDetectionClient(api_key="k", api_base=API_BASE)  # pragma: allowlist secret
 
-        assert DEFAULT_TIMEOUT_SECONDS == 120
-        assert client.timeout == DEFAULT_TIMEOUT_SECONDS
-        assert mock_class.call_args.kwargs["config"].timeout == DEFAULT_TIMEOUT_SECONDS
+        assert client.timeout == ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS
+        assert mock_class.call_args.kwargs["config"].timeout == ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS
 
     def test_no_network_call_on_construction(self, mock_rest_client, mock_iam_token):
         WatsonxDetectionClient(
@@ -146,7 +147,7 @@ class TestRequest:
             container_kind="project",
         )
 
-        mock_iam_token.assert_not_called()
+        mock_iam_token.get_token.assert_not_called()
         mock_rest_client.call_rest_json.assert_not_called()
 
 
@@ -172,57 +173,16 @@ class TestResponse:
 
 
 class TestTokenHandling:
-    """IAM token caching and reset."""
+    """IAM token management via IAMTokenManager."""
 
-    def test_token_fetched_once_across_successful_calls(self, client, mock_iam_token, mock_rest_client):
+    def test_token_retrieval_and_header(self, client, mock_iam_token, mock_rest_client):
+        mock_iam_token.get_token.side_effect = ["token-1", "token-1", "token-1"]
         for _ in range(3):
             client.detect(payload=PAYLOAD)
 
-        assert mock_iam_token.call_count == 1
-        mock_iam_token.assert_called_with(api_key="test-api-key")  # pragma: allowlist secret
+        assert mock_iam_token.get_token.call_count == 3
         tokens = [c.kwargs["headers"]["Authorization"] for c in mock_rest_client.call_rest_json.call_args_list]
         assert tokens == ["Bearer token-1"] * 3
-
-    @pytest.mark.parametrize("status_code", [401, 403])
-    def test_auth_failure_resets_token(self, client, mock_iam_token, mock_rest_client, status_code):
-        mock_rest_client.call_rest_json.side_effect = [
-            ExternalServiceError(message="denied", error_code=ErrorCode.HTTP_ERROR, status_code=status_code),
-            {"detections": []},
-        ]
-
-        with pytest.raises(DocpipeException):
-            client.detect(payload=PAYLOAD)
-        client.detect(payload=PAYLOAD)
-
-        assert mock_iam_token.call_count == 2
-        second_headers = mock_rest_client.call_rest_json.call_args_list[1].kwargs["headers"]
-        assert second_headers == {"Authorization": "Bearer token-2"}
-
-    def test_server_error_keeps_token(self, client, mock_iam_token, mock_rest_client):
-        mock_rest_client.call_rest_json.side_effect = [
-            ExternalServiceError(message="boom", error_code=ErrorCode.HTTP_ERROR, status_code=500),
-            {"detections": []},
-        ]
-
-        with pytest.raises(DocpipeException):
-            client.detect(payload=PAYLOAD)
-        client.detect(payload=PAYLOAD)
-
-        assert mock_iam_token.call_count == 1
-        second_headers = mock_rest_client.call_rest_json.call_args_list[1].kwargs["headers"]
-        assert second_headers == {"Authorization": "Bearer token-1"}
-
-    def test_connection_error_keeps_token(self, client, mock_iam_token, mock_rest_client):
-        mock_rest_client.call_rest_json.side_effect = [
-            ExternalServiceError(message="no route", error_code=ErrorCode.CONNECTION_ERROR),
-            {"detections": []},
-        ]
-
-        with pytest.raises(DocpipeException):
-            client.detect(payload=PAYLOAD)
-        client.detect(payload=PAYLOAD)
-
-        assert mock_iam_token.call_count == 1
 
 
 class TestWatsonxDetectionClientThreadSafety:
@@ -260,30 +220,26 @@ class TestWatsonxDetectionClientThreadSafety:
         return fake_request
 
     def test_concurrent_detect_calls_do_not_mix_results(self, mock_iam_token):
+        mock_iam_token.get_token.side_effect = None
+        mock_iam_token.get_token.return_value = "token-1"
         client = self._make_client()
         seen_headers: list[str] = []
         fake_request = self._fake_request_factory(seen_headers=seen_headers)
 
         with patch.object(client._rest_client.session, "request", side_effect=fake_request) as session_request:
-            # Warm the token so every worker deterministically reuses the cached value.
-            client.detect(payload={"input": "warmup", "detectors": {"pii": {}}})
-            seen_headers.clear()
-
             payloads = [{"input": f"text-{i}", "detectors": {"pii": {}}} for i in range(self.THREAD_COUNT * 4)]
             with ThreadPoolExecutor(max_workers=self.THREAD_COUNT) as executor:
                 results = list(executor.map(lambda p: client.detect(payload=p), payloads))
 
-        assert session_request.call_count == len(payloads) + 1
+        assert session_request.call_count == len(payloads)
         for payload, result in zip(payloads, results, strict=True):
             assert result == [{"text": payload["input"], "container": "shared-container"}]
         assert seen_headers == ["Bearer token-1"] * len(payloads)
-        assert mock_iam_token.call_count == 1
+        assert mock_iam_token.get_token.call_count == len(payloads)
 
     def test_concurrent_first_calls_use_consistent_token(self, mock_iam_token):
-        # Cold start: racing first calls may each fetch a token (no lock), but every
-        # request must carry a real token and never ``Bearer None``.
-        mock_iam_token.side_effect = None
-        mock_iam_token.return_value = "shared-token"
+        mock_iam_token.get_token.side_effect = None
+        mock_iam_token.get_token.return_value = "shared-token"
         client = self._make_client()
         seen_headers: list[str] = []
         fake_request = self._fake_request_factory(seen_headers=seen_headers)
@@ -300,20 +256,7 @@ class TestWatsonxDetectionClientThreadSafety:
         for index, result in enumerate(results):
             assert result == [{"text": f"text-{index}", "container": "shared-container"}]
         assert seen_headers == ["Bearer shared-token"] * self.THREAD_COUNT
-        assert 1 <= mock_iam_token.call_count <= self.THREAD_COUNT
-
-    def test_token_reset_during_fetch_does_not_send_bearer_none(self, client, mock_iam_token, mock_rest_client):
-        def fetch_and_get_reset(*, api_key):
-            # Simulate another thread clearing the cached token (401/403) mid-fetch.
-            client._access_token = None
-            return "real-token"
-
-        mock_iam_token.side_effect = fetch_and_get_reset
-
-        client.detect(payload=PAYLOAD)
-
-        headers = mock_rest_client.call_rest_json.call_args.kwargs["headers"]
-        assert headers == {"Authorization": "Bearer real-token"}
+        assert mock_iam_token.get_token.call_count == self.THREAD_COUNT
 
 
 class TestPreconditions:
@@ -386,4 +329,4 @@ class TestErrorTranslation:
         client.detect(payload=PAYLOAD)
 
         assert exc_info.value.status_code == 500
-        assert mock_iam_token.call_count == 1
+        assert mock_iam_token.get_token.call_count == 2
