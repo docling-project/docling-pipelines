@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DefaultJobRunManager, on a real JobTrackerService over the in-memory store."""
 
 import uuid
