@@ -220,6 +220,22 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
     - In practice, almost all private methods and attributes in this codebase should use `_` (single). Reserve `__` for the rare case where name mangling is the explicit intent.
     - Never use `__name__` (dunder) style for anything other than Python special/magic methods (`__init__`, `__repr__`, `__enter__`, etc.).
 
+17. **Class member ordering** — in every new or modified class, order members top to bottom as follows:
+
+    1. Class-level variables / constants (including class attributes such as `short_name`, `category`, `owner`)
+    2. `__init__` and other special/magic methods (`__str__`, `__repr__`, `__eq__`, `__enter__`, etc.)
+    3. Public methods (primary public API, e.g. `transform()`, `get_metadata()`, `validate()`)
+    4. Protected methods (single underscore, `_name`)
+    5. Private methods (double underscore, `__name`, name-mangled — rare, see rule 16)
+    6. Properties (`@property` getters and their setters)
+
+    **Concrete rules:**
+    - Within each group, keep `@classmethod` / `@staticmethod` members next to related instance methods; do not create a separate group for them
+    - Within a group, order methods by call flow where practical (callers before callees)
+    - Apply to new classes and to classes you modify; reorder only the class being touched, and never reorder classes unrelated to the task
+    - When reordering an existing class, make it a separate commit from behavior changes so the diff stays reviewable
+    - Reordering must not change behavior (no renames, no signature changes, no logic edits)
+
 ## Environment Variables
 
 | Variable | Effect |
