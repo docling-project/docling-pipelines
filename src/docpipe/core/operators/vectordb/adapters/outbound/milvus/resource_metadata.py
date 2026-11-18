@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Milvus-specific resource metadata fetcher for flow enrichment.
 
 Fetches live collection metadata from a Milvus connection: available collections,
@@ -12,7 +15,10 @@ from __future__ import annotations
 from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.operators.vectordb_utils import is_binary_vector_feature
 
 logger = get_logger()
 
@@ -27,6 +33,11 @@ class MilvusResourceMetadata:
     All helper methods are stateless and receive the raw PyMilvusClient so the
     connection is established once by fetch() and reused across calls.
     """
+
+    @staticmethod
+    def project_mappable_features(*, available_features: dict[str, Any]) -> dict[str, Any]:
+        """Project Milvus mappable features (all features are mappable)."""
+        return dict(available_features)
 
     def fetch(
         self,
@@ -60,6 +71,8 @@ class MilvusResourceMetadata:
             on any connection failure.
         """
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.client import MilvusClient
+
+        provider_config = reveal_value(provider_config)
 
         has_host = bool(provider_config.get(OperatorConstants.VectorDB.HOST))
         has_uri = bool(provider_config.get(OperatorConstants.VectorDB.URI))
@@ -121,7 +134,10 @@ class MilvusResourceMetadata:
                 OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: stored_resource_metadata,
             }
         except Exception as exc:
-            logger.warning("Failed to fetch Milvus metadata: %s", exc)
+            logger.warning(
+                "Failed to fetch Milvus metadata: %s",
+                sanitize_exception(exc=exc, config_key="provider_config"),
+            )
             return empty_result()
 
     @staticmethod
@@ -155,7 +171,7 @@ class MilvusResourceMetadata:
                 "is_primary": field.get("is_primary", False),
                 "description": field.get("description", ""),
             }
-            if "FLOAT_VECTOR" in dtype:
+            if "FLOAT_VECTOR" in dtype or "BINARY_VECTOR" in dtype:
                 params = field.get("params", {})
                 entry["dimension"] = params.get("dim")
                 indexes = field.get("indexes", [])
@@ -259,20 +275,26 @@ class MilvusResourceMetadata:
             return {"collection_name": collection_name, "supported": True}
 
         # "type" is always a normalised uppercase string produced by _dtype_name()
-        has_float_vector = any("FLOAT_VECTOR" in f.get("type", "") for f in schema.values())
-        if not has_float_vector:
+        has_vector = any(
+            any(v in f.get("type", "") for v in ("FLOAT_VECTOR", "BINARY_VECTOR")) for f in schema.values()
+        )
+        if not has_vector:
             return {
                 "collection_name": collection_name,
                 "supported": False,
-                "reason": "no FLOAT_VECTOR field",
+                "reason": "no vector field",
             }
 
-        has_index = any(f.get("index_created", False) for f in schema.values() if "FLOAT_VECTOR" in f.get("type", ""))
+        has_index = any(
+            f.get("index_created", False)
+            for f in schema.values()
+            if any(v in f.get("type", "") for v in ("FLOAT_VECTOR", "BINARY_VECTOR"))
+        )
         if not has_index:
             return {
                 "collection_name": collection_name,
                 "supported": False,
-                "reason": "no index on FLOAT_VECTOR field",
+                "reason": "no index on vector field",
             }
 
         return {"collection_name": collection_name, "supported": True}
@@ -331,6 +353,10 @@ class MilvusResourceMetadata:
                 ),
                 None,
             )
+            binary_vector_feature = next(
+                (n for n, m in available_features.items() if is_binary_vector_feature(feature_config=m)),
+                None,
+            )
             sparse_feature = (
                 next(
                     (
@@ -358,6 +384,9 @@ class MilvusResourceMetadata:
                 elif "FLOAT_VECTOR" in field_type and vector_feature and vector_feature not in covered:
                     result.append({"feature_name": vector_feature, "mapped_column_name": field_name})
                     covered.add(vector_feature)
+                elif "BINARY_VECTOR" in field_type and binary_vector_feature and binary_vector_feature not in covered:
+                    result.append({"feature_name": binary_vector_feature, "mapped_column_name": field_name})
+                    covered.add(binary_vector_feature)
                 elif field_name in available_features and field_name not in covered:
                     result.append({"feature_name": field_name, "mapped_column_name": field_name})
                     covered.add(field_name)

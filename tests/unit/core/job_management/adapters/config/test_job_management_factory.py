@@ -313,6 +313,21 @@ class TestJobManagementFactoryInitializeStorage:
         assert "DOCPIPE_STORAGE_BACKEND" in env
         assert "DOCPIPE_FRAMEWORK_TYPE" in env
 
+    def test_resolve_worker_env_forwards_enable_custom_operators_when_set(self):
+        """The custom-operator switch is forwarded so workers agree with the API."""
+        factory = JobManagementFactory(storage_backend=StorageBackend.IN_MEMORY)
+        with patch.dict(os.environ, {"DOCPIPE_ENABLE_CUSTOM_OPERATORS": "true"}):
+            env = factory.resolve_worker_env()
+        assert env["DOCPIPE_ENABLE_CUSTOM_OPERATORS"] == "true"
+
+    def test_resolve_worker_env_omits_enable_custom_operators_when_unset(self):
+        """An unset switch is not forwarded, so workers keep the disabled default."""
+        factory = JobManagementFactory(storage_backend=StorageBackend.IN_MEMORY)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DOCPIPE_ENABLE_CUSTOM_OPERATORS", None)
+            env = factory.resolve_worker_env()
+        assert "DOCPIPE_ENABLE_CUSTOM_OPERATORS" not in env
+
     # def test_resolve_worker_env_filesystem_with_env_override(self):
     #     """resolve_worker_env picks up ENV_JOB_STATS_BASE_DIR_KEY for filesystem backend."""
     #     factory = JobManagementFactory(storage_backend=StorageBackend.FILESYSTEM)

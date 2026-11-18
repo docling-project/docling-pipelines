@@ -205,7 +205,6 @@ describe('VaultInput', () => {
   });
 
   it('empty and undefined value defaults are handled gracefully', () => {
-    // @ts-expect-error testing undefined value prop
     renderVaultInput({ value: undefined });
     const input = document.querySelector('input');
     expect(input).toBeTruthy();

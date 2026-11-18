@@ -1,15 +1,20 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for VectorDB operator with OpenSearch adapter."""
 
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pyarrow as pa
 import pytest
 
-from docpipe.core.constants.constants import Metrics
+from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb import VectorDBOperator
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
+from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.config import get_opensearch_config
 from docpipe.utils.operators.vectordb_utils import generate_composite_pk, generate_positional_pk
@@ -92,7 +97,9 @@ class TestVectorDBOperatorInitialization:
         config[OperatorConstants.Config.PROVIDER_CONFIG] = provider_cfg
 
         with patch("docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearch"):
-            with pytest.raises(DocpipeException, match="Failed to initialize vector database adapter"):
+            with pytest.raises(
+                DocpipeException, match=r"Failed to create vector store adapter 'opensearch'.*index_name"
+            ):
                 VectorDBOperator(config=config)
 
     def test_missing_index_name_also_caught_by_schema_validation(self, basic_config):
@@ -131,7 +138,9 @@ class TestVectorDBOperatorInitialization:
             "docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient.__init__",
             return_value=None,
         ):
-            with pytest.raises(DocpipeException, match="Failed to initialize vector database adapter"):
+            with pytest.raises(
+                DocpipeException, match=r"Failed to create vector store adapter 'milvus'.*collection_name"
+            ):
                 VectorDBOperator(config=config)
 
     def test_missing_collection_name_also_caught_by_schema_validation(self):
@@ -164,8 +173,9 @@ class TestVectorDBOperatorInitialization:
         config = basic_config.copy()
         config["provider"] = "invalid_db"
 
-        with pytest.raises(DocpipeException, match="Failed to initialize vector database adapter"):
+        with pytest.raises(DocpipeException, match="Unknown vector store adapter: 'invalid_db'") as exc_info:
             VectorDBOperator(config)
+        assert exc_info.value.status_code == 400
 
     def test_missing_provider_config(self, basic_config):
         """Test that missing provider_config raises clear error"""
@@ -946,6 +956,69 @@ class TestVectorDBOperatorGetMetadataProviders:
         assert "providers" in provider_config
         assert "opensearch" in provider_config["providers"]
         assert "milvus" in provider_config["providers"]
+        assert "weaviate" in provider_config["providers"]
+
+
+class TestVectorDBOperatorWeaviateMetadata:
+    """Weaviate is published in operator metadata."""
+
+    @pytest.fixture
+    def metadata(self):
+        return VectorDBOperator.get_metadata()
+
+    def test_provider_valid_values_include_weaviate(self, metadata):
+        provider = metadata["attributes"]["provider"]
+        assert "weaviate" in provider["valid_values"]
+        assert "weaviate" in provider["description"].lower()
+
+    def test_operator_description_mentions_weaviate(self, metadata):
+        assert "Weaviate" in metadata["description"]
+
+    def test_weaviate_provider_config_schema(self, metadata):
+        props = metadata["attributes"]["provider_config"]["providers"]["weaviate"]["properties"]
+        assert props["collection_name"]["required"] is True
+        assert set(props["index_type"]["valid_values"]) == {"hnsw", "flat", "dynamic"}
+        assert set(props["distance_metric"]["valid_values"]) == {
+            "cosine",
+            "dot",
+            "l2-squared",
+            "manhattan",
+            "hamming",
+        }
+
+    @pytest.mark.parametrize("field_name", ["api_key", "bearer_token", "password"])
+    def test_weaviate_credentials_are_sensitive(self, metadata, field_name):
+        props = metadata["attributes"]["provider_config"]["providers"]["weaviate"]["properties"]
+        assert props[field_name]["sensitive"] is True
+
+
+class TestVectorDBOperatorChunkFailureAttribution:
+    """Failed chunks are attributed to their parent document; the adapter is always closed."""
+
+    def test_failed_chunk_marks_parent_document_failed(self):
+        op, mock_adapter = _make_operator_with_mock_adapter()
+        mock_adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index: f"{file_id}_{chunk_index}"
+        mock_adapter.index_documents.return_value = (
+            0,
+            [{"index": {"_id": "doc1_0", "error": {"reason": "bad property"}}}],
+        )
+
+        table = pa.table({"doc_id_hash": ["doc1"], "embeddings": [[0.1, 0.2]]})
+        _, metadata = op.transform(table)
+
+        assert metadata[Metrics.External.CHUNKS_FAILED_TO_INDEX] == 1
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        failed = metadata[Metrics.External.FAILED_DOCS]
+        assert [entry["reason"] for entry in failed] == ["One or more chunks failed to index"]
+
+    def test_adapter_exception_during_transform_still_closes_adapter(self):
+        op, mock_adapter = _make_operator_with_mock_adapter()
+        mock_adapter.index_documents.side_effect = RuntimeError("boom")
+
+        table = pa.table({"doc_id_hash": ["doc1"], "embeddings": [[0.1, 0.2]]})
+        op.transform(table)
+
+        mock_adapter.close.assert_called_once()
 
 
 class TestGeneratePositionalPk:
@@ -1061,6 +1134,7 @@ class TestStalePkCleanup:
         adapter.detect_all_vector_dimensions.return_value = {"embeddings": 3}
         adapter.index_documents.return_value = (1, [])
         adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.delete_documents_by_ids.return_value = (0, 0)
         return adapter
 
     @pytest.fixture
@@ -1136,6 +1210,41 @@ class TestStalePkCleanup:
         deleted = mock_adapter.delete_documents_by_ids.call_args[0][0]
         assert pk0 in deleted
         assert pk1 in deleted
+
+    def test_failed_stale_deletions_are_warned_and_insert_proceeds(
+        self, mock_adapter, stale_cleanup_config, chunked_table
+    ) -> None:
+        """Deletions the store reports as failed are logged with their count and do not block the insert."""
+        mock_adapter.get_chunk_ids_for_documents.return_value = {"/docs/file_a.pdf": {"stale_a", "stale_b"}}
+        mock_adapter.delete_documents_by_ids.return_value = (0, 2)
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            op = VectorDBOperator(stale_cleanup_config)
+            op.transform(chunked_table)
+        warnings = [call.args for call in mock_logger.warning.call_args_list]
+        assert any("could not be deleted" in args[0] and args[1] == 2 for args in warnings)
+        mock_adapter.index_documents.assert_called_once()
+
+    def test_no_warning_when_all_stale_deletions_succeed(
+        self, mock_adapter, stale_cleanup_config, chunked_table
+    ) -> None:
+        mock_adapter.get_chunk_ids_for_documents.return_value = {"/docs/file_a.pdf": {"stale_a"}}
+        mock_adapter.delete_documents_by_ids.return_value = (1, 0)
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+                return_value=mock_adapter,
+            ),
+            patch("docpipe.core.operators.vectordb.vectordb_operator.logger") as mock_logger,
+        ):
+            op = VectorDBOperator(stale_cleanup_config)
+            op.transform(chunked_table)
+        assert not any("could not be deleted" in call.args[0] for call in mock_logger.warning.call_args_list)
 
     def test_insert_proceeds_even_if_cleanup_raises(self, mock_adapter, stale_cleanup_config, chunked_table) -> None:
         """A failure in stale PK cleanup must not prevent index_documents from being called."""
@@ -1233,12 +1342,12 @@ class TestChunkPkBranching:
 
 
 # ---------------------------------------------------------------------------
-# _process_doc_id_row
+# _build_doc_id_mappings
 # ---------------------------------------------------------------------------
 
 
-class TestProcessDocIdRow:
-    """Direct unit tests for _process_doc_id_row."""
+class TestBuildDocIdMappings:
+    """Direct unit tests for the columnar _build_doc_id_mappings."""
 
     @pytest.fixture
     def op(self):
@@ -1250,87 +1359,42 @@ class TestProcessDocIdRow:
                 }
             )
 
-    def test_adds_doc_hash_to_unique_ids(self, op):
+    def test_builds_all_mappings(self, op):
         table = pa.table({"doc_id_hash": ["h1"], "id": ["f1"], "name": ["doc.pdf"]})
-        unique_doc_ids: set = set()
-        doc_hash_to_id: dict = {}
-        doc_hash_to_name: dict = {}
-        file_ids: set = set()
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=True,
-            has_name_col=True,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id=doc_hash_to_id,
-            doc_hash_to_name=doc_hash_to_name,
-            file_ids=file_ids,
-        )
-        assert "h1" in unique_doc_ids
-        assert doc_hash_to_id["h1"] == "f1"
+        unique_doc_ids, doc_hash_to_id, doc_hash_to_name, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
+        assert doc_hash_to_id == {"h1": "f1"}
         assert file_ids == {"f1"}
-        assert doc_hash_to_name["h1"] == "doc.pdf"
+        assert doc_hash_to_name == {"h1": "doc.pdf"}
 
-    def test_null_original_id_not_added_to_file_ids(self, op):
+    def test_null_original_id_falls_back_to_document_id(self, op):
         table = pa.table({"doc_id_hash": ["h1"], "id": pa.array([None], type=pa.string())})
-        unique_doc_ids: set = set()
-        doc_hash_to_id: dict = {}
-        doc_hash_to_name: dict = {}
-        file_ids: set = set()
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=True,
-            has_name_col=False,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id=doc_hash_to_id,
-            doc_hash_to_name=doc_hash_to_name,
-            file_ids=file_ids,
-        )
-        assert "h1" in unique_doc_ids
-        assert doc_hash_to_id == {}
-        assert file_ids == set()
+        unique_doc_ids, doc_hash_to_id, _, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
+        assert doc_hash_to_id == {"h1": "h1"}
+        assert file_ids == {"h1"}
 
     def test_null_name_not_added_to_name_map(self, op):
         table = pa.table({"doc_id_hash": ["h1"], "name": pa.array([None], type=pa.string())})
-        unique_doc_ids: set = set()
-        doc_hash_to_name: dict = {}
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=False,
-            has_name_col=True,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id={},
-            doc_hash_to_name=doc_hash_to_name,
-            file_ids=set(),
-        )
+        _, _, doc_hash_to_name, _ = op._build_doc_id_mappings(table=table)
         assert doc_hash_to_name == {}
 
-    def test_no_id_col_skips_id_mapping(self, op):
+    def test_no_id_col_falls_back_to_document_id(self, op):
         table = pa.table({"doc_id_hash": ["h1"]})
-        unique_doc_ids: set = set()
-        doc_hash_to_id: dict = {}
-        op._process_doc_id_row(
-            table=table,
-            idx=0,
-            doc_hash="h1",
-            id_column="id",
-            has_id_col=False,
-            has_name_col=False,
-            unique_doc_ids=unique_doc_ids,
-            doc_hash_to_id=doc_hash_to_id,
-            doc_hash_to_name={},
-            file_ids=set(),
-        )
-        assert "h1" in unique_doc_ids
-        assert doc_hash_to_id == {}
+        unique_doc_ids, doc_hash_to_id, _, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
+        assert doc_hash_to_id == {"h1": "h1"}
+        assert file_ids == {"h1"}
+
+    def test_rows_with_empty_doc_hash_are_skipped(self, op):
+        table = pa.table({"doc_id_hash": ["h1", None, ""], "id": ["f1", "f2", "f3"]})
+        unique_doc_ids, _, _, file_ids = op._build_doc_id_mappings(table=table)
+        assert unique_doc_ids == {"h1"}
+        assert file_ids == {"f1"}
+
+    def test_missing_doc_id_column_returns_empty(self, op):
+        table = pa.table({"other": ["x"]})
+        assert op._build_doc_id_mappings(table=table) == (set(), {}, {}, set())
 
 
 # ---------------------------------------------------------------------------
@@ -1704,6 +1768,25 @@ class TestPrepareDocumentsExceptionPath:
         _, metadata = op.transform(table)
         assert metadata["failed_docs_count"] >= 1
 
+    def test_memmap_chunks_without_embeddings_column_fail_with_actionable_reason(self):
+        op, _ = _make_operator_with_mock_adapter()
+        metadata = op.create_base_metadata(total_docs_count=1)
+        table = pa.table(
+            {
+                "doc_id_hash": ["doc1"],
+                OperatorConstants.Columns.CHUNKED_CONTENT: [{DocpipeConstants.CHUNKS_MEMMAP_FILE: "/tmp/chunks.bin"}],
+            }
+        )
+
+        documents, _ = op._prepare_documents(
+            table=table, vector_columns=["embeddings"], doc_hash_to_id={}, metadata=metadata
+        )
+
+        assert documents == []
+        assert metadata["failed_docs_count"] == 1
+        reasons = " ".join(str(v) for v in metadata.values())
+        assert "memory-mapped chunks require an embeddings column" in reasons
+
 
 # ---------------------------------------------------------------------------
 # _index_and_record_results — failed chunk tracking
@@ -1946,6 +2029,544 @@ class TestIndexAndRecordResultsFailedChunks:
         assert "<" not in doc_dict["content"]
         assert "Hello World from DocLang" in doc_dict["content"]
         assert doc_dict["page_no"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Adapter release after flow validation
+# ---------------------------------------------------------------------------
+
+
+class TestAdapterReleaseAfterFlowValidation:
+    """validate() releases the adapter only when the operator was built for flow validation."""
+
+    @staticmethod
+    def _validate(op: VectorDBOperator) -> None:
+        op.validate(errors=[], warnings=[], available_features=[])
+
+    def test_close_called_once_after_successful_validation(self):
+        op, adapter = _make_operator_with_mock_adapter({"validating_flow": True})
+        self._validate(op)
+        adapter.close.assert_called_once()
+
+    def test_close_called_and_original_error_propagates_when_validation_raises(self):
+        op, adapter = _make_operator_with_mock_adapter({"validating_flow": True})
+        adapter.get_config_schema.side_effect = RuntimeError("schema failure")
+
+        with pytest.raises(RuntimeError, match="schema failure"):
+            self._validate(op)
+
+        adapter.close.assert_called_once()
+
+    def test_close_failure_does_not_mask_validation_result(self):
+        op, adapter = _make_operator_with_mock_adapter({"validating_flow": True})
+        adapter.close.side_effect = RuntimeError("close failure")
+        errors: list[str] = []
+
+        op.validate(errors=errors, warnings=[], available_features=[])
+
+        adapter.close.assert_called_once()
+
+    def test_close_failure_does_not_mask_validation_exception(self):
+        op, adapter = _make_operator_with_mock_adapter({"validating_flow": True})
+        adapter.get_config_schema.side_effect = RuntimeError("schema failure")
+        adapter.close.side_effect = RuntimeError("close failure")
+
+        with pytest.raises(RuntimeError, match="schema failure"):
+            self._validate(op)
+
+    def test_normal_run_validate_does_not_close_and_transform_closes_once(self):
+        op, adapter = _make_operator_with_mock_adapter()
+        self._validate(op)
+        adapter.close.assert_not_called()
+
+        op.transform(pa.table({"doc_id_hash": ["doc1"], "embeddings": [[0.1, 0.2]]}))
+
+        adapter.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Document identity
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentIdentity:
+    """A document is identified by its non-empty id, else by its document ID column value."""
+
+    @staticmethod
+    def _operator() -> tuple[VectorDBOperator, Mock]:
+        op, adapter = _make_operator_with_mock_adapter()
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.index_documents.side_effect = lambda documents: (len(documents), [])
+        return op, adapter
+
+    @staticmethod
+    def _chunked(*, ids: list | None, doc_ids: list[str]) -> pa.Table:
+        columns: dict = {
+            "doc_id_hash": doc_ids,
+            "chunked_content": [[{"chunk": f"{d}-a"}, {"chunk": f"{d}-b"}] for d in doc_ids],
+            "embeddings": [[[0.1, 0.2], [0.3, 0.4]] for _ in doc_ids],
+        }
+        if ids is not None:
+            columns["id"] = pa.array(ids, type=pa.string())
+        return pa.table(columns)
+
+    def test_null_ids_on_two_documents_produce_distinct_keys_and_both_are_written(self):
+        op, adapter = self._operator()
+
+        op.transform(self._chunked(ids=[None, None], doc_ids=["docA", "docB"]))
+
+        written = [pk for pk, _ in adapter.index_documents.call_args[0][0]]
+        assert sorted(written) == ["docA#0", "docA#1", "docB#0", "docB#1"]
+
+    def test_missing_id_column_requests_cleanup_with_each_document_id(self):
+        op, adapter = self._operator()
+
+        op.transform(self._chunked(ids=None, doc_ids=["docA", "docB"]))
+
+        assert set(adapter.get_chunk_ids_for_documents.call_args[0][0]) == {"docA", "docB"}
+        written = [pk for pk, _ in adapter.index_documents.call_args[0][0]]
+        assert sorted(written) == ["docA#0", "docA#1", "docB#0", "docB#1"]
+
+    def test_null_id_deletes_returned_chunks_the_run_no_longer_produces(self):
+        op, adapter = self._operator()
+        adapter.get_chunk_ids_for_documents.return_value = {"docA": {"docA#0", "docA#1", "docA#2"}}
+
+        op.transform(self._chunked(ids=[None], doc_ids=["docA"]))
+
+        assert adapter.get_chunk_ids_for_documents.call_args[0][0] == ["docA"]
+        assert adapter.delete_documents_by_ids.call_args[0][0] == ["docA#2"]
+
+    def test_rows_with_an_id_keep_id_based_keys(self):
+        op, adapter = self._operator()
+        adapter.get_chunk_ids_for_documents.return_value = {"/f/a.pdf": {"/f/a.pdf#0", "/f/a.pdf#1"}}
+
+        op.transform(self._chunked(ids=["/f/a.pdf"], doc_ids=["docA"]))
+
+        written = [pk for pk, _ in adapter.index_documents.call_args[0][0]]
+        assert written == ["/f/a.pdf#0", "/f/a.pdf#1"]
+        assert adapter.get_chunk_ids_for_documents.call_args[0][0] == ["/f/a.pdf"]
+        adapter.delete_documents_by_ids.assert_not_called()
+
+    def test_empty_string_id_falls_back_to_document_id(self):
+        op, adapter = self._operator()
+
+        op.transform(self._chunked(ids=[""], doc_ids=["docA"]))
+
+        written = [pk for pk, _ in adapter.index_documents.call_args[0][0]]
+        assert written == ["docA#0", "docA#1"]
+
+    def test_failure_attribution_uses_the_same_identity(self):
+        op, adapter = self._operator()
+        adapter.index_documents.side_effect = None
+        adapter.index_documents.return_value = (3, [{"index": {"_id": "docA#1", "error": {"reason": "bad"}}}])
+
+        _, metadata = op.transform(self._chunked(ids=[None], doc_ids=["docA"]))
+
+        assert [entry["id"] for entry in metadata[Metrics.External.FAILED_DOCS]] == ["docA"]
+
+
+# ---------------------------------------------------------------------------
+# Provider-agnostic contract: provider selection, input table, output metadata
+# ---------------------------------------------------------------------------
+
+
+class TestProviderAgnosticContract:
+    def test_unknown_provider_error_names_it_and_lists_available_providers(self):
+        with pytest.raises(DocpipeException) as exc_info:
+            VectorDBOperator(
+                {
+                    OperatorConstants.Config.PROVIDER: "nosuchdb",
+                    OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx"},
+                }
+            )
+
+        message = str(exc_info.value)
+        assert "nosuchdb" in message
+        for provider in ("opensearch", "milvus", "weaviate"):
+            assert provider in message
+
+    def test_missing_document_id_column_returns_input_unchanged_and_fails(self):
+        op, adapter = _make_operator_with_mock_adapter()
+        table = pa.table({"content": ["x"], "embeddings": [[0.1, 0.2]]})
+
+        tables, metadata = op.transform(table)
+
+        assert tables == [table]
+        assert metadata[Metrics.External.NODE_STATUS] == "Failed"
+        adapter.index_documents.assert_not_called()
+
+    def test_empty_document_id_row_is_skipped_with_reason_and_others_written(self):
+        op, adapter = _make_operator_with_mock_adapter()
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.index_documents.side_effect = lambda documents: (len(documents), [])
+        table = pa.table({"doc_id_hash": ["", "docB"], "embeddings": [[0.1, 0.2], [0.3, 0.4]]})
+
+        _, metadata = op.transform(table)
+
+        skipped = metadata[Metrics.External.SKIPPED_DOCS]
+        assert [entry["reason"] for entry in skipped] == ["Missing document ID"]
+        assert [pk for pk, _ in adapter.index_documents.call_args[0][0]] == ["docB"]
+
+    def test_n_chunks_become_n_objects_with_text_and_vector(self):
+        op, adapter = _make_operator_with_mock_adapter()
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.index_documents.side_effect = lambda documents: (len(documents), [])
+        table = pa.table(
+            {
+                "doc_id_hash": ["docA"],
+                "chunked_content": [[{"chunk": "one"}, {"chunk": "two"}, {"chunk": "three"}]],
+                "embeddings": [[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]],
+            }
+        )
+
+        op.transform(table)
+
+        objects = adapter.index_documents.call_args[0][0]
+        assert len(objects) == 3
+        assert [row["content"] for _, row in objects] == ["one", "two", "three"]
+        assert [row["embeddings"] for _, row in objects] == [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+
+    def test_successful_write_returns_input_table_and_full_metadata_contract(self):
+        op, adapter = _make_operator_with_mock_adapter()
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.index_documents.side_effect = lambda documents: (len(documents), [])
+        table = pa.table(
+            {
+                "doc_id_hash": ["docA"],
+                "chunked_content": [[{"chunk": "one"}, {"chunk": "two"}]],
+                "embeddings": [[[0.1, 0.2], [0.3, 0.4]]],
+            }
+        )
+
+        tables, metadata = op.transform(table)
+
+        assert tables == [table]
+        assert {
+            "documents_in_scope",
+            "processed_docs",
+            "failed_docs_count",
+            "failed_docs",
+            "skipped_docs_count",
+            "skipped_docs",
+            "total_chunks_to_index",
+            "chunks_indexed_successfully",
+            "chunks_failed_to_index",
+            "number_of_batches",
+            "node_status",
+        } <= set(metadata)
+        assert metadata["chunks_indexed_successfully"] == metadata["total_chunks_to_index"] == 2
+        assert metadata["failed_docs_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Sparse retrieval mode
+# ---------------------------------------------------------------------------
+
+
+class TestSparseRetrievalMode:
+    SPARSE_FEATURES: ClassVar[dict[str, Any]] = {
+        "doc_id_hash": {"type": "string", "available_for_vector_db": True, "is_primary": True},
+        "content": {"type": "string", "available_for_vector_db": True},
+    }
+
+    def test_sparse_only_in_memory_run_passes_no_dense_vector(self):
+        op, adapter = _make_operator_with_mock_adapter(
+            {
+                OperatorConstants.VectorDB.ADD_SPARSE_VECTOR: True,
+                OperatorConstants.Config.AVAILABLE_FEATURES: self.SPARSE_FEATURES,
+                OperatorConstants.Config.FEATURE_MAPPINGS: [
+                    {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                    {"feature_name": "content", "mapped_column_name": "text"},
+                ],
+            }
+        )
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.index_documents.side_effect = lambda documents: (len(documents), [])
+        table = pa.table({"doc_id_hash": ["docA"], "chunked_content": [[{"chunk": "alpha"}, {"chunk": "beta"}]]})
+
+        _, metadata = op.transform(table)
+
+        adapter.detect_all_vector_dimensions.assert_not_called()
+        assert adapter.create_index.call_args.kwargs["dimension_mapping"] == {}
+        objects = adapter.index_documents.call_args[0][0]
+        assert [row["content"] for _, row in objects] == ["alpha", "beta"]
+        assert all("embeddings" not in row for _, row in objects)
+        assert metadata[Metrics.External.NODE_STATUS] != "Failed"
+
+    def test_sparse_and_dense_run_detects_dimensions_and_writes_vectors(self):
+        op, adapter = _make_operator_with_mock_adapter({OperatorConstants.VectorDB.ADD_SPARSE_VECTOR: True})
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        adapter.index_documents.side_effect = lambda documents: (len(documents), [])
+        table = pa.table(
+            {
+                "doc_id_hash": ["docA"],
+                "chunked_content": [[{"chunk": "alpha"}]],
+                "embeddings": [[[0.1, 0.2]]],
+            }
+        )
+
+        op.transform(table)
+
+        adapter.detect_all_vector_dimensions.assert_called_once()
+        assert adapter.create_index.call_args.kwargs["dimension_mapping"] == {"embeddings": 384}
+        objects = adapter.index_documents.call_args[0][0]
+        assert objects[0][1]["embeddings"] == [0.1, 0.2]
+
+    def test_sparse_embeddings_mapping_is_accepted_by_provider_that_ignores_it(self):
+        op, adapter = _make_operator_with_mock_adapter(
+            {
+                OperatorConstants.VectorDB.ADD_SPARSE_VECTOR: True,
+                OperatorConstants.Config.FEATURE_MAPPINGS: [
+                    {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+                    {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"},
+                    {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"},
+                ],
+            }
+        )
+        errors: list[str] = []
+
+        op.validate(errors=errors, warnings=[], available_features=[])
+
+        assert not any("sparse_embeddings" in e for e in errors)
+        adapter.get_config_schema.assert_called_once()
+
+
+class TestVectorDBOperatorValidateFeatureTypes:
+    """validate() forwards the propagated feature types to the adapter and reports its rejection."""
+
+    @staticmethod
+    def _validate(
+        *,
+        feature_types: dict | None,
+        adapter_error: Exception | None = None,
+        initial_errors: list | None = None,
+    ) -> tuple[list, MagicMock]:
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "test_index", "host": "localhost"},
+        }
+        if feature_types is not None:
+            config[DocpipeConstants.VALIDATION_FEATURE_TYPES] = feature_types
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearch"):
+            operator = VectorDBOperator(config)
+        operator.adapter = MagicMock()
+        operator.adapter.get_config_schema.return_value = OpenSearchConfig
+        operator.adapter.validate_vector_feature_types.side_effect = adapter_error
+        errors: list = list(initial_errors or [])
+        operator.validate(errors=errors, warnings=[], available_features=[])
+        return errors, operator.adapter
+
+    def test_feature_types_are_forwarded_to_adapter(self):
+        types = {"embeddings": "vector_binary"}
+        errors, adapter = self._validate(feature_types=types)
+        adapter.validate_vector_feature_types.assert_called_once_with(feature_types=types)
+        assert not errors
+
+    def test_adapter_rejection_is_reported_as_error(self):
+        errors, adapter = self._validate(
+            feature_types={"embeddings": "vector"}, adapter_error=DocpipeException("bad index")
+        )
+        assert "bad index" in errors
+        adapter.validate_vector_feature_types.assert_called_once()
+
+    def test_adapter_not_called_without_feature_types(self):
+        _, adapter = self._validate(feature_types=None)
+        adapter.validate_vector_feature_types.assert_not_called()
+
+    def test_adapter_not_called_when_earlier_errors_exist(self):
+        """Feature-type validation is skipped when the config is already invalid."""
+        errors, adapter = self._validate(
+            feature_types={"embeddings": "vector"},
+            initial_errors=["earlier validation error"],
+        )
+        adapter.validate_vector_feature_types.assert_not_called()
+        assert "earlier validation error" in errors
+
+
+class TestBinaryVectorColumnHandling:
+    """Binary (vector_binary) columns are treated as vector columns and streamed as raw bytes."""
+
+    @staticmethod
+    def _make_operator(*, available_features: dict, sparse: bool = False, detected: dict | None = None):
+        mock_adapter = Mock()
+        mock_adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content: (
+            f"{file_id}_{chunk_index}"
+        )
+        mock_adapter.detect_all_vector_dimensions.return_value = detected or {}
+        config = {
+            OperatorConstants.Config.PROVIDER: "opensearch",
+            OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+            OperatorConstants.Config.AVAILABLE_FEATURES: available_features,
+            OperatorConstants.VectorDB.ADD_SPARSE_VECTOR: sparse,
+        }
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+            return_value=mock_adapter,
+        ):
+            return VectorDBOperator(config), mock_adapter
+
+    def test_prepare_file_based_chunks_keeps_packed_bytes(self):
+        import json
+
+        op, _ = self._make_operator(available_features={})
+        packed = [b"\x01\x02", b"\x03\x04"]
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.yield_chunks_from_file",
+            return_value=iter([json.dumps({"chunk": "a"}), json.dumps({"chunk": "b"})]),
+        ):
+            result = op._prepare_file_based_chunks(
+                row_data={"id": "file.pdf", "content": "full text"},
+                doc_id="hash1",
+                chunks_filepath="/tmp/chunks.bin",
+                vector_column_generators={"embeddings": iter(packed)},
+                id_column="id",
+            )
+
+        assert [row["embeddings"] for _, row in result] == packed
+        assert all(isinstance(row["embeddings"], bytes) for _, row in result)
+
+    def test_prepare_file_based_chunks_mixed_dense_and_binary_columns(self):
+        import json
+
+        op, _ = self._make_operator(available_features={})
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.yield_chunks_from_file",
+            return_value=iter([json.dumps({"chunk": "a"})]),
+        ):
+            result = op._prepare_file_based_chunks(
+                row_data={"id": "file.pdf", "content": "full text"},
+                doc_id="hash1",
+                chunks_filepath="/tmp/chunks.bin",
+                vector_column_generators={
+                    "dense_emb": iter([np.array([0.1, 0.2])]),
+                    "binary_emb": iter([b"\xff"]),
+                },
+                id_column="id",
+            )
+
+        _, row = result[0]
+        assert row["dense_emb"] == pytest.approx([0.1, 0.2])
+        assert row["binary_emb"] == b"\xff"
+
+    def test_resolve_vector_dimensions_includes_binary_columns(self):
+        features = {
+            "binary_emb": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_VECTOR_BINARY,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+            },
+            "dense_emb": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_VECTOR,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+            },
+            "content": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_STRING,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: True,
+            },
+        }
+        op, adapter = self._make_operator(available_features=features, detected={"binary_emb": 256, "dense_emb": 384})
+
+        table = pa.table({"binary_emb": [b"\x00" * 32], "dense_emb": [[0.1, 0.2]], "content": ["x"]})
+        vec_cols, dim_map = op._resolve_vector_dimensions(table=table, metadata={})
+
+        assert vec_cols == ["binary_emb", "dense_emb"]
+        assert dim_map == {"binary_emb": 256, "dense_emb": 384}
+        adapter.detect_all_vector_dimensions.assert_called_once()
+
+    def test_resolve_vector_dimensions_ignores_binary_not_available_for_vector_db(self):
+        features = {
+            "binary_emb": {
+                OperatorConstants.Misc.TYPE: OperatorConstants.Types.TYPE_VECTOR_BINARY,
+                OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB: False,
+            },
+        }
+        op, _ = self._make_operator(available_features=features)
+        metadata: dict = {}
+
+        vec_cols, dim_map = op._resolve_vector_dimensions(table=pa.table({"binary_emb": [b"\x00"]}), metadata=metadata)
+
+        assert vec_cols == []
+        assert dim_map is None
+        assert metadata[Metrics.External.NODE_STATUS] == "Failed"
+
+
+class TestProviderValidationHookAndPassThrough:
+    """Operator calls the adapter validation hook and does not re-wrap docpipe exceptions."""
+
+    CONFIG: ClassVar[dict] = {
+        OperatorConstants.Config.PROVIDER: "opensearch",
+        OperatorConstants.Config.PROVIDER_CONFIG: {"index_name": "idx", "host": "localhost"},
+    }
+
+    def test_validate_calls_adapter_hook_and_collects_messages(self):
+        adapter = MagicMock()
+        adapter.get_config_schema.return_value = OpenSearchConfig
+
+        def _hook(*, errors, warnings):
+            errors.append("hook error")
+            warnings.append("hook warning")
+
+        adapter.validate_configuration.side_effect = _hook
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", return_value=adapter):
+            op = VectorDBOperator(dict(self.CONFIG))
+        errors: list = []
+        warnings: list = []
+        op.validate(errors=errors, warnings=warnings, available_features=[])
+        adapter.validate_configuration.assert_called_once()
+        assert "hook error" in errors
+        assert "hook warning" in warnings
+
+    def test_provider_without_hook_is_unaffected(self):
+        from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
+
+        # The base port implements a no-op hook: it must not add errors or warnings.
+        errors: list = []
+        warnings: list = []
+        VectorStorePort.validate_configuration(MagicMock(), errors=errors, warnings=warnings)
+        assert errors == []
+        assert warnings == []
+
+    def test_docpipe_exception_from_factory_is_reraised_unchanged(self):
+        original = DocpipeException(message="boom", status_code=400)
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=original):
+            with pytest.raises(DocpipeException) as exc_info:
+                VectorDBOperator(dict(self.CONFIG))
+        assert exc_info.value is original
+
+    def test_docpipe_exception_wrapping_a_client_error_is_sanitized_and_keeps_its_codes(self):
+        cause = ConnectionError("cannot reach https://user:secret-token@host:19530")  # pragma: allowlist secret
+        original = DocpipeException(message=f"Failed to connect: {cause}", status_code=503)
+        original.__cause__ = cause
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=original):
+            with pytest.raises(DocpipeException) as exc_info:
+                VectorDBOperator(dict(self.CONFIG))
+        assert "secret-token" not in str(exc_info.value)
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.__cause__ is original
+
+    def test_unexpected_error_is_wrapped_with_cause(self):
+        cause = ValueError("bad value")
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=cause):
+            with pytest.raises(DocpipeException, match="bad value") as exc_info:
+                VectorDBOperator(dict(self.CONFIG))
+        assert exc_info.value.__cause__ is cause
 
 
 if __name__ == "__main__":

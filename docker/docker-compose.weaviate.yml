@@ -1,0 +1,49 @@
+# TEST-ONLY Weaviate servers for the real-server suite in tests/integration/weaviate/.
+#
+# - Anonymous access is enabled; every published port is bound to 127.0.0.1 and the
+#   servers hold no real data.
+# - The image comes from the upstream registry (cr.weaviate.io), which is not an
+#   approved source for deployment. Do not use this file to deploy Weaviate.
+#
+# Default server (immediately consistent vector queries):
+#   docker compose -f docker/docker-compose.weaviate.yml up -d
+# Async-indexing server (only for the "dynamic" index scenario):
+#   docker compose -f docker/docker-compose.weaviate.yml --profile async up -d weaviate-async
+
+# Pinned for integration test reproducibility; bump together with a rerun of tests/integration/weaviate/.
+x-weaviate-image: &weaviate-image cr.weaviate.io/semitechnologies/weaviate:1.40.2
+
+x-weaviate-environment: &weaviate-environment
+  AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+  PERSISTENCE_DATA_PATH: /var/lib/weaviate
+  DEFAULT_VECTORIZER_MODULE: none
+  AUTOSCHEMA_ENABLED: "false"
+  CLUSTER_HOSTNAME: node1
+
+services:
+  weaviate:
+    image: *weaviate-image
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:50051:50051"
+    environment:
+      <<: *weaviate-environment
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+
+  weaviate-async:
+    image: *weaviate-image
+    profiles:
+      - async
+    ports:
+      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:50052:50051"
+    environment:
+      <<: *weaviate-environment
+      ASYNC_INDEXING: "true"
+    volumes:
+      - weaviate-async-data:/var/lib/weaviate
+
+volumes:
+  weaviate-data:
+  weaviate-async-data:

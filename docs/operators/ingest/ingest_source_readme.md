@@ -464,15 +464,15 @@ for i in range(result_table.num_rows):
 The operator validates and filters files by extension using centralized constants from [`OperatorConstants.FileExtensions`](../../../src/docpipe/core/constants/operator_constants.py):
 
 **Supported Extensions:**
-- **Documents**: PDF, DOCX, PPTX, XLSX
-- **Text**: Markdown, Plain Text, HTML
+- **Documents**: PDF, DOCX, PPTX, XLSX, CSV, EPUB, EML, MSG; Office variants PPTM, XLSM, XLTX, XLTM
+- **Text**: MD, TXT, HTML, HTM, XHTML, MHTML, MHT, MARKDOWN, TEXT, QMD, RMD, TEX, LATEX, ADOC, ASCIIDOC, ASC, VTT
 - **Images**: PNG, JPEG, JPG, TIFF, TIF, BMP, WebP, GIF, JFIF
 - **Audio** (with ASR): WAV, MP3, M4A, AAC, OGG, FLAC
-- **Video** (with ASR): MP4, AVI, MOV
+- **Video**: MP4, AVI, MOV, MKV, WebM (conversion requires video dependencies and ffmpeg)
 
 **Filter Parameters:**
 - **include_filter**: Comma-separated list of extensions to include (e.g., "pdf,txt,docx")
-  - If not specified, defaults to all supported extensions
+  - If not specified, defaults to all supported extensions. This includes the added document formats and widens default ingestion; specify an explicit filter to retain a narrower set.
   - Must be a subset of supported extensions (validation enforced)
 - **exclude_filter**: Comma-separated list of extensions to exclude (e.g., "tmp,log")
   - Must be a subset of supported extensions (validation enforced)
@@ -608,6 +608,27 @@ tables, metadata = ingest_node.transform(input_table)
 # storage_node = StorageOperator(storage_config)
 # storage_node.transform(embedded_tables[0])
 ```
+
+## Credentials from Vault
+
+The S3, IBM COS, Google Drive, OneDrive, SharePoint, Box and Dropbox providers accept a `vault://` reference as the
+whole value of a credential field in `provider_config`. The `filesystem` and `web` providers declare no such field.
+
+```json
+{
+  "provider": "s3",
+  "provider_config": {
+    "access_key": "vault://hashicorp/docpipe/s3#access_key",
+    "secret_key": "vault://hashicorp/docpipe/s3#secret_key",  # pragma: allowlist secret
+    "region": "us-east-1"
+  }
+}
+```
+
+The platform resolves the reference when it builds this node, and only if the path matches `secrets.vault.allowed_paths`.
+The extract step resolves the ingest node's own references again when it fetches content. The adapters do not copy
+credentials into document metadata. See [Declared secret fields](../../guides/SECRETS_GUIDE.md#declared-secret-fields)
+for the field list and the [sample flow](../../../sample_flows/use_cases/s3_ingest_vault.json).
 
 ## Security Best Practices
 

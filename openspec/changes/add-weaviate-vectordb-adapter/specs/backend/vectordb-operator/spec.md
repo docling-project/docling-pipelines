@@ -85,3 +85,59 @@ The operator SHALL return its input table unchanged as the single output table. 
 #### Scenario: Row without a document ID is skipped
 - **WHEN** a row's document ID value is empty
 - **THEN** that row is recorded in `skipped_docs` with reason "Missing document ID" and the remaining rows are still written
+
+### Requirement: Stale chunk cleanup failures are reported
+When removing stale chunks of a re-ingested document fails for some chunks, the operator SHALL log a warning with the number of chunks that were not removed and SHALL still write the new chunks.
+
+#### Scenario: Some stale chunks cannot be deleted
+- **WHEN** the provider reports 2 failed deletions among the stale chunks of a re-ingested document
+- **THEN** a warning states that 2 stale chunks were not removed, and the new chunks are still written
+
+### Requirement: Provider validation hook and exception pass-through
+`validate()` SHALL call the selected provider's optional configuration-validation hook, which appends provider-specific problems to `errors` and notices to `warnings`; a provider that does not implement it SHALL be unaffected. When the provider raises a `DocpipeException` while the adapter is being created, the operator SHALL raise that exception unchanged. Any other exception SHALL still be wrapped as a `DocpipeException` that names the provider and keeps the original as its cause.
+
+#### Scenario: Provider reports problems through validate
+- **WHEN** a provider's hook finds two problems and `validate()` is called
+- **THEN** both messages appear in `errors`, and validation does not stop at the first one
+
+#### Scenario: Provider without the hook
+- **WHEN** `validate()` is called for a provider that does not implement the hook
+- **THEN** no error or warning is added by the hook step
+
+#### Scenario: DocpipeException from an adapter
+- **WHEN** adapter creation raises a `DocpipeException` with status code 400
+- **THEN** the operator raises the same exception, with the same status code and message, and does not wrap it
+
+#### Scenario: Other exception from an adapter
+- **WHEN** adapter creation raises a `ValueError`
+- **THEN** the operator raises a `DocpipeException` that names the provider and has the `ValueError` as its cause
+
+## MODIFIED Requirements
+
+### Requirement: Vector store resource metadata and flow enrichment
+The vector database adapters SHALL provide live resource introspection for flow enrichment endpoints, retrieving available indices/collections, existing schema definitions (including dense, sparse, and binary vector dimensions and index information), supporting collections with `FLOAT_VECTOR` or `BINARY_VECTOR` fields, and resolving default feature mappings while preserving upstream dynamic feature descriptions. Enrichment SHALL tolerate absent, empty, null, or blank provider configuration without opening a connection.
+
+#### Scenario: Live resources discovered during enrichment
+- **WHEN** flow feature enrichment is requested for a vectordb node with valid connection configuration
+- **THEN** available indices or collections are fetched from the vector store and returned in `available_resources`
+
+#### Scenario: Selected resource schema and feature mapping resolution
+- **WHEN** an existing index or collection name is selected in provider config
+- **THEN** its schema is retrieved in `selected_resource_schema` and feature mappings are aligned with the incoming available features
+
+#### Scenario: Binary vector collection schema and metadata inspection
+- **WHEN** an existing Milvus collection contains a `BINARY_VECTOR` field
+- **THEN** its bit dimension and index metadata (such as `HAMMING` / `JACCARD` metric and binary index type) are extracted into `selected_resource_schema` and `stored_resource_metadata`
+
+#### Scenario: Binary vector collection support check
+- **WHEN** an existing Milvus collection contains a `BINARY_VECTOR` field with an index created
+- **THEN** `is_docpipe_supported_resource` evaluates to `supported: True` without requiring a `FLOAT_VECTOR` field
+
+#### Scenario: Unreachable vector store during enrichment
+- **WHEN** the vector database is unreachable or connection fails during enrichment
+- **THEN** an empty fallback metadata structure is returned without raising an unhandled exception or breaking flow enrichment
+
+#### Scenario: Unconfigured provider values
+- **WHEN** an OpenSearch, Milvus, or Weaviate node has an absent, empty-object, null, or blank-string `provider_config`
+- **THEN** enrichment succeeds without opening a connection and omits live resource metadata from that node
+- **AND** provider-specific mappable features remain projected and normalized, while `input_features` retains the upstream feature set

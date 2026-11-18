@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Kafka listener for file event dispatch."""
 
 from __future__ import annotations
@@ -105,6 +108,8 @@ class KafkaEventListener:
 
             while not self._stop_event.is_set():
                 message = consumer.poll(timeout=1.0)
+                if self._stop_event.is_set():
+                    break
                 if message is None:
                     continue
                 error = message.error()
@@ -117,6 +122,8 @@ class KafkaEventListener:
                     payload = deserializer(message.value(), serialization_context)
                     event = InputEvent.model_validate(payload)
                     event_id = str(event.event_id)
+                    if self._stop_event.is_set():
+                        break
                     self._dispatch_service.dispatch(event=event)
                     logger.info(
                         "Kafka event dispatched event_id=%s topic=%s partition=%s offset=%s",

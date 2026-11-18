@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from typing import ClassVar
 
 from docpipe.core.constants import OrchestratorType
@@ -70,7 +73,7 @@ class OrchestratorFactory:
         orchestrator_name: str = OrchestratorType.PYTHON,
         job_stats_service: JobStatsService | None = None,
         job_run_manager: JobRunManager | None = None,
-        enable_custom_operators: bool = True,
+        enable_custom_operators: bool | None = None,
         custom_operator_packages: list[str] | None = None,
         execution_reporter=None,
     ) -> AbstractOrchestrator:  # pragma: no cover

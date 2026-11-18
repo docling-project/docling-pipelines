@@ -1,5 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class for all docpipe flow orchestrators."""
 
+import sys
 import threading
 from abc import ABC, abstractmethod
 from operator import itemgetter
@@ -27,10 +31,12 @@ from docpipe.core.orchestration.abstract_operator_executor import AbstractOperat
 from docpipe.core.orchestration.batch_manager import BatchManager
 from docpipe.core.orchestration.flow_execution_event_handler import FlowExecutionEventHandler
 from docpipe.core.orchestration.models.execution_event_context import NodeTableSummary, SinkDatasetInfo
+from docpipe.core.orchestration.operator_factory import OperatorFactory
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults, FlowEnginePort
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.core.datetime import get_current_timestamp
 from docpipe.utils.data.pyarrow_handler import BaseParquetTableHandler, get_parquet_table_handler
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.deleted_rows_tracker import (
     combine_cumulative_deleted_rows,
@@ -41,6 +47,11 @@ from docpipe.utils.orchestration.prefect_config import (
 )
 
 logger = get_logger()
+
+# Provider fields downstream nodes read from ``global_config["ingest_source"]``. They name
+# or locate source documents and never authenticate; credentials and endpoints are absent.
+INGEST_SOURCE_NAMING_FACTS: tuple[str, ...] = ("prefix", "paths")
+INGEST_SOURCE_INCLUDE_FILTER_KEY = "include_filter"
 
 R = TypeVar("R")  # The return type of the user's function
 P = ParamSpec("P")
@@ -57,7 +68,7 @@ class AbstractOrchestrator(ABC):
         *,
         job_stats_service: JobStatsService | None = None,
         job_run_manager: JobRunManager | None = None,
-        enable_custom_operators: bool = True,
+        enable_custom_operators: bool | None = None,
         custom_operator_packages: list[str] | None = None,
         execution_reporter=None,
         observer: ExecutionLifecycleObserverPort | None = None,
@@ -68,12 +79,14 @@ class AbstractOrchestrator(ABC):
         Args:
             job_stats_service: Optional job statistics service for tracking job execution
             job_run_manager: Optional framework job run manager for external status updates
-            enable_custom_operators: Whether to enable custom operators (passed to operator factory)
+            enable_custom_operators: Whether to enable custom operators (default: from env, else disabled)
             custom_operator_packages: List of custom operator packages (passed to operator factory)
             execution_reporter: Optional output formatter for user-friendly console output
             observer: Optional lifecycle observer for lineage emission
         """
-        self.enable_custom_operators = enable_custom_operators
+        self.enable_custom_operators = OperatorFactory.resolve_enable_custom_operators(
+            enable_custom_operators=enable_custom_operators
+        )
         self.custom_operator_packages = custom_operator_packages
         self.job_status = ExecutionStatus.RUNNING
         self.job_run_id: str | None = None
@@ -234,8 +247,28 @@ class AbstractOrchestrator(ABC):
         try:
             self.execute_flow(op_flow=op_flow, global_config=global_config)
         finally:
-            self._check_and_upload_deleted_rows()
-            self._cleanup_memmap_files()
+            try:
+                self._check_and_upload_deleted_rows()
+                self._cleanup_memmap_files()
+            finally:
+                self._release_run_secrets(job_run_id=job_run_id)
+
+    @staticmethod
+    def _release_run_secrets(*, job_run_id: str | None) -> None:
+        """Drop the run's scrubber entries, cache-key secret, and fetch caches when the run ends."""
+        from docpipe.integrations.secrets.registry import clear_run
+        from docpipe.utils.operators.binary_content_fetcher import clear_fetch_caches
+
+        clear_run(run_id=str(job_run_id) if job_run_id else None)
+        clear_fetch_caches()
+        # Workers exist only when an untrusted custom operator ran under custom_operators.isolation=process.
+        worker_module = sys.modules.get("docpipe.core.orchestration.operator_loader.isolation.worker_client")
+        if worker_module is not None:
+            worker_module.get_worker_pool().release_run(run_id=str(job_run_id) if job_run_id else "")
+        # The REST client cache is keyed by digests under the run's key, so its entries cannot be hit again.
+        watsonx_module = sys.modules.get("docpipe.integrations.watsonx.rest_client")
+        if watsonx_module is not None:
+            watsonx_module.WatsonxRestEmbeddingClient.clear_client_cache()
 
     def _get_ingest_summary_message(self, *, output_table, deleted_docs_count: int, operator: dict) -> str | None:
         """Process and log ingest step results."""
@@ -273,7 +306,7 @@ class AbstractOrchestrator(ABC):
         if not (is_batching_enabled and continue_on_batch_failure):
             self.job_status = ExecutionStatus.FAILING
             # Capture error message for job-level message field
-            self.message = str(e)
+            self.message = sanitize_exception(exc=e, config_key=op_def[OperatorConstants.Columns.NAME])
 
         self.flow_execution_event_handler.after_node_failure(
             node_id=op_def[OperatorConstants.Columns.ID],
@@ -292,7 +325,7 @@ class AbstractOrchestrator(ABC):
                 node_id=op_def[OperatorConstants.Columns.ID],
                 node_name=op_def[OperatorConstants.Columns.NAME],
                 operator_type=op_def.get(OperatorConstants.Misc.OPERATOR, ""),
-                error_message=str(e),
+                error_message=sanitize_exception(exc=e, config_key=op_def[OperatorConstants.Columns.NAME]),
                 exception=e,
                 start_time=start,
                 end_time=get_current_timestamp(),
@@ -567,6 +600,7 @@ class AbstractOrchestrator(ABC):
 
         if not skip:
             from docpipe.core.lineage.utils import LineageUtils
+            from docpipe.core.operators.secret_fields import declared_key_names
             from docpipe.core.orchestration.models.execution_event_context import NodeCompleteContext
 
             # Track the last output table for flow-level COMPLETE lineage event
@@ -598,6 +632,7 @@ class AbstractOrchestrator(ABC):
                     sink_dataset_namespace=sink_ns,
                     sink_dataset_name=sink_name,
                     has_downstream=bool(op_def.get(DocpipeConstants.OUTPUT_EDGES)),
+                    secret_field_names=declared_key_names(metadata=type(executor.get_operator()).get_metadata()),
                 ),
             )
 
@@ -1183,9 +1218,33 @@ class AbstractOrchestrator(ABC):
 
         return LineageUtils.derive_ingest_dataset_name(ingest_operator=ingest_operator)
 
+    @staticmethod
+    def _ingest_source_facts(*, ingest_operator: dict, operator_config: dict) -> dict:
+        """Return the non-secret source facts downstream nodes may read from ``global_config`` (design D6).
+
+        Only the provider name, the ingest node identity, the include filter, and the naming
+        fields ``prefix`` and ``paths`` are copied. Credentials, endpoints, and every other
+        provider field stay in the ingest node's own configuration, which the on-demand
+        fetch resolves for itself.
+        """
+        provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG) or {}
+        naming_facts = {key: provider_config[key] for key in INGEST_SOURCE_NAMING_FACTS if key in provider_config}
+        facts: dict = {
+            OperatorConstants.Config.PROVIDER: operator_config.get(OperatorConstants.Config.PROVIDER),
+            DocpipeConstants.NODE_ID: ingest_operator.get(OperatorConstants.Columns.ID),
+            DocpipeConstants.NODE_NAME: ingest_operator.get(OperatorConstants.Columns.NAME),
+            OperatorConstants.Config.PROVIDER_CONFIG: naming_facts,
+        }
+        if INGEST_SOURCE_INCLUDE_FILTER_KEY in operator_config:
+            facts[INGEST_SOURCE_INCLUDE_FILTER_KEY] = operator_config[INGEST_SOURCE_INCLUDE_FILTER_KEY]
+        return facts
+
     def _populate_ingest_source_config(self, *, ingest_operator, global_config):
         """
-        Populate global_config with ingest_source params for lazy binary loading.
+        Populate global_config with non-secret ingest_source facts for lazy binary loading.
+
+        Credential fields are not copied: the on-demand fetch resolves the ingest node's own
+        references when it needs them.
 
         Args:
             ingest_operator: The ingest operator definition
@@ -1199,21 +1258,12 @@ class AbstractOrchestrator(ABC):
         )
         if "ingest_source" in operator_type.lower() or "IngestSourceOperator" in operator_type:
             operator_config = ingest_operator.get(OperatorConstants.Config.CONFIG, {})
-            provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
-
-            global_config[OperatorConstants.Config.INGEST_SOURCE] = {
-                OperatorConstants.Config.PROVIDER: operator_config.get(OperatorConstants.Config.PROVIDER),
-                OperatorConstants.Config.PROVIDER_CONFIG: provider_config,
-            }
-            self.logger.info(
-                "Populated global_config with ingest_source params for provider: %s",
-                operator_config.get(OperatorConstants.Config.PROVIDER),
-                extra=self.common_log_arguments,
+            global_config[OperatorConstants.Config.INGEST_SOURCE] = self._ingest_source_facts(
+                ingest_operator=ingest_operator, operator_config=operator_config
             )
-            self.logger.debug(
-                "global_config after population: ingest_source keys=%s, provider_config keys=%s",
-                list(global_config.get(OperatorConstants.Config.INGEST_SOURCE, {}).keys()),
-                list(provider_config.keys()),
+            self.logger.info(
+                "Populated global_config with ingest_source facts for provider: %s",
+                operator_config.get(OperatorConstants.Config.PROVIDER),
                 extra=self.common_log_arguments,
             )
         else:

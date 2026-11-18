@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unified WatsonX adapter for inference, embeddings, and text detection.
 
 This adapter consolidates all WatsonX capabilities into a single class,
@@ -47,7 +50,7 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
         api_base: str | None = None,
         container_id: str | None = None,
         container_kind: str | None = None,
-        timeout: int = 120,
+        timeout: int = ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS,
         model_name: str | None = None,
         project_id: str | None = None,
         embedding_batch_size: int = ServiceConstants.DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE,
@@ -215,7 +218,9 @@ class WatsonXAdapter(LLMInferencePort, LLMEmbeddingPort, TextDetectionPort):
                 container_id=self._embedding_client_params["container_id"],
                 container_kind=self._embedding_client_params["container_kind"],
                 model_name=self.model_name or "",
-                timeout=self._embedding_client_params.get("timeout", 120),
+                timeout=self._embedding_client_params.get(
+                    "timeout", ServiceConstants.DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS
+                ),
                 batch_size=self._embedding_batch_size,
             )
             logger.info("Initialized WatsonX embedding client for model '%s'", self.model_name)

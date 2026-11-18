@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import React from 'react';
 import CommonPropertiesPanelWrapper from '@/components/PropertiesPanel/CommonPropertiesPanelWrapper';
 
 describe('CommonPropertiesPanelWrapper', () => {

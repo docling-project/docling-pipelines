@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """String manipulation and processing utilities."""
 
 import json
@@ -99,6 +102,27 @@ def escape_query_value(value: str) -> str:
     """
     escaped_value = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped_value}"'
+
+
+def trim_whitespace_span(*, text: str, start: int, end: int) -> tuple[int, int]:
+    """Move a ``[start, end)`` span inward past leading and trailing whitespace.
+
+    The text is never modified, so ``text[new_start:new_end]`` is always a substring
+    of ``text[start:end]``.  A whitespace-only span collapses to ``new_start == new_end``.
+
+    Args:
+        text: Source text the offsets point into.
+        start: Span start offset (inclusive).
+        end: Span end offset (exclusive).
+
+    Returns:
+        The trimmed ``(start, end)`` offsets.
+    """
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
 
 
 def is_null_or_empty(value: str | None) -> bool:

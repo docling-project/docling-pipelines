@@ -32,7 +32,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/core/operators/extract/` | `ExtractOperator` — docling-based text + entity extraction |
 | `src/docpipe/core/operators/functional/` | `BranchingOperator`, `ChunkerOperator`, `EmbeddingsOperator`, `MergeOperator`, `DocIdHashOperator`, `NOOPOperator`, `EntityCurationOperator` |
 | `src/docpipe/core/operators/quality/` | `DocumentClassifierOperator`, `DocQuality`, `EdedupOperator`, `LanguageDetect`, `MLEnrichmentOperator`, `PIIAndHAPAnnotator`, `ReadabilityOperator`, `RedactionOperator`, `SQLFilterOperator` |
-| `src/docpipe/core/operators/vectordb/` | `VectorDBOperator` — OpenSearch / Milvus adapters |
+| `src/docpipe/core/operators/vectordb/` | `VectorDBOperator` — OpenSearch / Milvus / Weaviate adapters |
 | `src/docpipe/core/operators/document_sets/` | `DocumentSetOperator` — Storage category |
 | `src/docpipe/core/operators/acl/` | `ACLOperator` — access control on data |
 | `src/docpipe/core/orchestration/flow_executor.py` | `FlowExecutor` — loads flow JSON, calls orchestrator |
@@ -54,7 +54,7 @@ Micro-batching default behavior: CLI, REST job runs, and `DocpipeFlowManager` de
 | `src/docpipe/core/data_access/` | Wraps `data_processing.DataAccess` — parquet-based document table IO |
 | `src/docpipe/core/document_classes/` | YAML schema definitions for document column structures |
 | `src/docpipe/integrations/` | External service clients: AWS, Docling, HuggingFace, LiteLLM, Ollama, WatsonX |
-| `src/docpipe/storage/` | Storage abstraction: DuckDB + filesystem; interfaces `TableStorage`, `KeyValueStorage` in `storage/interfaces/`; default DuckDB paths: `data/duckdb/job_stats.duckdb`, `data/duckdb/document_sets.duckdb` |
+| `src/docpipe/storage/` | Storage abstraction: DuckDB + filesystem; interfaces `TableStoragePort`, `KeyValueStoragePort`, `ContentStoragePort` in `storage/interfaces/`; default DuckDB paths: `data/duckdb/job_stats.duckdb`, `data/duckdb/document_sets.duckdb` |
 | `src/docpipe/utils/infrastructure/logging.py` | `get_logger()` — always use this, never `logging.getLogger()` directly |
 | `src/docpipe/utils/infrastructure/config_utils.py` | `DocpipeConfigLoader` — reads `docling-pipelines-config.yaml` once (cached singleton); use `get(key=...)` / `get_storage()` in factories, never parse the YAML file directly |
 | `src/docpipe/utils/` | Shared: logging, pyarrow handlers (`utils/data/pyarrow_handler.py`), flow_utils, duckdb helpers, llm utils |
@@ -228,7 +228,7 @@ Never import an `adapters/` class from `domain/` or `application/`. Domain ports
 | `OLLAMA_HOST` | LLM host, default `http://localhost:11434` |
 | `PREFECT_API_URL` | Prefect server URL |
 | `PREFECT_MODE` | `server` \| `ephemeral` |
-| `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `true` (default) \| `false` |
+| `DOCPIPE_ENABLE_CUSTOM_OPERATORS` | `false` (default) \| `true` — custom operators (uploaded, `DOCPIPE_CUSTOM_OPERATORS`) load only when enabled |
 | `DOCPIPE_CUSTOM_OPERATORS` | Comma-separated package paths injected as operator providers |
 | `DOCPIPE_CONFIG_PATH` | Path to `docling-pipelines-config.yaml` |
 | `DOCPIPE_STORAGE_BACKEND` | Forwarded to workers only; no longer overrides `job_management.storage` in the config file |

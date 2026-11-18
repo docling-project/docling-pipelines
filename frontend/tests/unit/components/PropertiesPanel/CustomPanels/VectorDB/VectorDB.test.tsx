@@ -392,7 +392,7 @@ describe('VectorDBPanelBody', () => {
       if (removeBtn) {
         fireEvent.click(removeBtn);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
-      } else if (removeBtns.length > 0) {
+      } else if (removeBtns[0]) {
         fireEvent.click(removeBtns[0]);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
       } else {
@@ -424,7 +424,7 @@ describe('VectorDBPanelBody', () => {
       if (removeBtn) {
         fireEvent.click(removeBtn);
         expect(controller.updatePropertyValue.mock.calls.length).toBeGreaterThanOrEqual(2);
-      } else if (removeBtns.length > 0) {
+      } else if (removeBtns[0]) {
         fireEvent.click(removeBtns[0]);
         expect(controller.updatePropertyValue.mock.calls.length).toBeGreaterThanOrEqual(2);
       } else {
@@ -824,7 +824,7 @@ describe('VectorDBPanelBody', () => {
       if (removeBtn) {
         fireEvent.click(removeBtn);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
-      } else if (removeBtns.length > 0) {
+      } else if (removeBtns[0]) {
         fireEvent.click(removeBtns[0]);
         expect(controller.updatePropertyValue).toHaveBeenCalled();
       } else {
@@ -1232,12 +1232,14 @@ describe('VectorDBPanelBody', () => {
       />
     );
     const addBtns = screen.queryAllByRole('button', { name: /add/i });
-    if (addBtns.length > 0) {
-      fireEvent.click(addBtns[0]);
+    const firstAddBtn = addBtns[0];
+    if (firstAddBtn) {
+      fireEvent.click(firstAddBtn);
     }
     const closeBtns = screen.queryAllByRole('button', { name: /cancel|close/i });
-    if (closeBtns.length > 0) {
-      fireEvent.click(closeBtns[0]);
+    const firstCloseBtn = closeBtns[0];
+    if (firstCloseBtn) {
+      fireEvent.click(firstCloseBtn);
     }
     expect(document.body).toBeInTheDocument();
   });
@@ -1391,5 +1393,198 @@ describe('VectorDBPanelBody', () => {
     } else {
       expect(document.body).toBeInTheDocument();
     }
+  });
+
+  // ── Milvus Lite binary vector restriction warning ─────────────────────────
+
+  it('renders warning InlineNotification when Milvus Lite is configured with upstream vector_binary features', () => {
+    const controller = makeController({
+      getAppData: vi.fn(() => ({
+        operatorMetadata: {},
+        nodeId: 'node-vdb',
+        pipelineFlow: { pipelines: [{ nodes: [] }] },
+        nodeFeatureMap: {
+          'node-vdb': {
+            input_features: {
+              binary_emb: {
+                name: 'binary_emb',
+                type: 'vector_binary',
+                description: 'Binary vector embeddings',
+                available_for_filter: false,
+                available_for_vector_db: true,
+                mandatory_for_vector_db: true,
+                node_id: 'node-embed',
+                tags: [],
+              },
+            },
+            output_features: {},
+          },
+        },
+      })),
+      getPropertyValue: vi.fn((p: { name: string }) => {
+        if (p.name === 'provider') return 'milvus';
+        if (p.name === 'provider_config') return JSON.stringify({ auth_type: 'lite', uri: './milvus_demo.db' });
+        return undefined;
+      }),
+    });
+
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
+    expect(screen.getByText(/Milvus Lite restriction/i)).toBeInTheDocument();
+    expect(screen.getByText(/Milvus Lite does not support binary vectors/i)).toBeInTheDocument();
+  });
+
+  it('does not render Milvus Lite warning when auth_type is not lite', () => {
+    const controller = makeController({
+      getAppData: vi.fn(() => ({
+        operatorMetadata: {},
+        nodeId: 'node-vdb',
+        pipelineFlow: { pipelines: [{ nodes: [] }] },
+        nodeFeatureMap: {
+          'node-vdb': {
+            input_features: {
+              binary_emb: {
+                name: 'binary_emb',
+                type: 'vector_binary',
+                description: 'Binary vector embeddings',
+                available_for_filter: false,
+                available_for_vector_db: true,
+                mandatory_for_vector_db: true,
+                node_id: 'node-embed',
+                tags: [],
+              },
+            },
+            output_features: {},
+          },
+        },
+      })),
+      getPropertyValue: vi.fn((p: { name: string }) => {
+        if (p.name === 'provider') return 'milvus';
+        if (p.name === 'provider_config') return JSON.stringify({ auth_type: 'standalone' });
+        return undefined;
+      }),
+    });
+
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
+    expect(screen.queryByText(/Milvus Lite restriction/i)).toBeNull();
+  });
+
+  it('does not render Milvus Lite warning when upstream features are only dense vectors', () => {
+    const controller = makeController({
+      getAppData: vi.fn(() => ({
+        operatorMetadata: {},
+        nodeId: 'node-vdb',
+        pipelineFlow: { pipelines: [{ nodes: [] }] },
+        nodeFeatureMap: {
+          'node-vdb': {
+            input_features: {
+              dense_emb: {
+                name: 'dense_emb',
+                type: 'vector',
+                description: 'Dense vector embeddings',
+                available_for_filter: false,
+                available_for_vector_db: true,
+                mandatory_for_vector_db: true,
+                node_id: 'node-embed',
+                tags: [],
+              },
+            },
+            output_features: {},
+          },
+        },
+      })),
+      getPropertyValue: vi.fn((p: { name: string }) => {
+        if (p.name === 'provider') return 'milvus';
+        if (p.name === 'provider_config') return JSON.stringify({ auth_type: 'lite', uri: './milvus_demo.db' });
+        return undefined;
+      }),
+    });
+
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
+    expect(screen.queryByText(/Milvus Lite restriction/i)).toBeNull();
+  });
+
+  it('renders uri input field and hides host/port/secure when milvus auth_type is lite', () => {
+    const controller = makeController({
+      getPropertyValue: vi.fn((p: { name: string }) => {
+        if (p.name === 'provider') return 'milvus';
+        if (p.name === 'provider_config') return JSON.stringify({ auth_type: 'lite', uri: './milvus_demo.db' });
+        return undefined;
+      }),
+    });
+
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
+    expect(document.getElementById('milvus-uri')).toBeInTheDocument();
+    expect(document.getElementById('milvus-host')).toBeNull();
+    expect(document.getElementById('milvus-port')).toBeNull();
+    expect(document.getElementById('milvus-secure')).toBeNull();
+  });
+
+  it('renders OpenSearch binary vector warning when provider is opensearch and input features include vector_binary', () => {
+    const controller = makeController({
+      getAppData: vi.fn(() => ({
+        operatorMetadata: {},
+        nodeId: 'node-vdb',
+        pipelineFlow: { pipelines: [{ nodes: [] }] },
+        nodeFeatureMap: {
+          'node-vdb': {
+            input_features: {
+              binary_emb: {
+                name: 'binary_emb',
+                type: 'vector_binary',
+                description: 'Binary vector embeddings',
+                available_for_filter: false,
+                available_for_vector_db: true,
+                mandatory_for_vector_db: true,
+                node_id: 'node-embed',
+                tags: [],
+              },
+            },
+            output_features: {},
+          },
+        },
+      })),
+      getPropertyValue: vi.fn((p: { name: string }) => {
+        if (p.name === 'provider') return 'opensearch';
+        return undefined;
+      }),
+    });
+
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
+    expect(screen.getByText(/OpenSearch restriction/i)).toBeInTheDocument();
+    expect(screen.getByText(/OpenSearch does not support binary vectors/i)).toBeInTheDocument();
+  });
+
+  it('does not render OpenSearch binary vector warning when input features are dense only', () => {
+    const controller = makeController({
+      getAppData: vi.fn(() => ({
+        operatorMetadata: {},
+        nodeId: 'node-vdb',
+        pipelineFlow: { pipelines: [{ nodes: [] }] },
+        nodeFeatureMap: {
+          'node-vdb': {
+            input_features: {
+              embeddings: {
+                name: 'embeddings',
+                type: 'vector',
+                description: 'Dense vector embeddings',
+                available_for_filter: false,
+                available_for_vector_db: true,
+                mandatory_for_vector_db: true,
+                node_id: 'node-embed',
+                tags: [],
+              },
+            },
+            output_features: {},
+          },
+        },
+      })),
+      getPropertyValue: vi.fn((p: { name: string }) => {
+        if (p.name === 'provider') return 'opensearch';
+        return undefined;
+      }),
+    });
+
+    renderWithProviders(<VectorDBPanelBody controller={controller} />);
+    expect(screen.queryByText(/OpenSearch restriction/i)).toBeNull();
   });
 });

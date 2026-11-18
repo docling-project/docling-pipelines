@@ -255,6 +255,9 @@ jobs:
           if [ -z "$MODIFIED" ]; then echo "No modified Python files."; exit 0; fi
           python -m ruff check $MODIFIED
 
+      - name: Secret Reveal Guard
+        run: python scripts/check_secret_reveal.py
+
       - name: Static Type Checking (Mypy)
         run: |
           MODIFIED=$(git diff --name-only --diff-filter=ACMR $(git merge-base HEAD origin/main)..HEAD | grep '\.py$' | grep -v '^examples/' || true)
@@ -263,6 +266,33 @@ jobs:
 
       - name: Validate Notebooks
         run: pre-commit run nbqa-ruff-check --all-files
+
+  openspec:
+    name: OpenSpec Validation
+    runs-on: ubuntu-latest
+    needs: verify-commits
+    if: >
+      !cancelled() &&
+      (needs.verify-commits.result == 'success' || needs.verify-commits.result == 'skipped')
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      # Keep in sync with the openspec-validate hook in .pre-commit-config.yaml.
+      - name: Install OpenSpec CLI
+        run: npm install -g --ignore-scripts @fission-ai/openspec@1.15.0
+
+      - name: Validate Specs and Active Changes
+        run: openspec validate --all --strict --no-interactive
+
+      - name: Validate Archived Changes Have No Open Tasks
+        run: openspec validate --archived --no-interactive
 
   frontend-test:
     name: Frontend Tests
@@ -363,7 +393,11 @@ jobs:
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Unit Tests
-        run: python -m pytest tests/unit -m "unit and not integration" -v --cov=src --cov-report=xml --cov-report=term-missing
+        # The secret conformance matrix (681 cases, about 3 minutes) runs in its own job below.
+        run: >
+          python -m pytest tests/unit -m "unit and not integration" -v
+          --deselect tests/unit/secrets_conformance/test_conformance_matrix.py
+          --cov=src --cov-report=xml --cov-report=term-missing
 
       - name: Check Python PR Coverage
         run: |
@@ -373,6 +407,9 @@ jobs:
       - name: Run CLI Tests
         run: python -m pytest tests/test_docpipe_cli.py -v
 
+      - name: Measure custom operator isolation overhead (p95 must be at most 2 seconds)
+        run: python scripts/benchmark_isolation_worker.py --samples 20 --budget 2.0
+
       - name: Upload Test Coverage Artifact
         uses: actions/upload-artifact@v4
         if: always()
@@ -380,6 +417,54 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 14
+
+  secrets-conformance:
+    name: Secret Conformance Matrix (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+
+    env:
+      PYTHONPATH: src
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-suffix: "py312"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install System Dependencies
+        run: sudo apt-get install -y libldap2-dev libsasl2-dev
+
+      - name: Install Dependencies
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run secret conformance matrix
+        run: python -m pytest tests/unit/secrets_conformance/test_conformance_matrix.py -m "unit and not integration" -v
 
   postgres-integration-test:
     name: PostgreSQL Integration Tests (PostgreSQL 16)

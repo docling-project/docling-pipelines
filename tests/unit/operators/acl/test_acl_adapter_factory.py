@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for ACL Adapter Factory."""
 
 from unittest.mock import Mock
@@ -11,6 +14,15 @@ from docpipe.core.operators.acl.adapters.outbound.factories.acl_adapter_factory 
 )
 from docpipe.core.operators.acl.ports.outbound.acl_extraction import ACLExtractionPort
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
+
+
+@pytest.fixture(autouse=True)
+def _restore_acl_adapter_registry():
+    """Put the registered providers back after a test that clears the registry, for the tests that run later."""
+    saved = dict(_ACL_ADAPTER_REGISTRY)
+    yield
+    _ACL_ADAPTER_REGISTRY.clear()
+    _ACL_ADAPTER_REGISTRY.update(saved)
 
 
 class MockACLAdapter(ACLExtractionPort):

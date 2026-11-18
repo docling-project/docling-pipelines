@@ -1,0 +1,120 @@
+{
+  "flow_name": "local-redacted-indexing",
+  "description": "Fully local pipeline that redacts PII and HAP before indexing, so neither reaches the vector store: Ingest -> Extract -> PII/HAP redaction (Presidio for PII, Hugging Face ibm-granite/granite-guardian-hap-38m for HAP) -> Chunk -> Embeddings (sentence-transformers) -> Milvus Lite (.db file). Requires the presidio extra and the spaCy model en_core_web_sm; the HAP and embedding models are downloaded on first use unless they are already in the local Hugging Face cache. To run offline (HF_HUB_OFFLINE=1), pre-fetch both models, including their weight files, with 'hf download <model_id>'.",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "storage": "in-memory",
+    "execute_type": "local",
+    "enable_micro_batching": false
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_documents",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "./tests/fixtures/customer_support_docs",
+            "./tests/fixtures/pii_hap_docs"
+          ]
+        },
+        "include_filter": "txt"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_content",
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        },
+        "entity_extraction": {
+          "provider": "none"
+        }
+      },
+      "depends_on": [
+        "ingest_documents"
+      ]
+    },
+    {
+      "type": "pii_and_hap",
+      "name": "redact_pii_and_hap",
+      "config": {
+        "pii_provider": "presidio",
+        "pii_provider_config": {
+          "language": "en",
+          "spacy_model": "en_core_web_sm"
+        },
+        "hap_provider": "huggingface",
+        "hap_provider_config": {},
+        "expected_redactions": [
+          "pii",
+          "hap"
+        ],
+        "pii_threshold": 0.5,
+        "hap_threshold": 0.8,
+        "redaction": true,
+        "redaction_character": "*",
+        "hap_redaction": true,
+        "hap_redaction_character": "#",
+        "doc_column": "content"
+      },
+      "depends_on": [
+        "extract_content"
+      ]
+    },
+    {
+      "type": "chunker",
+      "name": "chunk_documents",
+      "config": {
+        "chunk_type": "hybrid",
+        "doc_column": "content",
+        "chunk_size": 512,
+        "chunk_overlap": 50,
+        "retain_original_content": false
+      },
+      "depends_on": [
+        "redact_pii_and_hap"
+      ]
+    },
+    {
+      "type": "embeddings",
+      "name": "generate_embeddings",
+      "config": {
+        "provider": "huggingface",
+        "embeddings_column": "embeddings",
+        "provider_config": {
+          "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+          "use_local": true
+        }
+      },
+      "depends_on": [
+        "chunk_documents"
+      ]
+    },
+    {
+      "type": "vectordb",
+      "name": "store_in_milvus_lite",
+      "config": {
+        "provider": "milvus",
+        "doc_id_column": "doc_id_hash",
+        "add_sparse_vector": false,
+        "provider_config": {
+          "collection_name": "local_redacted_documents",
+          "auth_type": "lite",
+          "uri": "./data/milvus/local_redacted_documents.db",
+          "index_type": "FLAT",
+          "metric_type": "COSINE",
+          "batch_size": 100
+        }
+      },
+      "depends_on": [
+        "generate_embeddings"
+      ]
+    }
+  ]
+}
