@@ -255,6 +255,9 @@ jobs:
           if [ -z "$MODIFIED" ]; then echo "No modified Python files."; exit 0; fi
           python -m ruff check $MODIFIED
 
+      - name: Secret Reveal Guard
+        run: python scripts/check_secret_reveal.py
+
       - name: Static Type Checking (Mypy)
         run: |
           MODIFIED=$(git diff --name-only --diff-filter=ACMR $(git merge-base HEAD origin/main)..HEAD | grep '\.py$' | grep -v '^examples/' || true)

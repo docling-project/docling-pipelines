@@ -8,6 +8,8 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node", "vite/client"],
 
     /* Linting */
     "strict": true,
@@ -16,5 +18,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["server", "src"]
+  "include": ["server"]
 }

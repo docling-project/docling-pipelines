@@ -16,6 +16,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.sharepoint.co
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -265,6 +266,8 @@ class SharePointDestinationAdapter(DestinationAdapterPort[SharePointDestinationC
                 client_secret: "${SHAREPOINT_CLIENT_SECRET}"
                 tenant_id:     "${SHAREPOINT_TENANT_ID}"
         """
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
         client_id = resolve_env_var(credentials.get("client_id"))
         client_secret = resolve_env_var(credentials.get("client_secret"))
         tenant_id = resolve_env_var(credentials.get("tenant_id"))

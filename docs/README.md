@@ -39,6 +39,7 @@ Task-oriented guides to help you accomplish specific goals:
 - **[Unified LLM Architecture](guides/UNIFIED_LLM_ARCHITECTURE_GUIDE.md)** - LLM integration patterns
 - **[Document Libraries](guides/USER_GUIDE_DOCUMENT_LIBRARIES.md)** - Managing document collections
 - **[Document Class Utils](guides/DOCUMENT_CLASS_UTILS.md)** - Document schema utilities
+- **[Secrets Guide](guides/SECRETS_GUIDE.md)** - Reference grammar, path policy, audit records, and custom operator rules
 - **[Vault Integration](guides/VAULT_INTEGRATION_GUIDE.md)** - HashiCorp Vault secret resolution via `vault://` URIs
 - **[UI User Guide](guides/UI_USER_GUIDE.md)** - Using the React frontend
 
