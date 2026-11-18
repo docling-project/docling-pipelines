@@ -4,7 +4,7 @@
 """JobTrackerService edge cases on the real in-memory store, aggregator and DTO mapper.
 
 The flow definition snapshot storage is a process-wide singleton built from the YAML config, so
-the tests point its accessor at a real KeyValueFileSystemStorage in tmp_path.
+every test points its accessor at a real KeyValueFileSystemStorage in tmp_path.
 """
 
 import uuid
@@ -25,6 +25,19 @@ from docpipe.exceptions.docpipe_exceptions import DocpipeException, JobRunNotFou
 from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
 
 JOB_ID = "6f1b6e2c-3d4a-4c5b-9e8f-0a1b2c3d4e5f"
+
+
+@pytest.fixture(autouse=True)
+def snapshots(tmp_path: Path, monkeypatch) -> KeyValueFileSystemStorage:
+    """Keep every test off the process-wide snapshot factory.
+
+    Building that factory reads the YAML config, and the config loader caches it for the
+    process. Node ordering looks up the flow definition, so even tests that never save one
+    would otherwise leave the real config cached for later test modules.
+    """
+    storage = KeyValueFileSystemStorage(base_dir=str(tmp_path / "snapshots"))
+    monkeypatch.setattr(snapshot_factory, "get_flow_definitions_snapshot_storage", lambda: storage)
+    return storage
 
 
 @pytest.fixture
@@ -289,12 +302,6 @@ class TestFormattedStats:
 
 
 class TestFlowDefinitionSnapshots:
-    @pytest.fixture
-    def snapshots(self, tmp_path: Path, monkeypatch) -> KeyValueFileSystemStorage:
-        storage = KeyValueFileSystemStorage(base_dir=str(tmp_path / "snapshots"))
-        monkeypatch.setattr(snapshot_factory, "get_flow_definitions_snapshot_storage", lambda: storage)
-        return storage
-
     def test_saved_definition_is_returned(self, service, run, snapshots):
         service.save_flow_definition(job_id=JOB_ID, job_run_id=run, flow_definition={"flow_name": "f"})
 
