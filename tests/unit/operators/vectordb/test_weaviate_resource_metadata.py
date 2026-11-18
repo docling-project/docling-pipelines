@@ -207,7 +207,7 @@ class TestSupportedResource:
         assert result[VB.SELECTED_RESOURCE_SCHEMA] == {}
         assert {"feature_name": "doc_id_hash", "mapped_column_name": "pk"} in result[VB.FEATURE_MAPPINGS_RESPONSE]
 
-    def test_new_name_with_sparse_adds_content_and_sparse_defaults(self):
+    def test_new_name_with_sparse_adds_content_default_and_no_sparse_mapping(self):
         result, _ = _fetch(
             collection_name="Fresh",
             collection=None,
@@ -215,7 +215,7 @@ class TestSupportedResource:
         )
         mappings = result[VB.FEATURE_MAPPINGS_RESPONSE]
         assert {"feature_name": "content", "mapped_column_name": "text"} in mappings
-        assert {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"} in mappings
+        assert {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"} not in mappings
 
     @pytest.mark.parametrize("add_sparse", [False, True])
     def test_indexed_collection_with_field_tokenized_content_is_unsupported(self, add_sparse):
@@ -319,6 +319,74 @@ class TestFeatureMappingResolution:
         )
         assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved
 
+    def test_saved_custom_content_source_absent_from_metadata_is_preserved(self):
+        saved = [
+            {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+            {"feature_name": "body", "mapped_column_name": "text"},
+            {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={
+                OperatorConstants.Columns.DOC_COLUMN: "body",
+                OperatorConstants.Config.FEATURE_MAPPINGS: saved,
+                VB.ADD_SPARSE_VECTOR: True,
+            },
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved[:2]
+
+    def test_saved_custom_sparse_feature_is_dropped(self):
+        saved = [
+            {"feature_name": "content", "mapped_column_name": "text"},
+            {"feature_name": "keyword_vector", "mapped_column_name": "keywords"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={OperatorConstants.Config.FEATURE_MAPPINGS: saved},
+            available_features={
+                **FEATURES,
+                "keyword_vector": {"type": OperatorConstants.Types.TYPE_VECTOR_SPARSE},
+            },
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved[:1]
+
+    def test_saved_sparse_mapping_absent_from_metadata_is_dropped(self):
+        saved = [
+            {"feature_name": "content", "mapped_column_name": "text"},
+            {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={OperatorConstants.Config.FEATURE_MAPPINGS: saved},
+            available_features={name: meta for name, meta in FEATURES.items() if name != "sparse_embeddings"},
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == saved[:1]
+
+    def test_legacy_saved_sparse_mapping_is_dropped(self):
+        saved = [
+            {"feature_name": "content", "mapped_column_name": "text"},
+            {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"},
+        ]
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={OperatorConstants.Config.FEATURE_MAPPINGS: saved},
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == [
+            {"feature_name": "content", "mapped_column_name": "text"},
+        ]
+
+    def test_saved_mappings_containing_only_sparse_falls_back_to_defaults(self):
+        saved = [{"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"}]
+        result, _ = _fetch(
+            collection_name="FreshCollection",
+            collection=None,
+            operator_config={OperatorConstants.Config.FEATURE_MAPPINGS: saved},
+        )
+        mappings = result[VB.FEATURE_MAPPINGS_RESPONSE]
+        assert {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"} not in mappings
+        assert {"feature_name": "doc_id_hash", "mapped_column_name": "pk"} in mappings
+        assert {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"} in mappings
+
     def test_live_schema_is_used_for_existing_collection_without_saved_mappings(self):
         result, _ = _fetch(
             collection=_collection(),
@@ -329,7 +397,7 @@ class TestFeatureMappingResolution:
         assert {"feature_name": "embeddings", "mapped_column_name": "vector_embeddings"} in mappings
         assert {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"} not in mappings
 
-    def test_live_schema_maps_sparse_feature_when_bm25_is_on(self):
+    def test_live_schema_maps_content_property_when_bm25_is_on(self):
         collection = _collection(props=[*_good_props()[:3], _prop("content", tokenization=Tokenization.WORD)])
         result, _ = _fetch(
             collection=collection,
@@ -337,7 +405,7 @@ class TestFeatureMappingResolution:
         )
         mappings = result[VB.FEATURE_MAPPINGS_RESPONSE]
         assert {"feature_name": "content", "mapped_column_name": "content"} in mappings
-        assert {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"} in mappings
+        assert {"feature_name": "sparse_embeddings", "mapped_column_name": "sparse_embeddings"} not in mappings
 
     def test_defaults_when_live_schema_yields_nothing(self):
         collection = _collection(props=[_prop("unrelated")], vectors={})
@@ -365,7 +433,8 @@ class TestFailureReporting:
                 available_features=FEATURES,
             )
         client_cls.assert_not_called()
-        assert result == VectorDBMetadataFetcher._empty_result()
+        expected = VectorDBMetadataFetcher._empty_result()
+        assert result == expected
         assert "error" not in result[VB.IS_DOCPIPE_SUPPORTED_RESOURCE]
 
     def test_cloud_without_cluster_url_returns_plain_empty_result(self):
@@ -378,7 +447,8 @@ class TestFailureReporting:
                 available_features=FEATURES,
             )
         client_cls.assert_not_called()
-        assert result == VectorDBMetadataFetcher._empty_result()
+        expected = VectorDBMetadataFetcher._empty_result()
+        assert result == expected
 
     def test_authenticated_plaintext_reports_error_without_connecting(self):
         with patch("weaviate.connect_to_custom") as connect:
@@ -485,3 +555,20 @@ class TestClientConstruction:
             )
         kwargs = client_cls.call_args.kwargs
         assert kwargs == {"host": "wv.local", "port": 9090, "grpc_port": 50099}
+
+
+class TestProjectMappableFeatures:
+    def test_excludes_sparse_vector_features_and_preserves_others(self):
+        from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
+            WeaviateResourceMetadata,
+            project_mappable_features,
+        )
+
+        projected = WeaviateResourceMetadata.project_mappable_features(available_features=FEATURES)
+        assert "sparse_embeddings" not in projected
+        assert "embeddings" in projected
+        assert "content" in projected
+        assert "doc_id_hash" in projected
+
+        # Module-level alias returns identical projection
+        assert project_mappable_features(available_features=FEATURES) == projected
