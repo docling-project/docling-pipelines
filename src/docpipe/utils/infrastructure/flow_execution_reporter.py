@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow execution reporter for clean, user-friendly console output.
 
 This module provides reporting for flow execution using the logging system
@@ -165,9 +168,6 @@ class FlowExecutionReporter:
             col_names: List of column names in the table
             step_name: Name of the operator step (for context)
         """
-        if not col_names:
-            return
-
         new_columns = self._get_new_columns(col_names=col_names)
         removed_columns = self._get_removed_columns(col_names=col_names)
         existing_columns = [col for col in col_names if col not in new_columns]
@@ -197,10 +197,6 @@ class FlowExecutionReporter:
             logger.info("   Existing (%s): %s", len(existing_columns), ", ".join(existing_columns[:10]))
             if len(existing_columns) > 10:
                 logger.info("      ... and %s more", len(existing_columns) - 10)
-
-        if not new_columns and not removed_columns and not existing_columns:
-            # No columns at all (shouldn't happen, but handle gracefully)
-            logger.info("   (no columns)")
 
     def _print_column_list(self, columns: list[str], *, indent: str = "     ") -> None:
         """Print a list of columns with appropriate formatting based on count.
@@ -312,7 +308,8 @@ class FlowExecutionReporter:
             if i < len(columns) - 1:
                 current_line += ", "
 
-        # Print final line
+        # Print final line. It is empty when the last column name is "" and the
+        # line before it was just flushed for being too long.
         if current_line != indent:
             logger.info(current_line)
 
@@ -324,11 +321,6 @@ class FlowExecutionReporter:
             indent: Indentation string for each line
         """
         groups = self._group_columns_by_prefix(columns)
-
-        # If grouping resulted in empty dict, fall back to wrapped display
-        if not groups:
-            self._print_wrapped_columns(columns, indent=indent)
-            return
 
         for group_name, cols in groups.items():
             logger.info("%s%s (%s):", indent, group_name, len(cols))
@@ -406,9 +398,6 @@ class FlowExecutionReporter:
         Args:
             metadata: Operator-specific metadata dictionary (may contain nested 'node_metadata' for old format)
         """
-        if not metadata:
-            return
-
         # Handle old format where metadata is wrapped
         actual_metadata = metadata.get("node_metadata", metadata) if "node_metadata" in metadata else metadata
 
@@ -500,8 +489,7 @@ class FlowExecutionReporter:
             logger.info("   %s:", display_name)
             for k, v in list(value.items())[:10]:
                 logger.info("      %s: %s", k, v)
-            if len(value) > 10:
-                logger.info("      ... and %s more", len(value) - 10)
+            logger.info("      ... and %s more", len(value) - 10)
 
     @staticmethod
     def _print_other_fields(fields: dict[str, Any]) -> None:
