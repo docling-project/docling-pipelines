@@ -76,6 +76,17 @@ Uploading, updating and deleting custom operators SHALL require `admin`, because
 - **WHEN** an admin uploads a valid operator
 - **THEN** the response is 201
 
+### Requirement: Operator filesystem and SQL containment
+When `DOCPIPE_AUTH_ENABLED=true`, `sql_filter` SHALL disable DuckDB external file access (`enable_external_access = false`), and `ingest_source` with the `filesystem` provider SHALL restrict resolved paths to roots in `DOCPIPE_INGEST_ALLOWED_PATHS` (defaulting to the data directory).
+
+#### Scenario: SQL filter external access blocked
+- **WHEN** `DOCPIPE_AUTH_ENABLED=true` and `sql_filter` executes a query referencing a local file
+- **THEN** DuckDB refuses external file access
+
+#### Scenario: Filesystem ingest outside allowed roots rejected
+- **WHEN** `DOCPIPE_AUTH_ENABLED=true` and `ingest_source` (`filesystem`) targets a path outside `DOCPIPE_INGEST_ALLOWED_PATHS`
+- **THEN** validation or execution fails and the path is not read
+
 ### Requirement: Ownership is recorded from the session
 When a flow or project is created by an authenticated caller, its `created_by` SHALL be set to that caller's username. When a job run is created by an authenticated caller, its `user_id` SHALL be set to that caller's username. When a flow or project is updated by an authenticated caller, its `modified_by` SHALL be set to that caller's username, and the server SHALL ignore any `modified_by` value in the request body.
 
@@ -124,12 +135,16 @@ A bulk delete of flows SHALL check ownership for each flow. Flows the caller may
 - **WHEN** an editor bulk-deletes two own flows and one flow owned by another user
 - **THEN** the two own flows are deleted and the third is reported as refused without the other user's name
 
-### Requirement: Non-API callers are unaffected
-The command-line interface and the Python library SHALL continue to operate without an authenticated caller, and ownership checks SHALL NOT block them.
+### Requirement: Non-API callers use explicit system actor
+Write methods on `FlowService`, `ProjectService`, and `JobManagementService` and `can_modify(actor, owner)` SHALL require an explicit `ActorContext` (no `actor=None` bypass). The CLI, Python library, and in-process callers such as `EventDispatchService` SHALL pass `SYSTEM_ACTOR`, which is permitted to modify any resource.
 
-#### Scenario: CLI deletes an owned flow
-- **WHEN** a flow is deleted through the library without an actor
+#### Scenario: CLI deletes an owned flow with SYSTEM_ACTOR
+- **WHEN** a flow is deleted through the CLI or library using `SYSTEM_ACTOR`
 - **THEN** the delete succeeds regardless of `created_by`
+
+#### Scenario: Missing actor rejected
+- **WHEN** a service write method or `can_modify` is called without an `ActorContext`
+- **THEN** the call fails closed rather than bypassing ownership checks
 
 ### Requirement: Audit of denials and writes
 Every authorization denial and every successful create, update and delete under `/api/v1/` SHALL be written to the audit log with the username, action, target and outcome. Failures other than 403, such as 404 and 409 on a write, SHALL be logged with the same fields and the status code. Usernames and targets that come from untrusted sources SHALL have newlines and control characters removed before logging. Passwords and tokens SHALL NOT be logged.
