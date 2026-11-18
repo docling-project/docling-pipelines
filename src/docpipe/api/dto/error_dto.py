@@ -65,6 +65,7 @@ ErrorCode = Literal[
     "sql_filter_error",
     # Custom Operator error codes
     "custom_operator_not_found",
+    "custom_operator_upload_forbidden",
     "custom_operator_already_exists",
     "custom_operator_invalid_data",
     "custom_operators_disabled",

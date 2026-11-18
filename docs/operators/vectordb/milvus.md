@@ -705,7 +705,7 @@ for failed_doc in metadata['failed_docs']:
 ### 5. Nullable Fields
 - Non-mandatory fields are automatically made nullable
 - Prevents insertion failures when optional fields are missing
-- Content field is always required (not nullable)
+- Content field is required in sparse (BM25) mode and nullable in dense mode
 
 ### 6. Batch Processing
 - Default batch size (100) works well for most cases
@@ -720,6 +720,15 @@ for failed_doc in metadata['failed_docs']:
 # Use auto-detection by not specifying vector_dimension
 # Check that all mandatory fields are present in data
 ```
+
+### Text Over the VARCHAR Limit
+
+Milvus stores text in `VARCHAR` fields capped at 65,535 UTF-8 bytes, and rejects longer values instead of truncating them. Multi-byte characters count more than once, so 30,000 Chinese characters (90,000 bytes) are over the limit. This usually happens only when a flow has no `chunker` node, so each row carries a whole document.
+
+- **Content mapped explicitly, or sparse mode**: the row is reported in `failed_docs` and left out of the collection. The other rows in its batch are still inserted.
+- **Dense mode with `content` unmapped**: the row is inserted with an empty `text` field, and a warning names the document.
+
+To store the text, add a `chunker` node before `vectordb`.
 
 ### Performance Issues
 ```python

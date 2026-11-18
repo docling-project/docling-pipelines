@@ -16,6 +16,8 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.resource_metadata import (
     OpenSearchResourceMetadata,
@@ -481,6 +483,39 @@ class TestFetchMetadataRouting:
         call_kwargs = mock_instance.fetch.call_args.kwargs
         assert call_kwargs["provider_config"] == provider_cfg
         assert call_kwargs["operator_config"] is op_cfg
+
+    def test_project_mappable_features_weaviate_filters_sparse_features(self):
+        features = {
+            "content": {"type": "string"},
+            "embeddings": {"type": "vector"},
+            "sparse_embeddings": {"type": OperatorConstants.Types.TYPE_VECTOR_SPARSE},
+        }
+        result = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+            available_features=features,
+        )
+        assert "sparse_embeddings" not in result
+        assert "content" in result
+        assert "embeddings" in result
+
+    @pytest.mark.parametrize(
+        "provider",
+        [
+            OperatorConstants.VectorDB.OPENSEARCH,
+            OperatorConstants.VectorDB.MILVUS,
+            "custom_provider",
+        ],
+    )
+    def test_project_mappable_features_pass_through_for_other_providers(self, provider: str):
+        features = {
+            "content": {"type": "string"},
+            "sparse_embeddings": {"type": OperatorConstants.Types.TYPE_VECTOR_SPARSE},
+        }
+        result = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=provider,
+            available_features=features,
+        )
+        assert result == features
 
 
 # ---------------------------------------------------------------------------
