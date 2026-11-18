@@ -42,8 +42,8 @@ export interface LoginRequest {
 
 /** Response of `POST /auth/login`. The `access_token` must never be stored. */
 export interface LoginResponse {
-  access_token: string;
-  token_type: string;
+  access_token?: string;
+  token_type?: string;
   user: AuthUser;
 }
 
