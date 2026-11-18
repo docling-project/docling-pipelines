@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """JobTrackerService edge cases on the real in-memory store, aggregator and DTO mapper.
 
 The flow definition snapshot storage is a process-wide singleton built from the YAML config, so
@@ -42,7 +45,9 @@ def run(service: JobTrackerService) -> str:
 
 
 def _node(store: InMemoryJobStatsStore, job_run_id: str, node_id: str, batch_id: str | None = None) -> NodeStats:
-    return store.get_node_stats_by_batch_and_node(job_run_id=job_run_id, batch_id=batch_id, node_id=node_id)
+    node = store.get_node_stats_by_batch_and_node(job_run_id=job_run_id, batch_id=batch_id, node_id=node_id)
+    assert node is not None
+    return node
 
 
 class TestJobLifecycle:
@@ -55,6 +60,16 @@ class TestJobLifecycle:
 
         stats = service.get_job_run_stats(job_run_id=run)
         assert (stats.report_generation_started_at, stats.report_generation_completed_at) == (10, 20)
+
+    def test_end_job_stores_the_run_message(self, service, run):
+        service.end_job(
+            job_run_id=run,
+            status=ExecutionStatus.FAILED,
+            job_run_stats={"message": "source unreachable", "report_status": "GENERATING"},
+        )
+
+        stats = service.get_job_run_stats(job_run_id=run)
+        assert (stats.message, stats.report_status) == ("source unreachable", "GENERATING")
 
     def test_cancel_request_for_an_unknown_run(self, service):
         with pytest.raises(JobRunNotFoundException, match="Job run not found: nope"):
@@ -111,6 +126,45 @@ class TestNodeExecution:
         )
 
         assert _node(store, run, "n1").error == "Node completed with issues: 1 skipped"
+
+    def test_raw_operator_metadata_is_wrapped_with_node_id_and_operator(self, service, run, store):
+        service.start_node_execution(job_run_id=run, node_id="n1", node_name="N1", total_docs=["a"])
+        service.complete_node_execution(
+            job_run_id=run,
+            node_id="n1",
+            node_name="N1",
+            docs_completed=["a"],
+            failed_docs=[],
+            skipped_docs=[],
+            col_names=[],
+            node_status=ExecutionStatus.COMPLETED,
+            node_metadata={"chunks": 4},
+        )
+
+        assert _node(store, run, "n1").node_metadata == {
+            "id": "n1",
+            "operator": "N1",
+            OperatorConstants.Metadata.NODE_METADATA: {"chunks": 4},
+        }
+
+    def test_failed_doc_ids_are_scoped_to_one_batch(self, service, run):
+        for batch_id, failed in (("b1", ["x"]), ("b2", ["y", "z"])):
+            service.start_node_execution(
+                job_run_id=run, node_id="n1", node_name="N1", total_docs=failed, batch_id=batch_id
+            )
+            service.complete_node_execution(
+                job_run_id=run,
+                node_id="n1",
+                node_name="N1",
+                docs_completed=[],
+                failed_docs=failed,
+                skipped_docs=[],
+                col_names=[],
+                node_status=ExecutionStatus.FAILED,
+                batch_id=batch_id,
+            )
+
+        assert service.get_failed_doc_ids_for_batch(job_run_id=run, batch_id="b2") == ["y", "z"]
 
     @pytest.mark.parametrize(
         ("finish", "extra"),
@@ -172,6 +226,30 @@ class TestDocCounts:
 
         stats = service.get_job_run_stats(job_run_id=run)
         assert (stats.total_docs, stats.total_pages_processed, stats.page_type_stats) == (0, 0, None)
+
+    def test_ingest_metadata_without_total_docs_keeps_the_count(self, service, run):
+        service.update_doc_counts(
+            job_run_id=run,
+            operator_category=OperatorCategory.Ingest.value,
+            metadata={Metrics.External.TOTAL_DOCS: 3},
+        )
+        service.update_doc_counts(
+            job_run_id=run,
+            operator_category=OperatorCategory.Ingest.value,
+            metadata={OperatorConstants.Metadata.TOTAL_PAGES_PROCESSED: 2},
+        )
+
+        stats = service.get_job_run_stats(job_run_id=run)
+        assert (stats.total_docs, stats.total_pages_processed) == (3, 2)
+
+    def test_total_docs_from_a_non_ingest_operator_are_ignored(self, service, run):
+        service.update_doc_counts(
+            job_run_id=run,
+            operator_category=OperatorCategory.Extract.value,
+            metadata={Metrics.External.TOTAL_DOCS: 7},
+        )
+
+        assert service.get_job_run_stats(job_run_id=run).total_docs == 0
 
 
 class TestFinalDocumentCounts:
