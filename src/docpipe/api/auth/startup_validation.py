@@ -19,6 +19,7 @@ from docpipe.utils.infrastructure.logging import get_logger
 
 from .config import AuthSettings
 from .jwt_handler import _JWT_SECRET_MIN_LENGTH, JWTConfig
+from .roles import Role
 
 logger = get_logger(__name__)
 
@@ -108,6 +109,13 @@ def validate_auth_startup(*, settings: AuthSettings, cors_origins: list[str]) ->
         logger.warning(
             "SECURITY WARNING: CORS_ORIGINS contains '*', which allows any origin. "
             "Set CORS_ORIGINS to the explicit origins of your frontend."
+        )
+
+    if settings.default_role == Role.ADMIN:
+        logger.warning(
+            "SECURITY WARNING: %s is set to 'admin'. Every authenticated user without a group "
+            "mapping will receive full administrator privileges.",
+            EnvironmentVariables.DOCPIPE_AUTH_DEFAULT_ROLE,
         )
 
     if not settings.enabled:

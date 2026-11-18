@@ -195,6 +195,19 @@ class TestBounds:
         assert len(_pair_state) <= 20
         assert MAX_TRACKED_KEYS >= 20  # production cap is not lowered by the test
 
+    def test_active_locked_out_pair_is_not_evicted_ahead_of_unlocked_entries(self, monkeypatch):
+        monkeypatch.setattr(rate_limit, "MAX_TRACKED_KEYS", 10)
+        _fail(client_ip="1.1.1.1", count=PAIR_LOCKOUT_THRESHOLD, username="locked-user")
+        assert ("1.1.1.1", "locked-user") in _pair_state
+
+        # Flood with unlocked single-failure entries exceeding capacity
+        for index in range(25):
+            record_failed_login(client_ip=f"10.0.0.{index}", username=f"flood-{index}")
+
+        assert len(_pair_state) == 10
+        assert ("1.1.1.1", "locked-user") in _pair_state
+        assert check_login_rate_limit(client_ip="1.1.1.1", username="locked-user") is False
+
     def test_concurrent_failures_are_all_counted(self):
         threads = [
             threading.Thread(target=record_failed_login, kwargs={"client_ip": "3.3.3.3", "username": "alice"})
@@ -231,3 +244,11 @@ class TestGetClientIp:
 
     def test_unknown_when_no_peer(self):
         assert get_client_ip(request=_request(peer=None), trust_proxy_headers=False) == "unknown"
+
+    def test_selects_entry_from_right_by_trusted_proxy_count(self):
+        request = _request(peer="10.1.1.1", forwarded_for="1.1.1.1, 198.51.100.5, 203.0.113.9")
+        assert get_client_ip(request=request, trust_proxy_headers=True, trusted_proxy_count=2) == "198.51.100.5"
+
+    def test_trusted_proxy_count_exceeding_header_entries_falls_back_to_first_entry(self):
+        request = _request(peer="10.1.1.1", forwarded_for="203.0.113.9")
+        assert get_client_ip(request=request, trust_proxy_headers=True, trusted_proxy_count=3) == "203.0.113.9"

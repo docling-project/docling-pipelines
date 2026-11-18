@@ -619,7 +619,7 @@ class TestAdmin:
         deleted_project = client.delete(f"/api/v1/projects/{seed.project_id}", headers=admin)
 
         assert patched_flow.status_code == 200
-        assert patched_flow.json()["modified_by"] == _ADMIN_USERNAME
+        assert patched_flow.json()["modified_by"] == f"bootstrap:{_ADMIN_USERNAME}"
         assert patched_project.status_code == 200
         assert cancelled.status_code == 202
         assert deleted_run.status_code == 204
@@ -643,7 +643,7 @@ class TestSession:
 
         body = _admin_login(client=client)
 
-        assert body["user"]["username"] == _ADMIN_USERNAME
+        assert body["user"]["username"] == f"bootstrap:{_ADMIN_USERNAME}"
         assert body["user"]["roles"] == ["admin"]
         assert client.cookies.get(DEFAULT_COOKIE_NAME) == body["access_token"]
         me = client.get("/auth/me")
@@ -680,7 +680,7 @@ class TestSession:
         response = client.post("/api/v1/projects", json={"name": "csrf project"}, headers=_CSRF_HEADERS)
 
         assert response.status_code == 201
-        assert response.json()["created_by"] == _ADMIN_USERNAME
+        assert response.json()["created_by"] == f"bootstrap:{_ADMIN_USERNAME}"
 
     @pytest.mark.parametrize(
         ("method", "url", "kwargs"),

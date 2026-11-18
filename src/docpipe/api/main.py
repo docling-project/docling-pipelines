@@ -33,7 +33,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from docpipe.api.api_router import api_router
 from docpipe.api.auth.bootstrap_auth import BootstrapAdminAuthenticator
 from docpipe.api.auth.config import get_auth_settings
-from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.dependencies import CSRF_HEADER, get_current_user
 from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_token
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
 from docpipe.api.auth.models import AuthConfigResponse, LoginRequest, LoginResponse, User
@@ -175,6 +175,7 @@ def _start_bff() -> tuple[subprocess.Popen | None, str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan."""
+    _initialize_auth_at_startup()
     try:
         get_default_factory().initialize_storage()
     except Exception as exc:
@@ -214,6 +215,7 @@ async def lifespan(app: FastAPI):
             event_listener.start()
         yield
     finally:
+        _reset_auth_on_shutdown()
         if event_listener is not None:
             await event_listener.stop()
         if app.state.bff_client is not None:
@@ -286,32 +288,77 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ldap_authenticator: LDAPAuthenticator | None = None
-try:
-    ldap_config: LDAPConfig | None = LDAPConfig()
-    # LDAP counts as configured only when a server is set, so a deployment with neither LDAP
-    # nor the bootstrap administrator answers login with 503.
-    if ldap_config and ldap_config.ldap_server:
-        ldap_authenticator = LDAPAuthenticator(ldap_config)
-except Exception as e:
-    logger.error("Failed to initialize LDAP configuration: %s", e)
-    ldap_config = None
-    ldap_authenticator = None
+_UNINITIALIZED = object()
 
-# Fails startup with a ConfigurationError when auth is enabled and JWT_SECRET_KEY is missing, weak or
-# a placeholder. A bad configuration must never silently disable login.
-jwt_config: JWTConfig | None = validate_auth_startup(settings=get_auth_settings(), cors_origins=allowed_origins)
+ldap_config: LDAPConfig | None = None
+ldap_authenticator: LDAPAuthenticator | None | object = _UNINITIALIZED
+jwt_config: JWTConfig | None | object = _UNINITIALIZED
+bootstrap_authenticator: BootstrapAdminAuthenticator | None | object = _UNINITIALIZED
 
-# The bootstrap administrator is configured outside the try block above on purpose: a partial
-# or invalid configuration must stop startup instead of silently disabling the break-glass login.
-bootstrap_authenticator: BootstrapAdminAuthenticator | None = BootstrapAdminAuthenticator.from_settings(
-    settings=get_auth_settings()
-)
 
-logger.info(
-    "OIDC role mapping reads groups from the %s claim(s)",
-    ", ".join(group_claim_names(config=get_oauth2_config())),
-)
+def _init_ldap_authenticator() -> LDAPAuthenticator | None:
+    """Initialize the LDAP authenticator from the current environment if configured."""
+    global ldap_config
+    try:
+        ldap_config = LDAPConfig()
+        # LDAP counts as configured only when a server is set, so a deployment with neither LDAP
+        # nor the bootstrap administrator answers login with 503.
+        if ldap_config and ldap_config.ldap_server:
+            return LDAPAuthenticator(ldap_config)
+    except Exception as e:
+        logger.error("Failed to initialize LDAP configuration: %s", e)
+        ldap_config = None
+    return None
+
+
+def _get_ldap_authenticator() -> LDAPAuthenticator | None:
+    """Return the active LDAP authenticator, initializing lazily when lifespan did not run."""
+    if ldap_authenticator is not _UNINITIALIZED:
+        return cast(LDAPAuthenticator | None, ldap_authenticator)
+    return _init_ldap_authenticator()
+
+
+def _get_jwt_config() -> JWTConfig | None:
+    """Return the active JWT configuration, validating lazily when lifespan did not run."""
+    if jwt_config is not _UNINITIALIZED:
+        return cast(JWTConfig | None, jwt_config)
+    return validate_auth_startup(settings=get_auth_settings(), cors_origins=allowed_origins)
+
+
+def _get_bootstrap_authenticator() -> BootstrapAdminAuthenticator | None:
+    """Return the active bootstrap authenticator, initializing lazily when lifespan did not run."""
+    if bootstrap_authenticator is not _UNINITIALIZED:
+        return cast(BootstrapAdminAuthenticator | None, bootstrap_authenticator)
+    return BootstrapAdminAuthenticator.from_settings(settings=get_auth_settings())
+
+
+def _initialize_auth_at_startup() -> None:
+    """Validate and initialize auth configuration during application lifespan startup."""
+    global ldap_authenticator, jwt_config, bootstrap_authenticator
+    settings = get_auth_settings()
+    if ldap_authenticator is _UNINITIALIZED:
+        ldap_authenticator = _init_ldap_authenticator()
+    # Fails startup with a ConfigurationError when auth is enabled and JWT_SECRET_KEY is missing, weak or
+    # a placeholder. A bad configuration must never silently disable login.
+    if jwt_config is _UNINITIALIZED:
+        jwt_config = validate_auth_startup(settings=settings, cors_origins=allowed_origins)
+    # The bootstrap administrator is configured outside the LDAP try block on purpose: a partial
+    # or invalid configuration must stop startup instead of silently disabling the break-glass login.
+    if bootstrap_authenticator is _UNINITIALIZED:
+        bootstrap_authenticator = BootstrapAdminAuthenticator.from_settings(settings=settings)
+    logger.info(
+        "OIDC role mapping reads groups from the %s claim(s)",
+        ", ".join(group_claim_names(config=get_oauth2_config())),
+    )
+
+
+def _reset_auth_on_shutdown() -> None:
+    """Reset lifespan-initialized auth globals on shutdown."""
+    global ldap_authenticator, jwt_config, bootstrap_authenticator
+    ldap_authenticator = _UNINITIALIZED
+    jwt_config = _UNINITIALIZED
+    bootstrap_authenticator = _UNINITIALIZED
+
 
 # More specific handlers first, then generic.
 app.add_exception_handler(DocpipeException, cast(Any, docpipe_exception_handler))
@@ -346,9 +393,13 @@ async def health_check():
     return HealthCheckResponse(status="healthy")
 
 
-@app.post("/auth/login", response_model=LoginResponse)
+@app.post("/auth/login", response_model=LoginResponse, response_model_exclude_none=True)
 async def login(credentials: LoginRequest, request: Request, response: Response):
     """Authenticate with the configured authenticators, set the session cookie and return the token.
+
+    Browser clients (requests carrying ``X-Requested-With``) receive only the HttpOnly session
+    cookie and the ``user`` object in the JSON body (``access_token`` is omitted). Non-browser
+    script clients receive ``access_token`` in the JSON body as well.
 
     Args:
         credentials: Login credentials (username and password)
@@ -361,7 +412,12 @@ async def login(credentials: LoginRequest, request: Request, response: Response)
     Raises:
         HTTPException: 401 if authentication fails, 429 if throttled, 503 if no login method is configured
     """
-    client_ip = get_client_ip(request=request, trust_proxy_headers=get_auth_settings().trust_proxy_headers)
+    settings = get_auth_settings()
+    client_ip = get_client_ip(
+        request=request,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_count=settings.trusted_proxy_count,
+    )
     retry_after = login_retry_after(client_ip=client_ip, username=credentials.username)
     if retry_after:
         logger.warning("Login throttled for client address: %s", sanitize_for_log(client_ip))
@@ -372,10 +428,13 @@ async def login(credentials: LoginRequest, request: Request, response: Response)
             headers={"Retry-After": str(retry_after)},
         )
 
+    active_bootstrap = _get_bootstrap_authenticator()
+    active_ldap = _get_ldap_authenticator()
+    active_jwt = _get_jwt_config()
     authenticators: list[AuthenticatorPort] = [
-        candidate for candidate in (bootstrap_authenticator, ldap_authenticator) if candidate is not None
+        candidate for candidate in (active_bootstrap, active_ldap) if candidate is not None
     ]
-    if not authenticators or jwt_config is None:
+    if not authenticators or active_jwt is None:
         logger.error("Authentication not configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -404,17 +463,21 @@ async def login(credentials: LoginRequest, request: Request, response: Response)
             JWTClaims.FULL_NAME: user.full_name,
             JWTClaims.ROLES: [role.value for role in user.roles],
         }
-        access_token: str = create_access_token(token_data, jwt_config)
+        access_token: str = create_access_token(token_data, active_jwt)
         set_session_cookie(
             response=response,
             request=request,
-            settings=get_auth_settings(),
+            settings=settings,
             token=access_token,
-            max_age_seconds=jwt_config.jwt_access_token_expire_minutes * 60,
+            max_age_seconds=active_jwt.jwt_access_token_expire_minutes * 60,
         )
 
         logger.info("User logged in successfully: %s", sanitize_for_log(user.username))
-        return LoginResponse(access_token=access_token, user=user)
+        is_browser_client = bool(request.headers.get(CSRF_HEADER, "").strip())
+        return LoginResponse(
+            access_token=None if is_browser_client else access_token,
+            user=user,
+        )
 
     except (HTTPException, DocpipeException):
         raise
@@ -452,10 +515,12 @@ async def get_auth_config():
         Whether auth is enabled, whether credential login is available, and the OIDC providers
         (name, display name and authorize URL only; never ids, secrets or endpoint addresses)
     """
+    active_bootstrap = _get_bootstrap_authenticator()
+    active_ldap = _get_ldap_authenticator()
+    active_jwt = _get_jwt_config()
     return AuthConfigResponse(
         auth_enabled=get_auth_settings().enabled,
-        credential_login=(bootstrap_authenticator is not None or ldap_authenticator is not None)
-        and jwt_config is not None,
+        credential_login=(active_bootstrap is not None or active_ldap is not None) and active_jwt is not None,
         providers=list_enabled_providers(),
     )
 

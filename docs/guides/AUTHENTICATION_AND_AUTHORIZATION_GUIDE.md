@@ -96,6 +96,8 @@ local principal with the `admin` role. No `JWT_SECRET_KEY` is needed.
 | `DOCPIPE_AUTH_COOKIE_NAME` | `docpipe_access_token` | Name of the session cookie |
 | `DOCPIPE_AUTH_COOKIE_SECURE` | `false` | Always set the `Secure` attribute on the session cookie |
 | `DOCPIPE_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` and `X-Forwarded-Proto` from a reverse proxy |
+| `DOCPIPE_TRUSTED_PROXY_COUNT` | `1` | Number of trusted proxy hops appended to `X-Forwarded-For` (`>= 1`) |
+| `DOCPIPE_INGEST_ALLOWED_PATHS` | data dir | Allowed root directories for `ingest_source` filesystem paths when auth is enabled |
 | `DOCPIPE_AUTH_BOOTSTRAP_USERNAME` | none | Username of the bootstrap administrator. Must be set together with the hash |
 | `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH` | none | bcrypt hash of the bootstrap administrator password |
 | `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins. A `*` entry logs a security warning |
@@ -220,7 +222,8 @@ Rotating `JWT_SECRET_KEY` invalidates all tokens at once.
 The lockout key is the pair of address and username, so an attacker cannot lock a real user out from another address.
 
 The counters live in process memory. They reset on restart and are not shared across workers or replicas, so treat the
-limit as a brake on brute-force attempts, not as a security boundary.
+limit as a brake on brute-force attempts, not as a security boundary. Failed attempts before the throttle trips still
+trigger an LDAP bind against your directory, which can contribute to directory-side account lockout.
 
 ## Proxy trust and the Secure cookie
 
@@ -234,11 +237,13 @@ The session cookie gets the `Secure` attribute when any of these holds:
 - `DOCPIPE_TRUST_PROXY_HEADERS=true` and the request carries `X-Forwarded-Proto: https`, or
 - `DOCPIPE_AUTH_COOKIE_SECURE=true`.
 
-When `DOCPIPE_TRUST_PROXY_HEADERS=true`, the throttle also uses the rightmost `X-Forwarded-For` entry as the client
-address. That entry is the one the trusted proxy appended. Earlier entries come from the client and are ignored.
+When `DOCPIPE_TRUST_PROXY_HEADERS=true`, the throttle reads the `X-Forwarded-For` entry at `-DOCPIPE_TRUSTED_PROXY_COUNT`
+(the rightmost entry by default when `DOCPIPE_TRUSTED_PROXY_COUNT=1`). That entry is the one appended by your outermost
+trusted proxy; earlier entries come from the client and are ignored.
 
-Set `DOCPIPE_TRUST_PROXY_HEADERS=true` only when the API sits behind exactly one ingress or load balancer that appends
-to `X-Forwarded-For`. If clients can reach the API directly, they can forge the header and bypass the throttle.
+Set `DOCPIPE_TRUST_PROXY_HEADERS=true` only when the API sits behind the configured number of trusted proxies
+(`DOCPIPE_TRUSTED_PROXY_COUNT`) that append to `X-Forwarded-For`. If clients can reach the API directly, they can forge
+the header and bypass the throttle.
 
 If auth is enabled and neither `DOCPIPE_AUTH_COOKIE_SECURE` nor `DOCPIPE_TRUST_PROXY_HEADERS` is true, the API logs a
 warning at startup, because a proxy that terminates TLS would receive a cookie without `Secure`.

@@ -15,6 +15,7 @@ from docpipe.core.models.actor_context import (
     ROLE_ADMIN,
     ROLE_EDITOR,
     ROLE_VIEWER,
+    SYSTEM_ACTOR,
     ActorContext,
     can_modify,
 )
@@ -78,12 +79,22 @@ class TestCanModify:
     def test_admin_with_other_roles_can_modify(self):
         assert can_modify(actor=_actor("root", ROLE_VIEWER, ROLE_ADMIN), owner="bob") is True
 
-    def test_none_actor_is_always_allowed(self):
-        assert can_modify(actor=None, owner="bob") is True
-        assert can_modify(actor=None, owner=None) is True
+    def test_none_actor_fails_closed(self):
+        assert can_modify(actor=None, owner="bob") is False  # type: ignore[arg-type]
+        assert can_modify(actor=None, owner=None) is False  # type: ignore[arg-type]
+
+    def test_system_actor_is_always_allowed(self):
+        assert SYSTEM_ACTOR.is_system is True
+        assert can_modify(actor=SYSTEM_ACTOR, owner="bob") is True
+        assert can_modify(actor=SYSTEM_ACTOR, owner=None) is True
 
     def test_owner_comparison_is_exact(self):
         assert can_modify(actor=_actor("Alice", ROLE_EDITOR), owner="alice") is False
+
+    def test_provider_prefixed_identities_do_not_collide(self):
+        assert can_modify(actor=_actor("ldap:alice", ROLE_EDITOR), owner="ldap:alice") is True
+        assert can_modify(actor=_actor("ldap:alice", ROLE_EDITOR), owner="bootstrap:alice") is False
+        assert can_modify(actor=_actor("oidc:google:alice", ROLE_EDITOR), owner="ldap:alice") is False
 
     def test_requires_keyword_arguments(self):
         with pytest.raises(TypeError):

@@ -6,6 +6,7 @@
 import pytest
 
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.core.projects.application.services.project_service import ProjectService
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.exceptions.docpipe_exceptions import PermissionDeniedException
@@ -32,10 +33,14 @@ class TestCreate:
 
         assert created.created_by == "alice"
 
-    def test_no_actor_leaves_created_by_untouched(self, service):
-        created = service.create_project(project=_project())
+    def test_system_actor_leaves_created_by_untouched(self, service):
+        created = service.create_project(project=_project(), actor=SYSTEM_ACTOR)
 
         assert created.created_by is None
+
+    def test_none_actor_fails_closed(self, service):
+        with pytest.raises(PermissionDeniedException):
+            service.create_project(project=_project(), actor=None)  # type: ignore[arg-type]
 
 
 class TestUpdate:
@@ -86,13 +91,19 @@ class TestUpdate:
 
         assert updated.modified_by == "bob"
 
-    def test_library_path_without_actor(self, service, project_repo):
+    def test_library_path_with_system_actor(self, service, project_repo):
         project_repo.save(project=_project(created_by="alice"))
 
-        updated = service.partial_update_project(project_id="p1", updates={"description": "d"})
+        updated = service.partial_update_project(project_id="p1", updates={"description": "d"}, actor=SYSTEM_ACTOR)
 
         assert updated.description == "d"
         assert updated.modified_by is None
+
+    def test_none_actor_fails_closed(self, service, project_repo):
+        project_repo.save(project=_project(created_by="alice"))
+
+        with pytest.raises(PermissionDeniedException):
+            service.partial_update_project(project_id="p1", updates={"description": "d"}, actor=None)  # type: ignore[arg-type]
 
 
 class TestDelete:
@@ -137,7 +148,7 @@ class TestDelete:
         assert "p1" not in project_repo.projects
         assert "theirs" not in flow_repo.flows
 
-    def test_cascade_calls_bulk_delete_with_actor_none(self, project_repo, flow_repo, job_stats_service, mocker, alice):
+    def test_cascade_calls_bulk_delete_with_actor(self, project_repo, flow_repo, job_stats_service, mocker, alice):
         flow_service = mocker.Mock(spec=FlowService)
         flow_service.bulk_delete_flows.return_value = {"total_failed": 0, "total_deleted": 1, "failed": []}
         service = ProjectService(
@@ -151,13 +162,19 @@ class TestDelete:
 
         service.delete_project(project_id="p1", actor=alice)
 
-        flow_service.bulk_delete_flows.assert_called_once_with(flow_ids=["f1"], actor=None)
+        flow_service.bulk_delete_flows.assert_called_once_with(flow_ids=["f1"], actor=alice)
 
-    def test_library_path_without_actor_ignores_ownership(self, service, project_repo, flow_repo):
+    def test_library_path_with_system_actor_ignores_ownership(self, service, project_repo, flow_repo):
         project_repo.save(project=_project(created_by="alice"))
         flow_repo.save(asset=make_flow(flow_id="theirs", created_by="bob", container_id="p1"))
 
-        service.delete_project(project_id="p1")
+        service.delete_project(project_id="p1", actor=SYSTEM_ACTOR)
 
         assert "p1" not in project_repo.projects
         assert "theirs" not in flow_repo.flows
+
+    def test_none_actor_fails_closed(self, service, project_repo):
+        project_repo.save(project=_project(created_by="alice"))
+
+        with pytest.raises(PermissionDeniedException):
+            service.delete_project(project_id="p1", actor=None)  # type: ignore[arg-type]

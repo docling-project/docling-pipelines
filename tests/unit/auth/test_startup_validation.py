@@ -197,15 +197,20 @@ class TestPlaceholderDetection:
 
 
 class TestApplicationImport:
-    """The app module must fail loudly at import when auth is enabled with a bad configuration."""
+    """The app must fail loudly during lifespan startup when auth is enabled with a bad configuration."""
 
     @staticmethod
-    def _import_app(*, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    def _run_app(*, env: dict[str, str], enter_lifespan: bool) -> subprocess.CompletedProcess[str]:
         child_env = {key: value for key, value in os.environ.items() if not key.startswith(("JWT_", "DOCPIPE_AUTH_"))}
         child_env.update(env)
         child_env["PYTHONPATH"] = str(_SRC_DIR)
+        script = (
+            "from fastapi.testclient import TestClient\nimport docpipe.api.main as m\nwith TestClient(m.app):\n    pass"
+            if enter_lifespan
+            else "import docpipe.api.main"
+        )
         return subprocess.run(  # nosec B603
-            [sys.executable, "-c", "import docpipe.api.main"],
+            [sys.executable, "-c", script],
             env=child_env,
             capture_output=True,
             text=True,
@@ -215,18 +220,27 @@ class TestApplicationImport:
         )
 
     def test_enabled_with_weak_secret_fails_to_start(self):
-        result = self._import_app(env={"DOCPIPE_AUTH_ENABLED": "true", "JWT_SECRET_KEY": "weak"})
+        result = self._run_app(
+            env={"DOCPIPE_AUTH_ENABLED": "true", "JWT_SECRET_KEY": "weak"},  # pragma: allowlist secret
+            enter_lifespan=True,
+        )
 
         assert result.returncode != 0
         assert "ConfigurationError" in result.stderr
         assert "JWT_SECRET_KEY must be set to a value of at least 32 characters" in result.stderr
 
     def test_enabled_with_strong_secret_starts(self):
-        result = self._import_app(env={"DOCPIPE_AUTH_ENABLED": "true", "JWT_SECRET_KEY": _STRONG_SECRET})
+        result = self._run_app(
+            env={"DOCPIPE_AUTH_ENABLED": "true", "JWT_SECRET_KEY": _STRONG_SECRET},
+            enter_lifespan=False,
+        )
 
         assert result.returncode == 0, result.stderr
 
     def test_disabled_without_secret_starts(self):
-        result = self._import_app(env={"DOCPIPE_AUTH_ENABLED": "false"})
+        result = self._run_app(
+            env={"DOCPIPE_AUTH_ENABLED": "false"},
+            enter_lifespan=False,
+        )
 
         assert result.returncode == 0, result.stderr

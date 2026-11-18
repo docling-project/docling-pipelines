@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.core.projects.application.services.project_service import ProjectService
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.exceptions.docpipe_exceptions import (
@@ -32,7 +33,7 @@ class TestProjectServiceCreate:
             job_stats_service=mock_job_stats_service,
         )
 
-        result = service.create_project(project=sample_project)
+        result = service.create_project(project=sample_project, actor=SYSTEM_ACTOR)
 
         assert result.project_id == sample_project.project_id
         assert result.flow_count == 0
@@ -53,7 +54,7 @@ class TestProjectServiceCreate:
             job_stats_service=mock_job_stats_service,
         )
 
-        result = service.create_project(project=sample_project)
+        result = service.create_project(project=sample_project, actor=SYSTEM_ACTOR)
 
         assert result.flow_count == 0
 
@@ -70,7 +71,7 @@ class TestProjectServiceCreate:
         )
 
         with pytest.raises(ProjectAlreadyExistsException):
-            service.create_project(project=sample_project)
+            service.create_project(project=sample_project, actor=SYSTEM_ACTOR)
 
         mock_project_repository.save.assert_not_called()
 
@@ -87,7 +88,7 @@ class TestProjectServiceCreate:
         blank = Project(name="   ")
 
         with pytest.raises(ProjectInvalidDataException):
-            service.create_project(project=blank)
+            service.create_project(project=blank, actor=SYSTEM_ACTOR)
 
         mock_project_repository.exists_by_name.assert_not_called()
         mock_project_repository.save.assert_not_called()
@@ -105,7 +106,7 @@ class TestProjectServiceCreate:
         too_long = Project(name="x" * 256)
 
         with pytest.raises(ProjectInvalidDataException):
-            service.create_project(project=too_long)
+            service.create_project(project=too_long, actor=SYSTEM_ACTOR)
 
     def test_create_project_duplicate_logs_warning(
         self, mock_project_repository, mock_flow_repository, mock_flow_service, mock_job_stats_service, sample_project
@@ -121,7 +122,7 @@ class TestProjectServiceCreate:
 
         with patch("docpipe.core.projects.application.services.project_service.logger") as mock_log:
             with pytest.raises(ProjectAlreadyExistsException):
-                service.create_project(project=sample_project)
+                service.create_project(project=sample_project, actor=SYSTEM_ACTOR)
             mock_log.warning.assert_called_once()
 
 
@@ -353,7 +354,7 @@ class TestProjectServiceUpdate:
             job_stats_service=mock_job_stats_service,
         )
 
-        result = service.update_project(project=sample_project)
+        result = service.update_project(project=sample_project, actor=SYSTEM_ACTOR)
 
         assert result.project_id == sample_project.project_id
         mock_project_repository.update.assert_called_once_with(project=sample_project)
@@ -371,7 +372,7 @@ class TestProjectServiceUpdate:
         )
 
         with pytest.raises(ProjectNotFoundException):
-            service.update_project(project=sample_project)
+            service.update_project(project=sample_project, actor=SYSTEM_ACTOR)
 
         mock_project_repository.update.assert_not_called()
 
@@ -395,6 +396,7 @@ class TestProjectServicePartialUpdate:
         result = service.partial_update_project(
             project_id=sample_project.project_id,
             updates={"name": "Renamed Project", "description": "New desc"},
+            actor=SYSTEM_ACTOR,
         )
 
         assert result is not None
@@ -416,6 +418,7 @@ class TestProjectServicePartialUpdate:
         result = service.partial_update_project(
             project_id=sample_project.project_id,
             updates={"project_id": "evil-id", "created_by": "hacker", "name": "Safe Update"},
+            actor=SYSTEM_ACTOR,
         )
 
         # project_id must not have changed
@@ -435,7 +438,9 @@ class TestProjectServicePartialUpdate:
         )
 
         with pytest.raises(ProjectInvalidDataException):
-            service.partial_update_project(project_id=sample_project.project_id, updates={"name": ""})
+            service.partial_update_project(
+                project_id=sample_project.project_id, updates={"name": ""}, actor=SYSTEM_ACTOR
+            )
 
         mock_project_repository.update.assert_not_called()
 
@@ -452,7 +457,7 @@ class TestProjectServicePartialUpdate:
         )
 
         with pytest.raises(ProjectNotFoundException):
-            service.partial_update_project(project_id="no-such-id", updates={"name": "X"})
+            service.partial_update_project(project_id="no-such-id", updates={"name": "X"}, actor=SYSTEM_ACTOR)
 
 
 class TestProjectServiceDelete:
@@ -470,7 +475,7 @@ class TestProjectServiceDelete:
             job_stats_service=mock_job_stats_service,
         )
 
-        service.delete_project(project_id=sample_project.project_id)
+        service.delete_project(project_id=sample_project.project_id, actor=SYSTEM_ACTOR)
 
         mock_project_repository.delete.assert_called_once_with(project_id=sample_project.project_id)
 
@@ -487,7 +492,7 @@ class TestProjectServiceDelete:
         )
 
         with pytest.raises(ProjectNotFoundException):
-            service.delete_project(project_id="missing-id")
+            service.delete_project(project_id="missing-id", actor=SYSTEM_ACTOR)
 
         mock_project_repository.delete.assert_not_called()
 
@@ -517,9 +522,11 @@ class TestProjectServiceDelete:
             job_stats_service=mock_job_stats_service,
         )
 
-        service.delete_project(project_id=sample_project.project_id)
+        service.delete_project(project_id=sample_project.project_id, actor=SYSTEM_ACTOR)
 
-        mock_flow_service.bulk_delete_flows.assert_called_once_with(flow_ids=[flow_for_project.asset_id], actor=None)
+        mock_flow_service.bulk_delete_flows.assert_called_once_with(
+            flow_ids=[flow_for_project.asset_id], actor=SYSTEM_ACTOR
+        )
         mock_project_repository.delete.assert_called_once_with(project_id=sample_project.project_id)
 
     def test_delete_no_flows_skips_bulk_delete(
@@ -535,7 +542,7 @@ class TestProjectServiceDelete:
             job_stats_service=mock_job_stats_service,
         )
 
-        service.delete_project(project_id=sample_project.project_id)
+        service.delete_project(project_id=sample_project.project_id, actor=SYSTEM_ACTOR)
 
         mock_flow_service.bulk_delete_flows.assert_not_called()
         mock_project_repository.delete.assert_called_once_with(project_id=sample_project.project_id)

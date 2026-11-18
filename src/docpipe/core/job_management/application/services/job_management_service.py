@@ -24,13 +24,14 @@ from docpipe.core.constants.constants import (
 from docpipe.core.job_management.domain.models import JobStats
 from docpipe.core.job_management.domain.ports import JobRunManager, JobStatsService
 from docpipe.core.models.actor_context import ActorContext
-from docpipe.core.models.ownership import ensure_can_modify
+from docpipe.core.models.ownership import PERMISSION_DENIED_MESSAGE, ensure_can_modify
 from docpipe.core.models.session_info import SessionInfo, get_session_info, set_session_info
 from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
     FlowValidationException,
     JobRunNotFoundException,
+    PermissionDeniedException,
 )
 from docpipe.utils.infrastructure.audit import audited
 from docpipe.utils.infrastructure.logging import get_logger
@@ -131,7 +132,7 @@ class JobManagementService:
         target=lambda a: str(a["request_body"].entity.job.asset_ref),
         result_target=lambda r: str(r.get("job_run_id")),
     )
-    def create_job_run_from_request(self, *, request_body: Any, actor: ActorContext | None = None) -> dict[str, Any]:
+    def create_job_run_from_request(self, *, request_body: Any, actor: ActorContext) -> dict[str, Any]:
         """
         Create and start a new job run from API request body.
 
@@ -140,9 +141,9 @@ class JobManagementService:
 
         Args:
             request_body: JobsAPIExecuteModel containing job and job_run configuration
-            actor: Caller identity. When present, the job run's ``user_id`` is the caller's
-                username, overriding any client-supplied ``user_id``. When None the
-                request's ``user_id`` (or None) is used.
+            actor: Caller identity. For non-system actors, the job run's ``user_id`` is the
+                caller's username, overriding any client-supplied ``user_id``. For
+                ``SYSTEM_ACTOR`` the request's ``user_id`` (or None) is used.
 
         Returns:
             dict containing at minimum ``job_id`` and ``job_run_id``.
@@ -150,7 +151,15 @@ class JobManagementService:
 
         Raises:
             JobRunOperationFailedException: If required fields are missing or invalid
+            PermissionDeniedException: If ``actor`` is not a valid ``ActorContext``.
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="job_run.create",
+                target="-",
+            )
+
         # Extract job and job_run from request
         job = request_body.entity.job
         job_run = request_body.entity.job_run
@@ -173,7 +182,7 @@ class JobManagementService:
         if job_run_config_model:
             user_id = job_run_config_model.user_id
             metadata = dict(job_run_config_model.metadata)
-        if actor is not None:
+        if not actor.is_system:
             user_id = actor.username
             flow_config[DocpipeConstants.USER_ID] = actor.username
 
@@ -279,16 +288,22 @@ class JobManagementService:
         """
         return self.job_stats_service.get_job_run_stats(job_run_id=job_run_id)
 
-    def _ensure_actor_owns_job_run(self, *, job_run_id: str, actor: ActorContext | None, action: str) -> None:
+    def _ensure_actor_owns_job_run(self, *, job_run_id: str, actor: ActorContext, action: str) -> None:
         """Verify ``actor`` may modify the job run, fetching its stats first.
 
-        Does nothing when ``actor`` is None (CLI / library / internal callers).
+        Does nothing when ``actor`` is ``SYSTEM_ACTOR`` (CLI / library / internal callers).
 
         Raises:
             JobRunNotFoundException: If the job run does not exist.
             PermissionDeniedException: If the actor may not modify the job run.
         """
-        if actor is None:
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action=action,
+                target=job_run_id,
+            )
+        if actor.is_system:
             return
         job_stats = self.job_stats_service.get_job_run_stats(job_run_id=job_run_id)
         if job_stats is None:
@@ -296,14 +311,14 @@ class JobManagementService:
         ensure_can_modify(actor=actor, owner=job_stats.user_id, action=action, target=job_run_id)
 
     @audited(action="job_run.cancel", target=lambda a: str(a["job_run_id"]))
-    def cancel_job_run(self, *, job_run_id: str, actor: ActorContext | None = None) -> None:
+    def cancel_job_run(self, *, job_run_id: str, actor: ActorContext) -> None:
         """
         Request cancellation of a job run.
 
         Args:
             job_run_id: Job run identifier
-            actor: Caller identity. When present, only the run's creator, an admin, or any
-                editor (for runs with no ``user_id``) may cancel.
+            actor: Caller identity. Only the run's creator, an admin, ``SYSTEM_ACTOR``,
+                or any editor (for runs with no ``user_id``) may cancel.
 
         Raises:
             PermissionDeniedException: If ``actor`` may not cancel the job run.
@@ -319,14 +334,14 @@ class JobManagementService:
         logger.info("Requested cancellation: job_run_id=%s", job_run_id)
 
     @audited(action="job_run.delete", target=lambda a: str(a["job_run_id"]))
-    def delete_job_run(self, *, job_run_id: str, actor: ActorContext | None = None) -> None:
+    def delete_job_run(self, *, job_run_id: str, actor: ActorContext) -> None:
         """
         Delete a job run and its statistics.
 
         Args:
             job_run_id: Job run identifier
-            actor: Caller identity. When present, only the run's creator, an admin, or any
-                editor (for runs with no ``user_id``) may delete.
+            actor: Caller identity. Only the run's creator, an admin, ``SYSTEM_ACTOR``,
+                or any editor (for runs with no ``user_id``) may delete.
 
         Raises:
             PermissionDeniedException: If ``actor`` may not delete the job run.

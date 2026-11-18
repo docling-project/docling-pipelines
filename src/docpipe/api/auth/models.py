@@ -47,7 +47,9 @@ class User(BaseModel):
     roles: list[Role] = Field(default_factory=lambda: [Role.VIEWER], description="Roles held by the user")
 
 
-class LoginResponse(TokenResponse):
+class LoginResponse(BaseModel):
     """Login response: the token for script clients plus the authenticated user."""
 
+    access_token: str | None = Field(default=None, description="JWT access token (omitted for browser clients)")
+    token_type: str = Field(default="bearer", description="Token type")
     user: User = Field(..., description="Authenticated user, including roles")

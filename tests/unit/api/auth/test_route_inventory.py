@@ -9,12 +9,15 @@ fails when a route was added without the session dependency, without a matrix en
 with a role guard that differs from the matrix.
 """
 
+import ast
 import inspect
+import textwrap
 from collections.abc import Iterable
 
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 
+from docpipe.api.auth.actor import get_actor_context
 from docpipe.api.auth.dependencies import require_session
 from docpipe.api.auth.guards import require_role
 from docpipe.api.auth.roles import Role
@@ -196,6 +199,48 @@ def test_no_api_route_exists_for_an_exempt_docs_path():
     }
 
     assert api_paths.isdisjoint(EXEMPT_NON_API_ROUTE_PATHS)
+
+
+_OWNERSHIP_PREFIXES = ("/api/v1/flows", "/api/v1/projects", "/api/v1/job_runs")
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _endpoint_passes_actor_kwarg(endpoint: object) -> bool:
+    """Return True if the endpoint AST passes ``actor=...`` to a service call."""
+    source = textwrap.dedent(inspect.getsource(endpoint))  # type: ignore[arg-type]
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg == "actor":
+                    return True
+    return False
+
+
+def test_every_mutating_ownership_route_declares_get_actor_context_and_passes_actor():
+    violations: list[str] = []
+    checked = 0
+    for context in iter_route_contexts(real_app.routes):
+        if not isinstance(context.original_route, APIRoute):
+            continue
+        path = context.path or ""
+        if not path.startswith(_OWNERSHIP_PREFIXES):
+            continue
+        methods = (context.methods or set()) & _MUTATING_METHODS
+        if not methods:
+            continue
+        checked += 1
+        dependant = context.original_route.dependant
+        has_actor_dep = any(dep.call is get_actor_context for dep in dependant.dependencies)
+        passes_actor = _endpoint_passes_actor_kwarg(context.original_route.endpoint)
+        for method in sorted(methods):
+            if not has_actor_dep:
+                violations.append(f"{method} {path}: does not declare actor via get_actor_context")
+            if not passes_actor:
+                violations.append(f"{method} {path}: does not pass actor= to service")
+
+    assert checked > 0
+    assert violations == []
 
 
 # --- The inventory can fail ------------------------------------------------------------

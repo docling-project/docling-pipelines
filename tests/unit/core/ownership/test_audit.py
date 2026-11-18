@@ -7,6 +7,7 @@ import logging
 
 import pytest
 
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.core.projects.application.services.project_service import ProjectService
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.exceptions.docpipe_exceptions import FlowNotFoundException, PermissionDeniedException
@@ -88,7 +89,7 @@ def test_newline_in_username_is_removed(flow_service, audit_handler):
 
 
 def test_library_path_is_audited_without_user(flow_service, audit_handler):
-    flow_service.create_flow(flow=make_flow(flow_id="f1"))
+    flow_service.create_flow(flow=make_flow(flow_id="f1"), actor=SYSTEM_ACTOR)
 
     assert _audit_lines(audit_handler)[0].startswith("AUDIT user=- action=flow.create")
 

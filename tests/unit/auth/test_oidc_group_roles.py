@@ -142,9 +142,15 @@ class TestGoogleProvider:
     @pytest.mark.asyncio
     async def test_google_sends_no_group_claim_so_user_is_viewer(self):
         provider = GoogleOAuth2Provider(GoogleOAuth2Config(oauth2_enabled=True, oauth2_client_id="c"))
-        payload = {"email": "u@gmail.com", "name": "U"}
+        payload = {"sub": "google-sub", "email": "u@gmail.com", "name": "U"}
 
         assert await _extract(provider, payload) == [Role.VIEWER]
+
+    @pytest.mark.asyncio
+    async def test_google_email_fallback_requires_email_verified(self):
+        provider = GoogleOAuth2Provider(GoogleOAuth2Config(oauth2_enabled=True, oauth2_client_id="c"))
+        with pytest.raises(ExternalServiceError, match="email_verified"):
+            await _extract(provider, {"email": "u@gmail.com", "name": "U", "email_verified": False})
 
 
 class TestConfigurationAndSafety:
