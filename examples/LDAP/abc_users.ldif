@@ -17,8 +17,7 @@ sn: Baker
 givenName: Alice
 ou: editors
 uid: alice
-# pragma: allowlist nextline secret
-userPassword: Password123!
+userPassword: ${TEST_USER_PASSWORD}
 uidNumber: 1003
 gidNumber: 1003
 homeDirectory: /home/alice
@@ -33,8 +32,7 @@ sn: Brown
 givenName: Charlie
 ou: viewers
 uid: charlie
-# pragma: allowlist nextline secret
-userPassword: Password123!
+userPassword: ${TEST_USER_PASSWORD}
 uidNumber: 1002
 gidNumber: 1002
 homeDirectory: /home/charlie
