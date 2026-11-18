@@ -12,8 +12,10 @@ from typing import Any
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.operator_metadata import OperatorMetadata
-from docpipe.core.orchestration.feature_propagation import feature_merge
-from docpipe.core.orchestration.feature_propagation.feature_merge import disambiguate_features
+from docpipe.core.orchestration.feature_propagation.feature_merge import (
+    disambiguate_features,
+)
+from docpipe.core.orchestration.feature_propagation.feature_merge import merge_features as _merge_features
 from docpipe.core.orchestration.feature_propagation.models import (
     FeatureMetadata,
     FeaturePropagationResult,
@@ -398,7 +400,7 @@ class FeaturePropagator:
     ) -> dict[str, FeatureMetadata]:
         """Merge features from multiple parent results using runtime merge semantics.
 
-        Thin delegate to :func:`feature_merge.merge_features`, kept so existing callers
+        Thin delegate to :func:`~docpipe.core.orchestration.feature_propagation.feature_merge.merge_features`, kept so existing callers
         (``FlowEnrichmentService``) continue to work. See that function for the merge rules.
 
         Args:
@@ -410,7 +412,7 @@ class FeaturePropagator:
         Returns:
             Dict mapping feature names to FeatureMetadata after the merge.
         """
-        return feature_merge.merge_features(
+        return _merge_features(
             parent_results=parent_results,
             merge_type=merge_type,
             column_option=column_option,
