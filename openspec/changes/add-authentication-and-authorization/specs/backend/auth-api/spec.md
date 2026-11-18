@@ -117,10 +117,14 @@ Cookie-authenticated requests using `POST`, `PUT`, `PATCH` or `DELETE` SHALL inc
 - **THEN** the request is processed normally
 
 ### Requirement: Login
-`POST /auth/login` SHALL validate credentials through the configured authenticators, and on success SHALL set the session cookie and return the `access_token` (for API and script clients) together with the authenticated `user` and `roles`. Failure SHALL return 401 with a generic "Invalid credentials" message that does not reveal whether the username exists.
+`POST /auth/login` SHALL validate credentials through the configured authenticators, and on success SHALL set the session cookie and return the authenticated `user` and `roles`. It SHALL omit `access_token` from the JSON response body for browser requests (when `X-Requested-With` is present), returning `access_token` only to non-browser clients. Failure SHALL return 401 with a generic "Invalid credentials" message that does not reveal whether the username exists.
 
-#### Scenario: Successful login sets cookie and returns user and token
-- **WHEN** valid credentials are posted to `/auth/login`
+#### Scenario: Browser login omits access_token from JSON body
+- **WHEN** valid credentials are posted to `/auth/login` with `X-Requested-With` present
+- **THEN** the response is 200 with `user` (including `roles`) and a `Set-Cookie` header, and the JSON body omits `access_token`
+
+#### Scenario: Non-browser login returns access_token and user
+- **WHEN** valid credentials are posted to `/auth/login` without `X-Requested-With`
 - **THEN** the response is 200 with `access_token` and `user` (including `roles`), and a `Set-Cookie` header for the session
 
 #### Scenario: Wrong password
@@ -130,6 +134,17 @@ Cookie-authenticated requests using `POST`, `PUT`, `PATCH` or `DELETE` SHALL inc
 #### Scenario: No login method configured
 - **WHEN** no LDAP configuration and no bootstrap administrator are configured
 - **THEN** `POST /auth/login` returns 503 and `GET /auth/config` reports no credential login
+
+### Requirement: Provider-prefixed canonical identities
+Authenticated principals SHALL use provider-prefixed canonical usernames (`ldap:<uid>`, `oidc:<provider>:<sub>`, `bootstrap:<username>`) in the JWT, `ActorContext`, ownership fields (`created_by`, `modified_by`, `user_id`), and `GET /auth/me` so identities cannot collide across providers. When an OIDC provider falls back to an `email` claim for the subject identifier, the callback SHALL require `email_verified` to be `true` and reject unverified emails.
+
+#### Scenario: Provider prefix prevents cross-provider collision
+- **WHEN** user `alice` authenticates via LDAP and another `alice` via bootstrap
+- **THEN** their canonical usernames are `ldap:alice` and `bootstrap:alice` respectively
+
+#### Scenario: OIDC email fallback requires email_verified
+- **WHEN** an OIDC token relies on the `email` claim as identifier and `email_verified` is not `true`
+- **THEN** authentication is rejected with 401 and no session cookie is set
 
 ### Requirement: Bootstrap administrator
 A local administrator login SHALL be available when both `DOCPIPE_AUTH_BOOTSTRAP_USERNAME` and `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH` (a bcrypt hash) are set in the environment. It SHALL always grant the `admin` role and SHALL stay available when LDAP or OIDC is configured, as a break-glass login. Every successful bootstrap login SHALL be written to the audit log.
@@ -215,23 +230,19 @@ The callback SHALL prefix `/ui` when the relative `return_to` path does not alre
 - **WHEN** `return_to` is `https://evil.example/`
 - **THEN** the redirect goes to `/ui/projects`
 
-### Requirement: OIDC login binds to the browser
-`/auth/oauth2/authorize` SHALL set a short-lived `HttpOnly` nonce cookie and tie the stored `state` to it. The callback SHALL reject a request whose nonce cookie is missing or does not match, so that an attacker cannot complete a login in a victim's browser. The `state` store is in-memory and per process, and the setup guide SHALL state that limit.
+### Requirement: OIDC login binds to the browser and uses PKCE
+`/auth/oauth2/authorize` SHALL generate a PKCE `code_verifier` (`S256` `code_challenge`), an OIDC `nonce`, and a short-lived `HttpOnly` browser cookie bound to the stored `state`. The callback SHALL exchange the authorization code with `code_verifier`, verify the ID-token `nonce` claim, and reject a request whose browser cookie or ID-token `nonce` is missing or mismatched. The `state` store is in-memory and per process, and the setup guide SHALL state that limit.
 
-#### Scenario: Matching nonce
-- **WHEN** the callback arrives with the nonce cookie that `authorize` set
-- **THEN** the login completes
+#### Scenario: Matching browser cookie, PKCE and ID-token nonce
+- **WHEN** the callback arrives with the browser cookie that `authorize` set and the ID-token `nonce` matches
+- **THEN** the authorization code is exchanged with PKCE `code_verifier` and the login completes
 
-#### Scenario: Missing nonce
-- **WHEN** the callback arrives with a valid `state` but no nonce cookie
+#### Scenario: Missing browser cookie or mismatched ID-token nonce
+- **WHEN** the callback arrives with a missing or mismatched browser cookie or an invalid ID-token `nonce`
 - **THEN** the response is 400 and no session cookie is set
 
-#### Scenario: Mismatched nonce
-- **WHEN** the callback arrives with a nonce cookie that does not match the stored one
-- **THEN** the response is 400 and no session cookie is set
-
-### Requirement: Login throttling
-`POST /auth/login` SHALL allow at most 5 failed attempts per client address per minute and SHALL lock the pair of client address and username for 5 minutes after 5 consecutive failures. Throttled responses SHALL be 429 with a `Retry-After` header. Successful logins SHALL NOT count toward the limit.
+### Requirement: Login throttling and LDAP bind limits
+`POST /auth/login` SHALL allow at most 5 failed attempts per client address per minute and SHALL lock the pair of client address and username for 5 minutes after 5 consecutive failures. Throttled responses SHALL be 429 with a `Retry-After` header. Successful logins SHALL NOT count toward the limit. Rate-limiter state and concurrent LDAP bind limits are enforced per process, and the setup guide SHALL document these per-process limits.
 
 #### Scenario: Address limit
 - **WHEN** one address makes a sixth failed attempt within a minute
@@ -246,15 +257,19 @@ The callback SHALL prefix `/ui` when the relative `return_to` path does not alre
 - **THEN** the same user can still log in from another address
 
 ### Requirement: Client address for throttling
-The client address SHALL be the TCP peer address by default. When `DOCPIPE_TRUST_PROXY_HEADERS=true` it SHALL be the rightmost `X-Forwarded-For` entry, which is the address the trusted proxy observed. Earlier entries come from the client and SHALL be ignored. Operators SHALL set the flag only when the API sits behind exactly one ingress or load balancer that appends to the header, and the setup guide SHALL say so.
+The client address SHALL be the TCP peer address by default. When `DOCPIPE_TRUST_PROXY_HEADERS=true`, it SHALL select the `X-Forwarded-For` entry `DOCPIPE_TRUSTED_PROXY_COUNT` hops from the right (defaulting to `1`, the address observed by the innermost trusted proxy), ignoring earlier client-supplied entries. Operators SHALL configure `DOCPIPE_TRUSTED_PROXY_COUNT` to match their trusted ingress hop count, and the setup guide SHALL document this.
 
 #### Scenario: Peer address by default
 - **WHEN** `DOCPIPE_TRUST_PROXY_HEADERS` is unset and `X-Forwarded-For` is present
 - **THEN** the TCP peer address is used
 
-#### Scenario: Forwarded address behind a trusted proxy
-- **WHEN** `DOCPIPE_TRUST_PROXY_HEADERS=true` and `X-Forwarded-For` is `spoofed, 203.0.113.9`
+#### Scenario: Forwarded address with default proxy hop count
+- **WHEN** `DOCPIPE_TRUST_PROXY_HEADERS=true`, `DOCPIPE_TRUSTED_PROXY_COUNT` is unset (`1`), and `X-Forwarded-For` is `spoofed, 203.0.113.9`
 - **THEN** `203.0.113.9` is used as the client address
+
+#### Scenario: Forwarded address behind multiple trusted proxies
+- **WHEN** `DOCPIPE_TRUST_PROXY_HEADERS=true`, `DOCPIPE_TRUSTED_PROXY_COUNT=2`, and `X-Forwarded-For` is `spoofed, 198.51.100.7, 10.0.0.2`
+- **THEN** `198.51.100.7` is used as the client address
 
 ### Requirement: Startup validation
 When auth is enabled the API SHALL fail to start unless `JWT_SECRET_KEY` is set, is not a placeholder and is at least 32 characters. It SHALL log a security warning when `CORS_ORIGINS` contains `*`.
@@ -267,9 +282,9 @@ When auth is enabled the API SHALL fail to start unless `JWT_SECRET_KEY` is set,
 - **WHEN** `DOCPIPE_AUTH_ENABLED=false` and no secret is set
 - **THEN** the API starts normally
 
-### Requirement: In-process internal callers need no credential
-Components that run inside the API process, such as event-triggered flow execution, SHALL call services with no `ActorContext` and SHALL NOT mint or send a system token.
+### Requirement: In-process internal callers use SYSTEM_ACTOR
+Components that run inside the API process, such as event-triggered flow execution, SHALL call services with `SYSTEM_ACTOR` and SHALL NOT mint or send a system token.
 
 #### Scenario: Event-triggered flow runs while auth is enabled
 - **WHEN** the event dispatch service executes a mapped flow while auth is enabled
-- **THEN** the flow runs without a bearer token and without an ownership check
+- **THEN** the flow runs with `SYSTEM_ACTOR` without a bearer token
