@@ -39,6 +39,7 @@ The Document Libraries module provides metadata management for organizing collec
 │  (Generic implementations in core/assets/common/)           │
 │  - DuckDBAssetRepository[DocumentLibrary]                   │
 │  - LocalAssetRepository[DocumentLibrary]                    │
+│  - PostgresAssetRepository[DocumentLibrary]                 │
 │  Created by AssetRepositoryFactory.create_repository()      │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -48,10 +49,6 @@ The Document Libraries module provides metadata management for organizing collec
 ```text
 src/docpipe/core/assets/document_libraries/
 ├── __init__.py
-├── adapters/
-│   ├── __init__.py
-│   └── duckdb/
-│       └── __init__.py                 # Notes only: DuckDBAssetRepository[DocumentLibrary] is used directly
 ├── application/
 │   ├── __init__.py
 │   └── services/
@@ -105,6 +102,7 @@ Document libraries do not have their own repository class. They use the generic
   `document_libraries` collection of a `KeyValueStoragePort` (DuckDB). The record contains
   the library's `document_set_ids`, so no separate junction table is needed.
 - `LocalAssetRepository[DocumentLibrary]` stores the same records as JSON files.
+- `PostgresAssetRepository[DocumentLibrary]` stores each library record in PostgreSQL.
 
 `AssetRepositoryFactory.create_repository(asset_type=DocumentLibrary)` selects the implementation
 from the `assets_management` section of `docling-pipelines-config.yaml` or from environment
