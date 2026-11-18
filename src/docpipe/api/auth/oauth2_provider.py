@@ -3,6 +3,8 @@
 
 """OAuth2 provider implementation with OIDC support."""
 
+import base64
+import hashlib
 import secrets
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
@@ -27,6 +29,14 @@ logger = get_logger(__name__)
 
 # Claims read for group membership when no claim is configured, in order.
 DEFAULT_GROUP_CLAIMS: tuple[str, ...] = ("groups", "roles")
+
+
+def generate_pkce_pair() -> tuple[str, str]:
+    """Generate an OAuth2 PKCE ``(code_verifier, code_challenge)`` pair using S256."""
+    code_verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return code_verifier, code_challenge
 
 
 def group_claim_names(*, config: OAuth2Config) -> tuple[str, ...]:
@@ -138,11 +148,19 @@ class OAuth2Provider(ABC):
             logger.error("Failed to fetch JWKS for %s: %s", self.get_provider_name(), e)
             raise ExternalServiceError(f"JWKS fetch failed: {e!s}") from e
 
-    def generate_authorization_url(self, state: str | None = None) -> tuple[str, str]:
+    def generate_authorization_url(
+        self,
+        state: str | None = None,
+        *,
+        code_challenge: str | None = None,
+        nonce: str | None = None,
+    ) -> tuple[str, str]:
         """Generate OAuth2 authorization URL.
 
         Args:
             state: Optional state parameter for CSRF protection
+            code_challenge: Optional PKCE S256 code challenge
+            nonce: Optional OIDC nonce parameter bound to the ID token
 
         Returns:
             Tuple of (authorization_url, state)
@@ -159,16 +177,27 @@ class OAuth2Provider(ABC):
             "scope": self.config.oauth2_scope,
             "state": state,
         }
+        if code_challenge:
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
+        if nonce:
+            params["nonce"] = nonce
 
         authorization_url = f"{auth_endpoint}?{urlencode(params)}"
         logger.debug("Generated authorization URL for %s", self.get_provider_name())
         return authorization_url, state
 
-    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
+    async def exchange_code_for_token(
+        self,
+        code: str,
+        *,
+        code_verifier: str | None = None,
+    ) -> dict[str, Any]:
         """Exchange authorization code for access token.
 
         Args:
             code: Authorization code from OAuth2 callback
+            code_verifier: Optional PKCE code verifier matching the authorization request
 
         Returns:
             Token response dictionary
@@ -185,6 +214,8 @@ class OAuth2Provider(ABC):
             "redirect_uri": self.config.oauth2_redirect_uri,
             "grant_type": "authorization_code",
         }
+        if code_verifier:
+            data["code_verifier"] = code_verifier
 
         try:
             async with httpx.AsyncClient() as client:
@@ -197,11 +228,12 @@ class OAuth2Provider(ABC):
             logger.error("Failed to exchange code for token with %s: %s", self.get_provider_name(), e)
             raise ExternalServiceError(f"Token exchange failed: {e!s}") from e
 
-    async def validate_id_token(self, id_token: str) -> dict[str, Any]:
+    async def validate_id_token(self, id_token: str, *, nonce: str | None = None) -> dict[str, Any]:
         """Validate OIDC ID token.
 
         Args:
             id_token: ID token to validate
+            nonce: Optional expected OIDC nonce claim
 
         Returns:
             Decoded token payload
@@ -231,6 +263,11 @@ class OAuth2Provider(ABC):
                 audience=self.config.oidc_audience or self.config.oauth2_client_id,
                 issuer=self.config.oidc_issuer,
             )
+
+            if nonce is not None:
+                token_nonce = payload.get("nonce")
+                if not isinstance(token_nonce, str) or not secrets.compare_digest(token_nonce, nonce):
+                    raise ExternalServiceError("ID token validation failed: invalid nonce")
 
             logger.info("Successfully validated ID token for %s", self.get_provider_name())
             return payload
@@ -313,9 +350,44 @@ class OAuth2Provider(ABC):
             )
         ]
 
+    def _resolve_oidc_username(
+        self,
+        *,
+        payload: dict[str, Any],
+        allow_preferred_username: bool = True,
+    ) -> str:
+        """Resolve the provider-prefixed canonical username ``oidc:<provider>:<sub>``.
+
+        Prefers the ``sub`` claim; falls back to ``preferred_username`` (when enabled for
+        the provider) and finally ``email`` only when ``email_verified`` is ``True``.
+        """
+        for raw_claim in ("sub", "preferred_username", "email"):
+            raw_val = payload.get(raw_claim)
+            if isinstance(raw_val, str) and is_reserved_username(raw_val):
+                logger.warning("Rejected an OIDC identity with a reserved username")
+                raise ExternalServiceError("Identity provider returned a reserved username")
+
+        sub = str(payload.get("sub") or "").strip()
+        if sub:
+            subject = sub
+        elif allow_preferred_username and str(payload.get("preferred_username") or "").strip():
+            subject = str(payload.get("preferred_username")).strip()
+        else:
+            email = str(payload.get("email") or "").strip()
+            if email:
+                if payload.get("email_verified") is not True:
+                    raise ExternalServiceError("OIDC email fallback requires email_verified=true")
+                subject = email
+            else:
+                subject = ""
+
+        if not subject:
+            return ""
+        return f"oidc:{self.get_provider_name()}:{subject}"
+
     @staticmethod
     def reject_reserved_username(*, user: User) -> User:
-        """Refuse an identity whose username is the reserved local principal name.
+        """Refuse an identity whose username is a reserved principal name.
 
         Args:
             user: User extracted from the provider response.
@@ -332,11 +404,17 @@ class OAuth2Provider(ABC):
         return user
 
     @abstractmethod
-    async def extract_user_from_token(self, token_data: dict[str, Any]) -> User:
+    async def extract_user_from_token(
+        self,
+        token_data: dict[str, Any],
+        *,
+        nonce: str | None = None,
+    ) -> User:
         """Extract user information from token data.
 
         Args:
             token_data: Token response data
+            nonce: Optional expected OIDC nonce claim
 
         Returns:
             User object
@@ -351,17 +429,27 @@ class GoogleOAuth2Provider(OAuth2Provider):
         """Get provider name."""
         return "google"
 
-    async def extract_user_from_token(self, token_data: dict[str, Any]) -> User:
+    async def extract_user_from_token(
+        self,
+        token_data: dict[str, Any],
+        *,
+        nonce: str | None = None,
+    ) -> User:
         """Extract user from Google token data."""
         id_token = token_data.get("id_token")
         if not id_token:
             raise ExternalServiceError("No ID token in response")
 
-        payload = await self.validate_id_token(id_token)
+        payload = (
+            await self.validate_id_token(id_token, nonce=nonce)
+            if nonce is not None
+            else await self.validate_id_token(id_token)
+        )
+        username = self._resolve_oidc_username(payload=payload, allow_preferred_username=False)
 
         return self.reject_reserved_username(
             user=User(
-                username=payload.get("email", ""),
+                username=username,
                 email=payload.get("email", ""),
                 full_name=payload.get("name", ""),
                 roles=self.resolve_roles(claims=payload),
@@ -376,17 +464,27 @@ class AzureADOAuth2Provider(OAuth2Provider):
         """Get provider name."""
         return "azure"
 
-    async def extract_user_from_token(self, token_data: dict[str, Any]) -> User:
+    async def extract_user_from_token(
+        self,
+        token_data: dict[str, Any],
+        *,
+        nonce: str | None = None,
+    ) -> User:
         """Extract user from Azure AD token data."""
         id_token = token_data.get("id_token")
         if not id_token:
             raise ExternalServiceError("No ID token in response")
 
-        payload = await self.validate_id_token(id_token)
+        payload = (
+            await self.validate_id_token(id_token, nonce=nonce)
+            if nonce is not None
+            else await self.validate_id_token(id_token)
+        )
+        username = self._resolve_oidc_username(payload=payload, allow_preferred_username=True)
 
         return self.reject_reserved_username(
             user=User(
-                username=payload.get("preferred_username", payload.get("email", "")),
+                username=username,
                 email=payload.get("email", payload.get("preferred_username", "")),
                 full_name=payload.get("name", ""),
                 roles=self.resolve_roles(claims=payload),
@@ -401,19 +499,28 @@ class GenericOIDCProvider(OAuth2Provider):
         """Get provider name."""
         return "generic"
 
-    async def extract_user_from_token(self, token_data: dict[str, Any]) -> User:
+    async def extract_user_from_token(
+        self,
+        token_data: dict[str, Any],
+        *,
+        nonce: str | None = None,
+    ) -> User:
         """Extract user from generic OIDC token data."""
         id_token = token_data.get("id_token")
         access_token = token_data.get("access_token")
 
         if id_token:
-            payload = await self.validate_id_token(id_token)
+            payload = (
+                await self.validate_id_token(id_token, nonce=nonce)
+                if nonce is not None
+                else await self.validate_id_token(id_token)
+            )
         elif access_token:
             payload = await self.get_user_info(access_token)
         else:
             raise ExternalServiceError("No ID token or access token in response")
 
-        username = payload.get("preferred_username") or payload.get("email") or payload.get("sub") or ""
+        username = self._resolve_oidc_username(payload=payload, allow_preferred_username=True)
         email = payload.get("email", "")
         full_name = payload.get("name", "")
 

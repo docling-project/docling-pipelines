@@ -13,6 +13,7 @@ from dataclasses import dataclass
 ROLE_VIEWER = "viewer"
 ROLE_EDITOR = "editor"
 ROLE_ADMIN = "admin"
+SYSTEM_USERNAME = "<system>"
 
 
 @dataclass(frozen=True)
@@ -22,29 +23,37 @@ class ActorContext:
     Attributes:
         username: Authenticated username, compared with ``created_by`` / ``user_id``.
         roles: Role names held by the caller (``viewer``, ``editor``, ``admin``).
+        is_system: True for internal / non-API callers (CLI, library, event dispatch).
     """
 
     username: str
     roles: frozenset[str] = frozenset()
+    is_system: bool = False
 
 
-def can_modify(*, actor: ActorContext | None, owner: str | None) -> bool:
+SYSTEM_ACTOR = ActorContext(username=SYSTEM_USERNAME, roles=frozenset({ROLE_ADMIN}), is_system=True)
+
+
+def can_modify(*, actor: ActorContext, owner: str | None) -> bool:
     """Decide whether ``actor`` may update or delete an asset owned by ``owner``.
 
     Rules:
-        - ``actor is None`` (CLI, library, internal callers) is always allowed.
+        - ``actor`` must be an ``ActorContext`` instance (fails closed otherwise).
+        - ``actor.is_system`` (CLI, library, internal callers) is always allowed.
         - ``admin`` may modify anything.
         - ``editor`` may modify assets it owns, and assets with no owner.
         - Anyone else (``viewer`` or no role) may not modify anything.
 
     Args:
-        actor: The caller, or ``None`` for non-API callers.
+        actor: The caller identity (required; no ``None`` bypass).
         owner: The asset's owner (``created_by`` / ``user_id``); empty or ``None`` means ownerless.
 
     Returns:
         True when the modification is allowed.
     """
-    if actor is None:
+    if not isinstance(actor, ActorContext):
+        return False
+    if actor.is_system:
         return True
     if ROLE_ADMIN in actor.roles:
         return True

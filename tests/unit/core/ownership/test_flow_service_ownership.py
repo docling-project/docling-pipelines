@@ -5,6 +5,7 @@
 
 import pytest
 
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.core.models.ownership import PERMISSION_DENIED_MESSAGE
 from docpipe.exceptions.docpipe_exceptions import PermissionDeniedException
 from tests.unit.core.ownership.conftest import make_flow
@@ -25,10 +26,14 @@ class TestCreate:
 
         assert created.created_by == "alice"
 
-    def test_no_actor_leaves_created_by_empty(self, flow_service):
-        created = flow_service.create_flow(flow=make_flow(flow_id="f1"))
+    def test_system_actor_leaves_created_by_empty(self, flow_service):
+        created = flow_service.create_flow(flow=make_flow(flow_id="f1"), actor=SYSTEM_ACTOR)
 
         assert created.created_by is None
+
+    def test_none_actor_fails_closed(self, flow_service):
+        with pytest.raises(PermissionDeniedException):
+            flow_service.create_flow(flow=make_flow(flow_id="f1"), actor=None)  # type: ignore[arg-type]
 
 
 class TestUpdate:
@@ -80,13 +85,19 @@ class TestUpdate:
         with pytest.raises(PermissionDeniedException):
             flow_service.update_flow(make_flow(flow_id="f1"), actor=viewer)
 
-    def test_no_actor_updates_regardless_of_owner(self, flow_service, flow_repo):
+    def test_system_actor_updates_regardless_of_owner(self, flow_service, flow_repo):
         flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
 
-        updated = flow_service.update_flow(make_flow(flow_id="f1"))
+        updated = flow_service.update_flow(make_flow(flow_id="f1"), actor=SYSTEM_ACTOR)
 
         assert updated.created_by == "alice"
         assert updated.modified_by is None
+
+    def test_none_actor_fails_closed(self, flow_service, flow_repo):
+        flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
+
+        with pytest.raises(PermissionDeniedException):
+            flow_service.update_flow(make_flow(flow_id="f1"), actor=None)  # type: ignore[arg-type]
 
 
 class TestPartialUpdate:
@@ -106,12 +117,18 @@ class TestPartialUpdate:
 
         assert flow_repo.flows["f1"].description != "x"
 
-    def test_no_actor_keeps_library_behaviour(self, flow_service, flow_repo):
+    def test_system_actor_keeps_library_behaviour(self, flow_service, flow_repo):
         flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
 
-        updated = flow_service.partial_update_flow("f1", {"description": "x"})
+        updated = flow_service.partial_update_flow("f1", {"description": "x"}, actor=SYSTEM_ACTOR)
 
         assert updated.description == "x"
+
+    def test_none_actor_fails_closed(self, flow_service, flow_repo):
+        flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
+
+        with pytest.raises(PermissionDeniedException):
+            flow_service.partial_update_flow("f1", {"description": "x"}, actor=None)  # type: ignore[arg-type]
 
 
 class TestDelete:
@@ -135,11 +152,17 @@ class TestDelete:
 
         assert flow_service.delete_flow("f1", actor=admin) is True
 
-    def test_library_path_without_actor_deletes_owned_flow(self, flow_service, flow_repo):
+    def test_library_path_with_system_actor_deletes_owned_flow(self, flow_service, flow_repo):
         flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
 
-        assert flow_service.delete_flow("f1") is True
+        assert flow_service.delete_flow("f1", actor=SYSTEM_ACTOR) is True
         assert "f1" not in flow_repo.flows
+
+    def test_none_actor_fails_closed(self, flow_service, flow_repo):
+        flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
+
+        with pytest.raises(PermissionDeniedException):
+            flow_service.delete_flow("f1", actor=None)  # type: ignore[arg-type]
 
 
 class TestBulkDelete:
@@ -167,14 +190,20 @@ class TestBulkDelete:
         assert result["total_failed"] == 1
         assert "f1" in flow_repo.flows
 
-    def test_no_actor_deletes_everything(self, flow_service, flow_repo):
+    def test_system_actor_deletes_everything(self, flow_service, flow_repo):
         flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
         flow_repo.save(asset=make_flow(flow_id="f2", created_by="bob"))
 
-        result = flow_service.bulk_delete_flows(["f1", "f2"])
+        result = flow_service.bulk_delete_flows(["f1", "f2"], actor=SYSTEM_ACTOR)
 
         assert result["total_deleted"] == 2
         assert result["total_failed"] == 0
+
+    def test_none_actor_fails_closed(self, flow_service, flow_repo):
+        flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))
+
+        with pytest.raises(PermissionDeniedException):
+            flow_service.bulk_delete_flows(["f1"], actor=None)  # type: ignore[arg-type]
 
     def test_admin_deletes_foreign_flows(self, flow_service, flow_repo, admin):
         flow_repo.save(asset=make_flow(flow_id="f1", created_by="alice"))

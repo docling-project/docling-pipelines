@@ -67,7 +67,7 @@ class TestAuthenticate:
         user = authenticator.authenticate(username=_USERNAME, password=_PASSWORD)
 
         assert user is not None
-        assert user.username == _USERNAME
+        assert user.username == f"bootstrap:{_USERNAME}"
         assert user.roles == [Role.ADMIN]
 
     def test_wrong_password_is_rejected(self, authenticator):
@@ -137,7 +137,7 @@ class TestAudit:
         authenticator.authenticate(username=_USERNAME, password=_PASSWORD)
 
         assert handler.messages == [
-            f"AUDIT user={_USERNAME} action={AUDIT_ACTION_BOOTSTRAP_LOGIN} target=/auth/login outcome=success status=-"
+            f"AUDIT user=bootstrap:{_USERNAME} action={AUDIT_ACTION_BOOTSTRAP_LOGIN} target=/auth/login outcome=success status=-"
         ]
 
     def test_failed_login_is_not_audited_and_password_not_logged(self, authenticator, capture):

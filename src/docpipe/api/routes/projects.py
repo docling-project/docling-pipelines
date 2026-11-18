@@ -21,7 +21,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.actor import get_actor_context
 from docpipe.api.auth.guards import require_role
 from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_project_service
@@ -129,7 +129,7 @@ _IsElyraQuery = Annotated[
 ]
 
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
-ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
+ActorDep = Annotated[ActorContext, Depends(get_actor_context)]
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────

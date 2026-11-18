@@ -116,10 +116,11 @@ class BootstrapAdminAuthenticator(AuthenticatorPort):
         password_matches = bcrypt.checkpw(password_bytes, self._password_hash)
         if not (username_matches and password_matches):
             return None
+        canonical_username = f"bootstrap:{self._username}"
         audit_event(
-            username=self._username,
+            username=canonical_username,
             action=AUDIT_ACTION_BOOTSTRAP_LOGIN,
             target="/auth/login",
             outcome=OUTCOME_SUCCESS,
         )
-        return User(username=self._username, roles=[Role.ADMIN])
+        return User(username=canonical_username, roles=[Role.ADMIN])

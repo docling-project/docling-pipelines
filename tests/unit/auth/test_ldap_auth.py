@@ -173,7 +173,7 @@ class TestStandardLDAPAuthentication:
 
         user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
-        assert user == User(username="jdoe", email="jdoe@example.com", full_name="John Doe")
+        assert user == User(username="ldap:jdoe", email="jdoe@example.com", full_name="John Doe")
 
     def test_successful_login_performs_expected_ldap_calls(self, *, ldap_config, ldap_clients):
         service_conn, user_conn = ldap_clients
@@ -210,7 +210,7 @@ class TestStandardLDAPAuthentication:
 
         user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
-        assert user == User(username="jdoe", email="", full_name="")
+        assert user == User(username="ldap:jdoe", email="", full_name="")
 
     def test_utf8_attribute_values_are_decoded(self, *, ldap_config, ldap_clients):
         service_conn, _ = ldap_clients
@@ -323,7 +323,7 @@ class TestStandardLDAPAuthentication:
         user = LDAPAuthenticator(ldap_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
         assert user is not None
-        assert user.username == "jdoe"
+        assert user.username == "ldap:jdoe"
         assert "Failed to unbind LDAP connection" in ldap_log.text
 
     def test_start_tls_is_negotiated_on_every_connection_when_ssl_enabled(self, *, ldap_config, ldap_clients):
@@ -379,7 +379,7 @@ class TestActiveDirectoryAuthentication:
 
         user = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
-        assert user == User(username="jdoe", email="jdoe@corp.example.com", full_name="John Doe")
+        assert user == User(username="ldap:jdoe", email="jdoe@corp.example.com", full_name="John Doe")
         conn.simple_bind_s.assert_called_once_with(f"jdoe@{_AD_DOMAIN}", _USER_CREDENTIAL)
         conn.search_s.assert_called_once_with(
             _USER_DN,
@@ -410,7 +410,7 @@ class TestActiveDirectoryAuthentication:
 
         user = LDAPAuthenticator(ad_config).authenticate(username="jdoe", password=_USER_CREDENTIAL)
 
-        assert user == User(username="jdoe", email="", full_name="")
+        assert user == User(username="ldap:jdoe", email="", full_name="")
 
     def test_missing_ad_domain_raises_configuration_error(self, *, ad_config, ldap_clients):
         ad_config.ldap_ad_domain = ""

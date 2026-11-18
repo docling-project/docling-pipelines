@@ -141,3 +141,14 @@ def test_job_run_list_exposes_user_id(client, job_stats_service):
 
     assert response.status_code == 200
     assert response.json()["list"][0]["user_id"] == "alice"
+
+
+def test_provider_prefixed_usernames_round_trip_and_isolate_ownership(client, current_user):
+    current_user["user"] = User(username="ldap:alice", roles=[Role.EDITOR])
+    created = client.post("/flows", json=AUTHORING_FLOW)
+    assert created.status_code == 201
+    flow_id = created.json()["flow_id"]
+    assert created.json()["created_by"] == "ldap:alice"
+
+    current_user["user"] = User(username="oidc:google:alice", roles=[Role.EDITOR])
+    assert client.delete(f"/flows/{flow_id}").status_code == 403

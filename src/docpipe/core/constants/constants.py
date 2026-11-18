@@ -379,10 +379,23 @@ class EnvironmentVariables:
     DOCPIPE_AUTH_COOKIE_NAME = "DOCPIPE_AUTH_COOKIE_NAME"
     DOCPIPE_AUTH_COOKIE_SECURE = "DOCPIPE_AUTH_COOKIE_SECURE"
     DOCPIPE_TRUST_PROXY_HEADERS = "DOCPIPE_TRUST_PROXY_HEADERS"
+    DOCPIPE_TRUSTED_PROXY_COUNT = "DOCPIPE_TRUSTED_PROXY_COUNT"
+    DOCPIPE_INGEST_ALLOWED_PATHS = "DOCPIPE_INGEST_ALLOWED_PATHS"
     DOCPIPE_AUTH_BOOTSTRAP_USERNAME = "DOCPIPE_AUTH_BOOTSTRAP_USERNAME"
     DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH = (
         "DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH"  # pragma: allowlist secret  # nosec B105
     )
+
+
+_AUTH_TRUE_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+
+
+def is_auth_enabled() -> bool:
+    """Return True when ``DOCPIPE_AUTH_ENABLED`` is set to a truthy value."""
+    raw = os.environ.get(EnvironmentVariables.DOCPIPE_AUTH_ENABLED)
+    if raw is None or not raw.strip():
+        return False
+    return raw.strip().lower() in _AUTH_TRUE_VALUES
 
 
 class LineageConstants:

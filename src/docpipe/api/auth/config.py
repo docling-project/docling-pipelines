@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 
 DEFAULT_COOKIE_NAME = "docpipe_access_token"
 DEFAULT_ROLE = Role.VIEWER
+DEFAULT_TRUSTED_PROXY_COUNT = 1
 
 # Separator for group identifiers in the DOCPIPE_AUTH_ROLE_MAPPING_* variables. LDAP
 # distinguished names contain commas, so a comma cannot be used.
@@ -139,6 +140,30 @@ def _read_default_role() -> Role:
         return DEFAULT_ROLE
 
 
+def _read_trusted_proxy_count() -> int:
+    """Read ``DOCPIPE_TRUSTED_PROXY_COUNT``, falling back to 1 (minimum 1)."""
+    raw = _env_str(name=EnvironmentVariables.DOCPIPE_TRUSTED_PROXY_COUNT)
+    if raw is None:
+        return DEFAULT_TRUSTED_PROXY_COUNT
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid %s value; falling back to %d",
+            EnvironmentVariables.DOCPIPE_TRUSTED_PROXY_COUNT,
+            DEFAULT_TRUSTED_PROXY_COUNT,
+        )
+        return DEFAULT_TRUSTED_PROXY_COUNT
+    if parsed < 1:
+        logger.warning(
+            "Non-positive %s value; falling back to %d",
+            EnvironmentVariables.DOCPIPE_TRUSTED_PROXY_COUNT,
+            DEFAULT_TRUSTED_PROXY_COUNT,
+        )
+        return DEFAULT_TRUSTED_PROXY_COUNT
+    return parsed
+
+
 @dataclass(frozen=True)
 class AuthSettings:
     """Immutable snapshot of the authentication settings at the time of the call."""
@@ -153,6 +178,7 @@ class AuthSettings:
     cookie_name: str = DEFAULT_COOKIE_NAME
     cookie_secure: bool = False
     trust_proxy_headers: bool = False
+    trusted_proxy_count: int = DEFAULT_TRUSTED_PROXY_COUNT
     bootstrap_username: str | None = None
     bootstrap_password_hash: str | None = None
 
@@ -167,14 +193,51 @@ class AuthSettings:
             cookie_name=_env_str(name=EnvironmentVariables.DOCPIPE_AUTH_COOKIE_NAME) or DEFAULT_COOKIE_NAME,
             cookie_secure=_env_bool(name=EnvironmentVariables.DOCPIPE_AUTH_COOKIE_SECURE, default=False),
             trust_proxy_headers=_env_bool(name=EnvironmentVariables.DOCPIPE_TRUST_PROXY_HEADERS, default=False),
+            trusted_proxy_count=_read_trusted_proxy_count(),
             bootstrap_username=_env_str(name=EnvironmentVariables.DOCPIPE_AUTH_BOOTSTRAP_USERNAME),
             bootstrap_password_hash=_env_str(name=EnvironmentVariables.DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH),
         )
 
 
+_AUTH_ENV_KEYS: tuple[str, ...] = (
+    EnvironmentVariables.DOCPIPE_AUTH_ENABLED,
+    EnvironmentVariables.DOCPIPE_AUTH_DEFAULT_ROLE,
+    EnvironmentVariables.DOCPIPE_AUTH_ROLE_MAPPING_VIEWER,
+    EnvironmentVariables.DOCPIPE_AUTH_ROLE_MAPPING_EDITOR,
+    EnvironmentVariables.DOCPIPE_AUTH_ROLE_MAPPING_ADMIN,
+    EnvironmentVariables.DOCPIPE_AUTH_COOKIE_NAME,
+    EnvironmentVariables.DOCPIPE_AUTH_COOKIE_SECURE,
+    EnvironmentVariables.DOCPIPE_TRUST_PROXY_HEADERS,
+    EnvironmentVariables.DOCPIPE_TRUSTED_PROXY_COUNT,
+    EnvironmentVariables.DOCPIPE_AUTH_BOOTSTRAP_USERNAME,
+    EnvironmentVariables.DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH,
+    EnvironmentVariables.DOCPIPE_CONFIG_PATH,
+)
+
+_cached_auth_settings: tuple[tuple[str | None, ...], AuthSettings] | None = None
+
+
+def _current_env_signature() -> tuple[str | None, ...]:
+    """Return a lightweight tuple of the auth environment variables."""
+    return tuple(os.environ.get(key) for key in _AUTH_ENV_KEYS)
+
+
+def reset_auth_settings_cache() -> None:
+    """Clear the cached ``AuthSettings`` snapshot (used by tests when environment changes)."""
+    global _cached_auth_settings
+    _cached_auth_settings = None
+    _yaml_mapping_cache.clear()
+
+
 def get_auth_settings() -> AuthSettings:
-    """Return the current settings (re-read from the environment on every call).
+    """Return the cached ``AuthSettings`` snapshot, refreshing when environment variables change.
 
     Usable as a FastAPI dependency.
     """
-    return AuthSettings.from_env()
+    global _cached_auth_settings
+    sig = _current_env_signature()
+    if _cached_auth_settings is not None and _cached_auth_settings[0] == sig:
+        return _cached_auth_settings[1]
+    settings = AuthSettings.from_env()
+    _cached_auth_settings = (sig, settings)
+    return settings

@@ -184,7 +184,10 @@ See [ACL Document Retrieval](ACL_DOCUMENT_RETRIEVAL.md) for full details on ACL 
 | `DOCPIPE_AUTH_ROLE_MAPPING_VIEWER` / `_EDITOR` / `_ADMIN` | — | Groups per role, separated by `;` |
 | `DOCPIPE_AUTH_COOKIE_NAME` | `docpipe_access_token` | Session cookie name |
 | `DOCPIPE_AUTH_COOKIE_SECURE` | `false` | Always set `Secure` on the session cookie |
-| `DOCPIPE_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` and `X-Forwarded-Proto` from one reverse proxy |
+| `DOCPIPE_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` and `X-Forwarded-Proto` from trusted reverse proxies |
+| `DOCPIPE_TRUSTED_PROXY_COUNT` | `1` | Number of trusted proxy hops appended to `X-Forwarded-For` |
+
+> **Token validity:** Roles are embedded in the 30-minute JWT (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`) without server-side revocation. Role changes and copied tokens remain effective until the token expires.
 | `DOCPIPE_AUTH_BOOTSTRAP_USERNAME` / `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH` | — | Break-glass `admin` login; set both or neither |
 | `PROJECT_REPOSITORY_BASE_DIR` | — | Override project storage directory (takes precedence over `docling-pipelines-config.yaml`) |
 | `DOCPIPE_POSTGRES_*` | — | PostgreSQL backend for job stats (see [Environment Variables](../../USER_GUIDE_PIPELINE_SETUP.md)) |

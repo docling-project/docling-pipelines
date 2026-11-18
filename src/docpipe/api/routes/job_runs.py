@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 
-from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.actor import get_actor_context
 from docpipe.api.auth.guards import require_role
 from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_job_management_service, get_job_stats_service
@@ -112,7 +112,7 @@ IncludeLogsQuery = Annotated[
 
 JobStatsServiceDep = Annotated[JobStatsService, Depends(get_job_stats_service)]
 JobManagementServiceDep = Annotated[JobManagementService, Depends(get_job_management_service)]
-ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
+ActorDep = Annotated[ActorContext, Depends(get_actor_context)]
 
 
 @job_runs_router.post(

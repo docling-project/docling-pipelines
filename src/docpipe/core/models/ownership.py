@@ -11,7 +11,7 @@ PERMISSION_DENIED_MESSAGE = "You do not have permission to modify this resource"
 
 def ensure_can_modify(
     *,
-    actor: ActorContext | None,
+    actor: ActorContext,
     owner: str | None,
     action: str,
     target: str,
@@ -21,7 +21,7 @@ def ensure_can_modify(
     The exception message is generic and never names the owner.
 
     Args:
-        actor: The caller, or ``None`` for non-API callers (always allowed).
+        actor: The caller identity (required; no ``None`` bypass).
         owner: The asset's owner (``created_by`` / ``user_id``); empty means ownerless.
         action: Short action name, for example ``flow.delete``.
         target: Identifier of the asset being modified.

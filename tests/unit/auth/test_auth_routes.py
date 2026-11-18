@@ -77,6 +77,18 @@ class TestLogin:
         assert claims["roles"] == ["editor"]
         assert response.cookies.get(_COOKIE) == body["access_token"]
 
+    def test_browser_client_login_omits_access_token_from_json_body(self, client):
+        response = _login(client, headers={"X-Requested-With": "XMLHttpRequest"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "access_token" not in body
+        assert body["user"]["username"] == "alice"
+        cookie_token = response.cookies.get(_COOKIE)
+        assert cookie_token
+        claims = jwt.decode(cookie_token, _SECRET, algorithms=["HS256"])
+        assert claims["username"] == "alice"
+
     def test_cookie_flags(self, client):
         header = _login(client).headers["set-cookie"].lower()
 

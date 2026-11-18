@@ -3,6 +3,7 @@
 
 """OAuth2 authentication routes."""
 
+import inspect
 import secrets
 import threading
 import time
@@ -13,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.responses import RedirectResponse
 from fastapi.responses import Response as FastAPIResponse
 
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, ExternalServiceError
 from docpipe.utils.infrastructure.audit import sanitize_for_log
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -21,7 +22,7 @@ from .config import get_auth_settings
 from .jwt_handler import JWTClaims, JWTConfig, create_access_token
 from .models import AuthProvider
 from .oauth2_config import OAuth2Config, get_oauth2_config
-from .oauth2_provider import OAuth2Provider, get_oauth2_provider
+from .oauth2_provider import OAuth2Provider, generate_pkce_pair, get_oauth2_provider
 from .session_cookie import COOKIE_SAMESITE, is_secure_request, set_session_cookie
 
 logger = get_logger(__name__)
@@ -36,7 +37,7 @@ router = APIRouter(prefix="/auth/oauth2", tags=["oauth2"])
 # horizontally-scaled production.
 _STATE_TTL_SECONDS = 600  # 10 minutes
 _MAX_STATE_ENTRIES = 10_000
-_state_store: dict[str, tuple[str, float, str]] = {}
+_state_store: dict[str, tuple[str, float, str] | tuple[str, float, str, str]] = {}
 _state_lock = threading.Lock()
 
 NONCE_COOKIE_NAME = "docpipe_oauth2_nonce"
@@ -99,17 +100,37 @@ def resolve_return_to(*, value: str | None) -> str:
     return f"{UI_PREFIX}{safe}"
 
 
-def _store_state(*, state: str, redirect_url: str, nonce: str = "") -> None:
-    """Record state token with TTL. Raises RuntimeError when the store is at capacity."""
+def _store_state(*, state: str, redirect_url: str, nonce: str = "", code_verifier: str = "") -> None:
+    """Record state token with TTL, nonce, and PKCE code_verifier.
+
+    Raises RuntimeError when the store is at capacity.
+    """
     now = time.monotonic()
     expiry = now + _STATE_TTL_SECONDS
     with _state_lock:
-        expired = [k for k, (_, exp, _nonce) in _state_store.items() if now > exp]
+        expired = [k for k, entry in _state_store.items() if now > entry[1]]
         for k in expired:
             del _state_store[k]
         if len(_state_store) >= _MAX_STATE_ENTRIES:
             raise RuntimeError("OAuth2 state store is full")
-        _state_store[state] = (redirect_url, expiry, nonce)
+        _state_store[state] = (redirect_url, expiry, nonce, code_verifier)
+
+
+def _consume_state_entry(*, state: str, nonce: str | None) -> tuple[str, str, str] | None:
+    """Remove a state token and return ``(return_to, stored_nonce, code_verifier)``, or None."""
+    with _state_lock:
+        entry = _state_store.pop(state, None)
+    if entry is None:
+        return None
+    redirect_url = entry[0]
+    expiry = entry[1]
+    stored_nonce = entry[2]
+    code_verifier = entry[3] if len(entry) > 3 else ""
+    if time.monotonic() > expiry:
+        return None
+    if not nonce or not stored_nonce or not secrets.compare_digest(nonce.encode(), stored_nonce.encode()):
+        return None
+    return redirect_url, stored_nonce, code_verifier
 
 
 def _consume_state(*, state: str, nonce: str | None) -> str | None:
@@ -126,16 +147,8 @@ def _consume_state(*, state: str, nonce: str | None) -> str | None:
         The stored ``return_to`` (possibly empty), or None for an unknown, expired or
         browser-mismatched state.
     """
-    with _state_lock:
-        entry = _state_store.pop(state, None)
-    if entry is None:
-        return None
-    redirect_url, expiry, stored_nonce = entry
-    if time.monotonic() > expiry:
-        return None
-    if not nonce or not stored_nonce or not secrets.compare_digest(nonce.encode(), stored_nonce.encode()):
-        return None
-    return redirect_url
+    consumed = _consume_state_entry(state=state, nonce=nonce)
+    return consumed[0] if consumed is not None else None
 
 
 def get_oauth2_provider_instance(
@@ -200,7 +213,13 @@ async def oauth2_authorize(
     try:
         state = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(32)
-        _store_state(state=state, redirect_url=safe_return_to or "", nonce=nonce)
+        code_verifier, code_challenge = generate_pkce_pair()
+        _store_state(
+            state=state,
+            redirect_url=safe_return_to or "",
+            nonce=nonce,
+            code_verifier=code_verifier,
+        )
     except RuntimeError as exc:
         logger.warning("OAuth2 state store is full; rejecting new login attempt")
         raise HTTPException(
@@ -209,7 +228,13 @@ async def oauth2_authorize(
         ) from exc
 
     try:
-        auth_url, _ = provider_instance.generate_authorization_url(state)
+        gen_params = inspect.signature(provider_instance.generate_authorization_url).parameters
+        gen_kwargs: dict[str, str] = {}
+        if "code_challenge" in gen_params:
+            gen_kwargs["code_challenge"] = code_challenge
+        if "nonce" in gen_params:
+            gen_kwargs["nonce"] = nonce
+        auth_url, _ = provider_instance.generate_authorization_url(state, **gen_kwargs)
         logger.info("Initiating OAuth2 flow with %s", provider_instance.get_provider_name())
         response = RedirectResponse(url=auth_url)
         response.set_cookie(
@@ -267,16 +292,40 @@ async def oauth2_callback(
         302 redirect to the validated same-origin ``return_to`` (default ``/ui/projects``)
     """
     try:
-        stored_return_to = _consume_state(state=state, nonce=request.cookies.get(NONCE_COOKIE_NAME))
-        if stored_return_to is None:
+        consumed = _consume_state_entry(state=state, nonce=request.cookies.get(NONCE_COOKIE_NAME))
+        if consumed is None:
             logger.warning("Invalid, expired or browser-mismatched OAuth2 state received")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired state parameter",
             )
+        stored_return_to, stored_nonce, code_verifier = consumed
 
-        token_data = await provider_instance.exchange_code_for_token(code)
-        user = await provider_instance.extract_user_from_token(token_data)
+        exchange_params = inspect.signature(provider_instance.exchange_code_for_token).parameters
+        if "code_verifier" in exchange_params and code_verifier:
+            token_data = await provider_instance.exchange_code_for_token(code, code_verifier=code_verifier)
+        else:
+            token_data = await provider_instance.exchange_code_for_token(code)
+
+        extract_params = inspect.signature(provider_instance.extract_user_from_token).parameters
+        try:
+            if "nonce" in extract_params and stored_nonce:
+                user = await provider_instance.extract_user_from_token(token_data, nonce=stored_nonce)
+            else:
+                user = await provider_instance.extract_user_from_token(token_data)
+        except ExternalServiceError as exc:
+            msg_lower = str(exc).lower()
+            if "invalid nonce" in msg_lower:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid ID token nonce",
+                ) from exc
+            if "email_verified" in msg_lower:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="OIDC email claim is not verified",
+                ) from exc
+            raise
 
         try:
             jwt_config = JWTConfig()

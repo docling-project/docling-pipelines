@@ -9,6 +9,7 @@ import pytest
 
 from docpipe.core.job_management.application.services.job_management_service import JobManagementService
 from docpipe.core.job_management.domain.models import JobStats
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.exceptions.docpipe_exceptions import JobRunNotFoundException, PermissionDeniedException
 
 _AUTHORING_FLOW = {
@@ -104,7 +105,14 @@ class TestCancelAndDelete:
 
     @pytest.mark.parametrize("method", ["cancel_job_run", "delete_job_run"])
     def test_library_path_skips_ownership_lookup(self, service, stats_service, method):
-        getattr(service, method)(job_run_id="r1")
+        getattr(service, method)(job_run_id="r1", actor=SYSTEM_ACTOR)
+
+        stats_service.get_job_run_stats.assert_not_called()
+
+    @pytest.mark.parametrize("method", ["cancel_job_run", "delete_job_run"])
+    def test_none_actor_fails_closed(self, service, stats_service, method):
+        with pytest.raises(PermissionDeniedException):
+            getattr(service, method)(job_run_id="r1", actor=None)
 
         stats_service.get_job_run_stats.assert_not_called()
 
@@ -121,15 +129,21 @@ class TestCreate:
 
         assert user_id == "alice"
 
-    def test_no_actor_falls_back_to_client_user_id(self, service, stats_service, manager):
-        user_id = self._create(service, stats_service, manager, request=_request(client_user_id="carol"), actor=None)
+    def test_system_actor_falls_back_to_client_user_id(self, service, stats_service, manager):
+        user_id = self._create(
+            service, stats_service, manager, request=_request(client_user_id="carol"), actor=SYSTEM_ACTOR
+        )
 
         assert user_id == "carol"
 
-    def test_no_actor_and_no_client_user_id_is_none(self, service, stats_service, manager):
-        user_id = self._create(service, stats_service, manager, request=_request(), actor=None)
+    def test_system_actor_and_no_client_user_id_is_none(self, service, stats_service, manager):
+        user_id = self._create(service, stats_service, manager, request=_request(), actor=SYSTEM_ACTOR)
 
         assert user_id is None
+
+    def test_none_actor_fails_closed(self, service, stats_service, manager):
+        with pytest.raises(PermissionDeniedException):
+            self._create(service, stats_service, manager, request=_request(), actor=None)
 
 
 class TestList:

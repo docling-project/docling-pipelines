@@ -167,7 +167,7 @@ class LDAPAuthenticator(AuthenticatorPort):
                 logger.info("Successfully authenticated user: %s", username)
 
                 return User(
-                    username=username,
+                    username=f"ldap:{username}",
                     email=email,
                     full_name=full_name,
                     roles=self._resolve_roles(attrs=entry_attrs),
@@ -224,7 +224,7 @@ class LDAPAuthenticator(AuthenticatorPort):
             logger.info("Successfully authenticated user: %s", username)
 
             return User(
-                username=username,
+                username=f"ldap:{username}",
                 email=email,
                 full_name=full_name,
                 roles=self._resolve_roles(attrs=attrs),

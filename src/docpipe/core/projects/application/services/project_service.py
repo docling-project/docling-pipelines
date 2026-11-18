@@ -19,11 +19,12 @@ from docpipe.core.assets.flows.domain.models.flow import Flow
 from docpipe.core.job_management.domain.models.job_stats import JobStats
 from docpipe.core.job_management.domain.ports.job_stats_service import JobStatsService
 from docpipe.core.models.actor_context import ActorContext
-from docpipe.core.models.ownership import ensure_can_modify
+from docpipe.core.models.ownership import PERMISSION_DENIED_MESSAGE, ensure_can_modify
 from docpipe.core.projects.domain.models.flow_job_run_summary import FlowJobRunSummary
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.core.projects.domain.ports.project_repository import ProjectRepository
 from docpipe.exceptions.docpipe_exceptions import (
+    PermissionDeniedException,
     ProjectAlreadyExistsException,
     ProjectInvalidDataException,
     ProjectNotFoundException,
@@ -77,14 +78,14 @@ class ProjectService:
     # ── CREATE ───────────────────────────────────────────────────────
 
     @audited(action="project.create", target=lambda a: a["project"].name, result_target=lambda r: str(r.project_id))
-    def create_project(self, *, project: Project, actor: ActorContext | None = None) -> Project:
+    def create_project(self, *, project: Project, actor: ActorContext) -> Project:
         """Create and persist a new project.
 
         Args:
             project: Project instance to create. project_id is auto-generated
                 if not provided.
-            actor: Caller identity. When present, ``created_by`` is set to the
-                caller's username. None (CLI / library) leaves it untouched.
+            actor: Caller identity. For non-system actors, ``created_by`` is set to the
+                caller's username. ``SYSTEM_ACTOR`` (CLI / library) leaves it untouched.
 
         Returns:
             The created project with flow_count=0.
@@ -92,14 +93,22 @@ class ProjectService:
         Raises:
             ProjectInvalidDataException: If name is empty or exceeds 255 chars.
             ProjectAlreadyExistsException: If a project with the same name exists.
+            PermissionDeniedException: If ``actor`` is not a valid ``ActorContext``.
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="project.create",
+                target=project.name,
+            )
+
         self._validate_name(project.name)
 
         if self._repository.exists_by_name(name=project.name):
             logger.warning("Attempted to create duplicate project name: %s", project.name)
             raise ProjectAlreadyExistsException(project_name=project.name)
 
-        if actor is not None:
+        if not actor.is_system:
             project.created_by = actor.username
 
         saved = self._repository.save(project=project)
@@ -180,13 +189,13 @@ class ProjectService:
     # ── FULL UPDATE ──────────────────────────────────────────────────
 
     @audited(action="project.update", target=lambda a: str(a["project"].project_id))
-    def update_project(self, *, project: Project, actor: ActorContext | None = None) -> Project:
+    def update_project(self, *, project: Project, actor: ActorContext) -> Project:
         """Fully replace a project's mutable fields.
 
         Args:
             project: Project with updated data. Must carry the existing project_id.
-            actor: Caller identity. When present, the caller must own the project
-                (or be admin, or the project must be ownerless) and ``modified_by``
+            actor: Caller identity. The caller must own the project (or be admin, system,
+                or the project must be ownerless) and for non-system actors ``modified_by``
                 is set to the caller's username.
 
         Returns:
@@ -196,9 +205,15 @@ class ProjectService:
             ProjectNotFoundException: If no project with this ID exists.
             PermissionDeniedException: If ``actor`` may not modify the project.
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="project.update",
+                target=str(project.project_id),
+            )
         if not self._repository.exists(project_id=project.project_id):
             raise ProjectNotFoundException(project_id=project.project_id)
-        if actor is not None:
+        if not actor.is_system:
             existing = self.get_project(project_id=str(project.project_id))
             ensure_can_modify(
                 actor=actor,
@@ -216,7 +231,7 @@ class ProjectService:
     # ── PARTIAL UPDATE ────────────────────────────────────────────────
 
     @audited(action="project.update", target=lambda a: str(a["project_id"]))
-    def partial_update_project(self, *, project_id: str, updates: dict, actor: ActorContext | None = None) -> Project:
+    def partial_update_project(self, *, project_id: str, updates: dict, actor: ActorContext) -> Project:
         """Apply a partial update, modifying only the provided fields.
 
         Protected fields (project_id, created_on, created_by) are silently
@@ -225,8 +240,8 @@ class ProjectService:
         Args:
             project_id: UUID of the project to update.
             updates: Dictionary of fields to update (from PATCH body).
-            actor: Caller identity. When present, the caller must own the project
-                (or be admin, or the project must be ownerless) and ``modified_by``
+            actor: Caller identity. The caller must own the project (or be admin, system,
+                or the project must be ownerless) and for non-system actors ``modified_by``
                 is set to the caller's username, ignoring any client-supplied value.
 
         Returns:
@@ -253,7 +268,7 @@ class ProjectService:
             if key in self.UPDATABLE_FIELDS:
                 setattr(existing, key, value)
 
-        if actor is not None:
+        if not actor.is_system:
             existing.modified_by = actor.username
 
         existing.update_timestamp()
@@ -265,40 +280,46 @@ class ProjectService:
     # ── DELETE ───────────────────────────────────────────────────────
 
     @audited(action="project.delete", target=lambda a: str(a["project_id"]))
-    def delete_project(self, *, project_id: str, actor: ActorContext | None = None) -> None:
+    def delete_project(self, *, project_id: str, actor: ActorContext) -> None:
         """Delete a project and cascade-delete all flows linked to it.
 
         Finds all flows whose container_id matches project_id and bulk-deletes
         them before removing the project record. Individual flow deletion
         failures are logged as warnings but do not block the project deletion.
 
-        When ``actor`` is given, ownership of the project and of every child flow is
-        verified before anything is deleted, so a foreign-owned child flow blocks the
-        whole delete. The check and the cascade are not atomic.
+        Ownership of the project and of every child flow is verified before
+        anything is deleted, so a foreign-owned child flow blocks the whole
+        delete. The check and the cascade are not atomic.
 
         Args:
             project_id: UUID of the project to delete.
-            actor: Caller identity, or None for CLI / library callers.
+            actor: Caller identity, or ``SYSTEM_ACTOR`` for CLI / library callers.
 
         Raises:
             ProjectNotFoundException: If no project with this ID exists.
             PermissionDeniedException: If ``actor`` may not delete the project or any child flow.
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="project.delete",
+                target=project_id,
+            )
         if not self._repository.exists(project_id=project_id):
             raise ProjectNotFoundException(project_id=project_id)
 
         child_flows = [f for f in self._flow_repository.find_all() if f.container_id == project_id and f.asset_id]
-        if actor is not None:
+        if not actor.is_system:
             project = self.get_project(project_id=project_id)
             ensure_can_modify(actor=actor, owner=project.created_by, action="project.delete", target=project_id)
             # Verify every child flow before deleting anything.
             for child in child_flows:
                 ensure_can_modify(actor=actor, owner=child.created_by, action="project.delete", target=project_id)
 
-        # Cascade: delete all flows linked to this project (ownership already verified above)
+        # Cascade: delete all flows linked to this project (pass actor through to bulk_delete_flows)
         flow_ids = [f.asset_id for f in child_flows if f.asset_id]
         if flow_ids:
-            result = self._flow_service.bulk_delete_flows(flow_ids=flow_ids, actor=None)
+            result = self._flow_service.bulk_delete_flows(flow_ids=flow_ids, actor=actor)
             if result.get("total_failed", 0):
                 logger.warning(
                     "Deleted project %s but %d linked flow(s) could not be removed: %s",

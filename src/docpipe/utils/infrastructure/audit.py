@@ -349,7 +349,7 @@ def audited(
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             bound = signature.bind(*args, **kwargs)
             actor: ActorContext | None = bound.arguments.get("actor")
-            username = actor.username if actor is not None else None
+            username = actor.username if actor is not None and not actor.is_system else None
             call_target = _safe_target(target, bound.arguments)
             try:
                 result = func(*args, **kwargs)

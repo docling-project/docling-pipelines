@@ -284,22 +284,42 @@ class _StubProvider(OAuth2Provider):
         self.extract_error = extract_error
         self.authorize_error = authorize_error
         self.exchanged_codes: list[str] = []
+        self.exchanged_verifiers: list[str | None] = []
+        self.extracted_nonces: list[str | None] = []
 
     def get_provider_name(self) -> str:
         return "stub"
 
-    def generate_authorization_url(self, state: str | None = None) -> tuple[str, str]:
+    def generate_authorization_url(
+        self,
+        state: str | None = None,
+        *,
+        code_challenge: str | None = None,
+        nonce: str | None = None,
+    ) -> tuple[str, str]:
         if self.authorize_error:
             raise self.authorize_error
-        return super().generate_authorization_url(state)
+        return super().generate_authorization_url(state, code_challenge=code_challenge, nonce=nonce)
 
-    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
+    async def exchange_code_for_token(
+        self,
+        code: str,
+        *,
+        code_verifier: str | None = None,
+    ) -> dict[str, Any]:
         self.exchanged_codes.append(code)
+        self.exchanged_verifiers.append(code_verifier)
         if self.exchange_error:
             raise self.exchange_error
         return {"id_token": "stub-id-token", "access_token": "stub-access-token"}
 
-    async def extract_user_from_token(self, token_data: dict[str, Any]) -> User:
+    async def extract_user_from_token(
+        self,
+        token_data: dict[str, Any],
+        *,
+        nonce: str | None = None,
+    ) -> User:
+        self.extracted_nonces.append(nonce)
         if self.extract_error:
             raise self.extract_error
         return self.user
@@ -715,6 +735,38 @@ class TestCallbackEndpoint:
 
         assert response.status_code == 502
         assert "access_token" not in response.text
+
+    def test_id_token_nonce_mismatch_returns_400_without_session_cookie(self, *, client, stub_provider):
+        stub_provider.extract_error = ExternalServiceError("ID token validation failed: invalid nonce")
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": _issue_state()})
+
+        assert response.status_code == 400
+        assert "docpipe_access_token" not in response.headers.get("set-cookie", "")
+
+    def test_unverified_email_fallback_returns_401_without_session_cookie(self, *, client, stub_provider):
+        stub_provider.extract_error = ExternalServiceError("OIDC email fallback requires email_verified=true")
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": _issue_state()})
+
+        assert response.status_code == 401
+        assert "docpipe_access_token" not in response.headers.get("set-cookie", "")
+
+    def test_authorize_sends_pkce_challenge_and_callback_forwards_verifier_and_nonce(self, *, client, stub_provider):
+        client.cookies.clear()
+        authorize = client.get("/auth/oauth2/authorize")
+        query = parse_qs(urlparse(authorize.headers["location"]).query)
+        assert query["code_challenge_method"] == ["S256"]
+        assert len(query["code_challenge"][0]) >= 32
+        state = query["state"][0]
+        nonce = query["nonce"][0]
+
+        response = client.get("/auth/oauth2/callback", params={"code": "c", "state": state})
+
+        assert response.status_code == 302
+        assert len(stub_provider.exchanged_verifiers) == 1
+        assert stub_provider.exchanged_verifiers[0]
+        assert stub_provider.extracted_nonces == [nonce]
 
     def test_unexpected_error_returns_generic_500(self, *, client, stub_provider):
         stub_provider.extract_error = KeyError("email")

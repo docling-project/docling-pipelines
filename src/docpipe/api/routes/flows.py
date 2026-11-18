@@ -22,7 +22,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from docpipe.api.auth.actor import get_actor
+from docpipe.api.auth.actor import get_actor_context
 from docpipe.api.auth.guards import require_role
 from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_flow_service
@@ -215,7 +215,7 @@ def get_filter_params(
 PaginationDep = Annotated[tuple[int, int], Depends(get_pagination_params)]
 FiltersDep = Annotated[dict, Depends(get_filter_params)]
 FlowServiceDep = Annotated[FlowService, Depends(get_flow_service)]
-ActorDep = Annotated[ActorContext | None, Depends(get_actor)]
+ActorDep = Annotated[ActorContext, Depends(get_actor_context)]
 
 
 @flows_router.post(
