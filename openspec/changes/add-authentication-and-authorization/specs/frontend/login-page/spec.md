@@ -7,14 +7,22 @@ The login-page capability defines the `/login` page where an unauthenticated use
 ## ADDED Requirements
 
 ### Requirement: Login route and layout
-The application SHALL serve a `/login` page, outside the main shell navigation, built from Carbon components: a form with username and password fields, a primary sign-in button, and an inline notification area. The page SHALL be usable on narrow screens.
+The application SHALL serve a `/login` page, outside the main shell navigation, built from Carbon components: a slim header with the application name and a theme toggle, a brand panel beside a form panel with username and password fields, a primary log-in button and an inline notification area. The page SHALL be usable on narrow screens.
 
 #### Scenario: Page renders
 - **WHEN** an unauthenticated user opens `/ui/login`
-- **THEN** the form, the application name and the sign-in button are shown without the main navigation
+- **THEN** the header, the brand panel, the form and the log-in button are shown without the main navigation, the notification bell or the profile menu
+
+#### Scenario: Brand panel follows the theme
+- **WHEN** the application theme is light or dark
+- **THEN** the brand panel shows the product tagline with the animated artwork for that theme
+
+#### Scenario: Narrow screen
+- **WHEN** the viewport is below the large breakpoint
+- **THEN** the brand panel collapses to a compact tagline strip above the form
 
 ### Requirement: Credential sign-in
-The credential form SHALL be shown only when `/auth/config` reports credential login available. It SHALL validate that both fields are non-empty before submitting, show a loading state while the request is pending and disable the button to prevent double submit. The password field SHALL offer a show/hide toggle.
+The credential form SHALL be shown only when `/auth/config` reports credential login available. It SHALL validate that both fields are non-empty before submitting and when a field loses focus while empty, show a loading state while the request is pending and disable the button to prevent double submit. The password field SHALL offer a show/hide toggle.
 
 #### Scenario: Empty field blocked
 - **WHEN** the user submits with an empty password
@@ -22,7 +30,7 @@ The credential form SHALL be shown only when `/auth/config` reports credential l
 
 #### Scenario: Failed sign-in
 - **WHEN** the server rejects the credentials
-- **THEN** an inline notification shows the server's message and the form stays editable
+- **THEN** an inline notification shows the server's message, the password field is cleared and focus returns to the username field
 
 #### Scenario: Throttled sign-in
 - **WHEN** the server answers 429
@@ -41,7 +49,7 @@ One button per configured OIDC provider SHALL start the provider flow by navigat
 
 #### Scenario: No method available
 - **WHEN** there is neither credential login nor a provider
-- **THEN** the page shows a notification that no sign-in method is configured
+- **THEN** the page shows a notification that no login method is configured
 
 ### Requirement: Return to requested page
 After a successful sign-in the user SHALL be sent to the `return_to` path from the query string, or to the projects page when absent or not a same-application relative path.
