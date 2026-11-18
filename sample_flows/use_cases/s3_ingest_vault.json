@@ -1,0 +1,67 @@
+{
+  "flow_name": "S3 Ingest With Credentials From Vault",
+  "flow_id": "s3-ingest-vault-flow-001",
+  "description": "Ingest documents from an S3 bucket whose access key and secret key are read from Vault (vault:// references), then extract text. The endpoint is left unset, so the adapter uses the AWS default. See docs/guides/SECRETS_GUIDE.md.",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "storage": "in-memory",
+    "execute_type": "local"
+  },
+  "flow": [
+    {
+      "name": "ingest_s3",
+      "type": "ingest_source",
+      "config": {
+        "provider": "s3",
+        "provider_config": {
+          "bucket": "${S3_BUCKET_NAME}",
+          "prefix": "${S3_PREFIX:}",
+          "region": "us-east-1",
+          "access_key": "vault://hashicorp/docpipe/s3#access_key",
+          "secret_key": "vault://hashicorp/docpipe/s3#secret_key"
+        },
+        "include_filter": "pdf,docx,txt,md",
+        "max_files": 100
+      }
+    },
+    {
+      "name": "extract",
+      "type": "extract_operator",
+      "depends_on": [
+        "ingest_s3"
+      ],
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        },
+        "max_workers": 4
+      }
+    },
+    {
+      "name": "write_markdown",
+      "type": "storage_output",
+      "depends_on": [
+        "extract"
+      ],
+      "config": {
+        "mode": "processed_content",
+        "destination_config": {
+          "provider": "filesystem",
+          "provider_config": {
+            "root_path": "./data/output/s3_vault",
+            "create_dirs": true
+          },
+          "credentials": {}
+        },
+        "output_format": "markdown",
+        "output_structure": {
+          "type": "flat",
+          "overwrite_existing": true
+        }
+      }
+    }
+  ]
+}

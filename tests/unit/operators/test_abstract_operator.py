@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for AbstractOperator base class.
 Tests initialization, validation, metadata handling, and utility methods.
@@ -282,12 +285,12 @@ def test_get_required_features_can_be_overridden():
 # ---------------------------------------------------------------------------
 
 
-def test_get_metadata_default_returns_empty_dict():
-    """get_metadata() returns empty dict by default."""
+def test_get_metadata_default_declares_no_secret_fields():
+    """get_metadata() declares no secret-capable fields by default (accepts no vault references)."""
     operator = make_operator()
     result = operator.get_metadata()
 
-    assert result == {}
+    assert result == {"secret_fields": []}
     assert isinstance(result, dict)
 
 

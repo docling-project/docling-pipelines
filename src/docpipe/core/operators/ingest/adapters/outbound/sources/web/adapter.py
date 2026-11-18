@@ -15,6 +15,7 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, ExternalServiceError
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.core.docpipe_utils import generate_hex_digest
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -258,6 +259,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
         Returns:
             Binary content as bytes, or None if download fails
         """
+        provider_config = reveal_value(provider_config)
         timeout = provider_config.get("timeout", 30)
 
         try:
@@ -301,6 +303,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
+        provider_config = reveal_value(provider_config)
         # Support both "urls" (list) and "url" (single) keys
         urls = provider_config.get("urls")
         if urls is None:
