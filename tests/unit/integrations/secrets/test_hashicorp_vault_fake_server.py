@@ -20,8 +20,9 @@ from requests.adapters import BaseAdapter
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
 from docpipe.integrations.secrets.hashicorp_vault import HashiCorpVaultProvider
+from docpipe.integrations.secrets.secret_provider import ProviderUnreachableError
 
-VAULT_ADDR = "http://vault.test:8200"
+VAULT_ADDR = "https://vault.test:8200"
 ROLE_ID = "11111111-2222-3333-4444-555555555555"
 SECRET_ID = "66666666-7777-8888-9999-000000000000"  # pragma: allowlist secret
 CLIENT_TOKEN = "hvs.CAESIfakeclienttoken"  # pragma: allowlist secret
@@ -179,6 +180,14 @@ def _read_timeout(request: requests.PreparedRequest) -> Exception:
     return requests.exceptions.ReadTimeout("Read timed out. (read timeout=30)", request=request)
 
 
+def _assert_no_leak(error: Exception, *fragments: str) -> None:
+    """The error names only a fixed category and chains nothing that could carry the address or path."""
+    assert error.__cause__ is None
+    assert error.__suppress_context__ is True
+    for fragment in fragments:
+        assert fragment not in str(error)
+
+
 class TestSecretReads:
     """KV v2 / KV v1 reads after a successful AppRole login."""
 
@@ -207,8 +216,11 @@ class TestSecretReads:
     def test_secret_missing_from_both_kv_versions_reports_kv_v1_status(self, fake_vault: FakeVault) -> None:
         provider = HashiCorpVaultProvider()
 
-        with pytest.raises(ExternalServiceError, match=r"HTTP 404 for path 'secret/no/such/secret'"):
+        with pytest.raises(ExternalServiceError, match=r"^Vault returned HTTP 404 for secret read \(kv1\)$") as exc:
             provider.get_secret(path="no/such/secret", key="value")
+
+        assert not isinstance(exc.value, ProviderUnreachableError)  # a missing secret is not an outage
+        assert "no/such/secret" not in str(exc.value)
 
         assert [r.url for r in fake_vault.requests[1:]] == [
             f"{VAULT_ADDR}/v1/secret/data/no/such/secret",
@@ -220,11 +232,11 @@ class TestSecretReads:
         provider = HashiCorpVaultProvider()
 
         with pytest.raises(
-            ExternalServiceError, match="Network error reading secret at path 'secret/database/postgres'"
+            ProviderUnreachableError, match=r"^Vault secret read failed \(kv2\): connection failed$"
         ) as exc:
             provider.get_secret(path="database/postgres", key="password")
 
-        assert isinstance(exc.value.__cause__, requests.exceptions.ConnectionError)
+        _assert_no_leak(exc.value, "database/postgres", "Connection refused")
         assert len(fake_vault.requests) == 2  # login + KV v2 read only
 
     def test_timeout_on_kv_v1_fallback_read_is_wrapped(self, fake_vault: FakeVault) -> None:
@@ -232,11 +244,11 @@ class TestSecretReads:
         provider = HashiCorpVaultProvider()
 
         with pytest.raises(
-            ExternalServiceError, match="Network error reading secret at path 'secret/legacy/api'"
+            ProviderUnreachableError, match=r"^Vault secret read failed \(kv1\): request timed out$"
         ) as exc:
             provider.get_secret(path="legacy/api")
 
-        assert isinstance(exc.value.__cause__, requests.exceptions.ReadTimeout)
+        _assert_no_leak(exc.value, "legacy/api", "Read timed out")
 
     def test_reading_without_a_session_raises_before_any_request(self, fake_vault: FakeVault) -> None:
         # get_secret() always authenticates first, so only a direct call reaches this guard.
@@ -251,21 +263,21 @@ class TestSecretReads:
 class TestAppRoleLogin:
     """Failures while logging in with role_id / secret_id."""
 
-    def test_connection_refused_names_vault_address(self, fake_vault: FakeVault) -> None:
+    def test_connection_refused_is_reported_without_the_address(self, fake_vault: FakeVault) -> None:
         fake_vault.network_errors["auth/approle/login"] = _connection_refused
 
-        with pytest.raises(ExternalServiceError, match=f"Cannot connect to Vault at {VAULT_ADDR}") as exc:
+        with pytest.raises(ProviderUnreachableError, match=r"^Vault AppRole login failed: connection failed$") as exc:
             HashiCorpVaultProvider().authenticate()
 
-        assert isinstance(exc.value.__cause__, requests.exceptions.ConnectionError)
+        _assert_no_leak(exc.value, "vault.test", "Connection refused")
 
     def test_timeout_is_reported_as_failed_authentication_request(self, fake_vault: FakeVault) -> None:
         fake_vault.network_errors["auth/approle/login"] = _read_timeout
 
-        with pytest.raises(ExternalServiceError, match="Vault authentication request failed: Read timed out") as exc:
+        with pytest.raises(ProviderUnreachableError, match=r"^Vault AppRole login failed: request timed out$") as exc:
             HashiCorpVaultProvider().authenticate()
 
-        assert isinstance(exc.value.__cause__, requests.exceptions.ReadTimeout)
+        _assert_no_leak(exc.value, "vault.test", "Read timed out")
 
     def test_login_pending_mfa_without_client_token_is_rejected(self, fake_vault: FakeVault) -> None:
         fake_vault.kv2["database/postgres"] = {"password": "pg-pass"}  # pragma: allowlist secret
@@ -282,18 +294,21 @@ class TestAppRoleLogin:
         )
         provider = HashiCorpVaultProvider()
 
-        with pytest.raises(ExternalServiceError, match="Vault login response missing client_token"):
+        with pytest.raises(ProviderUnreachableError, match=r"^Vault login response missing client_token$"):
             provider.get_secret(path="database/postgres", key="password")
 
         assert [r.method for r in fake_vault.requests] == ["POST"]  # no secret read without a token
 
-    def test_rejected_credentials_report_vault_error(
+    def test_rejected_credentials_report_status_without_vault_error_text(
         self, fake_vault: FakeVault, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("VAULT_SECRET_ID", "revoked-secret-id")  # pragma: allowlist secret
 
-        with pytest.raises(ExternalServiceError, match=r"login failed \(HTTP 400\).*invalid role or secret ID"):
+        with pytest.raises(ProviderUnreachableError, match=r"^Vault AppRole login failed \(HTTP 400\)$") as exc:
             HashiCorpVaultProvider().authenticate()
+
+        assert "invalid role or secret ID" not in str(exc.value)
+        assert "revoked-secret-id" not in str(exc.value)  # pragma: allowlist secret
 
 
 class TestConnectionConfiguration:
@@ -305,6 +320,16 @@ class TestConnectionConfiguration:
         monkeypatch.setenv("VAULT_ADDR", "")
 
         with pytest.raises(ConfigurationError, match="VAULT_ADDR must be set"):
+            HashiCorpVaultProvider().authenticate()
+
+        assert fake_vault.requests == []
+
+    def test_unparsable_vault_addr_is_rejected_without_echoing_it(
+        self, fake_vault: FakeVault, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VAULT_ADDR", "https://[vault.test:8200")  # unclosed IPv6 bracket: urlparse raises
+
+        with pytest.raises(ConfigurationError, match=r"^VAULT_ADDR must be an http\(s\) URL with a host\.$"):
             HashiCorpVaultProvider().authenticate()
 
         assert fake_vault.requests == []
@@ -387,3 +412,13 @@ class TestConnectionConfiguration:
             HashiCorpVaultProvider().authenticate()
 
         assert fake_vault.requests == []
+
+
+class TestAvailabilityCheck:
+    """is_available() reports False instead of raising."""
+
+    def test_unexpected_transport_error_reports_unavailable(self, fake_vault: FakeVault) -> None:
+        fake_vault.network_errors["sys/health"] = lambda request: ValueError("unexpected adapter failure")
+
+        assert HashiCorpVaultProvider().is_available() is False
+        assert [r.url for r in fake_vault.requests] == [f"{VAULT_ADDR}/v1/sys/health"]
