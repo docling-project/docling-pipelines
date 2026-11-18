@@ -18,8 +18,6 @@ import threading
 from functools import wraps
 from pathlib import Path
 
-import nltk
-
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -140,6 +138,9 @@ def ensure_nltk_data(package_id: str = "punkt_tab") -> None:
         This function uses a thread lock to prevent concurrent downloads,
         which could cause race conditions or duplicate downloads.
     """
+    # Imported lazily so that importing this module (via the operator registry) does not load nltk.
+    import nltk
+
     venv_nltk_data = Path(sys.prefix) / "nltk_data"
 
     # Use thread lock to prevent concurrent downloads
@@ -152,25 +153,28 @@ def ensure_nltk_data(package_id: str = "punkt_tab") -> None:
         # Step 2: Early exit if package already exists
         try:
             nltk.data.find(f"tokenizers/{package_id}")
-            logger.debug(f"NLTK {package_id} data already available")
+            logger.debug("NLTK %s data already available", package_id)
             return
         except LookupError:
             # Package not found, proceed with download
             venv_nltk_data.mkdir(exist_ok=True, parents=True)
-            logger.info(f"NLTK {package_id} not found. Downloading to {venv_nltk_data}...")
+            logger.info("NLTK %s not found. Downloading to %s...", package_id, venv_nltk_data)
 
         # Step 3: Try standard download with SSL verification first
         try:
             result = nltk.download(package_id, download_dir=str(venv_nltk_data), quiet=False)
             if not result:
                 raise ConnectionError(f"NLTK download of {package_id} returned False")
-            logger.info(f"Successfully downloaded NLTK {package_id} data to {venv_nltk_data}")
+            logger.info("Successfully downloaded NLTK %s data to %s", package_id, venv_nltk_data)
 
         except (ssl.SSLError, ConnectionError) as e:
             # Step 4: SSL or connection errors - retry with SSL bypass
             # ConnectionError is raised when nltk.download() returns False (SSL failure)
             # ssl.SSLError is raised directly by urllib on SSL issues
-            logger.warning(f"Initial NLTK download failed ({e}). Retrying without SSL verification...")
+            logger.warning(
+                "Initial NLTK download failed (%s). Retrying without SSL verification...",
+                e,
+            )
 
             try:
                 # Use our custom downloader that bypasses SSL verification
@@ -180,25 +184,29 @@ def ensure_nltk_data(package_id: str = "punkt_tab") -> None:
                 if not success:
                     raise RuntimeError(f"NLTK download of {package_id} returned False even without SSL verification")
 
-                logger.info(f"Successfully downloaded NLTK {package_id} data to {venv_nltk_data} (SSL bypassed)")
+                logger.info(
+                    "Successfully downloaded NLTK %s data to %s (SSL bypassed)",
+                    package_id,
+                    venv_nltk_data,
+                )
 
             except Exception as final_err:
                 # All retry attempts failed
-                logger.error(f"Critical NLTK download failure: {final_err}")
-                logger.info(f"Manual fix: python -m nltk.downloader {package_id} -d {venv_nltk_data}")
+                logger.error("Critical NLTK download failure: %s", final_err)
+                logger.info("Manual fix: python -m nltk.downloader %s -d %s", package_id, venv_nltk_data)
                 raise RuntimeError(f"Failed to download NLTK {package_id} data: {final_err}") from final_err
 
         except Exception as e:
             # Step 5: Non-SSL/network error - don't retry, just fail with helpful message
-            logger.error(f"Unexpected error during NLTK download: {e}")
-            logger.info(f"Manual fix: python -m nltk.downloader {package_id} -d {venv_nltk_data}")
+            logger.error("Unexpected error during NLTK download: %s", e)
+            logger.info("Manual fix: python -m nltk.downloader %s -d %s", package_id, venv_nltk_data)
             raise
 
         # Step 6: Final verification that data is now available
         try:
             nltk.data.find(f"tokenizers/{package_id}")
-            logger.debug(f"Verified NLTK {package_id} data is now available")
+            logger.debug("Verified NLTK %s data is now available", package_id)
         except LookupError as e:
-            logger.error(f"NLTK {package_id} data missing after download attempt")
-            logger.info(f"Manual fix: python -m nltk.downloader {package_id} -d {venv_nltk_data}")
+            logger.error("NLTK %s data missing after download attempt", package_id)
+            logger.info("Manual fix: python -m nltk.downloader %s -d %s", package_id, venv_nltk_data)
             raise RuntimeError(f"NLTK {package_id} data verification failed after download") from e

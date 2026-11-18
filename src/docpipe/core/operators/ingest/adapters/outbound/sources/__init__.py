@@ -6,6 +6,7 @@ with the SourceAdapterFactory via the @register_source_adapter decorator.
 
 # Import adapters to trigger registration
 from .box.adapter import BoxSourceAdapter
+from .dropbox.adapter import DropboxSourceAdapter
 from .filesystem.adapter import FilesystemSourceAdapter
 from .google_drive.adapter import GoogleDriveSourceAdapter
 from .onedrive.adapter import OneDriveSourceAdapter
@@ -15,6 +16,7 @@ from .web.adapter import WebPageSourceAdapter
 
 __all__ = [
     "BoxSourceAdapter",
+    "DropboxSourceAdapter",
     "FilesystemSourceAdapter",
     "GoogleDriveSourceAdapter",
     "OneDriveSourceAdapter",

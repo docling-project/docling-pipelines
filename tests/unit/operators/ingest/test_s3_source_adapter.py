@@ -76,7 +76,7 @@ class TestS3SourceConfig:
 
     def test_rejects_negative_max_file_size(self):
         """Test that negative max file size is rejected."""
-        with pytest.raises(ValidationError, match="max_file_size_mb must be positive"):
+        with pytest.raises(ValidationError, match="Input should be greater than or equal to 1"):
             S3SourceConfig(
                 access_key="key",
                 secret_key="secret",  # pragma: allowlist secret
@@ -158,23 +158,20 @@ class TestS3SourceAdapter:
 
     def test_build_config_from_operator_params(self, adapter):
         """Test building config from operator parameters."""
-        connection_params = {
+        provider_config = {
             "bucket": "my-bucket",
             "prefix": "docs/",
             "endpoint_url": "https://s3.example.com",
             "region": "us-west-2",
             "recursive": False,
             "max_file_size_mb": 50,
-        }
-        credentials = {
             "access_key": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
             "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # pragma: allowlist secret
         }
         included_extensions = [".pdf", ".docx"]
 
         config = adapter.build_config_from_operator_params(
-            connection_params=connection_params,
-            credentials=credentials,
+            provider_config=provider_config,
             included_extensions=included_extensions,
         )
 
@@ -188,18 +185,16 @@ class TestS3SourceAdapter:
 
     def test_build_config_missing_credentials(self, adapter):
         """Test that missing credentials raise ValueError."""
-        with pytest.raises(ValueError, match="Missing required credential: 'access_key'"):
+        with pytest.raises(ValueError, match="Missing required parameter: 'access_key'"):
             adapter.build_config_from_operator_params(
-                connection_params={"bucket": "bucket"},
-                credentials={"secret_key": "secret"},  # pragma: allowlist secret
+                provider_config={"bucket": "bucket", "secret_key": "secret"},  # pragma: allowlist secret
             )
 
     def test_build_config_missing_bucket(self, adapter):
         """Test that missing bucket raises ValueError."""
-        with pytest.raises(ValueError, match="Missing required connection parameter: 'bucket'"):
+        with pytest.raises(ValueError, match="Missing required parameter: 'bucket'"):
             adapter.build_config_from_operator_params(
-                connection_params={},
-                credentials={
+                provider_config={
                     "access_key": "key",
                     "secret_key": "secret",  # pragma: allowlist secret
                 },
@@ -207,10 +202,9 @@ class TestS3SourceAdapter:
 
     def test_build_config_with_null_credentials(self, adapter):
         """Null credentials from UI defaults must not raise AttributeError."""
-        with pytest.raises(ValueError, match="Missing required credential"):
+        with pytest.raises(ValueError, match="Missing required parameter: 'access_key'"):
             adapter.build_config_from_operator_params(
-                connection_params={"bucket": "my-bucket"},
-                credentials=None,
+                provider_config={"bucket": "my-bucket"},
             )
 
     @pytest.mark.asyncio
@@ -574,8 +568,12 @@ class TestExpectedBucketOwnerPropagation:
         mock_client = Mock()
         mock_client.get_object.return_value = {"Body": Mock(read=Mock(return_value=b"data"))}
 
-        connection_params = {"bucket": "test-bucket", "region": "us-east-1"}
-        credentials = {"access_key": "AKIAIOSFODNN7EXAMPLE", "secret_key": "secret"}  # pragma: allowlist secret
+        provider_config = {
+            "bucket": "test-bucket",
+            "region": "us-east-1",
+            "access_key": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+            "secret_key": "secret",  # pragma: allowlist secret
+        }
 
         with patch("boto3.client", return_value=mock_client):
             with patch(
@@ -584,8 +582,7 @@ class TestExpectedBucketOwnerPropagation:
             ):
                 result = adapter.fetch_binary_content(
                     source_id="s3://test-bucket/docs/file.pdf",
-                    connection_params=connection_params,
-                    credentials=credentials,
+                    provider_config=provider_config,
                 )
 
         assert result == b"data"
@@ -599,11 +596,12 @@ class TestExpectedBucketOwnerPropagation:
         mock_client = Mock()
         mock_client.get_object.return_value = {"Body": Mock(read=Mock(return_value=b"data"))}
 
-        connection_params = {
+        provider_config = {
             "bucket": "test-bucket",
             "endpoint_url": "https://s3.us-south.cloud-object-storage.appdomain.cloud",
+            "access_key": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+            "secret_key": "secret",  # pragma: allowlist secret
         }
-        credentials = {"access_key": "AKIAIOSFODNN7EXAMPLE", "secret_key": "secret"}  # pragma: allowlist secret
 
         with patch("boto3.client", return_value=mock_client):
             with patch(
@@ -612,8 +610,7 @@ class TestExpectedBucketOwnerPropagation:
             ):
                 result = adapter.fetch_binary_content(
                     source_id="s3://test-bucket/docs/file.pdf",
-                    connection_params=connection_params,
-                    credentials=credentials,
+                    provider_config=provider_config,
                 )
 
         assert result == b"data"
@@ -825,24 +822,21 @@ class TestS3FetchBinaryContentErrors:
     def test_returns_none_for_missing_access_key(self, adapter):
         result = adapter.fetch_binary_content(
             source_id="s3://bucket/key.pdf",
-            connection_params={},
-            credentials={"secret_key": "secret"},  # pragma: allowlist secret
+            provider_config={"secret_key": "secret"},  # pragma: allowlist secret
         )
         assert result is None
 
     def test_returns_none_for_missing_secret_key(self, adapter):
         result = adapter.fetch_binary_content(
             source_id="s3://bucket/key.pdf",
-            connection_params={},
-            credentials={"access_key": "key"},
+            provider_config={"access_key": "key"},
         )
         assert result is None
 
     def test_returns_none_for_missing_bucket_without_s3_uri(self, adapter):
         result = adapter.fetch_binary_content(
             source_id="just-a-key.pdf",
-            connection_params={},  # no bucket
-            credentials={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret
+            provider_config={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret  # no bucket
         )
         assert result is None
 
@@ -857,8 +851,11 @@ class TestS3FetchBinaryContentErrors:
             ):
                 result = adapter.fetch_binary_content(
                     source_id="folder/file.pdf",
-                    connection_params={"bucket": "my-bucket"},
-                    credentials={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret
+                    provider_config={
+                        "bucket": "my-bucket",
+                        "access_key": "key",
+                        "secret_key": "secret",  # pragma: allowlist secret
+                    },
                 )
         assert result == b"bytes"
 
@@ -875,8 +872,7 @@ class TestS3FetchBinaryContentErrors:
             ):
                 result = adapter.fetch_binary_content(
                     source_id="s3://bucket/file.pdf",
-                    connection_params={},
-                    credentials={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret
+                    provider_config={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret
                 )
         assert result is None
 
@@ -891,8 +887,7 @@ class TestS3FetchBinaryContentErrors:
             ):
                 result = adapter.fetch_binary_content(
                     source_id="s3://bucket/file.pdf",
-                    connection_params={},
-                    credentials={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret
+                    provider_config={"access_key": "key", "secret_key": "secret"},  # pragma: allowlist secret
                 )
         assert result is None
 
@@ -901,8 +896,7 @@ class TestS3FetchBinaryContentErrors:
         mock_client = Mock()
         mock_client.get_object.return_value = {"Body": Mock(read=Mock(return_value=b"x"))}
 
-        credentials = {"access_key": "key", "secret_key": "secret"}  # pragma: allowlist secret
-        connection_params: dict = {}
+        provider_config = {"access_key": "key", "secret_key": "secret"}  # pragma: allowlist secret
 
         with patch("boto3.client", return_value=mock_client) as mock_boto:
             with patch(
@@ -911,13 +905,11 @@ class TestS3FetchBinaryContentErrors:
             ):
                 adapter.fetch_binary_content(
                     source_id="s3://b/k1.pdf",
-                    connection_params=connection_params,
-                    credentials=credentials,
+                    provider_config=provider_config,
                 )
                 adapter.fetch_binary_content(
                     source_id="s3://b/k2.pdf",
-                    connection_params=connection_params,
-                    credentials=credentials,
+                    provider_config=provider_config,
                 )
 
         # boto3.client should only have been called once (cached on second call)

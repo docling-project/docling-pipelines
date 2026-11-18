@@ -15,9 +15,11 @@ import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { NumberInput } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import { NOOP_ATTRIBUTE as ATTR, NOOP_LABELS as LABEL, NOOP_DEFAULTS } from './constants';
+import { NOOP_ATTRIBUTE as ATTR, NOOP_DEFAULTS } from './constants';
+import { messages } from './Noop.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface NoopPanelBodyProps {
@@ -25,6 +27,7 @@ interface NoopPanelBodyProps {
 }
 
 export function NoopPanelBody({ controller }: NoopPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
   // ── Read operator attribute metadata from Redux (passed in via Canvas.tsx) ──
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   const operatorMetadata = (controller?.getAppData?.()?.operatorMetadata ?? {}) as Record<string, OperatorMetadata>;
@@ -52,15 +55,15 @@ export function NoopPanelBody({ controller }: NoopPanelBodyProps): React.JSX.Ele
             nodeAttributes={nodeAttributes}
             definition={
               (nodeAttributes[ATTR.SLEEP_SEC]?.description as string | undefined) ??
-              LABEL.SLEEP_SEC_DESCRIPTION
+              intl.formatMessage(messages.sleepSecDescription)
             }
           >
-            {LABEL.SLEEP_SEC}
+            {intl.formatMessage(messages.sleepSec)}
           </RequiredParamTooltip>
         </div>
         <NumberInput
           id="sleep_sec"
-          label={LABEL.SLEEP_SEC}
+          label={intl.formatMessage(messages.sleepSec)}
           hideLabel
           value={sleepSec}
           min={0}

@@ -303,6 +303,14 @@ class TestS3DestinationAdapterEnsureDirectory:
 
 
 class TestS3DestinationAdapterBuildConfig:
+    def test_accepts_ui_key_prefix(self):
+        adapter = S3DestinationAdapter()
+        cfg = adapter.build_config_from_operator_params(
+            provider_config={"bucket": "my-bucket", "key_prefix": "exports/"},
+            credentials={"access_key": "AKID", "secret_key": "SECRET"},  # pragma: allowlist secret
+        )
+        assert cfg.key_prefix == "exports/"
+
     def test_builds_config_from_valid_params(self):
         adapter = S3DestinationAdapter()
         cfg = adapter.build_config_from_operator_params(

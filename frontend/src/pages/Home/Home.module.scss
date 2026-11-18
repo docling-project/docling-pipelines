@@ -26,6 +26,14 @@
   }
 }
 
+// ── Beta Banner ───────────────────────────────────────────────────────────────
+
+.betaBanner {
+  // Override Carbon's default max-width so the banner spans the full viewport.
+  max-width: 100% !important;
+  margin: 0 !important;
+}
+
 // ── Zone 2: Recently Visited Bar ──────────────────────────────────────────────
 
 .recentBar {

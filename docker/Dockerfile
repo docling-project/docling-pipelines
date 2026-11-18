@@ -1,51 +1,89 @@
-# Stage 1: Builder
-FROM registry.access.redhat.com/ubi9/python-312:1-1777495222 as builder
+# Build the React UI into static assets.
+FROM registry.access.redhat.com/ubi10/nodejs-22 AS frontend-builder
 
 USER root
-RUN dnf install -y gcc gcc-c++ openldap-devel cyrus-sasl-devel openssl-devel && dnf clean all && pip install --no-cache-dir uv && pip install --upgrade pip==24.0
+WORKDIR /frontend
 
+# Cache dependencies separately from frontend source changes.
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/src ./src
+COPY frontend/public ./public
+COPY frontend/index.html \
+     frontend/vite.config.ts \
+     frontend/tsconfig.json \
+     ./
+# Copy
+RUN mv ./public/samples/docker_samplePipeline.json ./public/samples/samplePipeline.json
+RUN npm run build
+
+# Install Python dependencies before copying application source.
+FROM registry.access.redhat.com/ubi9/python-312 AS backend-builder
+
+USER root
 WORKDIR /opt/app-root
 
-# 1. Cache dependencies (This layer stays cached if pyproject.toml doesn't change)
-COPY pyproject.toml ./
-RUN touch README.md
-RUN mkdir -p ./src && \
-    uv pip install --no-cache ".[llm]" prefect-docker prefect-kubernetes
+RUN pip install --no-cache-dir uv
 
-# 2. Copy code and config files
-COPY src/ ./src/
-COPY sample_flows/ ./sample_flows/
-COPY docling-pipelines-config.yaml ./
+# Cache dependencies separately from backend source changes.
+COPY pyproject.toml uv.lock ./
+ARG COMPUTE_BACKEND=cpu
+# Use CPU dependencies by default, or select GPU support with COMPUTE_BACKEND=gpu.
+# Install the pinned torch and torchvision versions separately using CPU wheels.
+# This avoids CUDA dependencies while keeping pyproject.toml and uv.lock unchanged.
+RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
+    case "$COMPUTE_BACKEND" in \
+        gpu) \
+            uv export --locked --no-dev --no-emit-project \
+                --format pylock.toml --output-file pylock.toml && \
+            uv pip install --python /opt/docpipe-venv/bin/python \
+                --no-cache --require-hashes -r pylock.toml ;; \
+        cpu) \
+            uv export --locked --no-dev --no-emit-project \
+                --prune torch --prune torchvision \
+                --format pylock.toml --output-file pylock.toml && \
+            uv pip install --python /opt/docpipe-venv/bin/python \
+                --no-cache --require-hashes -r pylock.toml && \
+            uv export --locked --no-dev --no-emit-project --no-hashes \
+                --only-emit-package torch --only-emit-package torchvision \
+                --format requirements.txt --output-file requirements-cpu.txt && \
+            uv pip install --python /opt/docpipe-venv/bin/python \
+                --no-cache --torch-backend=cpu -r requirements-cpu.txt ;; \
+        *) echo "COMPUTE_BACKEND must be cpu or gpu" >&2; exit 1 ;; \
+    esac
 
-# Final editable install and cleanup of massive hidden cache
-RUN uv pip install --no-cache -e . && \
-    rm -rf ./src/.cache
-
-# Stage 2: Final Image
-FROM registry.access.redhat.com/ubi9/python-312:1-1777495222
+# Run the API and serve the built UI as a non-root user.
+FROM registry.access.redhat.com/ubi9/python-312-minimal
 
 USER root
-RUN dnf install -y \
-    mesa-libGL openldap-devel cyrus-sasl-devel openssl-devel glib2 && \
-    dnf clean all
+# Native Python extensions need GL, LDAP and OpenMP.
+RUN microdnf install -y --nodocs --setopt=install_weak_deps=0 \
+        mesa-libGL openldap libgomp && \
+    microdnf clean all && \
+    useradd -m -u 1000 docpipe
 
-# Create docpipe user and add to root group (GID 0) for OpenShift compatibility
-RUN useradd -m -u 1000 docpipe && \
-    usermod -a -G 0 docpipe
+COPY --from=backend-builder --chown=1000:0 /opt/docpipe-venv/ /opt/docpipe-venv/
+COPY --chown=1000:0 src/docpipe/ /opt/app-root/src/docpipe/
+COPY --from=frontend-builder --chown=1000:0 /frontend/dist /opt/app-root/src/docpipe/api/static/
 
-# Copy EVERYTHING from builder with OpenShift-compatible ownership (UID 1000, GID 0)
-COPY --from=builder --chown=1000:0 /opt/app-root/ /opt/app-root/
-
-# Create models, data, and nltk_data directories with OpenShift-compatible permissions
-RUN mkdir -p /opt/app-root/models /data /opt/app-root/nltk_data && \
-    chown -R docpipe:root /opt/app-root/models /data /opt/app-root/nltk_data && \
-    chmod -R g=u /opt/app-root /data
+# Allow runtime downloads and storage writes under the supported data paths.
+RUN mkdir -p \
+        /opt/app-root/nltk_data \
+        /opt/app-root/data \
+        /opt/app-root/src/data \
+        /data && \
+    chown -R docpipe:root \
+        /opt/app-root/nltk_data \
+        /opt/app-root/data \
+        /opt/app-root/src/data \
+        /data
 
 WORKDIR /opt/app-root/src
 USER docpipe
 ENV PYTHONPATH=/opt/app-root/src
-ENV PATH=/opt/app-root/bin:$PATH
-ENV DOCPIPE_DATA_PATH=/data
+ENV VIRTUAL_ENV=/opt/docpipe-venv
+ENV PATH=/opt/docpipe-venv/bin:$PATH
 
 EXPOSE 8080
 CMD ["python", "-m", "uvicorn", "docpipe.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

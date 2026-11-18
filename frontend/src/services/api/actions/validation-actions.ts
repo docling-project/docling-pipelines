@@ -15,6 +15,8 @@ const BFF_HEADERS = {
   'X-Requested-With': 'XMLHttpRequest',
 };
 
+export type ValidationActionType = 'highlight' | 'open_properties' | 'none';
+
 export interface ValidationAlertItem {
   code: string | null;
   message: string | null;
@@ -22,6 +24,7 @@ export interface ValidationAlertItem {
   node_id: string | null;
   node_name: string | null;
   operator: string | null;
+  action_type?: ValidationActionType | null;
 }
 
 export interface FlowValidationResponse {

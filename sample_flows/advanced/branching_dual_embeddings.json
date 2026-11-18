@@ -14,7 +14,7 @@
       "name": "ingest_documents",
       "config": {
         "provider": "filesystem",
-        "connection_params": {
+        "provider_config": {
           "paths": ["./sample_documents"]
         },
         "include_filter": "pdf,txt,docx"
@@ -136,7 +136,6 @@
         "provider": "opensearch",
         "index_name": "dual-embeddings-index",
         "doc_id_column": "doc_id_hash",
-        "create_index": true,
         "provider_config": {
           "host": "localhost",
           "port": 9200,

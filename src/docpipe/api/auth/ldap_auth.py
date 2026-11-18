@@ -1,15 +1,15 @@
 """LDAP authentication module."""
 
-import logging
-
 import ldap
+from ldap.filter import escape_filter_chars
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
+from docpipe.utils.infrastructure.logging import get_logger
 
 from .models import User
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LDAPConfig(BaseSettings):
@@ -50,6 +50,13 @@ class LDAPAuthenticator:
         Raises:
             Exception: If LDAP connection or authentication fails
         """
+        # A simple bind with an empty password is an "unauthenticated bind"
+        # (RFC 4513, section 5.1.2) that many servers report as successful, so
+        # it must never be treated as proof of the user's identity.
+        if not username or not password:
+            logger.warning("Rejected LDAP authentication with empty username or password")
+            return None
+
         ldap_client = None
 
         try:
@@ -81,7 +88,7 @@ class LDAPAuthenticator:
                     logger.warning("Invalid credentials for user: %s", username)
                     return None
 
-                search_filter = f"(sAMAccountName={username})"
+                search_filter = f"(sAMAccountName={escape_filter_chars(username)})"
                 attributes = [
                     "cn",
                     "mail",
@@ -123,7 +130,7 @@ class LDAPAuthenticator:
                 self.config.ldap_bind_password,
             )
 
-            search_filter = f"(uid={username})"
+            search_filter = f"(uid={escape_filter_chars(username)})"
             attributes = ["cn", "mail", "uid"]
 
             result = ldap_client.search_s(

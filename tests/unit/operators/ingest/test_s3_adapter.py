@@ -37,8 +37,7 @@ def make_config(**kwargs):
 
 
 def make_client_error(code="NoSuchBucket", message="Not found"):
-    error = ClientError({"Error": {"Code": code, "Message": message}}, "operation")
-    return error
+    return ClientError({"Error": {"Code": code, "Message": message}}, "operation")
 
 
 @pytest.fixture
@@ -50,8 +49,12 @@ def adapter():
 class TestBuildConfigFromOperatorParams:
     def test_success(self, adapter):
         config = adapter.build_config_from_operator_params(
-            connection_params={"bucket": "my-bucket", "prefix": "docs/"},
-            credentials={"access_key": "AKID", "secret_key": "SAK"},  # pragma: allowlist secret
+            provider_config={
+                "bucket": "my-bucket",
+                "prefix": "docs/",
+                "access_key": "AKID",
+                "secret_key": "SAK",  # pragma: allowlist secret
+            },
         )
         assert config.bucket == "my-bucket"
         assert config.access_key == "AKID"
@@ -59,28 +62,24 @@ class TestBuildConfigFromOperatorParams:
     def test_missing_access_key_raises(self, adapter):
         with pytest.raises(ValueError, match="access_key"):
             adapter.build_config_from_operator_params(
-                connection_params={"bucket": "b"},
-                credentials={"secret_key": "SAK"},  # pragma: allowlist secret
+                provider_config={"bucket": "b", "secret_key": "SAK"},  # pragma: allowlist secret
             )
 
     def test_missing_secret_key_raises(self, adapter):
         with pytest.raises(ValueError, match="secret_key"):
             adapter.build_config_from_operator_params(
-                connection_params={"bucket": "b"},
-                credentials={"access_key": "AKID"},  # pragma: allowlist secret
+                provider_config={"bucket": "b", "access_key": "AKID"},  # pragma: allowlist secret
             )
 
     def test_missing_bucket_raises(self, adapter):
         with pytest.raises(ValueError, match="bucket"):
             adapter.build_config_from_operator_params(
-                connection_params={},
-                credentials={"access_key": "AKID", "secret_key": "SAK"},  # pragma: allowlist secret
+                provider_config={"access_key": "AKID", "secret_key": "SAK"},  # pragma: allowlist secret
             )
 
     def test_with_extensions_and_max_files(self, adapter):
         config = adapter.build_config_from_operator_params(
-            connection_params={"bucket": "b"},
-            credentials={"access_key": "AKID", "secret_key": "SAK"},  # pragma: allowlist secret
+            provider_config={"bucket": "b", "access_key": "AKID", "secret_key": "SAK"},  # pragma: allowlist secret
             included_extensions=[".pdf", ".txt"],
             max_files=100,
         )
@@ -89,8 +88,13 @@ class TestBuildConfigFromOperatorParams:
 
     def test_optional_endpoint_url(self, adapter):
         config = adapter.build_config_from_operator_params(
-            connection_params={"bucket": "b", "endpoint_url": "http://minio:9000", "region": "us-east-1"},
-            credentials={"access_key": "AKID", "secret_key": "SAK"},  # pragma: allowlist secret
+            provider_config={
+                "bucket": "b",
+                "endpoint_url": "http://minio:9000",
+                "region": "us-east-1",
+                "access_key": "AKID",
+                "secret_key": "SAK",  # pragma: allowlist secret
+            },
         )
         assert config.endpoint_url == "http://minio:9000"
         assert config.region == "us-east-1"
@@ -286,8 +290,10 @@ class TestTestConnection:
 
 @pytest.mark.unit
 class TestFetchBinaryContent:
-    def _make_credentials(self):
-        return {"access_key": "AKID", "secret_key": "SAK"}  # pragma: allowlist secret
+    def _make_provider_config(self, **extra):
+        base = {"access_key": "AKID", "secret_key": "SAK"}  # pragma: allowlist secret
+        base.update(extra)
+        return base
 
     def test_fetch_by_s3_uri(self, adapter):
         with patch("docpipe.core.operators.ingest.adapters.outbound.sources.s3.adapter.boto3") as mock_boto3:
@@ -296,8 +302,7 @@ class TestFetchBinaryContent:
             mock_s3.get_object.return_value = {"Body": Mock(read=Mock(return_value=b"content"))}
             result = adapter.fetch_binary_content(
                 source_id="s3://my-bucket/path/to/file.pdf",
-                connection_params={},
-                credentials=self._make_credentials(),
+                provider_config=self._make_provider_config(),
             )
         assert result == b"content"
 
@@ -308,16 +313,14 @@ class TestFetchBinaryContent:
             mock_s3.get_object.return_value = {"Body": Mock(read=Mock(return_value=b"data"))}
             result = adapter.fetch_binary_content(
                 source_id="path/to/file.pdf",
-                connection_params={"bucket": "my-bucket"},
-                credentials=self._make_credentials(),
+                provider_config=self._make_provider_config(bucket="my-bucket"),
             )
         assert result == b"data"
 
     def test_missing_credentials_returns_none(self, adapter):
         result = adapter.fetch_binary_content(
             source_id="s3://b/k",
-            connection_params={},
-            credentials={},
+            provider_config={},
         )
         assert result is None
 
@@ -328,8 +331,7 @@ class TestFetchBinaryContent:
             mock_s3.get_object.side_effect = make_client_error("NoSuchKey")
             result = adapter.fetch_binary_content(
                 source_id="s3://b/k",
-                connection_params={},
-                credentials=self._make_credentials(),
+                provider_config=self._make_provider_config(),
             )
         assert result is None
 
@@ -344,8 +346,7 @@ class TestFetchBinaryContent:
             mock_s3.get_object.side_effect = FakeBotoCoreError()
             result = adapter.fetch_binary_content(
                 source_id="s3://b/k",
-                connection_params={},
-                credentials=self._make_credentials(),
+                provider_config=self._make_provider_config(),
             )
         assert result is None
 
@@ -356,16 +357,14 @@ class TestFetchBinaryContent:
             mock_s3.get_object.side_effect = RuntimeError("boom")
             result = adapter.fetch_binary_content(
                 source_id="s3://b/k",
-                connection_params={},
-                credentials=self._make_credentials(),
+                provider_config=self._make_provider_config(),
             )
         assert result is None
 
     def test_missing_bucket_in_key_mode_returns_none(self, adapter):
         result = adapter.fetch_binary_content(
             source_id="path/to/file.pdf",
-            connection_params={},  # no bucket
-            credentials=self._make_credentials(),
+            provider_config=self._make_provider_config(),  # no bucket
         )
         assert result is None
 
@@ -376,8 +375,7 @@ class TestFetchBinaryContent:
             mock_s3.get_object.return_value = {"Body": Mock(read=Mock(return_value=b"ok"))}
             result = adapter.fetch_binary_content(
                 source_id="s3://b/k",
-                connection_params={"endpoint_url": "http://minio:9000", "region": "us-east-1"},
-                credentials=self._make_credentials(),
+                provider_config=self._make_provider_config(endpoint_url="http://minio:9000", region="us-east-1"),
             )
         assert result == b"ok"
         call_kwargs = mock_boto3.client.call_args[1]

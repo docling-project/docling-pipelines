@@ -9,7 +9,7 @@ import BottomNotificationPanel from './BottomNotificationPanel/BottomNotificatio
 import type { NotificationItem } from './BottomNotificationPanel/BottomNotificationPanel';
 import TopNotificationBar from './TopNotificationBar/TopNotificationBar';
 import { VALIDATION_STATUS, HIGHLIGHT_MESSAGE_CODES } from '@/constants/notificationPanel';
-import type { FlowValidationResponse } from '@/services/api';
+import type { FlowValidationResponse, ValidationActionType } from '@/services/api';
 
 // ── Module-level persistent store ────────────────────────────────────────────
 // Survives component re-mounts (e.g. flyout open/close cycles that unmount Canvas subtree).
@@ -125,6 +125,7 @@ export function NotificationPanel({
         node_name: item.node_name,
         node_id: item.node_id,
         message_code: item.message_code,
+        action_type: item.action_type,
         timestamp,
       });
     });
@@ -138,13 +139,14 @@ export function NotificationPanel({
         node_name: item.node_name,
         node_id: item.node_id,
         message_code: item.message_code,
+        action_type: item.action_type,
         timestamp,
       });
     });
 
-    // Stable hash to detect content changes
-    const errorHash = validationData.errors?.map((e) => `${e.code}-${e.node_id}`).join('|') ?? '';
-    const warningHash = validationData.warnings?.map((w) => `${w.code}-${w.node_id}`).join('|') ?? '';
+    // Stable hash to detect content changes including message and action_type
+    const errorHash = validationData.errors?.map((e) => `${e.code}-${e.node_id}-${e.message}-${e.action_type}`).join('|') ?? '';
+    const warningHash = validationData.warnings?.map((w) => `${w.code}-${w.node_id}-${w.message}-${w.action_type}`).join('|') ?? '';
     const validationId = `${status}-${errorHash}-${warningHash}`;
 
     const isContentChanged = validationId !== lastValidationIdRef.current;
@@ -188,11 +190,24 @@ export function NotificationPanel({
   }, [isOpen, notifications, onStateChange]);
 
   // ── Node click routing ────────────────────────────────────────────────────
-  const handleNodeClick = (nodeId: string, messageCode?: string | null): void => {
+  const handleNodeClick = (
+    nodeId: string,
+    messageCode?: string | null,
+    actionType?: ValidationActionType | null
+  ): void => {
     const canvasController = canvasControllerRef.current;
     if (!canvasController) { return; }
 
-    if (messageCode && HIGHLIGHT_MESSAGE_CODES.has(messageCode)) {
+    // If action_type is explicitly provided by the backend:
+    if (actionType === 'none') {
+      return;
+    }
+
+    const shouldHighlight =
+      actionType === 'highlight' ||
+      (!actionType && Boolean(messageCode && HIGHLIGHT_MESSAGE_CODES.has(messageCode)));
+
+    if (shouldHighlight) {
       // Close any open properties panel, then select/highlight the node
       if (setActivePanelNodeId) { setActivePanelNodeId(null); }
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access

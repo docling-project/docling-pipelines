@@ -254,10 +254,9 @@ class TelemetryService:
             )
             self._enabled = False
         except Exception as e:
-            logger.error(
+            logger.exception(
                 "Failed to initialize telemetry",
                 extra={"error": str(e)},
-                exc_info=True,
             )
             self._enabled = False
 
@@ -361,7 +360,7 @@ class TelemetryService:
                         span.set_attribute(key, value)
             return span
         except Exception as e:
-            logger.debug(f"Failed to start span: {e}")
+            logger.debug("Failed to start span: %s", e)
             return None
 
     def end_span(self, span) -> None:
@@ -376,7 +375,7 @@ class TelemetryService:
         try:
             span.end()
         except Exception as e:
-            logger.debug(f"Failed to end span: {e}")
+            logger.debug("Failed to end span: %s", e)
 
     @contextmanager
     def span(self, name: str, *, attributes: dict[str, Any] | None = None):
@@ -417,7 +416,7 @@ class TelemetryService:
             if span is not None and value is not None:
                 span.set_attribute(key, value)
         except Exception as e:
-            logger.debug(f"Failed to set span attribute: {e}")
+            logger.debug("Failed to set span attribute: %s", e)
 
     def record_exception(self, exception: Exception, *, span=None) -> None:
         """Record an exception in a span.
@@ -438,7 +437,7 @@ class TelemetryService:
                 span.record_exception(exception)
                 span.set_status(trace.Status(trace.StatusCode.ERROR, str(exception)))
         except Exception as e:
-            logger.debug(f"Failed to record exception: {e}")
+            logger.debug("Failed to record exception: %s", e)
 
     def get_current_span(self):
         """Get the current active span.
@@ -454,7 +453,7 @@ class TelemetryService:
 
             return trace.get_current_span()
         except Exception as e:
-            logger.debug(f"Failed to get current span: {e}")
+            logger.debug("Failed to get current span: %s", e)
             return None
 
     def get_trace_context(self) -> dict[str, str]:
@@ -487,7 +486,7 @@ class TelemetryService:
                 "span_id": format(ctx.span_id, "016x"),
             }
         except Exception as e:
-            logger.debug(f"Failed to get trace context: {e}")
+            logger.debug("Failed to get trace context: %s", e)
             return empty
 
     # ------------------------------------------------------------------
@@ -522,7 +521,7 @@ class TelemetryService:
             self._http_request_counter.add(1, labels)
             self._http_request_duration.record(duration_ms, labels)
         except Exception as e:
-            logger.debug(f"Failed to record HTTP request metric: {e}")
+            logger.debug("Failed to record HTTP request metric: %s", e)
 
     def record_operator_execution(
         self,
@@ -558,7 +557,7 @@ class TelemetryService:
                     {"operator.name": operator_name, "operator.category": category},
                 )
         except Exception as e:
-            logger.debug(f"Failed to record operator execution metric: {e}")
+            logger.debug("Failed to record operator execution metric: %s", e)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -574,14 +573,14 @@ class TelemetryService:
                 logger.info("Shutting down telemetry tracing")
                 self._tracer_provider.shutdown()
             except Exception as e:
-                logger.error(f"Failed to shutdown tracing: {e}")
+                logger.error("Failed to shutdown tracing: %s", e)
 
         if self._meter_provider is not None:
             try:
                 logger.info("Shutting down telemetry metrics")
                 self._meter_provider.shutdown()
             except Exception as e:
-                logger.error(f"Failed to shutdown metrics: {e}")
+                logger.error("Failed to shutdown metrics: %s", e)
 
     @property
     def is_enabled(self) -> bool:

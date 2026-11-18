@@ -81,16 +81,17 @@ RUN_ID_3 = "ffff0000-0000-0000-0000-000000000003"
 # ── get_project_flows_with_run_summary ───────────────────────────────────────
 
 
-def test_get_project_flows_passes_container_id_to_flow_service():
+def test_get_project_flows_passes_container_id_and_is_elyra_to_flow_service():
     project = _make_project(PROJECT_ID)
     flows = [_make_flow(FLOW_ID_1, PROJECT_ID)]
     svc = _make_service(project=project, flows=flows)
 
-    svc.get_project_flows_with_run_summary(project_id=PROJECT_ID)
+    svc.get_project_flows_with_run_summary(project_id=PROJECT_ID, is_elyra=True)
 
     svc._flow_service.list_flows.assert_called_once()
     call_kwargs = svc._flow_service.list_flows.call_args.kwargs
     assert call_kwargs["container_id"] == PROJECT_ID
+    assert call_kwargs["is_elyra"] is True
 
 
 def test_get_project_flows_raises_404_for_unknown_project():

@@ -38,7 +38,7 @@ This method allows for:
 
 ### Alternative Method: Email Disclosure
 
-Alternatively, you can send an email with as many details as possible to [docling_pipeline_team-dg@ibm.com](mailto:docling_pipeline_team-dg@ibm.com). This is a distribution list for the maintainers team.
+Alternatively, you can send an email with as many details as possible to [docling_pipeline_team@wwpdl.vnet.ibm.com](mailto:docling_pipeline_team@wwpdl.vnet.ibm.com). This is a distribution list for the maintainers team.
 
 **Important:** Please do not create a public issue or discuss the vulnerability in any public channel until it has been addressed.
 

@@ -101,10 +101,7 @@ class TestOperatorMessages:
         """Test operator start message includes step name and type."""
         reporter.print_operator_start(step_name="step1", operator_type="extract_operator")
 
-        mock_logger.info.assert_called_once()
-        call_args = mock_logger.info.call_args[0][0]
-        assert "step1" in call_args
-        assert "extract_operator" in call_args
+        mock_logger.info.assert_called_once_with("[%s] Starting %s...", "step1", "extract_operator")
 
     @patch("docpipe.utils.infrastructure.flow_execution_reporter.logger")
     def test_print_operator_summary_updates_table_state(
@@ -244,9 +241,7 @@ class TestColumnListPrinting:
         columns = ["id", "name", "content"]
         reporter._print_column_list(columns)
 
-        mock_logger.info.assert_called_once()
-        call_args = mock_logger.info.call_args[0][0]
-        assert "id, name, content" in call_args
+        mock_logger.info.assert_called_once_with("%s%s", "     ", "id, name, content")
 
     @patch("docpipe.utils.infrastructure.flow_execution_reporter.logger")
     def test_print_column_list_many_columns(self, mock_logger, reporter):
@@ -271,8 +266,7 @@ class TestColumnListPrinting:
         custom_indent = "       "
         reporter._print_column_list(columns, indent=custom_indent)
 
-        call_args = mock_logger.info.call_args[0][0]
-        assert call_args.startswith(custom_indent)
+        mock_logger.info.assert_called_once_with("%s%s", custom_indent, "id, name")
 
 
 class TestMetadataCategorization:
@@ -502,3 +496,48 @@ class TestColumnTrackingExceptionPaths:
             result = reporter._get_removed_columns(col_names=["id", "content"])
 
         assert result == []
+
+
+class TestFlowExecutionReporterStaticMethods:
+    """Verify reporter helpers are static and callable without an instance."""
+
+    STATIC_METHODS = (
+        "print_operator_start",
+        "_format_duration",
+        "_log_column_change_header",
+        "_extract_column_names",
+        "_print_wrapped_columns",
+        "_format_group_name",
+        "_print_numeric_fields",
+        "_print_nested_dict_field",
+        "_print_other_fields",
+        "_print_generic_list",
+        "_extract_name_from_row",
+    )
+
+    def test_reporter_helpers_are_static(self):
+        """Every converted reporter helper must be a true staticmethod."""
+        import inspect
+
+        from docpipe.utils.infrastructure.flow_execution_reporter import FlowExecutionReporter
+
+        for method_name in self.STATIC_METHODS:
+            assert isinstance(inspect.getattr_static(FlowExecutionReporter, method_name), staticmethod), (
+                f"{method_name} is not a staticmethod"
+            )
+
+    def test_format_duration_class_call(self):
+        """Duration formatting works when called directly on the class."""
+        from docpipe.utils.infrastructure.flow_execution_reporter import FlowExecutionReporter
+
+        assert FlowExecutionReporter._format_duration(None) == "< 1s"
+        assert FlowExecutionReporter._format_duration(0.5) == "< 1s"
+        assert FlowExecutionReporter._format_duration(2.5) == "2.50s"
+
+    def test_extract_column_names_class_call(self):
+        """Column extraction works when called directly on the class."""
+        from docpipe.utils.infrastructure.flow_execution_reporter import FlowExecutionReporter
+
+        tables = [pa.table({"id": ["x"], "content": ["y"]}), None]
+
+        assert FlowExecutionReporter._extract_column_names(tables) == {"id", "content"}

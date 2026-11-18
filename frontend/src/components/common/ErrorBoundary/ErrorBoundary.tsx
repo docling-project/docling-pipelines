@@ -1,15 +1,17 @@
 import React, { Component, type ReactNode, type ErrorInfo } from 'react';
 import { ErrorEmptyState } from '@carbon/ibm-products';
 import { Renew } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { log4js, logUtil } from '@/utils/logger';
 import { useTheme } from '@/hooks';
+import { messages } from './ErrorBoundary.messages';
 import styles from './ErrorBoundary.module.scss';
 
 const logger = log4js.getLogger('ErrorBoundary');
 
 /** Props passed from ErrorBoundary to the default fallback UI. */
 interface ErrorFallbackProps {
-  message: string;
+  message: string | undefined;
   errorInfo: ErrorInfo | null;
   onReset: () => void;
 }
@@ -20,14 +22,15 @@ interface ErrorFallbackProps {
  */
 function ErrorFallback({ message, errorInfo, onReset }: ErrorFallbackProps): React.JSX.Element {
   const { isDarkMode } = useTheme();
+  const intl = useIntl();
   return (
     <div className={styles.errorContainer}>
       <ErrorEmptyState
         illustrationTheme={isDarkMode ? 'dark' : 'light'}
-        title="Something went wrong"
-        subtitle={message}
+        title={intl.formatMessage(messages.title)}
+        subtitle={message ?? intl.formatMessage(messages.unexpectedError)}
         action={{
-          text: 'Try again',
+          text: intl.formatMessage(messages.tryAgain),
           onClick: onReset,
           renderIcon: Renew,
           kind: 'tertiary',
@@ -35,7 +38,7 @@ function ErrorFallback({ message, errorInfo, onReset }: ErrorFallbackProps): Rea
       />
       {import.meta.env.DEV && errorInfo && (
         <details className={styles.errorDetails}>
-          <summary>Error details (development only)</summary>
+          <summary>{intl.formatMessage(messages.errorDetails)}</summary>
           <pre className={styles.errorStack}>
             {errorInfo.componentStack}
           </pre>
@@ -90,7 +93,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       }
       return (
         <ErrorFallback
-          message={this.state.error?.message ?? 'An unexpected error occurred'}
+          message={this.state.error?.message}
           errorInfo={this.state.errorInfo}
           onReset={this.handleReset}
         />

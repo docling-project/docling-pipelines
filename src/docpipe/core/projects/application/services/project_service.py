@@ -277,10 +277,11 @@ class ProjectService:
         name_filter: str | None = None,
         tags_filter: list[str] | None = None,
         is_hidden: bool | None = None,
+        is_elyra: bool | None = None,
     ) -> tuple[list[Flow], dict[str, FlowJobRunSummary], int]:
         """Return a paginated page of project flows, their run summaries, and the total count.
 
-        Makes exactly three downstream calls:
+        Makes downstream calls:
           1. Existence check via repository.exists() — cheap 404 guard.
           2. FlowService.list_flows(container_id=project_id, ...) — scoped,
              paginated, filtered flow list.
@@ -303,6 +304,7 @@ class ProjectService:
             tags_filter: Returns flows that carry at least one of these tags.
                          None returns flows with any tags.
             is_hidden: True/False filters by visibility; None returns all.
+            is_elyra: True=Elyra only, False=Authoring only, None=all formats.
 
         Returns:
             Tuple of:
@@ -325,12 +327,14 @@ class ProjectService:
             tags_filter=tags_filter,
             is_hidden=is_hidden,
             container_id=project_id,
+            is_elyra=is_elyra,
         )
         total = self._flow_service.count_flows(
             name_filter=name_filter,
             tags_filter=tags_filter,
             is_hidden=is_hidden,
             container_id=project_id,
+            is_elyra=is_elyra,
         )
         summaries = self._build_job_run_summaries(flow_ids=[f.flow_id for f in flows if f.flow_id])
         logger.debug(

@@ -17,6 +17,39 @@ assets_management:
       # Database path for DuckDB storage
       database_path: data/duckdb/document_sets.duckdb
 
+  # To keep document set / document library metadata in PostgreSQL (needed when
+  # running more than one API replica or worker against the same assets),
+  # replace the two blocks above with the following. Any connection key left out
+  # falls back to DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD; the password is
+  # required (YAML or DOCPIPE_POSTGRES_PASSWORD). Tables are created on first use
+  # in the given schema. The document set data tables themselves still live in
+  # DuckDB at database_path (operator option data_backend).
+  # Env overrides: DOCUMENTSET_REPOSITORY_TYPE=postgres, DOCUMENTLIBRARY_REPOSITORY_TYPE=postgres
+#  documentset_repository:
+#    type: postgres
+#    config:
+#      database_path: data/duckdb/document_sets.duckdb  # data tables (DuckDB)
+#      postgres:
+#        host: localhost
+#        port: 5432
+#        database: docpipe
+#        user: docpipe_user
+#        # password: set DOCPIPE_POSTGRES_PASSWORD instead of committing it here
+#        schema: docpipe_assets
+#        pool_size: 5
+#        max_overflow: 10
+#        pool_timeout: 30
+#
+#  documentlibrary_repository:
+#    type: postgres
+#    config:
+#      postgres:
+#        host: localhost
+#        port: 5432
+#        database: docpipe
+#        user: docpipe_user
+#        schema: docpipe_assets
+
 projects_management:
   project_repository:
     type: local
@@ -29,7 +62,7 @@ job_management:
   framework:
     type: default
     config: {}
-  store:
+  storage:
     # Storage backend options: inmemory, json, duckdb, postgresql
     # Current active: json (file-based storage)
     type: filesystem
@@ -66,6 +99,30 @@ secrets:
   vault:
     enabled: false          # Set to true to enable HashiCorp Vault integration
     provider: hashicorp     # Provider name used in vault:// URIs
+    # Vault paths an untrusted custom operator (uploaded through the API or fetched from an object store) may
+    # reference in a field it declares secret-capable. Same entry format as allowed_paths. Unset or empty: none.
+    # custom_operator_allowed_paths:
+    #   - hashicorp:custom-ops/team-a/*
+
+# Audit records (docpipe.audit logger) are always written to stdout as JSON lines.
+# Set retention_days to also write a daily-rotating file that keeps that many days.
+# audit:
+#   retention_days: 90
+#   file: ./data/audit/docpipe-audit.log   # default: <DOCPIPE_DATA_PATH>/audit/docpipe-audit.log
+
+# Who may create, update or delete custom operators once a secret provider is registered.
+# Usernames as authenticated by the API. An unset or empty list permits nobody (403).
+# With no secret provider registered every authenticated user may upload, as before.
+# Read routes stay open to any authenticated user.
+#
+# How an untrusted custom operator (uploaded through the API or fetched from an object store) may run.
+#   process   - in a separate worker process that holds no secret provider, token or other node's configuration.
+#   disabled  - the operator is refused ("not permitted").
+# Unset: "disabled" while a secret provider is registered; without a provider operators run as before.
+# custom_operators:
+#   allowed_uploaders:
+#     - alice
+#   isolation: process
 
 #
 #    # To use DuckDB (embedded database, no server required), uncomment below:

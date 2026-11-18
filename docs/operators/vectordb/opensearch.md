@@ -44,7 +44,6 @@ When configured with `provider: "opensearch"`, the operator supports multiple KN
 | `doc_id_column` | string | No | "doc_id_hash" | Column containing document IDs |
 | `embeddings_column` | string | No | "embeddings" | Column containing embeddings |
 | `vector_dimension` | integer | No | 384 | Dimension of vector embeddings |
-| `create_index` | boolean | No | true | Create index if it doesn't exist |
 | `batch_size` | integer | No | 100 | Documents per batch |
 | `provider_config` | object | Yes | - | Provider-specific configuration (see below) |
 
@@ -338,7 +337,6 @@ print(f"Deleted {success} documents, {failed} failed")
         "doc_id_column": "doc_id_hash",
         "embeddings_column": "embeddings",
         "vector_dimension": 768,
-        "create_index": true,
         "provider_config": {
           "host": "localhost",
           "port": 9200,
@@ -497,7 +495,7 @@ for failed_doc in metadata['failed_docs']:
 - **Inner Product**: For pre-normalized vectors
 
 ### 4. Index Management
-- Always set `create_index: true` for first run
+- The index is created automatically on first run and its schema is validated on later runs
 - Validate existing index configuration matches your settings
 - Use consistent engine/algorithm across index lifecycle
 

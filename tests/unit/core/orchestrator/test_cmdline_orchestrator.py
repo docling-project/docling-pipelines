@@ -32,7 +32,7 @@ class TestCommandLineOrchestrator(unittest.TestCase):
                     OperatorConstants.Misc.OPERATOR: OperatorConstants.Operators.INGEST_SOURCE,
                     "config": {
                         "provider": "filesystem",
-                        "connection_params": {
+                        "provider_config": {
                             "paths": [str(_PROJECT_ROOT / "tests" / "fixtures" / "customer_support_docs")]
                         },
                         "include_filter": "txt",

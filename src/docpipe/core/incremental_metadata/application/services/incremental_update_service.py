@@ -227,7 +227,8 @@ class IncrementalUpdateService:
         filtered_table2 = self.filter_rows(table=table2, ids_to_delete=ids_to_delete)
         return pa.concat_tables([table1, filtered_table2])
 
-    def filter_rows(self, *, table: pa.Table, ids_to_delete: list[str]) -> pa.Table | None:
+    @staticmethod
+    def filter_rows(*, table: pa.Table, ids_to_delete: list[str]) -> pa.Table | None:
         """
         Filter out rows with specified document IDs.
 
@@ -269,8 +270,9 @@ class IncrementalUpdateService:
                 f"Failed to retrieve processed document IDs for job_id={job_id}. Error: {exc!s}"
             ) from exc
 
+    @staticmethod
     def get_deleted_doc_ids_from_dict(
-        self, *, previously_processed_docs_dict: dict[str, Any], doc_ids: list[str]
+        *, previously_processed_docs_dict: dict[str, Any], doc_ids: list[str]
     ) -> list[str]:
         """
         Get document IDs that were previously processed but are now missing.
@@ -384,8 +386,8 @@ class IncrementalUpdateService:
         """
         self.store.clear(job_id=job_id)
 
+    @staticmethod
     def _prepare_records_for_save(
-        self,
         *,
         table: pa.Table,
         job_id: str,
@@ -417,7 +419,8 @@ class IncrementalUpdateService:
             if row.get(OperatorConstants.Misc.ID)
         ]
 
-    def _get_ids_to_delete(self, *, input_table: pa.Table, result_table: pa.Table) -> list[str]:
+    @staticmethod
+    def _get_ids_to_delete(*, input_table: pa.Table, result_table: pa.Table) -> list[str]:
         """
         Determine document IDs to delete based on input and result tables.
 

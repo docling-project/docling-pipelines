@@ -771,14 +771,14 @@ Study these existing connectors for best practices:
 
 ### 1. Execute Flow
 ```bash
-source src/docpipe_app/backend/.venv/bin/activate
+source .venv/bin/activate
 export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
 docling-pipelines --flow-file tests/flow_your_connector.json
 ```
 
 ### 2. Run Tests
 ```bash
-source src/docpipe_app/backend/.venv/bin/activate
+source .venv/bin/activate
 export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
 uv run pytest tests/unit/operators/ingest/test_your_connector.py -v
 ```

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from enum import StrEnum
 
 
@@ -17,6 +20,10 @@ class ErrorCode(StrEnum):
     FLOW_LIST_ERROR = "flow_list_error"
     FLOW_DELETE_ERROR = "flow_delete_error"
     FLOW_UPDATE_ERROR = "flow_update_error"
+
+    # Event mapping operations
+    EVENT_MAPPING_NOT_FOUND = "event_mapping_not_found"
+    EVENT_MAPPING_ALREADY_EXISTS = "event_mapping_already_exists"
 
     # Job run operations
     JOB_RUN_NOT_FOUND = "job_run_not_found"
@@ -51,8 +58,10 @@ class ErrorCode(StrEnum):
 
     # Custom Operator operations
     CUSTOM_OPERATOR_NOT_FOUND = "custom_operator_not_found"
+    CUSTOM_OPERATOR_UPLOAD_FORBIDDEN = "custom_operator_upload_forbidden"
     CUSTOM_OPERATOR_ALREADY_EXISTS = "custom_operator_already_exists"
     CUSTOM_OPERATOR_INVALID_DATA = "custom_operator_invalid_data"
+    CUSTOM_OPERATORS_DISABLED = "custom_operators_disabled"
 
     # ACL extraction errors
     ACL_EXTRACTION_FAILED = "acl_extraction_failed"

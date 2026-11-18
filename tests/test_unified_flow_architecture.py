@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Test unified asset architecture with Flow.
 
 This test verifies that the unified architecture works end-to-end:
@@ -143,6 +146,3 @@ def test_repository_health_check(flow_repository):
     assert "storage_path" in health
     assert health["storage_exists"] is True
     assert "asset_count" in health
-
-
-# Made with Bob

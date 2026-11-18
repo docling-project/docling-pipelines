@@ -127,9 +127,6 @@ class MetadataAggregator:
 
         This is the core aggregation logic that applies strategies to individual fields.
         """
-        if not metadata_list:
-            return {}
-
         all_keys: set[str] = set()
         for metadata in metadata_list:
             all_keys.update(metadata.keys())
@@ -138,13 +135,12 @@ class MetadataAggregator:
         for key in all_keys:
             strategy = self.strategies.get(key, AggregationStrategy.LAST)
             values = [metadata.get(key) for metadata in metadata_list if key in metadata]
-            if not values:
-                continue
             result[key] = self._apply_strategy(field_name=key, values=values, strategy=strategy)
 
         return result
 
-    def _apply_numeric_strategy(self, *, values: list[Any], strategy: AggregationStrategy) -> Any:
+    @staticmethod
+    def _apply_numeric_strategy(*, values: list[Any], strategy: AggregationStrategy) -> Any:
         """Apply SUM / AVERAGE / WEIGHTED_AVERAGE / MIN / MAX strategies."""
         numeric = [v for v in values if isinstance(v, (int, float))]
         if strategy == AggregationStrategy.SUM:
@@ -162,7 +158,7 @@ class MetadataAggregator:
         for value in values:
             if isinstance(value, list):
                 result.extend(value)
-            elif value is not None:
+            else:
                 result.append(value)
         return result
 
@@ -244,7 +240,8 @@ class MetadataAggregator:
 
         return values[-1]
 
-    def _apply_union_strategy(self, *, values: list[Any]) -> list[Any]:
+    @staticmethod
+    def _apply_union_strategy(*, values: list[Any]) -> list[Any]:
         """Apply UNION strategy - union of lists, preserving order."""
         result: list[Any] = []
         seen: set[Any] = set()

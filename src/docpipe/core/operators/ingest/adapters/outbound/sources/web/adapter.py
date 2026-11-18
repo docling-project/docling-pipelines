@@ -1,9 +1,11 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Web page source adapter using LangChain's RecursiveUrlLoader."""
 
 from typing import Any, AsyncGenerator
 
 import httpx
-from langchain_community.document_loaders import RecursiveUrlLoader
 from pydantic import BaseModel
 
 from docpipe.core.constants.operator_constants import OperatorConstants
@@ -13,6 +15,7 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, ExternalServiceError
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.core.docpipe_utils import generate_hex_digest
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -22,6 +25,8 @@ _CONTENT_TYPE_TO_EXTENSION: dict[str, str] = {
     OperatorConstants.MimeTypes.PDF: OperatorConstants.FileExtensions.EXT_PDF,
     OperatorConstants.MimeTypes.HTML: OperatorConstants.FileExtensions.EXT_HTML,
     OperatorConstants.MimeTypes.PLAIN: OperatorConstants.FileExtensions.EXT_TXT,
+    OperatorConstants.MimeTypes.CSV: OperatorConstants.FileExtensions.EXT_CSV,
+    OperatorConstants.MimeTypes.EML: OperatorConstants.FileExtensions.EXT_EML,
 }
 
 
@@ -103,9 +108,13 @@ class WebPageSourceAdapter(DocumentSourcePort):
         """
         # Iterate through all URLs
         for url in config.urls:
-            logger.info(f"Starting web crawl from {url} with max_depth={config.max_depth}")
+            logger.info("Starting web crawl from %s with max_depth=%s", url, config.max_depth)
 
             try:
+                # Imported lazily: langchain_community.document_loaders transitively loads
+                # langchain_text_splitters, which pulls in torch/transformers/spacy/nltk.
+                from langchain_community.document_loaders import RecursiveUrlLoader
+
                 # Create LangChain loader with configuration
                 # Note: RecursiveUrlLoader is synchronous
                 loader = RecursiveUrlLoader(
@@ -121,7 +130,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
 
                 # Load documents (synchronous operation from LangChain)
                 langchain_docs = loader.load()
-                logger.info(f"Successfully crawled {len(langchain_docs)} pages from {url}")
+                logger.info("Successfully crawled %s pages from %s", len(langchain_docs), url)
 
                 # Convert LangChain documents to domain documents
                 for lc_doc in langchain_docs:
@@ -161,7 +170,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
                         yield document
                     except Exception as e:
                         # Log warning but continue processing other pages
-                        logger.warning(f"Failed to process page {source_url}: {e}")
+                        logger.warning("Failed to process page %s: %s", source_url, e)
                         continue
             except ImportError as e:
                 raise DocpipeException(
@@ -169,7 +178,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
                 ) from e
             except Exception as e:
                 # Log error for this URL but continue with other URLs
-                logger.error(f"Failed to crawl {url}: {e}")
+                logger.error("Failed to crawl %s: %s", url, e)
                 continue
 
     async def test_connection(self, config: WebPageSourceConfig) -> tuple[bool, str]:
@@ -238,25 +247,23 @@ class WebPageSourceAdapter(DocumentSourcePort):
         self,
         *,
         source_id: str,
-        connection_params: dict[str, Any],
-        credentials: dict[str, Any],
+        provider_config: dict[str, Any],
     ) -> bytes | None:
         """
         Fetch binary content for a specific URL via HTTP download.
 
         Args:
             source_id: URL to download
-            connection_params: Connection parameters (timeout, etc.)
-            credentials: Authentication credentials (not used for web)
+            provider_config: All provider-specific parameters (timeout, etc.)
 
         Returns:
             Binary content as bytes, or None if download fails
         """
-        # Get timeout from connection_params or use default
-        timeout = connection_params.get("timeout", 30)
+        provider_config = reveal_value(provider_config)
+        timeout = provider_config.get("timeout", 30)
 
         try:
-            logger.info(f"Downloading binary content from URL: {source_id}")
+            logger.info("Downloading binary content from URL: %s", source_id)
 
             response = self._download_client.call_rest(
                 method=RestMethod.GET,
@@ -265,36 +272,30 @@ class WebPageSourceAdapter(DocumentSourcePort):
             )
 
             content = response.content
-            logger.info(f"Successfully downloaded {len(content)} bytes from {source_id}")
+            logger.info("Successfully downloaded %s bytes from %s", len(content), source_id)
             return content
 
         except ExternalServiceError as e:
-            logger.error(f"Failed to download from {source_id}: {e}")
+            logger.error("Failed to download from %s: %s", source_id, e)
             return None
         except Exception as e:
-            logger.error(f"Unexpected error downloading from {source_id}: {e}", exc_info=True)
+            logger.exception("Unexpected error downloading from %s: %s", source_id, e)
             return None
 
     def build_config_from_operator_params(
         self,
         *,
-        connection_params: dict,
-        credentials: dict,
+        provider_config: dict,
         included_extensions: list[str] | None = None,
         max_files: int | None = None,
     ) -> BaseModel:
         """
         Build web page configuration from operator parameters.
 
-        Maps IngestSource operator parameters to WebPageSourceConfig.
-        This encapsulates the knowledge of how to construct the config within
-        the adapter itself, following the Single Responsibility Principle.
-
         Args:
-            connection_params: Connection parameters from operator config
-            credentials: Credentials from operator config (not used for web)
-            included_extensions: File extensions to include (not used for web)
-            max_files: Maximum number of files to process (not used for web)
+            provider_config: All provider-specific parameters.
+            included_extensions: Not used for web.
+            max_files: Not used for web.
 
         Returns:
             WebPageSourceConfig: Validated configuration object
@@ -302,20 +303,20 @@ class WebPageSourceAdapter(DocumentSourcePort):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
-        # Support both single URL and list of URLs
-        urls = connection_params.get("urls")
+        provider_config = reveal_value(provider_config)
+        # Support both "urls" (list) and "url" (single) keys
+        urls = provider_config.get("urls")
         if urls is None:
-            # Fallback to single URL for backward compatibility
-            url = connection_params.get("url")
+            url = provider_config.get("url")
             urls = [url] if url else []
 
         config_dict = {
             "urls": urls,
-            "max_depth": connection_params.get("max_depth", 2),
-            "prevent_outside": connection_params.get("prevent_outside", True),
-            "exclude_patterns": connection_params.get("exclude_patterns", []),
-            "timeout": connection_params.get("timeout", 30),
-            "extractor": connection_params.get("extractor"),
+            "max_depth": provider_config.get("max_depth", 2),
+            "prevent_outside": provider_config.get("prevent_outside", True),
+            "exclude_patterns": provider_config.get("exclude_patterns", []),
+            "timeout": provider_config.get("timeout", 30),
+            "extractor": provider_config.get("extractor"),
         }
 
         return WebPageSourceConfig(**config_dict)

@@ -1,3 +1,5 @@
+"""RedactionOperator implementation for redacting text in document columns."""
+
 from typing import Any, Pattern
 
 import pyarrow as pa
@@ -124,6 +126,81 @@ class RedactionOperator(AbstractOperator):
             raise RuntimeError("redact() called but self.pattern is None; ensure a valid regex was provided.")
         return self.pattern.sub(lambda m: self.masking_character * len(m.group()), content)
 
+    def _redact_doclang_xml(self, content: str) -> tuple[str, int]:
+        """Redact text in DocLang XML content per DOM node (.text and .tail).
+
+        Preserves XML element tags, attributes, and tree hierarchy. If XML parsing fails,
+        falls back to plain string redaction with a warning.
+
+        Args:
+            content: DocLang XML string to redact.
+
+        Returns:
+            Tuple of (redacted_xml_string, match_count).
+        """
+        import xml.etree.ElementTree as ET  # nosec B405 — used only for tostring serialization after safe parsing via defusedxml
+
+        import defusedxml.ElementTree as DefusedET
+
+        try:
+            root = DefusedET.fromstring(content)
+        except Exception as e:
+            logger.warning(
+                "Failed to parse DocLang XML for per-node redaction: %s. Falling back to plain text redaction.",
+                e,
+                extra=self.common_log_arguments,
+            )
+            matches = self.pattern.findall(content) if self.pattern else []
+            return (self.redact(content), len(matches)) if matches else (content, 0)
+
+        match_count = 0
+
+        for elem in root.iter():
+            if elem.text:
+                matches = self.pattern.findall(elem.text) if self.pattern else []
+                if matches:
+                    match_count += len(matches)
+                    elem.text = self.redact(elem.text)
+            if elem.tail:
+                matches = self.pattern.findall(elem.tail) if self.pattern else []
+                if matches:
+                    match_count += len(matches)
+                    elem.tail = self.redact(elem.tail)
+
+        # ET.tostring with encoding="unicode" does not emit an <?xml ...?> prolog.
+        # This is intentional: docling's export_to_doclang() never produces a prolog,
+        # so DocLang content in this codebase is always a bare <doclang ...> root element.
+        # If that contract changes, switch to:
+        #   buf = io.StringIO()
+        #   ET.ElementTree(root).write(buf, encoding="unicode", xml_declaration=True)
+        #   return buf.getvalue(), match_count
+        return ET.tostring(root, encoding="unicode"), match_count
+
+    def _redact_single_document(self, content: str) -> tuple[str, int]:
+        """Redact a single document string based on self.doc_format.
+
+        Args:
+            content: Raw document string.
+
+        Returns:
+            Tuple of (redacted_content, match_count).
+        """
+        if not content:
+            return content, 0
+
+        if self.doc_format == OperatorConstants.DocFormat.DOCLANG:
+            if content.lstrip().startswith("<"):
+                return self._redact_doclang_xml(content)
+            logger.debug(
+                "doc_format is doclang but content does not appear to be XML; applying plain-text redaction.",
+                extra=self.common_log_arguments,
+            )
+
+        matches = self.pattern.findall(content) if self.pattern else []
+        if matches:
+            return self.redact(content), len(matches)
+        return content, 0
+
     def transform(self, table: pa.Table) -> tuple[list[pa.Table], dict[str, Any]]:
         """
         Operator-specific logic to convert one input Table to 0 or more output tables.
@@ -162,11 +239,11 @@ class RedactionOperator(AbstractOperator):
         updated_content_column = table[self.doc_column].to_pylist()
         redacted_rows = 0
         for n, content in enumerate(updated_content_column):
-            matches = self.pattern.findall(content)
-            if matches:
-                updated_content_column[n] = self.redact(content)
-                total_redactions += len(matches)
-                redaction_status[n] = len(matches)
+            redacted_text, match_count = self._redact_single_document(content or "")
+            if match_count > 0:
+                updated_content_column[n] = redacted_text
+                total_redactions += match_count
+                redaction_status[n] = match_count
                 redacted_rows += 1
 
         logger.info(

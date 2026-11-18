@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for document set factories."""
 
 from unittest.mock import MagicMock, patch
@@ -5,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import docpipe.core.assets.document_sets.adapters.duckdb  # noqa: F401
-from docpipe.core.assets.common.factories.repository_factory import RepositoryFactory
+from docpipe.core.assets.common.factories.asset_repository_factory import AssetRepositoryFactory
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
 from docpipe.core.assets.document_sets.domain.types import DataStoreConfig
 from docpipe.core.assets.document_sets.factories import DataStoreFactory
@@ -71,7 +74,7 @@ class TestRepositoryFactoryDocumentSet:
     def test_create_unknown_adapter_raises(self):
         """RepositoryFactory raises for unknown adapter type."""
         with pytest.raises(RepositoryConfigurationException):
-            RepositoryFactory.create_repository(asset_type=DocumentSet, adapter_name="unknown_adapter")
+            AssetRepositoryFactory.create_repository(asset_type=DocumentSet, adapter_name="unknown_adapter")
 
     def test_invalid_config_missing_path_raises(self):
         """DuckDBAssetRepository.from_config raises for missing database_path."""
@@ -188,3 +191,57 @@ class TestDataStoreFactory:
 
         mock_from_config.assert_called_once_with(config={"database_path": "/tmp/test.duckdb"})
         assert result is mock_instance
+
+
+@pytest.fixture
+def isolated_data_store_registry(monkeypatch):
+    """Run against copies of the adapter registry so test adapters do not leak."""
+    monkeypatch.setattr(DataStoreFactory, "_adapters", dict(DataStoreFactory._adapters))
+    monkeypatch.setattr(DataStoreFactory, "_adapter_metadata", dict(DataStoreFactory._adapter_metadata))
+
+
+class _BrokenStore:
+    """Adapter whose configuration is valid but whose construction fails."""
+
+    error: Exception = RuntimeError("backend unreachable")
+
+    @staticmethod
+    def validate_config(*, config):
+        return []
+
+    @classmethod
+    def from_config(cls, *, config):
+        raise cls.error
+
+
+@pytest.mark.usefixtures("isolated_data_store_registry")
+class TestDataStoreFactoryRegistry:
+    """Re-registration and construction failures."""
+
+    def test_re_registration_replaces_the_adapter(self):
+        DataStoreFactory.register(name="broken", display_name="Broken")(_BrokenStore)
+        replacement = type("ReplacementStore", (_BrokenStore,), {})
+
+        DataStoreFactory.register(name="broken", display_name="Broken v2")(replacement)
+
+        assert DataStoreFactory._adapters["broken"] is replacement
+        assert DataStoreFactory.get_adapter_info(adapter_name="broken")["display_name"] == "Broken v2"
+
+    def test_construction_error_is_wrapped(self):
+        DataStoreFactory.register(name="broken", display_name="Broken")(_BrokenStore)
+
+        with pytest.raises(DocpipeException, match="Failed to create data store adapter 'broken'") as exc_info:
+            DataStoreFactory.create(adapter_name="broken", config={})
+
+        assert exc_info.value.status_code == 500
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    def test_construction_docpipe_exception_is_kept(self, monkeypatch):
+        error = DocpipeException("database path is read-only", status_code=400)
+        monkeypatch.setattr(_BrokenStore, "error", error)
+        DataStoreFactory.register(name="broken", display_name="Broken")(_BrokenStore)
+
+        with pytest.raises(DocpipeException) as exc_info:
+            DataStoreFactory.create(adapter_name="broken", config={})
+
+        assert exc_info.value is error

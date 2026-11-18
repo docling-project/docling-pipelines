@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """IBM Cloud and MCSP IAM token manager for WatsonX API authentication.
 
 This module handles the exchange of IBM Cloud and MCSP API keys for IAM access tokens,
@@ -5,7 +8,6 @@ with automatic caching and refresh before expiration. Supports both IBM Cloud an
 MCSP (AWS) environments with different IAM endpoints and request formats.
 """
 
-import hashlib
 import logging
 import time
 from dataclasses import dataclass
@@ -71,7 +73,11 @@ class IAMTokenManager:
         self._cache = LRUCache(maxsize=128, ttl=self.CACHE_TTL_SECONDS)
         self._cache_key = self._generate_cache_key(api_key=api_key)
 
-        logger.debug(f"Initialized IAMTokenManager: environment={self.environment}, iam_base_url={self.iam_base_url}")
+        logger.debug(
+            "Initialized IAMTokenManager: environment=%s, iam_base_url=%s",
+            self.environment,
+            self.iam_base_url,
+        )
 
     @staticmethod
     def _detect_environment(*, watsonx_url: str) -> str:
@@ -116,8 +122,9 @@ class IAMTokenManager:
         Returns:
             Cache key string
         """
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        return f"iam_token:{key_hash}"
+        from docpipe.integrations.secrets.registry import cache_key_digest
+
+        return f"iam_token:{cache_key_digest(namespace='iam_token', parts=[api_key])}"
 
     def get_token(self) -> str:
         """Get valid IAM access token, refreshing if needed.
@@ -155,7 +162,7 @@ class IAMTokenManager:
         Raises:
             DocpipeException: If token exchange fails
         """
-        logger.debug(f"Fetching new IAM access token for {self.environment} environment")
+        logger.debug("Fetching new IAM access token for %s environment", self.environment)
 
         try:
             if self.environment == "MCSP":
@@ -172,7 +179,9 @@ class IAMTokenManager:
                 # Log response details for debugging before raising
                 if not response.ok:
                     logger.error(
-                        f"MCSP IAM token request failed - Status: {response.status_code}, Response: {response.text}"
+                        "MCSP IAM token request failed - Status: %s, Response: %s",
+                        response.status_code,
+                        response.text,
                     )
 
                 response.raise_for_status()
@@ -201,8 +210,9 @@ class IAMTokenManager:
                 # Log response details for debugging before raising
                 if not response.ok:
                     logger.error(
-                        f"IBM Cloud IAM token request failed - Status: {response.status_code}, "
-                        f"Response: {response.text}"
+                        "IBM Cloud IAM token request failed - Status: %s, Response: %s",
+                        response.status_code,
+                        response.text,
                     )
 
                 response.raise_for_status()
@@ -216,7 +226,11 @@ class IAMTokenManager:
             token_data = TokenData(access_token=access_token, expires_at=expires_at)
             self._cache.put(cache_key=self._cache_key, value=token_data)
 
-            logger.debug(f"Successfully fetched {self.environment} IAM token, expires in {expires_in} seconds")
+            logger.debug(
+                "Successfully fetched %s IAM token, expires in %s seconds",
+                self.environment,
+                expires_in,
+            )
             return access_token
 
         except requests.exceptions.RequestException as e:

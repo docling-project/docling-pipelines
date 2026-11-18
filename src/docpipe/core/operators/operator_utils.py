@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Utility functions and helpers shared across docpipe operators."""
 
 import datetime
@@ -6,12 +9,18 @@ import importlib.util
 import io
 import json
 import os
+import sys
+import tempfile
 import threading
+import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import re2 as re
 from charset_normalizer import from_bytes
 from pyarrow import Table
 
@@ -23,14 +32,14 @@ from docpipe.core.constants.constants import (
     internal_metrics,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
-from docpipe.core.job_management import NodeStats
-from docpipe.core.job_management.domain.utils import normalize_node_stats_for_dto
 from docpipe.exceptions.docpipe_exceptions import (
     FlowExecutionFailedException,
     FlowValidationException,
     ValidationAlert,
 )
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
+from docpipe.integrations.docling.converter_pool import get_docling_pool, options_fingerprint
+from docpipe.integrations.secrets.secret_value import SecretValue
 from docpipe.utils.infrastructure.logging import get_logger
 
 status_codes = {
@@ -51,56 +60,55 @@ hash_functions = hashlib.sha3_512
 logger = get_logger()
 
 # ---------------------------------------------------------------------------
-# DocumentConverter per-thread cache
+# DocumentConverter pooling
 # ---------------------------------------------------------------------------
 # DocumentConverter (docling-parse 7.x) is not thread-safe: calling .convert()
 # concurrently from multiple threads on the same instance causes segfaults on
-# macOS (arm64) and is unreliable on Linux. Each thread gets its own converter
-# instance, keyed by a stable MD5 hash of the format_options configuration so
-# that different pipeline configs (e.g. standard vs OCR-disabled) remain separate.
-_DOCLING_AVAILABLE = importlib.util.find_spec("docling") is not None
-
-# Pre-instantiate DocLangDocDeserializer at module import time under Python's import lock.
-# DocLangDocDeserializer is stateless pure-Python/Pydantic code and completely thread-safe.
-_DOCLANG_DESERIALIZER: Any | None = None
+# macOS (arm64) and is unreliable on Linux. Converters are therefore leased
+# *exclusively* from a process-wide, bounded pool (see
+# ``docpipe.integrations.docling.converter_pool``), keyed by a hash of the actual
+# format_options values so that different pipeline configs (e.g. standard vs
+# OCR-disabled, or two OCR engines) never share a converter. Pooled converters
+# survive across worker threads, micro-batches and operator instances, so Docling
+# model pipelines are initialised once per configuration instead of once per
+# worker thread per batch.
 try:
-    from docling_core.transforms.deserializer.doclang import DocLangDocDeserializer
+    _DOCLING_AVAILABLE = importlib.util.find_spec("docling") is not None
+except ValueError:
+    _DOCLING_AVAILABLE = "docling" in sys.modules
 
-    _DOCLANG_DESERIALIZER = DocLangDocDeserializer()
-except ImportError:
-    pass
+# DocLangDocDeserializer is stateless pure-Python/Pydantic code and completely thread-safe. It is created on first
+# use under a lock, not at import time: importing ``docling_core`` costs about 1.7 s, which every process that only
+# imports this module (for example an isolated custom operator worker) would otherwise pay.
+_DOCLANG_DESERIALIZER: Any | None = None
+_DOCLANG_DESERIALIZER_LOADED = False
+_DOCLANG_DESERIALIZER_LOCK = threading.Lock()
 
-# Thread-local storage: each thread has its own dict[cache_key -> DocumentConverter]
-_thread_local_converters = threading.local()
+_CONVERTER_POOL_KEY_PREFIX = "DocumentConverter:"
 
 
 def _converter_cache_key(converter_config: dict | None) -> str:
-    """Return a stable MD5 cache key for a given DocumentConverter configuration.
+    """Return a stable cache key for a given DocumentConverter configuration.
+
+    The key is a SHA-256 digest of the *values* of every format option (pipeline
+    class, backend, pipeline options including nested OCR/accelerator/table options),
+    so two configurations that differ in any setting get different keys while equal
+    settings built independently (e.g. by different operator instances) share one.
 
     Args:
         converter_config: Dict optionally containing ``format_options`` key.
 
     Returns:
-        A hex digest string that uniquely identifies the configuration.
+        ``"default"`` when no format options are given, otherwise a hex digest that
+        uniquely identifies the configuration.
     """
-    if not converter_config or "format_options" not in converter_config:
+    if not converter_config or OperatorConstants.Config.FORMAT_OPTIONS not in converter_config:
         return "default"
-    key_parts = {str(fmt): type(opt).__name__ for fmt, opt in converter_config["format_options"].items()}
-    return hashlib.md5(json.dumps(key_parts, sort_keys=True).encode(), usedforsecurity=False).hexdigest()  # nosec B324
+    return options_fingerprint(converter_config[OperatorConstants.Config.FORMAT_OPTIONS])
 
 
-def _get_or_create_converter(converter_config: dict | None) -> Any:
-    """Return a per-thread DocumentConverter, constructing it once per thread per unique config.
-
-    Each worker thread builds its own ``DocumentConverter`` instance so that
-    concurrent ``convert()`` calls never share state — avoiding the segfault
-    triggered by calling docling-parse 7.x from multiple threads simultaneously.
-
-    Args:
-        converter_config: Optional dict with ``format_options`` for the converter.
-
-    Returns:
-        A ``DocumentConverter`` instance owned by the calling thread.
+def _build_converter(converter_config: dict | None) -> Any:
+    """Construct a new DocumentConverter for ``converter_config``.
 
     Raises:
         RuntimeError: If docling is not installed.
@@ -111,24 +119,45 @@ def _get_or_create_converter(converter_config: dict | None) -> Any:
 
     from docling.document_converter import DocumentConverter
 
-    cache_key = _converter_cache_key(converter_config)
+    if converter_config and OperatorConstants.Config.FORMAT_OPTIONS in converter_config:
+        return DocumentConverter(format_options=converter_config[OperatorConstants.Config.FORMAT_OPTIONS])
+    return DocumentConverter()
 
-    # Ensure the thread-local dict exists
-    if not hasattr(_thread_local_converters, "cache"):
-        _thread_local_converters.cache = {}
 
-    thread_cache: dict[str, Any] = _thread_local_converters.cache
+@contextmanager
+def _lease_converter(converter_config: dict | None) -> Iterator[Any]:
+    """Borrow a DocumentConverter for ``converter_config`` exclusively.
 
-    if cache_key not in thread_cache:
-        logger.info("Creating DocumentConverter for cache key: %s", cache_key)
-        if converter_config and "format_options" in converter_config:
-            thread_cache[cache_key] = DocumentConverter(format_options=converter_config["format_options"])
-        else:
-            thread_cache[cache_key] = DocumentConverter()
-    else:
-        logger.debug("DocumentConverter cache hit for key: %s", cache_key)
+    The converter comes from the process-wide pool and is returned to it when the
+    block exits, so no two threads ever call ``convert()`` on the same instance and
+    the converter (with its initialised model pipelines) is reused by later calls.
 
-    return thread_cache[cache_key]
+    Args:
+        converter_config: Optional dict with ``format_options`` for the converter.
+
+    Yields:
+        A ``DocumentConverter`` instance owned by the caller for the block's duration.
+
+    Raises:
+        RuntimeError: If docling is not installed.
+    """
+    if not _DOCLING_AVAILABLE:
+        msg = "docling is not installed. Install with: pip install 'docling-pipelines-slim[extract]'"
+        raise RuntimeError(msg)
+
+    key = _CONVERTER_POOL_KEY_PREFIX + _converter_cache_key(converter_config)
+    with get_docling_pool().lease(key=key, factory=lambda: _build_converter(converter_config)) as converter:
+        yield converter
+
+
+@contextmanager
+def _use_converter(*, converter: Any, converter_config: dict | None) -> Iterator[Any]:
+    """Yield ``converter`` when given, otherwise lease a pooled one for ``converter_config``."""
+    if converter is not None:
+        yield converter
+        return
+    with _lease_converter(converter_config) as leased:
+        yield leased
 
 
 def sanitize_doc_id_for_filename(doc_id: str) -> str:
@@ -175,23 +204,25 @@ def is_asr_available() -> bool:
 
 def get_supported_file_extensions() -> str:
     """Get comma-separated list of supported file extensions based on available dependencies.
-    Returns base document formats always, and adds audio/video formats only if ASR is available.
+    Returns base and supported video formats always; audio formats require ASR.
     Returns:
         Comma-separated string of file extensions (e.g., "pdf,docx,mp3,wav")
     """
 
     # Base extensions always supported
-    supported_extensions: list[str] = OperatorConstants.FileExtensions.BASE_EXTENSIONS
+    supported_extensions: list[str] = [*OperatorConstants.FileExtensions.BASE_EXTENSIONS]
 
-    # Add audio/video extensions only if ASR is available
+    supported_extensions.extend(OperatorConstants.FileExtensions.VIDEO_EXTENSIONS)
     if is_asr_available():
-        supported_extensions.extend(OperatorConstants.FileExtensions.AUDIO_VIDEO_EXTENSIONS)
+        supported_extensions.extend(OperatorConstants.FileExtensions.AUDIO_EXTENSIONS)
 
     # Strip leading dots before joining (constants have dots, but return format should not)
     return ",".join(ext.lstrip(".") for ext in supported_extensions)
 
 
 def resolve_env_var(value: Any) -> Any:
+    if isinstance(value, SecretValue):
+        return value
     if not isinstance(value, str):
         return value
     if value.startswith("${") and value.endswith("}"):
@@ -456,6 +487,7 @@ class OperatorUtils:
         Returns:
             A dictionary containing the operator logs.
         """
+        from docpipe.core.job_management.domain.utils import normalize_node_stats_for_dto
         from docpipe.utils.operators.logging import get_log_and_job_file_path
 
         _log_final_path, _, _, aggregated_job_log_path = get_log_and_job_file_path(job_id=job_id, jobrun_id=jobrun_id)
@@ -476,6 +508,8 @@ class OperatorUtils:
     @staticmethod
     def determine_final_job_status(*, node_stats_list: dict[str, Any]) -> ExecutionStatus:
         """Determines the most severe job status from a list of node statuses."""
+        from docpipe.core.job_management import NodeStats
+
         if not node_stats_list:
             return ExecutionStatus.STARTING
 
@@ -544,7 +578,7 @@ class OperatorUtils:
             dt = datetime.datetime.fromtimestamp(epoch_ms / 1000, tz=datetime.UTC)
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         except (ValueError, TypeError, OverflowError) as e:
-            logger.error(f"Failed to convert epoch milliseconds to ISO8601: {e}")
+            logger.error("Failed to convert epoch milliseconds to ISO8601: %s", e)
             return None
 
     @staticmethod
@@ -902,7 +936,7 @@ class OperatorUtils:
         try:
             return input_table.rename_columns(new_names_ordered)
         except Exception as e:
-            logger.error(str(e), stack_info=True, exc_info=True)
+            logger.exception(str(e), stack_info=True)
             raise
 
     @staticmethod
@@ -1075,6 +1109,12 @@ class OperatorUtils:
         return doc_metadata
 
     @staticmethod
+    def resolve_file_extension(*, doc_name: str, document_format: str | None = None) -> str:
+        """Resolve one normalized extension, preferring an explicit document format."""
+        value = (document_format or "").strip()
+        return f".{value.lstrip('.').lower()}" if value else Path(doc_name or "").suffix.lower()
+
+    @staticmethod
     def _prepare_single_document(
         *,
         table: pa.Table,
@@ -1091,8 +1131,10 @@ class OperatorUtils:
             else f"document_{row_idx}"
         )
 
+        document_format = table["document_format"][row_idx].as_py() if "document_format" in table.column_names else None
+        file_ext = OperatorUtils.resolve_file_extension(doc_name=doc_name, document_format=document_format)
+
         if supported_extensions:
-            file_ext = Path(doc_name).suffix.lower()
             if file_ext not in supported_extensions:
                 return {
                     "idx": row_idx,
@@ -1116,7 +1158,13 @@ class OperatorUtils:
                 msg = f"Failed to fetch binary content for document {doc_name}"
                 raise ValueError(msg)
 
-        return {"idx": row_idx, "doc_id": doc_id, "doc_name": doc_name, "binary_content": binary_content}
+        return {
+            "idx": row_idx,
+            "doc_id": doc_id,
+            "doc_name": doc_name,
+            "binary_content": binary_content,
+            "file_extension": file_ext,
+        }
 
     @staticmethod
     def prepare_document_content_fetch(
@@ -1182,7 +1230,7 @@ class OperatorUtils:
                     )
                 )
             except Exception as e:
-                logger.error("Error preparing document '%s' at index %s: %s", doc_name, row_idx, str(e), exc_info=True)
+                logger.exception("Error preparing document '%s' at index %s: %s", doc_name, row_idx, str(e))
                 doc_tasks.append({"idx": row_idx, "doc_id": doc_id, "doc_name": doc_name, "error": str(e)})
         return doc_tasks
 
@@ -1297,6 +1345,12 @@ class OperatorUtils:
             if key in node:
                 docpipe[key] = node[key]
 
+        # Forward JSON Schema numeric range constraints
+        if "minimum" in node:
+            docpipe[OperatorConstants.Filtering.MIN_VALUE] = node["minimum"]
+        if "maximum" in node:
+            docpipe[OperatorConstants.Filtering.MAX_VALUE] = node["maximum"]
+
         # JSON Schema stores required fields as an array on the parent object node.
         # The check must use field_key (the raw JSON Schema property key, e.g.
         # "index_name") — NOT the Pydantic title (e.g. "Index Name") stored in
@@ -1378,6 +1432,10 @@ class OperatorUtils:
         if binary_content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
             return ".doc"
 
+        # WebP is a RIFF container.
+        if binary_content[:4] == b"RIFF" and binary_content[8:12] == b"WEBP":
+            return ".webp"
+
         # PNG
         if binary_content[:8] == b"\x89PNG\r\n\x1a\n":
             return ".png"
@@ -1418,6 +1476,13 @@ class OperatorUtils:
 
         Returns:
             Dotted extension string: '.docx', '.xlsx', or '.pptx'."""
+        try:
+            with zipfile.ZipFile(io.BytesIO(binary_content)) as archive:
+                with archive.open("mimetype") as mime_file:
+                    if mime_file.read(128) == b"application/epub+zip":
+                        return ".epub"
+        except (zipfile.BadZipFile, KeyError):
+            pass
         content_sample = binary_content[:2048]
         if b"word/" in content_sample:
             return ".docx"
@@ -1465,8 +1530,6 @@ class OperatorUtils:
         if not text or not text.lstrip().startswith("<"):
             return text
 
-        import re
-
         try:
             deserializer = OperatorUtils.get_doclang_deserializer()
             if deserializer is not None:
@@ -1484,7 +1547,19 @@ class OperatorUtils:
 
     @staticmethod
     def get_doclang_deserializer() -> Any | None:
-        """Get the module-level pre-instantiated DocLangDocDeserializer instance."""
+        """Return the shared DocLangDocDeserializer, creating it on first use, or None when docling_core is absent."""
+        global _DOCLANG_DESERIALIZER, _DOCLANG_DESERIALIZER_LOADED
+        if _DOCLANG_DESERIALIZER_LOADED:
+            return _DOCLANG_DESERIALIZER
+        with _DOCLANG_DESERIALIZER_LOCK:
+            if not _DOCLANG_DESERIALIZER_LOADED:
+                try:
+                    from docling_core.transforms.deserializer.doclang import DocLangDocDeserializer
+
+                    _DOCLANG_DESERIALIZER = DocLangDocDeserializer()
+                except ImportError:
+                    _DOCLANG_DESERIALIZER = None
+                _DOCLANG_DESERIALIZER_LOADED = True
         return _DOCLANG_DESERIALIZER
 
     @staticmethod
@@ -1618,6 +1693,7 @@ class OperatorUtils:
             Dict mapping column names to their exported string values.
         """
         export_fns: dict[str, Any] = {
+            OperatorConstants.Extraction.OUTPUT_FORMAT_MARKDOWN: doc.export_to_markdown,
             OperatorConstants.Extraction.OUTPUT_FORMAT_TEXT: doc.export_to_text,
             OperatorConstants.Extraction.OUTPUT_FORMAT_HTML: doc.export_to_html,
             OperatorConstants.Extraction.OUTPUT_FORMAT_JSON: lambda: json.dumps(doc.export_to_dict()),
@@ -1646,6 +1722,7 @@ class OperatorUtils:
         file_path: str,
         binary_content: bytes,
         additional_formats: list[str] | None = None,
+        doc_format: str = OperatorConstants.DocFormat.MARKDOWN,
     ) -> dict[str, Any]:
         """
         Extract content from plain text files (.txt, .md).
@@ -1682,13 +1759,26 @@ class OperatorUtils:
                         OperatorConstants.Columns.DOC_COLUMN_DEFAULT: None,
                     }
 
+            is_doclang_primary = doc_format == OperatorConstants.DocFormat.DOCLANG
+            primary_content = raw_text
+            if is_doclang_primary:
+                try:
+                    from docling_core.types.doc import DoclingDocument
+                    from docling_core.types.doc.labels import DocItemLabel
+
+                    doc = DoclingDocument(name=Path(file_path).name)
+                    doc.add_text(label=DocItemLabel.TEXT, text=raw_text)
+                    primary_content = doc.export_to_doclang()
+                except Exception as doc_err:
+                    logger.warning("Failed to export text file %s to doclang: %s", file_path, doc_err)
+
             logger.info("Completed extraction for text file: %s", file_path)
 
             result: dict[str, Any] = {
                 OperatorConstants.Extraction.SUCCESS: True,
-                OperatorConstants.Columns.DOC_COLUMN_DEFAULT: raw_text,
+                OperatorConstants.Columns.DOC_COLUMN_DEFAULT: primary_content,
                 OperatorConstants.Metadata.METADATA: {
-                    "char_count": len(raw_text),
+                    "char_count": len(primary_content),
                     "is_text_file": True,
                 },
             }
@@ -1718,20 +1808,23 @@ class OperatorUtils:
 
     @staticmethod
     def extract_content(
+        *,
         file_path: str,
         binary_content: bytes,
         converter_config: dict[str, Any] | None = None,
         additional_formats: list[str] | None = None,
         converter: Any = None,
+        doc_format: str = OperatorConstants.DocFormat.MARKDOWN,
+        file_extension: str | None = None,
     ) -> dict[str, Any]:
         """
         Common method for document extraction using Docling's DocumentConverter.
 
         This method handles the complete extraction workflow:
         1. File extension detection
-        2. Temporary file creation
+        2. Temporary file creation (for audio/video) or DocumentStream conversion
         3. Document conversion
-        4. Multi-format export (markdown is MANDATORY, additional formats optional)
+        4. Primary format export (markdown or doclang based on doc_format) and additional format export
 
         Args:
             file_path: Path to the document file (used for logging and extension detection)
@@ -1739,39 +1832,47 @@ class OperatorUtils:
             converter_config: Optional configuration for DocumentConverter initialization.
                              If provided, should contain 'format_options' key with format-specific settings.
                              Example: {'format_options': {InputFormat.PDF: PdfFormatOption(...)}}
-            additional_formats: Optional list of additional formats to generate beyond mandatory markdown.
-                               Options: 'html', 'json', 'text', 'doctags', 'doclang'.
+            additional_formats: Optional list of additional formats to generate beyond the primary format.
+                               Options: 'html', 'json', 'text', 'doctags', 'doclang', 'markdown'.
                                Each format creates a separate column in the output.
-                               Note: Markdown is ALWAYS generated and should NOT be included in this list.
             converter: Optional pre-built DocumentConverter instance. When provided,
                        ``converter_config`` is ignored and the supplied converter is used
-                       directly. Intended for GPU-accelerated adapters that construct the
-                       converter once and reuse it across documents.
+                       directly; the caller is then responsible for never using it from
+                       two threads at once. When omitted (the normal case) a converter
+                       for ``converter_config`` is leased exclusively from the
+                       process-wide pool and returned after the conversion.
+            doc_format: Target format for the primary content column (default: "markdown").
+            file_extension: Optional effective extension, taking precedence over the file path's suffix.
+                            Used to select media routing and construct the conversion filename.
 
         Returns:
             Dictionary containing:
                 - success: True if extraction succeeded
-                - content: Extracted content as markdown (ALWAYS present - required by downstream operators)
+                - content: Extracted primary content (doclang XML or markdown based on doc_format)
                 - content_html: HTML format (if 'html' in additional_formats)
                 - content_json: JSON format (if 'json' in additional_formats)
                 - content_text: Plain text format (if 'text' in additional_formats)
                 - content_doctags: DocTags format (if 'doctags' in additional_formats)
-                - content_doclang: DocLang format (if 'doclang' in additional_formats)
+                - content_doclang: DocLang format (if 'doclang' in additional_formats and doc_format != 'doclang')
+                - content_markdown: Markdown format (if 'markdown' in additional_formats and doc_format == 'doclang')
                 - metadata: Extraction metadata (char_count, page_count, formats)
                 - error: Error message if extraction failed
         """
-        # Markdown is ALWAYS generated (required by downstream operators like Chunker, Embeddings, PII, HAP)
-        # Additional formats are optional
         if additional_formats is None:
             additional_formats = []
 
-        # Filter out 'markdown' if user mistakenly included it (it's always generated)
-        additional_formats = [
-            fmt for fmt in additional_formats if fmt.lower() != OperatorConstants.Extraction.OUTPUT_FORMAT_MARKDOWN
-        ]
+        is_doclang_primary = doc_format == OperatorConstants.DocFormat.DOCLANG
+        primary_format_name = (
+            OperatorConstants.Extraction.OUTPUT_FORMAT_DOCLANG
+            if is_doclang_primary
+            else OperatorConstants.Extraction.OUTPUT_FORMAT_MARKDOWN
+        )
 
-        # Build complete format list for logging (markdown + additional)
-        all_formats = [OperatorConstants.Extraction.OUTPUT_FORMAT_MARKDOWN, *additional_formats]
+        # Filter out the primary format if user mistakenly included it in additional_formats
+        additional_formats = [fmt for fmt in additional_formats if fmt.lower() != primary_format_name]
+
+        # Build complete format list for logging (primary + additional)
+        all_formats = [primary_format_name, *additional_formats]
         logger.info("Processing file with Docling (formats: %s): %s", all_formats, file_path)
 
         try:
@@ -1779,7 +1880,7 @@ class OperatorUtils:
             from docling_core.types.io import DocumentStream
 
             # Determine the effective file extension
-            file_suffix = Path(file_path).suffix.lower()
+            file_suffix = OperatorUtils.resolve_file_extension(doc_name=file_path, document_format=file_extension)
             if not file_suffix:
                 file_suffix = OperatorUtils.detect_extension_from_bytes(binary_content)
 
@@ -1789,46 +1890,51 @@ class OperatorUtils:
                     file_path=file_path,
                     binary_content=binary_content,
                     additional_formats=additional_formats,
+                    doc_format=doc_format,
                 )
 
-            # Use supplied converter when provided (GPU path), otherwise retrieve
-            # (or lazily construct) the singleton converter for this config.
-            if converter is None:
-                converter = _get_or_create_converter(converter_config)
-
             # Create DocumentStream from binary content (no temporary file needed)
-            audio_video_suffixes = {f".{extension.lower()}" for extension in FormatToExtensions[InputFormat.AUDIO]}
-            doc_name = Path(file_path).name if file_path else f"document{file_suffix}"
-            if file_suffix in audio_video_suffixes:
-                current_path_file = Path.cwd() / doc_name
-                try:
-                    current_path_file.write_bytes(binary_content)
-                    result = converter.convert(current_path_file)
-                finally:
-                    if current_path_file.exists():
-                        current_path_file.unlink()
-            else:
-                # Create DocumentStream from binary content (no temporary file needed)
-                doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(binary_content))
-                # Convert document directly from stream
-                result = converter.convert(doc_stream)
+            audio_video_suffixes = {
+                f".{extension.lower().lstrip('.')}"
+                for input_format in (InputFormat.AUDIO, InputFormat.VIDEO)
+                for extension in FormatToExtensions.get(input_format, [])
+            }
+            doc_name = Path(file_path).name if file_path else "document"
+            if file_suffix and Path(doc_name).suffix.lower() != file_suffix:
+                doc_name = str(Path(doc_name).with_suffix(file_suffix))
+
+            # Use the supplied converter when provided; otherwise lease a pooled converter
+            # for this config exclusively for the duration of the conversion only.
+            with _use_converter(converter=converter, converter_config=converter_config) as active_converter:
+                if file_suffix in audio_video_suffixes:
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir) / Path(doc_name).name
+                        temp_path.write_bytes(binary_content)
+                        result = active_converter.convert(temp_path)
+                else:
+                    # Create DocumentStream from binary content (no temporary file needed)
+                    doc_stream = DocumentStream(name=doc_name, stream=io.BytesIO(binary_content))
+                    # Convert document directly from stream
+                    result = active_converter.convert(doc_stream)
 
             # Generate content in all requested formats
             content_dict: dict[str, str | None] = {}
             formats_generated = []
             formats_failed = []
 
-            # Always generate markdown first (mandatory)
+            # Export primary format directly
             try:
-                content_dict[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] = result.document.export_to_markdown()
-                formats_generated.append(OperatorConstants.Extraction.OUTPUT_FORMAT_MARKDOWN)
-                logger.info("Generated markdown format for %s", file_path)
+                if is_doclang_primary:
+                    content_dict[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] = result.document.export_to_doclang()
+                else:
+                    content_dict[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] = result.document.export_to_markdown()
+                formats_generated.append(primary_format_name)
+                logger.info("Generated %s format for %s", primary_format_name, file_path)
             except Exception as e:
-                # Markdown is mandatory - if it fails, the entire extraction fails
-                logger.error("Failed to generate mandatory markdown format for %s: %s", file_path, e)
+                logger.error("Failed to generate primary %s format for %s: %s", primary_format_name, file_path, e)
                 return {
                     OperatorConstants.Extraction.SUCCESS: False,
-                    OperatorConstants.Extraction.ERROR: f"Failed to generate mandatory markdown format: {e}",
+                    OperatorConstants.Extraction.ERROR: f"Failed to generate primary {primary_format_name} format: {e}",
                     OperatorConstants.Columns.DOC_COLUMN_DEFAULT: None,
                 }
 
@@ -1846,9 +1952,9 @@ class OperatorUtils:
                     else:
                         formats_failed.append(fmt)
 
-            # Get character count from markdown (default format)
-            markdown_content = content_dict.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT, "")
-            char_count = len(markdown_content) if markdown_content else 0
+            # Get character count from primary content
+            primary_content = content_dict.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT, "")
+            char_count = len(primary_content) if primary_content else 0
 
             # Get native page count from Docling result
             native_page_count = len(result.document.pages) if hasattr(result.document, "pages") else 0

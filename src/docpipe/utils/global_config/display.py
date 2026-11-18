@@ -160,8 +160,8 @@ def main():  # pragma: no cover
     print(list_global_config(verbose=False))
     print("\n\n=== DETAILED VIEW ===")
     print(list_global_config(verbose=True))
-    print("\n\n=== CATEGORY FILTER: Micro-Batching ===")
-    print(list_global_config(verbose=False, category="Micro-Batching"))
+    print("\n\n=== CATEGORY FILTER: Orchestration configuration ===")
+    print(list_global_config(verbose=False, category="Orchestration configuration"))
 
 
 if __name__ == "__main__":  # pragma: no cover

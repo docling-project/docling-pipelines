@@ -6,7 +6,7 @@
 
 // Validation
 export { validateFlow } from './actions/validation-actions';
-export type { FlowValidationResponse, ValidationAlertItem } from './actions/validation-actions';
+export type { FlowValidationResponse, ValidationAlertItem, ValidationActionType } from './actions/validation-actions';
 
 // Operators
 export { getOperatorMetadata, enrichFlowFeatures, getProviderModels } from './actions/operator-actions';

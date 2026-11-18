@@ -499,7 +499,7 @@ class TestBuildContainerEnv:
         with patch(
             "docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory"
         ) as mock_factory:
-            mock_factory.from_default_sources.return_value.resolve_worker_env.return_value = {}
+            mock_factory.create_default_factory.return_value.resolve_worker_env.return_value = {}
             env = adapter._build_container_env(base_env={}, deployment_path=None)
 
         assert "PREFECT_API_URL" in env
@@ -509,7 +509,7 @@ class TestBuildContainerEnv:
         with patch(
             "docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory"
         ) as mock_factory:
-            mock_factory.from_default_sources.return_value.resolve_worker_env.return_value = {}
+            mock_factory.create_default_factory.return_value.resolve_worker_env.return_value = {}
             env = adapter._build_container_env(
                 base_env={"PREFECT_API_URL": "http://custom:4200/api"}, deployment_path=None
             )
@@ -521,7 +521,7 @@ class TestBuildContainerEnv:
         with patch(
             "docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory"
         ) as mock_factory:
-            mock_factory.from_default_sources.return_value.resolve_worker_env.return_value = {}
+            mock_factory.create_default_factory.return_value.resolve_worker_env.return_value = {}
             env = adapter._build_container_env(base_env={}, deployment_path=None)
 
         assert env.get("PREFECT_MODE") == "server"
@@ -785,7 +785,7 @@ class TestGetEffectiveJobManagementEnv:
             patch.object(adapter, "_resolve_job_management_config_path", return_value=config_file),
             patch("docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory") as mock_factory,
         ):
-            mock_factory.from_default_sources.return_value.resolve_worker_env.return_value = {}
+            mock_factory.create_default_factory.return_value.resolve_worker_env.return_value = {}
             result = adapter._get_effective_job_management_env()
 
         assert any("CONFIG" in k or "config" in k.lower() for k in result)
@@ -799,7 +799,7 @@ class TestGetEffectiveJobManagementEnv:
             patch.object(adapter, "_resolve_job_management_config_path", return_value=fake_path),
             patch("docpipe.core.orchestration.prefect.adapters.work_pool_adapter.JobManagementFactory") as mock_factory,
         ):
-            mock_factory.from_default_sources.side_effect = RuntimeError("no factory")
+            mock_factory.create_default_factory.side_effect = RuntimeError("no factory")
             result = adapter._get_effective_job_management_env()
 
         assert isinstance(result, dict)

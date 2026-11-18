@@ -39,7 +39,7 @@ This document covers community guidelines, support channels, response time expec
 ### Scope
 
 - Keep discussions on-topic for `docling-pipelines`. Off-topic content may be removed.
-- Bug reports, feature requests, and questions belong in [GitHub Issues](https://github.com/IBM/docling-pipelines/issues) or [GitHub Discussions](https://github.com/IBM/docling-pipelines/discussions).
+- Bug reports, feature requests, and questions belong in [GitHub Issues](https://github.com/docling-project/docling-pipelines/issues) or [GitHub Discussions](https://github.com/docling-project/docling-pipelines/discussions).
 
 ### Enforcement
 
@@ -53,16 +53,16 @@ To report a conduct issue, email the maintainers at the addresses listed in the 
 
 | Channel | Purpose | Link |
 |---------|---------|------|
-| **GitHub Issues** | Bug reports, feature requests, operator questions | [github.com/IBM/docling-pipelines/issues](https://github.com/IBM/docling-pipelines/issues) |
-| **GitHub Discussions** | General questions, ideas, show & tell, Q&A | [github.com/IBM/docling-pipelines/discussions](https://github.com/IBM/docling-pipelines/discussions) |
-| **Pull Requests** | Code contributions, documentation improvements | [github.com/IBM/docling-pipelines/pulls](https://github.com/IBM/docling-pipelines/pulls) |
+| **GitHub Issues** | Bug reports, feature requests, operator questions | [github.com/docling-project/docling-pipelines/issues](https://github.com/docling-project/docling-pipelines/issues) |
+| **GitHub Discussions** | General questions, ideas, show & tell, Q&A | [github.com/docling-project/docling-pipelines/discussions](https://github.com/docling-project/docling-pipelines/discussions) |
+| **Pull Requests** | Code contributions, documentation improvements | [github.com/docling-project/docling-pipelines/pulls](https://github.com/docling-project/docling-pipelines/pulls) |
 | **Security vulnerabilities** | Private disclosure of security issues | See [SECURITY.md](.github/SECURITY.md) |
 
 ### When to use which channel
 
-- **Something is broken** → Open a [GitHub Issue](https://github.com/IBM/docling-pipelines/issues/new) using the bug report template.
-- **I have a feature idea** → Open a [GitHub Issue](https://github.com/IBM/docling-pipelines/issues/new) using the feature request template.
-- **I have a question about usage** → Start a [GitHub Discussion](https://github.com/IBM/docling-pipelines/discussions/new?category=q-a) in the Q&A category.
+- **Something is broken** → Open a [GitHub Issue](https://github.com/docling-project/docling-pipelines/issues/new) using the bug report template.
+- **I have a feature idea** → Open a [GitHub Issue](https://github.com/docling-project/docling-pipelines/issues/new) using the feature request template.
+- **I have a question about usage** → Start a [GitHub Discussion](https://github.com/docling-project/docling-pipelines/discussions/new?category=q-a) in the Q&A category.
 - **I want to contribute** → Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a PR.
 - **I found a security vulnerability** → Follow the process in [SECURITY.md](.github/SECURITY.md). Do **not** open a public issue.
 
@@ -149,4 +149,4 @@ The full list of maintainers is in [MAINTAINERS.md](MAINTAINERS.md).
 
 **Point of contact:** [docling_pipeline_team-dg@ibm.com](mailto:docling_pipeline_team-dg@ibm.com)
 
-For private matters (security issues, conduct reports), open a private security advisory via [GitHub Security Advisories](https://github.com/IBM/docling-pipelines/security/advisories/new) or email the team directly at [docling_pipeline_team-dg@ibm.com](mailto:docling_pipeline_team-dg@ibm.com).
+For private matters (security issues, conduct reports), open a private security advisory via [GitHub Security Advisories](https://github.com/docling-project/docling-pipelines/security/advisories/new) or email the team directly at [docling_pipeline_team-dg@ibm.com](mailto:docling_pipeline_team-dg@ibm.com).

@@ -218,15 +218,15 @@ describe('FlowRunHistoryTearsheet', () => {
     });
   });
 
-  it('does not render Download button for failed runs', async () => {
+  it('does not render Download button for unknown statuses', async () => {
     server.use(
       http.get('/api/job_runs', () =>
         HttpResponse.json({
           list: [
             {
-              job_run_id: 'run-fail-1',
+              job_run_id: 'run-unknown-1',
               start_time: 1705329000,
-              status: 'Failed',
+              status: 'UnknownStatus',
               duration: 10,
             },
           ],
@@ -234,11 +234,10 @@ describe('FlowRunHistoryTearsheet', () => {
       )
     );
     renderWithProviders(
-      <FlowRunHistoryTearsheet open={true} onClose={vi.fn()} flowId="flow-fail" />
+      <FlowRunHistoryTearsheet open={true} onClose={vi.fn()} flowId="flow-unknown" />
     );
-    await screen.findByRole('table');
-    const downloadBtn = document.querySelector('button[aria-label="Download logs"]');
-    expect(downloadBtn).toBeNull();
+    await screen.findByText('UnknownStatus');
+    expect(screen.queryByRole('button', { name: 'Download logs' })).toBeNull();
   });
 
   it('re-fetches when flowId changes', async () => {
@@ -275,19 +274,11 @@ describe('FlowRunHistoryTearsheet', () => {
     renderWithProviders(
       <FlowRunHistoryTearsheet open={true} onClose={vi.fn()} flowId="flow-dl-2" />
     );
-    const table = await screen.findByRole('table');
-    const allTableBtns = within(table).queryAllByRole('button');
-    const downloadBtn = allTableBtns.find(
-      (b) => !b.textContent?.trim() || b.querySelector('svg')
-    ) as HTMLElement | undefined;
-    if (downloadBtn) {
-      fireEvent.click(downloadBtn);
-      await waitFor(() => {
-        expect(createObjectURLSpy).toHaveBeenCalled();
-      });
-    } else {
-      expect(document.body).toBeInTheDocument();
-    }
+    const downloadBtn = await screen.findByRole('button', { name: 'Download logs' });
+    fireEvent.click(downloadBtn);
+    await waitFor(() => {
+      expect(createObjectURLSpy).toHaveBeenCalled();
+    });
   });
 
   it('triggerDownloadLogs concatenates node_sequence logs when present', async () => {
@@ -314,14 +305,11 @@ describe('FlowRunHistoryTearsheet', () => {
     renderWithProviders(
       <FlowRunHistoryTearsheet open={true} onClose={vi.fn()} flowId="flow-node-seq" />
     );
-    await screen.findByRole('table');
-    const downloadBtn = document.querySelector('button[aria-label="Download logs"]') as HTMLElement | null;
-    if (downloadBtn) {
-      fireEvent.click(downloadBtn);
-      await waitFor(() => {
-        expect(createObjectURLSpy).toHaveBeenCalled();
-      });
-    }
+    const downloadBtn = await screen.findByRole('button', { name: 'Download logs' });
+    fireEvent.click(downloadBtn);
+    await waitFor(() => {
+      expect(createObjectURLSpy).toHaveBeenCalled();
+    });
   });
 
   it('triggerDownloadLogs appends error_logs when present', async () => {
@@ -347,17 +335,14 @@ describe('FlowRunHistoryTearsheet', () => {
     renderWithProviders(
       <FlowRunHistoryTearsheet open={true} onClose={vi.fn()} flowId="flow-err-logs" />
     );
-    await screen.findByRole('table');
-    const downloadBtn = document.querySelector('button[aria-label="Download logs"]') as HTMLElement | null;
-    if (downloadBtn) {
-      fireEvent.click(downloadBtn);
-      await waitFor(() => {
-        expect(createObjectURLSpy).toHaveBeenCalled();
-      });
-    }
+    const downloadBtn = await screen.findByRole('button', { name: 'Download logs' });
+    fireEvent.click(downloadBtn);
+    await waitFor(() => {
+      expect(createObjectURLSpy).toHaveBeenCalled();
+    });
   });
 
-  it('download button does not appear for Failed run', async () => {
+  it('renders Download button for Failed run', async () => {
     server.use(
       http.get('/api/job_runs', () =>
         HttpResponse.json({
@@ -373,14 +358,7 @@ describe('FlowRunHistoryTearsheet', () => {
     renderWithProviders(
       <FlowRunHistoryTearsheet open={true} onClose={vi.fn()} flowId="flow-nondl" />
     );
-    // Wait for row to appear — timestamp button present, no Download button
-    await waitFor(() => {
-      const table = screen.queryByRole('table');
-      expect(table).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(document.querySelector('button[aria-label="Download logs"]')).toBeNull();
-    });
+    expect(await screen.findByRole('button', { name: 'Download logs' })).toBeInTheDocument();
   });
 
   it('renders Download button for Running status', async () => {

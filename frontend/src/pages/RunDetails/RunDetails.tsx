@@ -10,12 +10,15 @@
  * Back button returns to FlowDetail (`/flows/:flow_id?project_id=…`).
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { InlineLoading, InlineNotification } from '@carbon/react';
 import type { PipelineFlowDef } from '@elyra/canvas';
 import { ReadOnlyCanvas } from '@/components';
 import { getJobRun, cancelJobRun, getJobRunFlowDefinition } from '@/services/api/actions/job-run-actions';
+import { getFlow } from '@/services/api/actions/flow-actions';
+import { COMPLETED_STATUSES } from '@/constants/jobRunStatus';
 import { log4js, logUtil } from '@/utils/logger';
 import { useAppDispatch, useJobRunPoller } from '@/hooks';
 import {
@@ -24,17 +27,22 @@ import {
   setExecutionLogs,
 } from '@/slices/jobRunSlice';
 import { generateRoute } from '@/config';
+import { messages } from './RunDetails.messages';
 import styles from './RunDetails.module.scss';
 
 const logger = log4js.getLogger('RunDetails');
 
 export function RunDetails(): React.JSX.Element {
+  const intl = useIntl();
   const { flow_id: flowId, run_id: runId } = useParams<{ flow_id: string; run_id: string }>();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project_id') ?? '';
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { startPoll, stopPoll } = useJobRunPoller();
+
+  // Flow display name used in run-completion notifications (undefined = no toast).
+  const flowNameRef = useRef<string | undefined>(undefined);
 
   // Local state for the fetched pipeline flow definition
   const [pipelineFlow, setPipelineFlow] = useState<PipelineFlowDef | null>(null);
@@ -57,7 +65,7 @@ export function RunDetails(): React.JSX.Element {
         if (cancelled) { return; }
         const definition = snapshotRes.data as unknown as PipelineFlowDef | undefined;
         if (!definition) {
-          setLoadError('Flow definition not available for this run.');
+          setLoadError(intl.formatMessage(messages.definitionUnavailable));
           return;
         }
         setPipelineFlow(definition);
@@ -70,8 +78,20 @@ export function RunDetails(): React.JSX.Element {
         dispatch(setExecutionLogs(null));
         dispatch(setCurrentRun({ jobId: flowId, jobRunId: runId }));
 
-        // Arm the poller — it will start immediately and dispatch setRunning(true)
-        startPoll(runId);
+        // Resolve the flow name for notifications. Failure must not break the page.
+        try {
+          const flowRes = await getFlow(flowId);
+          flowNameRef.current = flowRes.data.name;
+        } catch {
+          flowNameRef.current = undefined;
+        }
+        if (cancelled) { return; }
+
+        // Arm the poller — it will start immediately and dispatch setRunning(true).
+        // Only pass the flow name for runs that are still live, so opening an
+        // already-finished run does not show a "run completed" toast.
+        const isLive = !COMPLETED_STATUSES.has(runRes.data.job_stats.status);
+        startPoll(runId, isLive ? flowNameRef.current : undefined);
 
         // If the run returned a terminal status on the first fetch, the poller's
         // first response will dispatch setRunning(false) on its own. But we set
@@ -79,7 +99,7 @@ export function RunDetails(): React.JSX.Element {
         dispatch(setExecutionLogs(runRes.data));
       } catch {
         if (!cancelled) {
-          setLoadError('Failed to load run details. Please try again.');
+          setLoadError(intl.formatMessage(messages.loadError));
         }
       }
     };
@@ -116,7 +136,7 @@ export function RunDetails(): React.JSX.Element {
     if (!flowId) { return; }
     dispatch(setRunning(true));
     dispatch(setCurrentRun({ jobId: flowId, jobRunId: newJobRunId }));
-    startPoll(newJobRunId);
+    startPoll(newJobRunId, flowNameRef.current);
     // Navigate to the new run's URL so the URL always reflects what's shown
     void navigate(generateRoute.runDetails(flowId, newJobRunId, projectId), { replace: true });
   };
@@ -129,7 +149,7 @@ export function RunDetails(): React.JSX.Element {
         logUtil.error({ logger, message: 'Failed to cancel job run', data: err });
       })
       .finally(() => {
-        startPoll(runId);
+        startPoll(runId, flowNameRef.current);
       });
   };
 
@@ -140,7 +160,7 @@ export function RunDetails(): React.JSX.Element {
       <div className={styles.stateContainer}>
         <InlineNotification
           kind="error"
-          title="Error"
+          title={intl.formatMessage(messages.errorTitle)}
           subtitle={loadError}
           hideCloseButton
         />
@@ -154,7 +174,7 @@ export function RunDetails(): React.JSX.Element {
   if (!pipelineFlow || !flowId || !runId) {
     return (
       <div className={styles.stateContainer}>
-        <InlineLoading description="Loading run..." />
+        <InlineLoading description={intl.formatMessage(messages.loading)} />
       </div>
     );
   }

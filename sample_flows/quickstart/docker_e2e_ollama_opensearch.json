@@ -1,0 +1,117 @@
+{
+  "flow_name": "docker-e2e-documents",
+  "description": "Local PDFs to Docling extraction, simple chunks, Ollama embeddings, and OpenSearch.",
+  "global_config": {
+    "doc_column": "content",
+    "disable_validation": false,
+    "force_ingest": true,
+    "data_storage_type": "local",
+    "storage": "in-memory",
+    "execute_type": "local",
+    "enable_micro_batching": false
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_source_filesystem",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "/documents"
+          ]
+        },
+        "include_filter": "pdf"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_with_docling",
+      "config": {
+        "text_extraction": {
+          "provider": "docling_library",
+          "doc_column": "content"
+        },
+        "entity_extraction": {
+          "provider": "none"
+        },
+        "max_workers": 1
+      },
+      "depends_on": [
+        "ingest_source_filesystem"
+      ]
+    },
+    {
+      "type": "chunker",
+      "name": "simple_chunker",
+      "config": {
+        "chunk_type": "simple",
+        "chunk_size": 512,
+        "chunk_overlap": 50,
+        "retain_original_content": false
+      },
+      "depends_on": [
+        "extract_with_docling"
+      ]
+    },
+    {
+      "type": "embeddings",
+      "name": "ollama_embeddings",
+      "config": {
+        "provider": "litellm",
+        "provider_config": {
+          "model_id": "openai/nomic-embed-text",
+          "api_base": "http://ollama:11434/v1",
+          "api_key": "ollama"
+        },
+        "embeddings_column": "embeddings",
+        "overlap_ratio": 0.1
+      },
+      "depends_on": [
+        "simple_chunker"
+      ]
+    },
+    {
+      "type": "vectordb",
+      "name": "opensearch_vector_store",
+      "config": {
+        "provider": "opensearch",
+        "doc_id_column": "doc_id_hash",
+        "provider_config": {
+          "index_name": "docker-e2e-documents",
+          "host": "opensearch",
+          "port": 9200,
+          "username": "${OPENSEARCH_USERNAME}",
+          "password": "${OPENSEARCH_PASSWORD}",
+          "use_ssl": false,
+          "verify_certs": false,
+          "batch_size": 100,
+          "engine": "faiss",
+          "algorithm": "hnsw",
+          "space_type": "l2"
+        },
+        "feature_mappings": [
+          {
+            "feature_name": "doc_id_hash",
+            "mapped_column_name": "pk"
+          },
+          {
+            "feature_name": "content",
+            "mapped_column_name": "text"
+          },
+          {
+            "feature_name": "name",
+            "mapped_column_name": "doc_name"
+          },
+          {
+            "feature_name": "embeddings",
+            "mapped_column_name": "vector_embeddings"
+          }
+        ]
+      },
+      "depends_on": [
+        "ollama_embeddings"
+      ]
+    }
+  ]
+}

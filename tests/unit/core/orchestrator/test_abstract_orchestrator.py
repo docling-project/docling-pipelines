@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for AbstractOrchestrator."""
 
 from unittest.mock import MagicMock, Mock, patch
@@ -301,8 +304,7 @@ class TestPopulateIngestSourceConfig:
             OperatorConstants.Misc.OPERATOR: "IngestSourceOperator",
             OperatorConstants.Config.CONFIG: {
                 OperatorConstants.Config.PROVIDER: "s3",
-                OperatorConstants.Config.CONNECTION_PARAMS: {"bucket": "my-bucket"},
-                OperatorConstants.Config.CREDENTIALS: {"access_key": "AKID"},
+                OperatorConstants.Config.PROVIDER_CONFIG: {"bucket": "my-bucket", "access_key": "AKID"},
             },
         }
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
@@ -318,19 +320,28 @@ class TestPopulateIngestSourceConfig:
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
         assert OperatorConstants.Config.INGEST_SOURCE not in global_config
 
-    def test_merged_connection_params_include_credentials(self, orchestrator):
+    def test_only_naming_facts_stored_in_global_config(self, orchestrator):
         global_config: dict = {}
         ingest_operator = {
+            OperatorConstants.Columns.ID: "n1",
+            OperatorConstants.Columns.NAME: "ingest",
             OperatorConstants.Misc.OPERATOR: "ingest_source",
             OperatorConstants.Config.CONFIG: {
-                OperatorConstants.Config.CONNECTION_PARAMS: {"bucket": "b"},
-                OperatorConstants.Config.CREDENTIALS: {"access_key": "KEY"},
+                OperatorConstants.Config.PROVIDER_CONFIG: {
+                    "bucket": "b",
+                    "prefix": "docs/",
+                    "access_key": "KEY",  # pragma: allowlist secret
+                    "endpoint_url": "https://example.test",
+                },
+                "include_filter": "pdf",
             },
         }
         orchestrator._populate_ingest_source_config(ingest_operator=ingest_operator, global_config=global_config)
-        merged = global_config[OperatorConstants.Config.INGEST_SOURCE][OperatorConstants.Config.CONNECTION_PARAMS]
-        assert "access_key" in merged
-        assert "bucket" in merged
+        ingest_source = global_config[OperatorConstants.Config.INGEST_SOURCE]
+        assert ingest_source[OperatorConstants.Config.PROVIDER_CONFIG] == {"prefix": "docs/"}
+        assert ingest_source["include_filter"] == "pdf"
+        assert ingest_source["node_id"] == "n1"
+        assert "KEY" not in str(ingest_source)
 
 
 @pytest.mark.unit
@@ -405,3 +416,93 @@ class TestInitialize:
             orchestrator.initialize(job_id="job-1", job_run_id="run-same")
             # get_session_info should not be called if skipping
             mock_si.assert_not_called()
+
+
+class TestOrchestratorFactory:
+    """Tests for OrchestratorFactory covering uncovered utility methods."""
+
+    def setup_method(self) -> None:
+        """Reset factory to defaults before each test."""
+        from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
+
+        OrchestratorFactory.reset_orchestrators()
+
+    def test_reset_orchestrators_restores_defaults(self) -> None:
+        """reset_orchestrators() clears custom registrations and restores python default."""
+        from docpipe.core.constants import OrchestratorType
+        from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
+        from docpipe.core.orchestration.python.python_orchestrator import PythonOrchestrator
+
+        # register a custom orchestrator then reset
+        OrchestratorFactory.register_orchestrators(orchestrators={"custom": ConcreteOrchestrator})
+        OrchestratorFactory.reset_orchestrators()
+
+        registered = OrchestratorFactory.get_registered_orchestrators()
+        assert OrchestratorType.PYTHON in registered
+        assert registered[OrchestratorType.PYTHON] is PythonOrchestrator
+        assert "custom" not in registered
+
+    def test_get_registered_orchestrators_returns_copy(self) -> None:
+        """get_registered_orchestrators() returns a dict copy, not the internal registry."""
+        from docpipe.core.constants import OrchestratorType
+        from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
+
+        result = OrchestratorFactory.get_registered_orchestrators()
+        assert OrchestratorType.PYTHON in result
+        # mutating the returned copy must not affect the registry
+        result["injected"] = ConcreteOrchestrator
+        clean = OrchestratorFactory.get_registered_orchestrators()
+        assert "injected" not in clean
+
+    def test_register_orchestrators_raises_on_empty_dict(self) -> None:
+        """register_orchestrators() raises ValueError when called with an empty dict."""
+        from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
+
+        with pytest.raises(ValueError, match="must not be empty"):
+            OrchestratorFactory.register_orchestrators(orchestrators={})
+
+
+@pytest.mark.unit
+class TestRecordSinkDataset:
+    """Sinks are shared across micro-batches on one orchestrator instance."""
+
+    NS = "opensearch://localhost:9200"
+
+    def test_starts_empty_without_hasattr_guard(self, orchestrator):
+        assert orchestrator.sink_datasets == {}
+
+    def test_same_sink_across_batches_is_one_entry_with_summed_rows(self, orchestrator):
+        for rows in (3, 4, 5):
+            orchestrator._record_sink_dataset(
+                namespace=self.NS, name="idx", tables=[pa.table({"id": [str(i) for i in range(rows)]})]
+            )
+        assert list(orchestrator.sink_datasets) == [(self.NS, "idx")]
+        assert orchestrator.sink_datasets[(self.NS, "idx")].summary.row_count == 12
+
+    def test_distinct_sinks_keep_their_own_schema(self, orchestrator):
+        orchestrator._record_sink_dataset(namespace=self.NS, name="a", tables=[pa.table({"id": ["1"]})])
+        orchestrator._record_sink_dataset(
+            namespace=self.NS, name="b", tables=[pa.table({"id": ["1", "2"], "extra": [1, 2]})]
+        )
+        assert [c for c, _ in orchestrator.sink_datasets[(self.NS, "a")].summary.schema_fields] == ["id"]
+        assert [c for c, _ in orchestrator.sink_datasets[(self.NS, "b")].summary.schema_fields] == ["id", "extra"]
+        assert orchestrator.sink_datasets[(self.NS, "b")].summary.row_count == 2
+
+    def test_no_table_records_nothing(self, orchestrator):
+        orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[])
+        orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[None])
+        assert orchestrator.sink_datasets == {}
+
+    def test_concurrent_batches_do_not_lose_rows(self, orchestrator):
+        import threading
+
+        def run_batch():
+            orchestrator._record_sink_dataset(namespace=self.NS, name="idx", tables=[pa.table({"id": ["1", "2"]})])
+
+        threads = [threading.Thread(target=run_batch) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(orchestrator.sink_datasets) == 1
+        assert orchestrator.sink_datasets[(self.NS, "idx")].summary.row_count == 40

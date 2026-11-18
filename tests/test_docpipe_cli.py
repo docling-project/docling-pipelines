@@ -36,7 +36,7 @@ class TestCommandLineOrchestrator(unittest.TestCase):
                     OperatorConstants.Misc.OPERATOR: OperatorConstants.Operators.INGEST_SOURCE,
                     "config": {
                         "provider": "filesystem",
-                        "connection_params": {"paths": ["tests/fixtures/customer_support_docs"]},
+                        "provider_config": {"paths": ["tests/fixtures/customer_support_docs"]},
                         "include_filter": "txt",
                     },
                     "input_edges": [],
@@ -154,7 +154,7 @@ class TestCommandLineOrchestrator(unittest.TestCase):
                     OperatorConstants.Misc.OPERATOR: OperatorConstants.Operators.INGEST_SOURCE,
                     "config": {
                         "provider": "filesystem",
-                        "connection_params": {"paths": ["tests/fixtures/customer_support_docs"]},
+                        "provider_config": {"paths": ["tests/fixtures/customer_support_docs"]},
                         "include_filter": "txt",
                     },
                     "input_edges": [],

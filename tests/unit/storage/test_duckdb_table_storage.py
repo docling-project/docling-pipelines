@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for DuckDBTableStorage (PyArrow table storage)."""
 
 import pyarrow as pa
@@ -456,3 +459,73 @@ class TestDuckDBTableStorageExceptionReraise:
         with patch.object(storage.connection_manager, "get_connection", return_value=mock_ctx):
             with pytest.raises(StorageException):
                 storage.upsert_data(table_name="valid_table", data=sample_table)
+
+
+class TestDuckDBTableStorageTypeMapping:
+    """Verify _pyarrow_to_duckdb_type is a pure static type-mapping helper."""
+
+    def test_pyarrow_to_duckdb_type_is_static(self):
+        """The type mapper must be a staticmethod (no instance state needed)."""
+        import inspect
+
+        assert isinstance(inspect.getattr_static(DuckDBTableStorage, "_pyarrow_to_duckdb_type"), staticmethod)
+
+    @pytest.mark.parametrize(
+        "pa_type,expected",
+        [
+            (pa.string(), "VARCHAR"),
+            (pa.large_string(), "VARCHAR"),
+            (pa.int64(), "BIGINT"),
+            (pa.int32(), "INTEGER"),
+            (pa.int16(), "SMALLINT"),
+            (pa.int8(), "TINYINT"),
+            (pa.float64(), "DOUBLE"),
+            (pa.float32(), "FLOAT"),
+            (pa.bool_(), "BOOLEAN"),
+            (pa.binary(), "BLOB"),
+            (pa.timestamp("us"), "TIMESTAMP"),
+            (pa.date32(), "DATE"),
+            (pa.time32("s"), "TIME"),
+            (pa.list_(pa.string()), "JSON"),
+            (pa.struct([("a", pa.string())]), "JSON"),
+        ],
+    )
+    def test_known_type_mappings(self, pa_type, expected):
+        """Known PyArrow types map to the documented DuckDB type strings."""
+        assert DuckDBTableStorage._pyarrow_to_duckdb_type(pa_type=pa_type) == expected
+
+    def test_unknown_type_defaults_to_varchar(self):
+        """Unmapped PyArrow types fall back to VARCHAR."""
+        # decimal128 is not present in the mapping table
+        assert DuckDBTableStorage._pyarrow_to_duckdb_type(pa_type=pa.decimal128(10, 2)) == "VARCHAR"
+
+    def test_instance_and_class_calls_agree(self, storage):
+        """Instance access and class access return identical mappings."""
+        assert storage._pyarrow_to_duckdb_type(pa_type=pa.int64()) == (
+            DuckDBTableStorage._pyarrow_to_duckdb_type(pa_type=pa.int64())
+        )
+
+
+class TestSchemaWideningAndWrites:
+    """Integer columns widen for float values, and execute_query commits writes."""
+
+    def test_integer_column_is_widened_for_float_values(self, storage):
+        """Without widening, DuckDB would round 5.5 to 6."""
+        schema = pa.schema([("id", pa.string()), ("amount", pa.int64())])
+        storage.create_table(table_name="totals", schema=schema)
+        storage.upsert_data(table_name="totals", data=pa.table({"id": ["a"], "amount": [5]}, schema=schema))
+
+        storage.upsert_data(table_name="totals", data=pa.table({"id": ["b"], "amount": [5.5]}))
+
+        stored = storage.read_data(table_name="totals")
+        assert stored.schema.field("amount").type == pa.float64()
+        assert stored.column("amount").to_pylist() == [5.0, 5.5]
+
+    def test_execute_query_commits_writes_on_a_database_file(self, storage):
+        """Reads open the file read-only; writes open it read-write and are kept."""
+        schema = pa.schema([("id", pa.string()), ("amount", pa.float64())])
+        storage.create_table(table_name="totals", schema=schema)
+
+        storage.execute_query(query="INSERT INTO totals VALUES (?, ?)", params=["a", 1.5])
+
+        assert storage.execute_query(query="SELECT id, amount FROM totals").to_pylist() == [{"id": "a", "amount": 1.5}]

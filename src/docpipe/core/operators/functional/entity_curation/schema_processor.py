@@ -47,13 +47,13 @@ class SchemaProcessor:
                     doc_cls_schema = doc_cls.get("document_class_schema", {})
                     if doc_cls_schema:
                         self.schema_cache[document_type] = doc_cls_schema
-                        logger.info(f"Loaded schema for document type '{document_type}' from {file_name}")
+                        logger.info("Loaded schema for document type '%s' from %s", document_type, file_name)
                     else:
-                        logger.warning(f"No valid schema found in {file_name}")
+                        logger.warning("No valid schema found in %s", file_name)
             except (OSError, json.JSONDecodeError) as exc:
-                logger.warning(f"Failed to load schema for '{document_type}' from {file_name}: {exc}")
+                logger.warning("Failed to load schema for '%s' from %s: %s", document_type, file_name, exc)
 
-        logger.info(f"Loaded {len(self.schema_cache)} schemas: {list(self.schema_cache.keys())}")
+        logger.info("Loaded %s schemas: %s", len(self.schema_cache), list(self.schema_cache.keys()))
 
     def process_with_schema(self, *, entities: dict[str, Any], document_type: str) -> dict[str, Any]:
         """
@@ -69,13 +69,13 @@ class SchemaProcessor:
         """
         schema = self.schema_cache.get(document_type)
         if not schema:
-            logger.warning(f"No schema found for document type '{document_type}', returning empty dict")
+            logger.warning("No schema found for document type '%s', returning empty dict", document_type)
             return {}
 
         # Get target tables from schema
         target_tables = schema.get(DocumentConstants.TARGET_TABLES, [])
         if not target_tables:
-            logger.warning(f"No target tables in schema for '{document_type}'")
+            logger.warning("No target tables in schema for '%s'", document_type)
             return {}
 
         # Process each target table
@@ -84,7 +84,7 @@ class SchemaProcessor:
             table_name = table.get(DocumentConstants.TABLE_NAME)
             columns = table.get(DocumentConstants.COLUMNS, [])
 
-            logger.debug(f"Processing table '{table_name}' with {len(columns)} columns")
+            logger.debug("Processing table '%s' with %s columns", table_name, len(columns))
 
             # Detect if this is an array-based table
             array_field = self._detect_array_field(columns=columns, entities=entities)
@@ -177,15 +177,13 @@ class SchemaProcessor:
         Returns:
             List of processed objects, one per array element
         """
-        array_data = entities.get(array_field, [])
-        if not isinstance(array_data, list):
-            logger.warning(f"Expected array for field '{array_field}', got {type(array_data)}")
-            return []
+        # _detect_array_field only returns fields whose value in these entities is a list
+        array_data: list[Any] = entities[array_field]
 
         result = []
 
         for idx, item in enumerate(array_data):
-            logger.debug(f"Processing array item {idx} from '{array_field}'")
+            logger.debug("Processing array item %s from '%s'", idx, array_field)
 
             # Create a temporary entities dict with the array item at the root
             temp_entities = {**entities, array_field: item}
@@ -226,7 +224,7 @@ class SchemaProcessor:
 
             result.append(item_result)
 
-        logger.debug(f"Processed {len(result)} items for array field '{array_field}'")
+        logger.debug("Processed %s items for array field '%s'", len(result), array_field)
         return result
 
     def _process_single_table(self, *, columns: list[dict], entities: dict[str, Any]) -> dict[str, Any]:
@@ -283,7 +281,7 @@ class SchemaProcessor:
         """
         func = TRANSFORMS.get(transform_name)
         if not func:
-            logger.warning(f"Unknown transformation: {transform_name}")
+            logger.warning("Unknown transformation: %s", transform_name)
             return None
 
         # Resolve argument values
@@ -293,16 +291,19 @@ class SchemaProcessor:
 
         # Debug log to inspect transformation inputs
         logger.debug(
-            f"Applying transformation '{transform_name}' with arguments: "
-            f"{', '.join(f'{k}={v!r} (type={type(v).__name__})' for k, v in kwargs.items())}"
+            "Applying transformation '%s' with arguments: %s",
+            transform_name,
+            ", ".join(f"{k}={v!r} (type={type(v).__name__})" for k, v in kwargs.items()),
         )
 
         try:
             return func(**kwargs)
         except Exception as e:
             logger.warning(
-                f"Transformation {transform_name} failed: {e}. "
-                f"Arguments were: {', '.join(f'{k}={v!r}' for k, v in kwargs.items())}"
+                "Transformation %s failed: %s. Arguments were: %s",
+                transform_name,
+                e,
+                ", ".join(f"{k}={v!r}" for k, v in kwargs.items()),
             )
             return None
 
@@ -330,7 +331,7 @@ class SchemaProcessor:
         """
         func = TRANSFORMS.get(transform_name)
         if not func:
-            logger.warning(f"Unknown transformation: {transform_name}")
+            logger.warning("Unknown transformation: %s", transform_name)
             return None
 
         # Resolve argument values with array path adjustment
@@ -340,16 +341,19 @@ class SchemaProcessor:
 
         # Debug log
         logger.debug(
-            f"Applying transformation '{transform_name}' with arguments: "
-            f"{', '.join(f'{k}={v!r} (type={type(v).__name__})' for k, v in kwargs.items())}"
+            "Applying transformation '%s' with arguments: %s",
+            transform_name,
+            ", ".join(f"{k}={v!r} (type={type(v).__name__})" for k, v in kwargs.items()),
         )
 
         try:
             return func(**kwargs)
         except Exception as e:
             logger.warning(
-                f"Transformation {transform_name} failed: {e}. "
-                f"Arguments were: {', '.join(f'{k}={v!r}' for k, v in kwargs.items())}"
+                "Transformation %s failed: %s. Arguments were: %s",
+                transform_name,
+                e,
+                ", ".join(f"{k}={v!r}" for k, v in kwargs.items()),
             )
             return None
 
@@ -380,7 +384,7 @@ class SchemaProcessor:
 
             # Ensure arg_name is a string
             if not isinstance(arg_name, str):
-                logger.warning(f"Invalid argument name type: {type(arg_name)}")
+                logger.warning("Invalid argument name type: %s", type(arg_name))
                 continue
 
             if DocumentConstants.FIELD in arg_value:

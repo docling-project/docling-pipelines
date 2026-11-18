@@ -84,6 +84,11 @@ class JobStatsModel(SQLModel, table=True):  # type: ignore[call-arg]
         title="Heartbeat Timestamp",
         description="Timestamp to ascertain if job run is currently in execution",
     )
+    progress_timestamp: int = Field(
+        default=0,
+        title="Progress Timestamp",
+        description="Timestamp of the last measurable unit of forward progress (epoch seconds)",
+    )
 
     # Document Counts
     total_docs: int = Field(
@@ -162,6 +167,12 @@ class JobStatsModel(SQLModel, table=True):  # type: ignore[call-arg]
         title="Flow ID",
         description="ID of the Docpipe flow for which job run was created",
         min_length=0,
+        max_length=255,
+    )
+    flow_name: str | None = Field(
+        default=None,
+        title="Flow Name",
+        description="Human-readable name of the flow at run creation time",
         max_length=255,
     )
 

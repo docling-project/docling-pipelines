@@ -1,0 +1,287 @@
+[
+  {
+    "id": "ad9dac49-7bac-495a-b552-ddec245e7295",
+    "type": "execution_node",
+    "op": "ingest_source",
+    "app_data": {
+      "react_nodes_data": {
+        "color": "#b28600",
+        "cardDescription": "Ingest"
+      },
+      "ui_data": {
+        "label": "Ingest data",
+        "image": "",
+        "x_pos": 41.6,
+        "y_pos": -45.3288,
+        "description": "Ingest documents from local and remote storage sources"
+      }
+    },
+    "outputs": [
+      {
+        "id": "ingest_source_outPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Output Port"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "provider": "filesystem",
+      "provider_config": { "paths": ["./sample_documents"] },
+      "max_files": 100,
+      "include_filter": null,
+      "exclude_filter": null,
+      "ignore_hidden_files": true
+    }
+  },
+  {
+    "id": "a2dcf4f0-3d93-4c96-a189-5a9668a44566",
+    "type": "execution_node",
+    "op": "extract_operator",
+    "app_data": {
+      "react_nodes_data": {
+        "color": "#00539a",
+        "cardDescription": "Extract"
+      },
+      "ui_data": {
+        "label": "Extract Content",
+        "image": "",
+        "x_pos": 332.8,
+        "y_pos": 45.3288,
+        "description": "Extract text and entities from documents using Docling"
+      }
+    },
+    "inputs": [
+      {
+        "id": "extract_inPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Input Port"
+          }
+        },
+        "links": [
+          {
+            "id": "2db0a4ee-993b-43a1-9be0-37f951f27cb0",
+            "node_id_ref": "ad9dac49-7bac-495a-b552-ddec245e7295",
+            "port_id_ref": "ingest_source_outPort"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "id": "extract_outPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Output Port"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "text_extraction": {
+        "provider_config": { "additional_formats": [] },
+        "provider": "docling_library"
+      },
+      "max_workers": 1,
+      "use_processes": false
+    }
+  },
+  {
+    "id": "8fe0bb37-46f9-45dd-8046-f4b63df47a7c",
+    "type": "execution_node",
+    "op": "chunker",
+    "app_data": {
+      "react_nodes_data": {
+        "color": "#520408",
+        "cardDescription": "Functional"
+      },
+      "ui_data": {
+        "label": "Chunking",
+        "image": "",
+        "x_pos": 624,
+        "y_pos": 45.3288,
+        "description": "Split text into smaller chunks for processing"
+      }
+    },
+    "inputs": [
+      {
+        "id": "chunker_inPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Input Port"
+          }
+        },
+        "links": [
+          {
+            "id": "ac4ef766-f8cf-40db-b95d-a3c2115ae15c",
+            "node_id_ref": "a2dcf4f0-3d93-4c96-a189-5a9668a44566",
+            "port_id_ref": "extract_outPort"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "id": "chunker_outPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Output Port"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "chunk_type": "simple",
+      "chunk_size": 2048,
+      "chunk_overlap": 200,
+      "chunk_overlap_percentage": 20,
+      "semantic_embeddings_model": null,
+      "breakpoint_threshold_type": "percentile",
+      "breakpoint_threshold_amount": null,
+      "docling_tokenizer": "sentence-transformers/all-MiniLM-L6-v2",
+      "retain_original_content": false,
+      "summarization": null,
+      "provider": null,
+      "provider_config": {}
+    }
+  },
+  {
+    "id": "c5ea6525-89b9-4923-8baa-f50eb4ad2cfe",
+    "type": "execution_node",
+    "op": "embeddings",
+    "app_data": {
+      "react_nodes_data": {
+        "color": "#520408",
+        "cardDescription": "Functional"
+      },
+      "ui_data": {
+        "label": "Embeddings",
+        "image": "",
+        "x_pos": 915.2,
+        "y_pos": 45.3288,
+        "description": "Create vector embeddings using Ollama or LiteLLM"
+      }
+    },
+    "inputs": [
+      {
+        "id": "embeddings_inPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Input Port"
+          }
+        },
+        "links": [
+          {
+            "id": "50e1c90b-a552-4ac2-8b4d-50f52d7c2bc3",
+            "node_id_ref": "8fe0bb37-46f9-45dd-8046-f4b63df47a7c",
+            "port_id_ref": "chunker_outPort"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "id": "embeddings_outPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Output Port"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "provider": "litellm",
+      "provider_config": {
+        "api_base": "http://ollama:11434/v1",
+        "model_id": "openai/nomic-embed-text",
+        "api_key": "${OLLAMA_API_KEY}"
+      },
+      "embeddings_column": "embeddings",
+      "overlap_ratio": 0.2,
+      "token_limit": 8192
+    }
+  },
+  {
+    "id": "99bdcc8c-d7c9-4296-909e-7ba81d6a2388",
+    "type": "execution_node",
+    "op": "vectordb",
+    "app_data": {
+      "react_nodes_data": {
+        "color": "#009d9a",
+        "cardDescription": "Vector DB"
+      },
+      "ui_data": {
+        "label": "Vector DB",
+        "image": "",
+        "x_pos": 1206.4,
+        "y_pos": 45.3288,
+        "description": "Store vectors in vector database (OpenSearch, Milvus, etc.)"
+      }
+    },
+    "inputs": [
+      {
+        "id": "vectordb_inPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Input Port"
+          }
+        },
+        "links": [
+          {
+            "id": "3c39598b-b5bb-4757-9e56-f15a0cf4d463",
+            "node_id_ref": "c5ea6525-89b9-4923-8baa-f50eb4ad2cfe",
+            "port_id_ref": "embeddings_outPort"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "id": "vectordb_outPort",
+        "app_data": {
+          "ui_data": {
+            "cardinality": { "min": 1, "max": 1 },
+            "label": "Output Port"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "provider": "opensearch",
+      "doc_id_column": "doc_id_hash",
+      "embeddings_column": "embeddings",
+      "sparse_embeddings_column": null,
+      "create_index": true,
+      "vector_dimension": 384,
+      "batch_size": 100,
+      "provider_config": {
+        "host": "opensearch",
+        "port": 9200,
+        "username": "${OPENSEARCH_USERNAME}",
+        "password": "${OPENSEARCH_PASSWORD}",
+        "use_ssl": false,
+        "verify_certs": false,
+        "index_name": "sample_flow_index",
+        "space_type": "l2",
+        "engine": "faiss"
+      },
+      "feature_mappings": [
+        { "feature_name": "doc_id_hash", "mapped_column_name": "pk" },
+        { "feature_name": "id", "mapped_column_name": "document_id" },
+        { "feature_name": "name", "mapped_column_name": "document_name" },
+        { "feature_name": "embeddings", "mapped_column_name": "vector_embeddings" }
+      ],
+      "add_sparse_vector": false
+    }
+  }
+]

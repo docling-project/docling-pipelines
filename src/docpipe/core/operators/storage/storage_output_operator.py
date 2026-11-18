@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """StorageOutputOperator — writes pipeline documents to storage destinations."""
 
 import json
@@ -21,6 +24,8 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.factories.des
     DestinationAdapterFactory,
 )
 from docpipe.core.operators.storage.domain.models import ContentFormat, WriteMode, WriteResult
+from docpipe.integrations.secrets.registry import scrub
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.binary_content_fetcher import get_binary_content
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
@@ -231,9 +236,25 @@ class StorageOutputOperator(AbstractOperator):
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each destination config class's secret-capable declarations per provider."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        return build_provider_secret_fields(
+            selector="destination_config.provider",
+            prefix="destination_config.provider_config",
+            classes={
+                name: DestinationAdapterFactory.create(name).get_config_schema()
+                for name in DestinationAdapterFactory.get_registered_names()
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Return operator metadata for flow validation and discovery."""
         return {
+            "secret_fields": ["destination_config.credentials.*"],
+            "secret_fields_by_provider": StorageOutputOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: StorageOutputOperator.is_available(),
             OperatorConstants.Misc.CATEGORY: StorageOutputOperator.category.value,
             OperatorConstants.Misc.LABEL: "Storage Output",
@@ -404,12 +425,16 @@ class StorageOutputOperator(AbstractOperator):
         provider = self.destination_config.get("provider", "")
         adapter = DestinationAdapterFactory.create(provider)
         try:
+            provider_config = self.destination_config.get("provider_config") or {}
+            # The UI stores provider-specific fields together in provider_config.
+            # Keep the separate credentials field compatible with existing flows.
+            credentials = {**provider_config, **(self.destination_config.get("credentials") or {})}
             dest_cfg = adapter.build_config_from_operator_params(
-                provider_config=self.destination_config.get("provider_config") or {},
-                credentials=self.destination_config.get("credentials") or {},
+                provider_config=provider_config,
+                credentials=credentials,
             )
         except (ValueError, KeyError) as e:
-            config_error_msg = str(e)
+            config_error_msg = sanitize_exception(exc=e, config_key=f"{self.short_name}.destination_config")
             logger.error(
                 "destination config error for operator '%s': %s",
                 self.short_name,
@@ -470,10 +495,10 @@ class StorageOutputOperator(AbstractOperator):
         # relative paths for cloud sources (e.g. S3) that don't store relative_path
         # directly in document metadata.
         ingest_source = self._global_config.get(OperatorConstants.Config.INGEST_SOURCE, {})
-        connection_params = ingest_source.get(OperatorConstants.Config.CONNECTION_PARAMS, {})
-        source_prefix: str | None = connection_params.get("prefix")
+        source_config = ingest_source.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
+        source_prefix: str | None = source_config.get("prefix")
         # Source paths list — used in hierarchical mode to prefix each root's folder name.
-        source_paths: list[str] | None = connection_params.get("paths") or None
+        source_paths: list[str] | None = source_config.get("paths") or None
 
         # For ingest_source (filesystem) rows there is no metadata column.  Derive the ingest root from
         # the common directory ancestor of all absolute paths in the batch so that the
@@ -545,10 +570,11 @@ class StorageOutputOperator(AbstractOperator):
                     )
 
             except Exception as e:
+                safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.destination_config")
                 logger.error(
                     "Unexpected error writing document %s: %s",
                     doc_name,
-                    e,
+                    safe_error,
                     extra=self.common_log_arguments,
                 )
                 row_write_results.append(
@@ -556,14 +582,14 @@ class StorageOutputOperator(AbstractOperator):
                         doc_id=doc_id,
                         doc_name=doc_name,
                         success=False,
-                        error_message=str(e),
+                        error_message=safe_error,
                     )
                 )
                 self.record_failed_document(
                     metadata=metadata,
                     doc_id=doc_id,
                     doc_name=doc_name,
-                    reason=str(e),
+                    reason=safe_error,
                 )
 
         metadata[Metrics.External.NODE_STATUS] = OperatorUtils.determine_execution_status(
@@ -886,7 +912,8 @@ class StorageOutputOperator(AbstractOperator):
         write_status = [r.write_status for r in write_results]
         destination_path = [r.destination_path for r in write_results]
         bytes_written = [r.bytes_written for r in write_results]
-        write_error = [r.error_message for r in write_results]
+        # The column is written to the output table and from there to files; adapter messages can echo a path.
+        write_error = [scrub(r.error_message) if r.error_message else r.error_message for r in write_results]
 
         new_columns = pa.table(
             {

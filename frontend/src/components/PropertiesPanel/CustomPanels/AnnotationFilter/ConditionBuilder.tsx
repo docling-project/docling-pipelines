@@ -30,6 +30,7 @@ import {
   Tooltip,
 } from '@carbon/react';
 import { Add, Information, TrashCan } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import type { FeatureAttributes } from '@/types';
 import {
   type Condition,
@@ -43,7 +44,7 @@ import {
   SQL_OPERATORS,
   TIMESTAMP_REGEX,
 } from './conditionTypes';
-import { CONDITION_BUILDER_LABELS } from './constants';
+import { messages } from './ConditionBuilder.messages';
 import styles from './ConditionBuilder.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,7 @@ function VariableDropdown({
   isReadOnlyMode,
   onVariableChange,
 }: VariableDropdownProps): React.JSX.Element {
+  const intl = useIntl();
   const featureNames = Object.keys(features);
   const variableItems = featureNames.map((name) => ({
     id: name,
@@ -101,8 +103,8 @@ function VariableDropdown({
   return (
     <Dropdown
       id={`var-${conditionId}`}
-      titleText={CONDITION_BUILDER_LABELS.VARIABLE}
-      label={CONDITION_BUILDER_LABELS.CHOOSE_VARIABLE}
+      titleText={intl.formatMessage(messages.variable)}
+      label={intl.formatMessage(messages.chooseVariable)}
       items={variableItems}
       itemToString={(item: { id: string; label: string } | null) => item?.id ?? ''}
       selectedItem={selectedVariable}
@@ -131,14 +133,15 @@ function OperatorDropdown({
   isReadOnlyMode,
   onOperatorChange,
 }: OperatorDropdownProps): React.JSX.Element {
+  const intl = useIntl();
   const items = getOperatorItems(featureType);
   return (
     <Dropdown
       id={`op-${conditionId}`}
-      titleText={CONDITION_BUILDER_LABELS.OPERATOR}
-      label={CONDITION_BUILDER_LABELS.CHOOSE_OPERATOR}
+      titleText={intl.formatMessage(messages.operator)}
+      label={intl.formatMessage(messages.chooseOperator)}
       items={items}
-      itemToString={(item: typeof SQL_OPERATORS[number] | null) => item?.label ?? ''}
+      itemToString={(item: typeof SQL_OPERATORS[number] | null) => (item ? intl.formatMessage(item.label) : '')}
       selectedItem={items.find((o) => o.value === operator) ?? null}
       onChange={({
         selectedItem,
@@ -198,6 +201,7 @@ export function ConditionBuilder({
   isReadOnlyMode = false,
   isLoading = false,
 }: ConditionBuilderProps): React.JSX.Element {
+  const intl = useIntl();
   /**
    * Per-condition validation error messages, keyed by `Condition.id`.
    * Errors are set on blur, not on every keystroke — see `handleBlur`.
@@ -233,15 +237,15 @@ export function ConditionBuilder({
       if (condition.operator === 'between') {
         const [v1, v2] = value.split('|');
         if (!v1 || !v2 || !TIMESTAMP_REGEX.test(v1) || !TIMESTAMP_REGEX.test(v2)) {
-          return CONDITION_BUILDER_LABELS.ERROR_INVALID_TIMESTAMP_RANGE;
+          return intl.formatMessage(messages.errorInvalidTimestampRange);
         }
       } else if (!TIMESTAMP_REGEX.test(value)) {
-        return CONDITION_BUILDER_LABELS.ERROR_INVALID_TIMESTAMP;
+        return intl.formatMessage(messages.errorInvalidTimestamp);
       }
     }
 
     if (featureType === FEATURE_TYPES.JSON && !isValidJSON(value)) {
-      return CONDITION_BUILDER_LABELS.ERROR_INVALID_JSON;
+      return intl.formatMessage(messages.errorInvalidJson);
     }
 
     return '';
@@ -349,7 +353,7 @@ export function ConditionBuilder({
         <RadioButtonGroup
           key={key}
           name={key}
-          legendText={CONDITION_BUILDER_LABELS.VALUE}
+          legendText={intl.formatMessage(messages.value)}
           className={styles.booleanInputWrapper}
           onChange={(evt: React.ChangeEvent<HTMLInputElement> | string | number | undefined) => {
             // Carbon's RadioButtonGroup passes the value directly in some versions
@@ -363,14 +367,14 @@ export function ConditionBuilder({
           <RadioButton
             id={`${key}-true`}
             value="true"
-            labelText={CONDITION_BUILDER_LABELS.TRUE}
+            labelText={intl.formatMessage(messages.valueTrue)}
             checked={boolValue}
             disabled={isReadOnlyMode}
           />
           <RadioButton
             id={`${key}-false`}
             value="false"
-            labelText={CONDITION_BUILDER_LABELS.FALSE}
+            labelText={intl.formatMessage(messages.valueFalse)}
             checked={!boolValue}
             disabled={isReadOnlyMode}
           />
@@ -386,7 +390,7 @@ export function ConditionBuilder({
           <div className={styles.betweenInputWrapper}>
             <NumberInput
               id={`num-start-${condition.id}`}
-              label={CONDITION_BUILDER_LABELS.START_VALUE}
+              label={intl.formatMessage(messages.startValue)}
               value={v1}
               invalid={!!error}
               invalidText={error}
@@ -399,7 +403,7 @@ export function ConditionBuilder({
             />
             <NumberInput
               id={`num-end-${condition.id}`}
-              label={CONDITION_BUILDER_LABELS.END_VALUE}
+              label={intl.formatMessage(messages.endValue)}
               value={v2}
               invalid={!!error}
               invalidText={error}
@@ -416,7 +420,7 @@ export function ConditionBuilder({
       return (
         <NumberInput
           id={`num-${condition.id}`}
-          label={CONDITION_BUILDER_LABELS.VALUE}
+          label={intl.formatMessage(messages.value)}
           value={condition.value}
           invalid={!!error}
           invalidText={error}
@@ -438,9 +442,9 @@ export function ConditionBuilder({
           <div className={styles.betweenInputWrapper}>
             <TextInput
               id={`dt-start-${condition.id}`}
-              labelText={CONDITION_BUILDER_LABELS.START_VALUE}
+              labelText={intl.formatMessage(messages.startValue)}
               placeholder={DATETIME_PLACEHOLDER}
-              helperText={CONDITION_BUILDER_LABELS.DATETIME_HELPER}
+              helperText={intl.formatMessage(messages.datetimeHelper)}
               value={v1}
               invalid={!!error}
               invalidText={error}
@@ -452,9 +456,9 @@ export function ConditionBuilder({
             />
             <TextInput
               id={`dt-end-${condition.id}`}
-              labelText={CONDITION_BUILDER_LABELS.END_VALUE}
+              labelText={intl.formatMessage(messages.endValue)}
               placeholder={DATETIME_PLACEHOLDER}
-              helperText={CONDITION_BUILDER_LABELS.DATETIME_HELPER}
+              helperText={intl.formatMessage(messages.datetimeHelper)}
               value={v2}
               invalid={!!error}
               invalidText={error}
@@ -470,9 +474,9 @@ export function ConditionBuilder({
       return (
         <TextInput
           id={`dt-${condition.id}`}
-          labelText={CONDITION_BUILDER_LABELS.VALUE}
+          labelText={intl.formatMessage(messages.value)}
           placeholder={DATETIME_PLACEHOLDER}
-          helperText={CONDITION_BUILDER_LABELS.DATETIME_HELPER}
+          helperText={intl.formatMessage(messages.datetimeHelper)}
           value={condition.value}
           invalid={!!error}
           invalidText={error}
@@ -490,9 +494,9 @@ export function ConditionBuilder({
       return (
         <TextArea
           id={`json-${condition.id}`}
-          labelText={CONDITION_BUILDER_LABELS.VALUE}
-          placeholder={CONDITION_BUILDER_LABELS.ENTER_JSON_VALUE}
-          helperText={CONDITION_BUILDER_LABELS.JSON_HELPER}
+          labelText={intl.formatMessage(messages.value)}
+          placeholder={intl.formatMessage(messages.enterJsonValue)}
+          helperText={intl.formatMessage(messages.jsonHelper)}
           value={condition.value}
           invalid={!!error}
           invalidText={error}
@@ -513,7 +517,7 @@ export function ConditionBuilder({
         <div className={styles.betweenInputWrapper}>
           <TextInput
             id={`str-start-${condition.id}`}
-            labelText={CONDITION_BUILDER_LABELS.START_VALUE}
+            labelText={intl.formatMessage(messages.startValue)}
             value={v1}
             readOnly={isReadOnlyMode}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -522,7 +526,7 @@ export function ConditionBuilder({
           />
           <TextInput
             id={`str-end-${condition.id}`}
-            labelText={CONDITION_BUILDER_LABELS.END_VALUE}
+            labelText={intl.formatMessage(messages.endValue)}
             value={v2}
             readOnly={isReadOnlyMode}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -540,9 +544,9 @@ export function ConditionBuilder({
     return (
       <TextInput
         id={`val-${condition.id}`}
-        labelText={CONDITION_BUILDER_LABELS.VALUE}
-        placeholder={isMultiValue ? CONDITION_BUILDER_LABELS.ENTER_MULTIPLE_VALUES : CONDITION_BUILDER_LABELS.ENTER_VALUE}
-        helperText={isMultiValue ? CONDITION_BUILDER_LABELS.COMMA_SEPARATED_HELPER : undefined}
+        labelText={intl.formatMessage(messages.value)}
+        placeholder={intl.formatMessage(isMultiValue ? messages.enterMultipleValues : messages.enterValue)}
+        helperText={isMultiValue ? intl.formatMessage(messages.commaSeparatedHelper) : undefined}
         value={condition.value}
         readOnly={isReadOnlyMode}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -555,13 +559,13 @@ export function ConditionBuilder({
   // ── Loading / empty states ───────────────────────────────────────────────
 
   if (isLoading) {
-    return <InlineLoading description={CONDITION_BUILDER_LABELS.LOADING_FEATURES} />;
+    return <InlineLoading description={intl.formatMessage(messages.loadingFeatures)} />;
   }
 
   if (featureNames.length === 0) {
     return (
       <div className={styles.noDataWrapper}>
-        {CONDITION_BUILDER_LABELS.NO_FEATURES}
+        {intl.formatMessage(messages.noFeatures)}
       </div>
     );
   }
@@ -602,7 +606,7 @@ export function ConditionBuilder({
           size="sm"
           hasIconOnly
           renderIcon={TrashCan}
-          iconDescription={CONDITION_BUILDER_LABELS.DELETE_CONDITION}
+          iconDescription={intl.formatMessage(messages.deleteCondition)}
           className={styles.deleteButton}
           onClick={() => { removeCondition(idx); }}
         />
@@ -622,8 +626,8 @@ export function ConditionBuilder({
       {subConditions.length > 0 && (
         <div className={styles.logicalOperatorStrip}>
           <div className={styles.logicalOperatorLabel}>
-            {CONDITION_BUILDER_LABELS.LOGICAL_OPERATOR}
-            <Tooltip align="top" label={CONDITION_BUILDER_LABELS.LOGICAL_OPERATOR_TOOLTIP}>
+            {intl.formatMessage(messages.logicalOperator)}
+            <Tooltip align="top" label={intl.formatMessage(messages.logicalOperatorTooltip)}>
               <button type="button" className={styles.infoButton}>
                 <Information />
               </button>
@@ -641,13 +645,13 @@ export function ConditionBuilder({
             <RadioButton
               id="logic-and"
               value={LOGICAL.AND}
-              labelText={CONDITION_BUILDER_LABELS.AND}
+              labelText={intl.formatMessage(messages.and)}
               disabled={isReadOnlyMode}
             />
             <RadioButton
               id="logic-or"
               value={LOGICAL.OR}
-              labelText={CONDITION_BUILDER_LABELS.OR}
+              labelText={intl.formatMessage(messages.or)}
               disabled={isReadOnlyMode}
             />
           </RadioButtonGroup>
@@ -667,7 +671,7 @@ export function ConditionBuilder({
       {!isReadOnlyMode && (
         <div className={styles.addButtonWrapper}>
           <Button kind="ghost" renderIcon={Add} onClick={addCondition}>
-            {CONDITION_BUILDER_LABELS.ADD_CONDITION}
+            {intl.formatMessage(messages.addCondition)}
           </Button>
         </div>
       )}

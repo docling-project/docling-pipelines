@@ -491,6 +491,56 @@ class TestBatchAttributeAccess:
         assert result == "default_value"
 
 
+class TestStaticMethodConversion:
+    """Verify per-document helpers are staticmethods callable without an instance."""
+
+    def test_get_timestamp_from_modified_time_is_static(self):
+        import inspect
+
+        assert isinstance(inspect.getattr_static(JobReportGenerator, "_get_timestamp_from_modified_time"), staticmethod)
+
+    def test_create_doc_entry_is_static(self):
+        import inspect
+
+        assert isinstance(inspect.getattr_static(JobReportGenerator, "_create_doc_entry"), staticmethod)
+
+    def test_get_timestamp_from_modified_time_class_call(self):
+        """Static call converts epoch seconds without needing an instance."""
+        result = JobReportGenerator._get_timestamp_from_modified_time(1704067200, "doc1")
+
+        assert result == "2024-01-01:00:00:00"
+
+    def test_create_doc_entry_class_call(self):
+        """Static call builds the expected document entry dict."""
+        entry = JobReportGenerator._create_doc_entry(
+            doc_name="report.pdf", modified_time=1704067200, timestamp_str="2024-01-01:00:00:00"
+        )
+
+        assert entry == {
+            "name": "report.pdf",
+            "status": "",
+            "reason": "",
+            "timestamp": "2024-01-01:00:00:00",
+            "pages": "",
+            "processing_time": "",
+            "modified_time": 1704067200,
+        }
+
+    def test_instance_and_class_calls_agree(self):
+        """Instance access and class access return identical results."""
+        job_stats = JobStats(
+            job_id=JOB_ID,
+            job_run_id=JOB_RUN_ID,
+            status=ExecutionStatus.COMPLETED,
+            node_stats={},
+        )
+        generator = JobReportGenerator(job_stats=job_stats)
+
+        assert generator._get_timestamp_from_modified_time(
+            1704067200, "doc1"
+        ) == JobReportGenerator._get_timestamp_from_modified_time(1704067200, "doc1")
+
+
 class TestReasonExtraction:
     """Test failure/skip reason extraction."""
 
@@ -1675,6 +1725,24 @@ class TestBuildDocToBatchMappingBatchPath:
 
 class TestReadParquetFile:
     """Lines 774-822 — _read_parquet_file file-not-found and error paths."""
+
+    @pytest.mark.parametrize("batch_num", [None, 0])
+    def test_reads_parquet_from_configured_data_path(self, *, tmp_path, monkeypatch, batch_num):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        monkeypatch.setenv("DOCPIPE_DATA_PATH", str(tmp_path))
+        job_stats = JobStats(job_id="j1", job_run_id="r1", status=ExecutionStatus.COMPLETED, node_stats={})
+        dag_nodes = [{"id": INGEST_NODE_ID, "name": "ingest-local", "input_edges": []}]
+        generator = JobReportGenerator(job_stats=job_stats, dag_nodes=dag_nodes)
+        output_dir = tmp_path / "j1" / "r1" / "data" / "ingest_local_0"
+        if batch_num is not None:
+            output_dir /= str(batch_num)
+        output_dir.mkdir(parents=True)
+        document = {"id": "doc-1", "name": "invoice.pdf", "modified_time": "2026-10-08"}
+        pq.write_table(pa.Table.from_pylist([document]), output_dir / "output.parquet")
+
+        assert generator._read_parquet_file(INGEST_NODE_ID, batch_num=batch_num) == {"doc-1": document}
 
     def test_returns_empty_dict_when_parquet_file_not_found(self, tmp_path):
         """Returns {} when the expected parquet path does not exist."""

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Port interface for vector database services.
 
 This port defines the contract that all vector database adapters must implement.
@@ -121,6 +124,32 @@ class VectorStorePort(ABC):
             Exception: If the existing schema is incompatible with the current run
         """
         ...
+
+    def validate_vector_feature_types(self, *, feature_types: dict[str, str | None]) -> None:
+        """Validate adapter configuration against the vector feature types known at flow validation time.
+
+        The default implementation accepts everything. Adapters override it when their configuration
+        depends on the kind of vectors produced upstream (e.g. dense vs. binary).
+
+        Args:
+            feature_types: Mapping of input feature name to its propagated feature type.
+
+        Raises:
+            Exception: If the adapter configuration is incompatible with the available feature types.
+        """
+        return
+
+    def validate_configuration(self, *, errors: list[str], warnings: list[str]) -> None:
+        """Report provider-specific configuration problems during operator validation.
+
+        Called from ``VectorDBOperator.validate()`` after the provider's config schema check, so the user sees
+        every problem as a message. The default implementation reports nothing.
+
+        Args:
+            errors: List to append blocking problems to.
+            warnings: List to append non-blocking notices to.
+        """
+        return
 
     @abstractmethod
     def index_exists(self) -> bool:

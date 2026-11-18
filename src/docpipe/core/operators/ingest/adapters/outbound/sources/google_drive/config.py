@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for Google Drive source adapter."""
 
 from pathlib import Path
@@ -17,23 +20,44 @@ class GoogleDriveSourceConfig(BaseModel):
     - OAuth or Service Account credential management
     """
 
-    # OAuth credentials (for user authentication)
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "service_account_json",
+        "service_account_json_path",
+        "credentials_json",
+        "credentials_path",
+        "token_path",
+    )
+
+    # Service Account credentials (inline JSON or dict is primary; file path is secondary)
+    service_account_json: dict | str | None = Field(
+        None,
+        description="Inline Google Service Account JSON string or dictionary (primary server-to-server auth)",
+        json_schema_extra={"sensitive": True},
+    )
+
+    service_account_json_path: str | None = Field(
+        None,
+        description="Path to Google Service Account JSON file (secondary/fallback server-to-server auth)",
+        json_schema_extra={"sensitive": True},
+    )
+
+    # OAuth credentials (inline client secrets JSON or dict is primary; file path is secondary)
+    credentials_json: dict | str | None = Field(
+        None,
+        description="Inline Google OAuth client secrets JSON string or dictionary (primary OAuth flow)",
+        json_schema_extra={"sensitive": True},
+    )
+
     credentials_path: str | None = Field(
         None,
-        description="Path to Google OAuth credentials JSON file (for OAuth flow)",
+        description="Path to Google OAuth credentials JSON file (secondary/fallback OAuth flow)",
         json_schema_extra={"sensitive": True},
     )
 
     token_path: str | None = Field(
         None,
-        description="Path to store OAuth token. If None, uses credentials_path directory",
-        json_schema_extra={"sensitive": True},
-    )
-
-    # Service Account credentials (for server-to-server authentication)
-    service_account_json_path: str | None = Field(
-        None,
-        description="Path to Google Service Account JSON file (alternative to OAuth)",
+        description="Path to store OAuth token. If None, uses credentials_path directory or default",
         json_schema_extra={"sensitive": True},
     )
 
@@ -61,7 +85,9 @@ class GoogleDriveSourceConfig(BaseModel):
         default_factory=list, description="List of glob patterns to exclude (e.g., ['*.tmp', 'Trash/*'])"
     )
 
-    max_file_size_mb: int | None = Field(None, description="Maximum file size in MB to process. None means no limit.")
+    max_file_size_mb: int | None = Field(
+        None, description="Maximum file size in MB to process. None means no limit.", ge=1
+    )
 
     # OAuth scopes
     scopes: list[str] = Field(
@@ -76,15 +102,18 @@ class GoogleDriveSourceConfig(BaseModel):
     @model_validator(mode="after")
     def validate_auth_method(self) -> "GoogleDriveSourceConfig":
         """Ensure either OAuth or Service Account credentials are provided."""
-        if not self.credentials_path and not self.service_account_json_path:
+        has_sa = bool(self.service_account_json or self.service_account_json_path)
+        has_oauth = bool(self.credentials_json or self.credentials_path)
+
+        if not has_sa and not has_oauth:
             raise ValueError(
-                "Either 'credentials_path' (for OAuth) or 'service_account_json_path' "
-                "(for Service Account) must be provided"
+                "Either Service Account credentials ('service_account_json' or 'service_account_json_path') "
+                "or OAuth credentials ('credentials_json' or 'credentials_path') must be provided"
             )
-        if self.credentials_path and self.service_account_json_path:
+        if has_sa and has_oauth:
             raise ValueError(
-                "Cannot use both 'credentials_path' and 'service_account_json_path'. "
-                "Choose either OAuth or Service Account authentication"
+                "Cannot use both Service Account and OAuth authentication. "
+                "Choose either Service Account or OAuth authentication"
             )
         return self
 
@@ -104,14 +133,6 @@ class GoogleDriveSourceConfig(BaseModel):
         """Ensure extensions start with a dot."""
         return [ext if ext.startswith(".") else f".{ext}" for ext in v]
 
-    @field_validator("max_file_size_mb")
-    @classmethod
-    def validate_max_file_size(cls, v: int | None) -> int | None:
-        """Validate max file size is positive."""
-        if v is not None and v <= 0:
-            raise ValueError("max_file_size_mb must be positive")
-        return v
-
     def get_token_path(self) -> str:
         """Get the token path, using credentials directory if not specified."""
         if self.token_path:
@@ -126,7 +147,7 @@ class GoogleDriveSourceConfig(BaseModel):
 
     def is_service_account(self) -> bool:
         """Check if using service account authentication."""
-        return self.service_account_json_path is not None
+        return self.service_account_json is not None or self.service_account_json_path is not None
 
     class Config:
         """Pydantic configuration."""

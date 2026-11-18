@@ -80,7 +80,8 @@ class AuthoringCompiler:
 
         return runtime_flow
 
-    def _generate_operator_ids(self, *, operators: list[AuthoringOperator]) -> dict[str, str]:
+    @staticmethod
+    def _generate_operator_ids(*, operators: list[AuthoringOperator]) -> dict[str, str]:
         """Generate UUID for each operator.
 
         Args:
@@ -91,7 +92,8 @@ class AuthoringCompiler:
         """
         return {op.name: str(uuid4()) for op in operators if op.name is not None}
 
-    def _build_dependency_graph(self, *, operators: list[AuthoringOperator]) -> dict[str, list[tuple[str, str | None]]]:
+    @staticmethod
+    def _build_dependency_graph(*, operators: list[AuthoringOperator]) -> dict[str, list[tuple[str, str | None]]]:
         """Build reverse dependency graph (who depends on whom).
 
         Creates a mapping from operator name to list of (dependent_name, link_name) tuples.
@@ -176,8 +178,9 @@ class AuthoringCompiler:
 
         return node_dict
 
+    @staticmethod
     def _build_input_edges(
-        self, *, operator: AuthoringOperator, operator_ids: dict[str, str]
+        *, operator: AuthoringOperator, operator_ids: dict[str, str]
     ) -> tuple[list[dict[str, str]], str | None]:
         """Build input edges for an operator.
 
@@ -209,8 +212,8 @@ class AuthoringCompiler:
 
         return input_edges, link_id
 
+    @staticmethod
     def _build_output_edges(
-        self,
         *,
         operator_name: str,
         dependency_graph: dict[str, list[tuple[str, str | None]]],
@@ -237,7 +240,8 @@ class AuthoringCompiler:
 
         return output_edges
 
-    def _transform_operator_config(self, *, operator: AuthoringOperator) -> dict[str, Any]:
+    @staticmethod
+    def _transform_operator_config(*, operator: AuthoringOperator) -> dict[str, Any]:
         """Transform operator config from authoring format to runtime format.
 
         Handles format conversions between the user-friendly authoring format
@@ -270,7 +274,8 @@ class AuthoringCompiler:
 
         return config
 
-    def _build_merge_input_links(self, *, input_edges: list[dict[str, str]]) -> list[dict[str, str]]:
+    @staticmethod
+    def _build_merge_input_links(*, input_edges: list[dict[str, str]]) -> list[dict[str, str]]:
         """Build merge input_links config from compiled input edges."""
         return [
             {

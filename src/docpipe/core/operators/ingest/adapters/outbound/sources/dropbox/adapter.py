@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Dropbox source adapter using the official Dropbox Python SDK."""
 
-import hashlib
 import mimetypes
 from collections.abc import AsyncGenerator, Iterator
 from fnmatch import fnmatch
@@ -16,6 +18,8 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_fa
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
+from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -39,6 +43,21 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
         # client (and its token refresh state) is reused for all documents in a batch.
         self._client_cache: dict[str, Dropbox] = {}
 
+    @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set a Dropbox file reference as the single file to ingest.
+
+        ``file_reference`` is the Dropbox path or id the producer supplies
+        for the event; batch ingestion (``fetch_documents``) already accepts
+        a reference via ``file_path`` and fetches/validates it against the
+        Dropbox API, so this only does basic input validation rather than
+        duplicating that call here.
+        """
+        if not file_reference or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty Dropbox path or id")
+
+        provider_config["file_path"] = file_reference
+
     # ------------------------------------------------------------------
     # Client handling
     # ------------------------------------------------------------------
@@ -53,7 +72,7 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
                 config.app_key or "",
             ]
         )
-        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+        return cache_key_digest(namespace="dropbox_client", parts=[material])
 
     def _get_dropbox_client(self, *, config: DropboxSourceConfig) -> Dropbox:
         """Return a cached authenticated Dropbox client for the given credentials."""
@@ -243,29 +262,31 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
     def build_config_from_operator_params(
         self,
         *,
-        connection_params: dict,
-        credentials: dict,
+        provider_config: dict,
         included_extensions: list[str] | None = None,
         max_files: int | None = None,
     ) -> DropboxSourceConfig:
         """Build the Dropbox configuration from operator parameters."""
+        provider_config = reveal_value(provider_config)
+        params = provider_config
+
         config_dict: dict[str, Any] = {
-            "access_token": resolve_env_var(credentials.get("access_token")),
-            "refresh_token": resolve_env_var(credentials.get("refresh_token")),
-            "app_key": resolve_env_var(credentials.get("app_key")),
-            "app_secret": resolve_env_var(credentials.get("app_secret")),
-            "folder_path": resolve_env_var(connection_params.get("folder_path", "")) or "",
-            "recursive": connection_params.get("recursive", True),
+            "access_token": resolve_env_var(params.get("access_token")),
+            "refresh_token": resolve_env_var(params.get("refresh_token")),
+            "app_key": resolve_env_var(params.get("app_key")),
+            "app_secret": resolve_env_var(params.get("app_secret")),
+            "folder_path": resolve_env_var(params.get("folder_path", "")) or "",
+            "recursive": params.get("recursive", True),
             "file_extensions": included_extensions or [],
-            "exclude_patterns": connection_params.get("exclude_patterns", []),
+            "exclude_patterns": params.get("exclude_patterns", []),
         }
 
         # Support single file ingestion via file_path
-        if connection_params.get("file_path"):
-            config_dict["file_path"] = resolve_env_var(connection_params["file_path"])
+        if params.get("file_path"):
+            config_dict["file_path"] = resolve_env_var(params["file_path"])
 
-        if "max_file_size_mb" in connection_params:
-            config_dict["max_file_size_mb"] = connection_params["max_file_size_mb"]
+        if "max_file_size_mb" in params:
+            config_dict["max_file_size_mb"] = params["max_file_size_mb"]
 
         if max_files is not None:
             config_dict["max_files"] = max_files
@@ -276,33 +297,27 @@ class DropboxSourceAdapter(DocumentSourcePort[DropboxSourceConfig]):
         self,
         *,
         source_id: str,
-        connection_params: dict[str, Any],
-        credentials: dict[str, Any],
+        provider_config: dict[str, Any],
     ) -> bytes | None:
         """
         Fetch binary content for a specific Dropbox file on-demand.
 
         Args:
             source_id: Dropbox file id (e.g. "id:abc123"), file path, or file URL
-            connection_params: Dropbox connection parameters (not used for downloads)
-            credentials: Dropbox credentials (access_token, or refresh_token + app_key + app_secret)
+            provider_config: All provider-specific parameters including credentials
+                (access_token, or refresh_token + app_key + app_secret)
 
         Returns:
             bytes | None: Binary content of the file, or None if it could not be downloaded
 
         Raises:
-            ValueError: If credentials are missing or source_id is empty
+            ValueError: If source_id is empty
         """
+        provider_config = reveal_value(provider_config)
         if not source_id:
             raise ValueError("Missing source_id for Dropbox binary content fetch")
 
-        credentials = credentials or {}
-        connection_params = connection_params or {}
-
-        config = self.build_config_from_operator_params(
-            connection_params=connection_params,
-            credentials=credentials,
-        )
+        config = self.build_config_from_operator_params(provider_config=provider_config)
 
         file_ref = self._normalize_source_id(source_id=source_id)
 

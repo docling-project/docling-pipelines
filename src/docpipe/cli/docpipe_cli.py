@@ -193,8 +193,7 @@ def load_flow_definition(*, file_path: str) -> tuple[dict[str, Any], dict[str, A
     Raises:
         FileNotFoundError: If the flow definition file is not found
         json.JSONDecodeError: If the file contains invalid JSON
-        FlowInvalidDataException: If the flow definition is invalid
-        KeyError: If required fields are missing from the flow definition
+        FlowInvalidDataException: If the flow definition is invalid or required fields are missing
         Exception: For other compilation errors
     """
     from docpipe.core.assets.flows.application.services.authoring_compiler import AuthoringCompiler
@@ -374,15 +373,6 @@ def _load_flow_or_exit(*, flow_file: str) -> tuple[dict[str, Any], dict[str, Any
         logger.error("  - Ensure all required fields are present")
         logger.error("  - Verify operator types are valid")
         sys.exit(1)
-    except KeyError as e:
-        logger.error("Missing required field in flow")
-        logger.error("  File: %s", flow_file)
-        logger.error("  Missing field: %s", str(e))
-        logger.error("Suggestions:")
-        logger.error("  - Ensure 'flow_name' field is present")
-        logger.error("  - Ensure 'flow' array is present with operators")
-        logger.error("  - Check that all operators have required fields (type, name)")
-        sys.exit(1)
     except Exception as e:
         logger.error("Failed to compile flow")
         logger.error("  File: %s", flow_file)
@@ -434,7 +424,7 @@ Examples:
   docling-pipelines --list-operators --verbose
   docling-pipelines --list-global-config
   docling-pipelines --list-global-config --verbose
-  docling-pipelines --list-global-config --category "Micro-Batching"
+  docling-pipelines --list-global-config --category "Orchestration configuration"
         """,
     )
 
@@ -463,12 +453,14 @@ Examples:
         "--category",
         "-c",
         type=str,
+        default=argparse.SUPPRESS,
         help="Filter by category (e.g., 'Execution Control', 'Incremental Processing', 'Orchestration configuration')",
     )
     list_global_config_parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
+        default=argparse.SUPPRESS,
         help="Show detailed parameter information",
     )
 

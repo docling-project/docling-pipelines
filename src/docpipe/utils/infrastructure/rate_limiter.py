@@ -35,7 +35,11 @@ class TokenBucketRateLimiter:
         self.last_update = time.time()
         self.lock = threading.Lock()
 
-        logger.info(f"Initialized TokenBucketRateLimiter: rate={rate} req/s, capacity={self.capacity}")
+        logger.info(
+            "Initialized TokenBucketRateLimiter: rate=%s req/s, capacity=%s",
+            rate,
+            self.capacity,
+        )
 
     def acquire(self, *, tokens: int = 1, timeout: float | None = None) -> bool:
         """Acquire tokens from the bucket, blocking if necessary.
@@ -102,7 +106,11 @@ class SlidingWindowRateLimiter:
         self.requests: deque[float] = deque()
         self.lock = threading.Lock()
 
-        logger.info(f"Initialized SlidingWindowRateLimiter: rate={rate} req/{window_seconds}s")
+        logger.info(
+            "Initialized SlidingWindowRateLimiter: rate=%s req/%ss",
+            rate,
+            window_seconds,
+        )
 
     def acquire(self, *, timeout: float | None = None) -> bool:
         """Acquire permission to make a request, blocking if necessary.
@@ -198,10 +206,10 @@ def ensure_global_concurrency_limit(*, limit_name: str, limit: int, slot_decay_p
                                 limit=limit, slot_decay_per_second=slot_decay_per_second
                             ),
                         )
-                        logger.debug(f"Updated global concurrency limit '{limit_name}'")
+                        logger.debug("Updated global concurrency limit '%s'", limit_name)
                     except Exception as update_err:
                         # Another worker might have updated it simultaneously; that's fine
-                        logger.debug(f"Simultaneous update for '{limit_name}': {update_err}")
+                        logger.debug("Simultaneous update for '%s': %s", limit_name, update_err)
                 return True
 
             except (ObjectNotFound, Exception):
@@ -212,14 +220,14 @@ def ensure_global_concurrency_limit(*, limit_name: str, limit: int, slot_decay_p
                             name=limit_name, limit=limit, slot_decay_per_second=slot_decay_per_second
                         )
                     )
-                    logger.debug(f"Created global concurrency limit '{limit_name}'")
+                    logger.debug("Created global concurrency limit '%s'", limit_name)
                 except ObjectAlreadyExists:
                     # Race condition: Another worker created it between our read and create
-                    logger.debug(f"Limit '{limit_name}' was created by another worker")
+                    logger.debug("Limit '%s' was created by another worker", limit_name)
                 return True
 
     except Exception as e:
-        logger.warning(f"Failed to ensure global concurrency limit '{limit_name}': {e}")
+        logger.warning("Failed to ensure global concurrency limit '%s': %s", limit_name, e)
         return False
 
 
@@ -271,7 +279,7 @@ def rate_limit_context(*, limit_name: str, rate: float, use_prefect: bool | None
                 slot_decay_per_second=rate,
             )
 
-            logger.info(f"Using Prefect rate limit: {limit_name} ({rate} req/s)")
+            logger.info("Using Prefect rate limit: %s (%s req/s)", limit_name, rate)
 
             # Block until a slot is available at the configured rate.
             # rate_limit is a function (not a context manager) — it blocks,
@@ -280,12 +288,15 @@ def rate_limit_context(*, limit_name: str, rate: float, use_prefect: bool | None
             yield
 
         except (ImportError, AttributeError) as e:
-            logger.warning(f"Prefect rate_limit not available ({e}), falling back to local rate limiter")
+            logger.warning(
+                "Prefect rate_limit not available (%s), falling back to local rate limiter",
+                e,
+            )
             limiter = TokenBucketRateLimiter(rate=rate)
             with limiter.limit():
                 yield
     else:
-        logger.debug(f"Using local rate limiter: {limit_name} (rate={rate} req/s)")
+        logger.debug("Using local rate limiter: %s (rate=%s req/s)", limit_name, rate)
         limiter = TokenBucketRateLimiter(rate=rate)
         with limiter.limit():
             yield

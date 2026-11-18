@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from docpipe.core.operators.ingest.adapters.outbound.sources.box.adapter import BoxSourceAdapter
 from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import BoxSourceConfig
@@ -49,7 +50,7 @@ class TestBoxSourceConfig:
 
     def test_validates_max_file_size(self):
         """Test that max_file_size_mb must be positive."""
-        with pytest.raises(ValueError, match="max_file_size_mb must be positive"):
+        with pytest.raises(ValidationError, match="Input should be greater than or equal to 1"):
             BoxSourceConfig(
                 credentials_path="/tmp/box_config.json",
                 max_file_size_mb=-1,
@@ -63,13 +64,11 @@ class TestBoxSourceAdapter:
         """Test building config with custom folder_id."""
         adapter = BoxSourceAdapter()
         config = adapter.build_config_from_operator_params(
-            connection_params={
+            provider_config={
                 "folder_id": "123456789",
                 "recursive": True,
                 "max_file_size_mb": 50,
                 "exclude_patterns": ["*.tmp"],
-            },
-            credentials={
                 "credentials_json_path": "/tmp/box_config.json",
             },
             included_extensions=["pdf", "docx"],
@@ -87,10 +86,8 @@ class TestBoxSourceAdapter:
         """Test that folder_id defaults to '0' when not specified."""
         adapter = BoxSourceAdapter()
         config = adapter.build_config_from_operator_params(
-            connection_params={
+            provider_config={
                 "recursive": False,
-            },
-            credentials={
                 "credentials_json_path": "/tmp/box_config.json",
             },
         )
@@ -102,10 +99,8 @@ class TestBoxSourceAdapter:
         """Test building config with max_files parameter."""
         adapter = BoxSourceAdapter()
         config = adapter.build_config_from_operator_params(
-            connection_params={
+            provider_config={
                 "folder_id": "987654321",
-            },
-            credentials={
                 "credentials_json_path": "/tmp/box_config.json",
             },
             max_files=100,
@@ -633,8 +628,7 @@ class TestBoxFetchBinaryContent:
         with patch.object(adapter, "_get_box_client", return_value=mock_client):
             result = adapter.fetch_binary_content(
                 source_id="702199884861",
-                connection_params={},
-                credentials={"credentials_json_path": "/tmp/box.json"},
+                provider_config={"credentials_json_path": "/tmp/box.json"},
             )
         assert result == b"content"
 
@@ -648,8 +642,7 @@ class TestBoxFetchBinaryContent:
         with patch.object(adapter, "_get_box_client", return_value=mock_client):
             result = adapter.fetch_binary_content(
                 source_id="https://app.box.com/file/702199884861",
-                connection_params={},
-                credentials={"credentials_json_path": "/tmp/box.json"},
+                provider_config={"credentials_json_path": "/tmp/box.json"},
             )
         assert result == b"data"
         mock_client.downloads.download_file.assert_called_once_with("702199884861")
@@ -658,8 +651,7 @@ class TestBoxFetchBinaryContent:
         adapter = BoxSourceAdapter()
         result = adapter.fetch_binary_content(
             source_id="https://app.box.com/bad/url",
-            connection_params={},
-            credentials={"credentials_json_path": "/tmp/box.json"},
+            provider_config={"credentials_json_path": "/tmp/box.json"},
         )
         assert result is None
 
@@ -667,8 +659,7 @@ class TestBoxFetchBinaryContent:
         adapter = BoxSourceAdapter()
         result = adapter.fetch_binary_content(
             source_id="123456",
-            connection_params={},
-            credentials={},
+            provider_config={},
         )
         assert result is None
 
@@ -677,8 +668,7 @@ class TestBoxFetchBinaryContent:
         with patch.object(adapter, "_get_box_client", side_effect=FileNotFoundError("no file")):
             result = adapter.fetch_binary_content(
                 source_id="123",
-                connection_params={},
-                credentials={"credentials_json_path": "/tmp/box.json"},
+                provider_config={"credentials_json_path": "/tmp/box.json"},
             )
         assert result is None
 
@@ -687,8 +677,7 @@ class TestBoxFetchBinaryContent:
         with patch.object(adapter, "_get_box_client", side_effect=ValueError("bad auth")):
             result = adapter.fetch_binary_content(
                 source_id="123",
-                connection_params={},
-                credentials={"credentials_json_path": "/tmp/box.json"},
+                provider_config={"credentials_json_path": "/tmp/box.json"},
             )
         assert result is None
 
@@ -697,7 +686,212 @@ class TestBoxFetchBinaryContent:
         with patch.object(adapter, "_get_box_client", side_effect=RuntimeError("unexpected")):
             result = adapter.fetch_binary_content(
                 source_id="123",
-                connection_params={},
-                credentials={"credentials_json_path": "/tmp/box.json"},
+                provider_config={"credentials_json_path": "/tmp/box.json"},
             )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# bind_file_reference
+# ---------------------------------------------------------------------------
+
+
+class TestBoxBindFileReference:
+    def test_valid_file_reference_sets_file_id(self):
+        """A non-empty file_reference is set as file_id without any Box API call."""
+        provider_config = {"credentials_json_path": "/tmp/box.json", "folder_id": "123"}
+
+        BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="file99")
+
+        assert provider_config["file_id"] == "file99"
+
+    def test_credentials_are_untouched(self):
+        """bind_file_reference only adds file_id; it never reads or rewrites credentials."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="file1")
+
+        assert provider_config["credentials_json_path"] == "/tmp/box.json"
+        assert "credentials_json" not in provider_config
+
+    def test_empty_file_reference_raises_value_error(self):
+        """An empty file_reference raises a clear ValueError."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        with pytest.raises(ValueError, match="non-empty Box file ID"):
+            BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="")
+
+        assert "file_id" not in provider_config
+
+    def test_blank_file_reference_raises_value_error(self):
+        """A whitespace-only file_reference raises a clear ValueError."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        with pytest.raises(ValueError, match="non-empty Box file ID"):
+            BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="   ")
+
+        assert "file_id" not in provider_config
+
+    def test_none_file_reference_raises_value_error(self):
+        """A None file_reference raises a clear ValueError, not an AttributeError."""
+        provider_config = {"credentials_json_path": "/tmp/box.json"}
+
+        with pytest.raises(ValueError, match="non-empty Box file ID"):
+            BoxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=None)
+
+        assert "file_id" not in provider_config
+
+
+# ---------------------------------------------------------------------------
+# box/auth.py — get_box_client
+# ---------------------------------------------------------------------------
+
+
+class TestGetBoxClient:
+    """Tests for the get_box_client helper in box/auth.py."""
+
+    def test_raises_file_not_found_when_path_missing(self, tmp_path):
+        """FileNotFoundError raised when credentials file does not exist."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        with pytest.raises(FileNotFoundError, match="Credentials file not found"):
+            get_box_client(credentials_path=str(tmp_path / "missing.json"))
+
+    def test_raises_value_error_when_path_is_directory(self, tmp_path):
+        """ValueError raised when credentials path points to a directory."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        with pytest.raises(ValueError, match="not a file"):
+            get_box_client(credentials_path=str(tmp_path))
+
+    def test_raises_permission_error_on_unreadable_file(self, tmp_path):
+        """PermissionError is re-raised with a descriptive message."""
+        from unittest.mock import patch
+
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        creds_file = tmp_path / "box.json"
+        creds_file.write_text("{}")
+
+        with patch("pathlib.Path.open", side_effect=PermissionError("denied")):
+            with pytest.raises(PermissionError, match="Permission denied accessing credentials file"):
+                get_box_client(credentials_path=str(creds_file))
+
+    def test_raises_value_error_on_invalid_json(self, tmp_path):
+        """ValueError raised when credentials file contains invalid JSON."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        bad_json = tmp_path / "bad.json"
+        bad_json.write_text("{ this is not json }")
+
+        with pytest.raises(ValueError, match="Invalid JSON in credentials file"):
+            get_box_client(credentials_path=str(bad_json))
+
+    def test_raises_value_error_when_jwt_auth_fails(self, tmp_path):
+        """ValueError raised when Box JWT authentication fails."""
+        from unittest.mock import patch
+
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        creds_file = tmp_path / "box.json"
+        creds_file.write_text('{"boxAppSettings": {}}')
+
+        with patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.JWTConfig") as mock_jwt_config:
+            mock_jwt_config.from_config_json_string.side_effect = Exception("invalid jwt config")
+            with pytest.raises(ValueError, match="Failed to authenticate with Box"):
+                get_box_client(credentials_path=str(creds_file))
+
+    def test_returns_box_client_on_success(self, tmp_path):
+        """Returns a BoxClient instance when credentials are valid."""
+        from unittest.mock import MagicMock, patch
+
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        creds_file = tmp_path / "box.json"
+        creds_file.write_text('{"boxAppSettings": {}}')
+
+        mock_client = MagicMock()
+
+        with (
+            patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.JWTConfig") as mock_jwt_config,
+            patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.BoxJWTAuth") as mock_jwt_auth,
+            patch(
+                "docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.BoxClient",
+                return_value=mock_client,
+            ),
+        ):
+            mock_jwt_config.from_config_json_string.return_value = MagicMock()
+            mock_jwt_auth.return_value = MagicMock()
+
+            result = get_box_client(credentials_path=str(creds_file))
+
+        assert result is mock_client
+
+    def test_raises_value_error_when_no_credentials_provided(self):
+        """ValueError raised when neither credentials_json nor credentials_path is provided."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        with pytest.raises(ValueError, match="Either credentials_json or credentials_path must be provided"):
+            get_box_client()
+
+    def test_creates_box_client_from_dict_inline_credentials(self):
+        """Returns BoxClient when valid credentials_json is provided as a dict."""
+        from unittest.mock import MagicMock, patch
+
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        mock_client = MagicMock()
+        with (
+            patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.JWTConfig") as mock_jwt_config,
+            patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.BoxJWTAuth") as mock_jwt_auth,
+            patch(
+                "docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.BoxClient",
+                return_value=mock_client,
+            ),
+        ):
+            mock_jwt_config.from_config_json_string.return_value = MagicMock()
+            mock_jwt_auth.return_value = MagicMock()
+
+            result = get_box_client(credentials_json={"boxAppSettings": {}})
+
+        assert result is mock_client
+
+    def test_creates_box_client_from_string_inline_credentials(self):
+        """Returns BoxClient when valid credentials_json is provided as a JSON string."""
+        from unittest.mock import MagicMock, patch
+
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        mock_client = MagicMock()
+        with (
+            patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.JWTConfig") as mock_jwt_config,
+            patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.BoxJWTAuth") as mock_jwt_auth,
+            patch(
+                "docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.BoxClient",
+                return_value=mock_client,
+            ),
+        ):
+            mock_jwt_config.from_config_json_string.return_value = MagicMock()
+            mock_jwt_auth.return_value = MagicMock()
+
+            result = get_box_client(credentials_json='{"boxAppSettings": {}}')
+
+        assert result is mock_client
+
+    def test_raises_value_error_on_invalid_inline_credentials_json_string(self):
+        """ValueError raised when credentials_json is not valid JSON."""
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        with pytest.raises(ValueError, match="Failed to authenticate with Box from inline credentials"):
+            get_box_client(credentials_json="{ not json }")
+
+    def test_raises_value_error_when_inline_credentials_auth_fails(self):
+        """ValueError raised when JWT initialization fails for inline credentials."""
+        from unittest.mock import patch
+
+        from docpipe.core.operators.ingest.adapters.outbound.sources.box.auth import get_box_client
+
+        with patch("docpipe.core.operators.ingest.adapters.outbound.sources.box.auth.JWTConfig") as mock_jwt_config:
+            mock_jwt_config.from_config_json_string.side_effect = Exception("JWT error")
+            with pytest.raises(ValueError, match="Failed to authenticate with Box from inline credentials"):
+                get_box_client(credentials_json={"boxAppSettings": {}})

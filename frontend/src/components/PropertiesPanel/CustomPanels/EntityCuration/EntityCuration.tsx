@@ -13,12 +13,11 @@ import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip } from '@/components/common';
 import { TextInput } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import {
-  ENTITY_CURATION_ATTRIBUTE as ATTR,
-  ENTITY_CURATION_LABELS as LABEL,
-} from './constants';
+import { ENTITY_CURATION_ATTRIBUTE as ATTR } from './constants';
+import { messages } from './EntityCuration.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 
 interface EntityCurationPanelBodyProps {
@@ -28,6 +27,7 @@ interface EntityCurationPanelBodyProps {
 export function EntityCurationPanelBody({
   controller,
 }: EntityCurationPanelBodyProps): React.JSX.Element {
+  const intl = useIntl();
 
   // ── Read operator attribute metadata from Redux (passed in via Canvas.tsx) ──
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -59,12 +59,12 @@ export function EntityCurationPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.ENTITIES_COLUMN]?.description ?? ''}
           >
-            {LABEL.ENTITIES_COLUMN}
+            {intl.formatMessage(messages.entitiesColumn)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="entities_column"
-          labelText={LABEL.ENTITIES_COLUMN}
+          labelText={intl.formatMessage(messages.entitiesColumn)}
           hideLabel
           value={entitiesColumn}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -84,12 +84,12 @@ export function EntityCurationPanelBody({
             nodeAttributes={nodeAttributes}
             definition={nodeAttributes[ATTR.DOCUMENT_TYPE_COLUMN]?.description ?? ''}
           >
-            {LABEL.DOCUMENT_TYPE_COLUMN}
+            {intl.formatMessage(messages.documentTypeColumn)}
           </RequiredParamTooltip>
         </div>
         <TextInput
           id="document_type_column"
-          labelText={LABEL.DOCUMENT_TYPE_COLUMN}
+          labelText={intl.formatMessage(messages.documentTypeColumn)}
           hideLabel
           value={documentTypeColumn}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {

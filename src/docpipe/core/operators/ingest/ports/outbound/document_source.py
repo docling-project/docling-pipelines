@@ -30,6 +30,11 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
     SOURCE_DESCRIPTION: str | None = None  # Brief description
     SOURCE_VERSION: str = "1.0.0"  # Semantic version
 
+    @classmethod
+    def bind_file_reference(cls, *, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Update provider settings for a file event, or reject unsupported providers."""
+        raise NotImplementedError(f"Source adapter '{cls.SOURCE_NAME or cls.__name__}' does not support file events")
+
     @abstractmethod
     async def fetch_documents(self, config: Any) -> AsyncGenerator[Document, None]:
         """
@@ -77,8 +82,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
     def build_config_from_operator_params(
         self,
         *,
-        connection_params: dict,
-        credentials: dict,
+        provider_config: dict,
         included_extensions: list[str] | None = None,
         max_files: int | None = None,
     ) -> SourceConfig:
@@ -89,8 +93,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
         to its specific configuration model, following the Open/Closed Principle.
 
         Args:
-            connection_params: Connection parameters from operator config
-            credentials: Credentials from operator config
+            provider_config: All provider-specific parameters including credentials.
             included_extensions: File extensions to include (optional)
             max_files: Maximum number of files to fetch (optional)
 
@@ -107,8 +110,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
         self,
         *,
         source_id: str,
-        connection_params: dict[str, Any],
-        credentials: dict[str, Any],
+        provider_config: dict[str, Any],
     ) -> bytes | None:
         """
         Fetch binary content for a specific document on-demand.
@@ -120,8 +122,7 @@ class DocumentSourcePort(ABC, Generic[SourceConfig]):  # noqa: UP046
         Args:
             source_id: Unique identifier for the document in the source system
                       (e.g., S3 key, file path, document ID)
-            connection_params: Connection parameters from operator config
-            credentials: Credentials from operator config
+            provider_config: All provider-specific parameters including credentials.
 
         Returns:
             bytes | None: Binary content of the document, or None if:

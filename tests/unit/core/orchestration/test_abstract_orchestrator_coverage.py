@@ -404,10 +404,13 @@ class TestInnerTaskSkipPaths:
         orchestrator._execute_step = MagicMock(side_effect=RuntimeError("Node exploded"))
 
         op_def = {"id": "n1", "name": "Chunk", "operator": "chunker"}
+        # Use MagicMock without spec so _unpack_prev_results can access .data_accesses
+        # and .tables — attributes that exist on ExecuteStepResults instances but are
+        # not visible when spec= inspects the class rather than an instance.
         result = orchestrator._inner_task(
             op_def=op_def,
             global_config={},
-            prev_results=MagicMock(spec=ExecuteStepResults, internal_metadata={}),
+            prev_results=MagicMock(data_accesses=[], tables=[], internal_metadata={}),
             session_info=MagicMock(),
             deleted_docs_count=0,
         )

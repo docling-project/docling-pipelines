@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from docpipe.core.job_management.domain.models.job_stats import JobStats
 from docpipe.core.job_management.domain.models.node_stats import NodeStats
 from docpipe.exceptions.docpipe_exceptions import JobRunInvalidStateException, JobRunNotFoundException
+from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.dag_utils import identify_ingest_and_destination_nodes
 
@@ -226,7 +227,7 @@ class JobReportGenerator:
         except JobRunOperationFailedException:
             raise
         except Exception as e:
-            logger.error("Failed to generate report on-demand for %s: %s", job_run_id, e, exc_info=True)
+            logger.exception("Failed to generate report on-demand for %s: %s", job_run_id, e)
             raise JobRunOperationFailedException(
                 message=f"Failed to generate report: {e!s}", job_run_id=job_run_id, operation="generate_report"
             ) from e
@@ -273,7 +274,7 @@ class JobReportGenerator:
         report_rows = self._create_report_rows(all_docs)
 
         elapsed = time.time() - start_time
-        logger.info(f"Generated report data for {len(report_rows)} documents in {elapsed:.2f}s")
+        logger.info("Generated report data for %s documents in %.2fs", len(report_rows), elapsed)
         return report_rows
 
     def generate_csv_content(self) -> str:
@@ -344,7 +345,7 @@ class JobReportGenerator:
         """
         ingest_node_id, _ = identify_ingest_and_destination_nodes(self.dag_nodes)
         if ingest_node_id:
-            logger.debug(f"Found ingest node: {ingest_node_id}")
+            logger.debug("Found ingest node: %s", ingest_node_id)
         else:
             logger.warning("Could not find ingest node")
         return ingest_node_id
@@ -383,12 +384,15 @@ class JobReportGenerator:
 
             if batch_nums:
                 logger.info(
-                    f"Found {len(batch_nums)} batches for node {node_id} from batch_node_stats: {sorted(batch_nums)}"
+                    "Found %s batches for node %s from batch_node_stats: %s",
+                    len(batch_nums),
+                    node_id,
+                    sorted(batch_nums),
                 )
                 return batch_nums
 
         # No micro-batching - return {None} to indicate no batch subdirectory in parquet path
-        logger.info(f"No batch data for node {node_id} - treating as non-batched (no batch subdirectory)")
+        logger.info("No batch data for node %s - treating as non-batched (no batch subdirectory)", node_id)
         return {None}
 
     def _find_extract_operator(self) -> tuple[str | None, str | None]:
@@ -421,13 +425,14 @@ class JobReportGenerator:
             # Check if this is an extract operator (e.g., extract_cpd, extract_cloud)
             if op_type and "extract" in op_type.lower():
                 node_name = self.node_id_to_name.get(node_id, "Unknown")
-                logger.info(f"Found extract operator: {node_name} (id: {node_id}, op_type: {op_type})")
+                logger.info("Found extract operator: %s (id: %s, op_type: %s)", node_name, node_id, op_type)
                 return node_id, node_name
 
         logger.warning("No extract operator found in dag_nodes")
         return None, None
 
-    def _get_timestamp_from_modified_time(self, modified_time: Any, doc_id: str) -> str:
+    @staticmethod
+    def _get_timestamp_from_modified_time(modified_time: Any, doc_id: str) -> str:
         """
         Convert modified_time to YYYY-MM-DD:HH:MM:SS format.
 
@@ -454,10 +459,11 @@ class JobReportGenerator:
                 return modified_time
             return ""
         except Exception as e:
-            logger.debug(f"Could not convert timestamp for doc {doc_id}: {e}")
+            logger.debug("Could not convert timestamp for doc %s: %s", doc_id, e)
             return ""
 
-    def _create_doc_entry(self, *, doc_name: str, modified_time: Any, timestamp_str: str) -> dict[str, Any]:
+    @staticmethod
+    def _create_doc_entry(*, doc_name: str, modified_time: Any, timestamp_str: str) -> dict[str, Any]:
         """Create initial document entry."""
         return {
             "name": doc_name,
@@ -496,8 +502,6 @@ class JobReportGenerator:
             return None
 
         nodes_with_batches = list(self.job_stats.batch_node_stats.keys())
-        if not nodes_with_batches:
-            return None
 
         # Use DAG nodes to find the first batching operator in flow order
         if self.dag_nodes:
@@ -506,14 +510,14 @@ class JobReportGenerator:
                 if node_id in nodes_with_batches:
                     first_batch_stats = next(iter(self.job_stats.batch_node_stats[node_id].values()))
                     node_name = self._get_batch_attr(first_batch_stats, "name", "unknown")
-                    logger.info(f"Found first batching operator: {node_name} (id: {node_id})")
+                    logger.info("Found first batching operator: %s (id: %s)", node_name, node_id)
                     return node_id
 
         # If no DAG nodes, use first node in batch_node_stats
         first_batch_node = nodes_with_batches[0]
         first_batch_stats = next(iter(self.job_stats.batch_node_stats[first_batch_node].values()))
         node_name = self._get_batch_attr(first_batch_stats, "name", "unknown")
-        logger.info(f"Using first node with batch info: {node_name} (id: {first_batch_node})")
+        logger.info("Using first node with batch info: %s (id: %s)", node_name, first_batch_node)
         return first_batch_node
 
     def _get_all_batch_docs(self, batch_stats: Any) -> set[str]:
@@ -531,7 +535,7 @@ class JobReportGenerator:
         if ingest_node_id and ingest_node_id in self.job_stats.node_stats:
             ingest_start_time = self.job_stats.node_stats[ingest_node_id].start_time or 0.0
         else:
-            logger.warning(f"Ingest node '{ingest_node_id}' not found in node_stats")
+            logger.warning("Ingest node '%s' not found in node_stats", ingest_node_id)
 
         return ingest_start_time
 
@@ -670,7 +674,7 @@ class JobReportGenerator:
                 processing_time_seconds = max(0, int(max_end_time - ingest_start_time))
                 doc_to_processing_time[doc_id] = str(processing_time_seconds)
 
-        logger.info(f"Calculated end-to-end processing time for {len(doc_to_processing_time)} documents")
+        logger.info("Calculated end-to-end processing time for %s documents", len(doc_to_processing_time))
         return doc_to_processing_time
 
     def _build_doc_to_batch_mapping(self) -> dict[str, str]:
@@ -684,15 +688,10 @@ class JobReportGenerator:
         Returns:
             Dictionary mapping doc_id to processing_time string (e.g., "45")
         """
-        # Check if batch_node_stats available
-        if not self.job_stats.batch_node_stats:
-            logger.info("No batch_node_stats available, using node-level timing")
-            return self._build_doc_to_batch_mapping_fallback()
-
-        # Find first batching operator
+        # Find first batching operator (None when batch_node_stats is empty)
         first_batching_node = self._find_first_batching_operator()
-        if not first_batching_node or first_batching_node not in self.job_stats.batch_node_stats:
-            logger.info("No batching operator found in batch_node_stats, using node-level timing")
+        if not first_batching_node:
+            logger.info("No batch_node_stats available, using node-level timing")
             return self._build_doc_to_batch_mapping_fallback()
 
         # Get destination nodes and ingest start time
@@ -701,7 +700,9 @@ class JobReportGenerator:
             logger.warning("No destination nodes found in DAG")
 
         logger.info(
-            f"Using batch-level timing. First batching operator: {first_batching_node}, Destination nodes: {destination_nodes}"
+            "Using batch-level timing. First batching operator: %s, Destination nodes: %s",
+            first_batching_node,
+            destination_nodes,
         )
 
         ingest_start_time = self._get_ingest_start_time()
@@ -715,7 +716,7 @@ class JobReportGenerator:
                 batch_id, batch_stats, destination_nodes, ingest_start_time, doc_to_processing_time
             )
 
-        logger.info(f"Calculated processing time for {len(doc_to_processing_time)} documents")
+        logger.info("Calculated processing time for %s documents", len(doc_to_processing_time))
         return doc_to_processing_time
 
     def _get_required_columns(self, node_id: str) -> list[str]:
@@ -780,13 +781,12 @@ class JobReportGenerator:
             # folder name matches what the orchestrator actually wrote
             sanitized_name = re.sub(r"\W+", "_", node_name)
             node_name_with_branch = f"{sanitized_name}_{branch_index}"
+            data_path = Path(get_data_path()) / self.job_id / self.job_run_id / "data" / node_name_with_branch
 
             if batch_num is not None:
-                file_path = (
-                    f"data/{self.job_id}/{self.job_run_id}/data/{node_name_with_branch}/{batch_num}/output.parquet"
-                )
+                file_path = data_path / str(batch_num) / "output.parquet"
             else:
-                file_path = f"data/{self.job_id}/{self.job_run_id}/data/{node_name_with_branch}/output.parquet"
+                file_path = data_path / "output.parquet"
 
             logger.info(
                 "Reading parquet: file=%s (node=%s branch=%s batch=%s)",
@@ -817,7 +817,7 @@ class JobReportGenerator:
             )
 
         except Exception as e:
-            logger.error("Error reading parquet for node %s: %s", node_id, e, exc_info=True)
+            logger.exception("Error reading parquet for node %s: %s", node_id, e)
 
         return doc_data
 
@@ -833,17 +833,17 @@ class JobReportGenerator:
         all_docs: dict[str, dict[str, Any]] = {}
         ingest_node_id = self._get_ingest_node_id()
 
-        logger.info(f"Ingest node ID identified: {ingest_node_id}")
+        logger.info("Ingest node ID identified: %s", ingest_node_id)
 
         if not ingest_node_id:
             logger.warning("No ingest operator found in flow definition")
             return all_docs
 
         # Read parquet file from ingest operator
-        logger.info(f"Reading parquet file for ingest node: {ingest_node_id}")
+        logger.info("Reading parquet file for ingest node: %s", ingest_node_id)
         ingest_data = self._read_parquet_file(ingest_node_id)
 
-        logger.info(f"Ingest data retrieved: {len(ingest_data)} documents")
+        logger.info("Ingest data retrieved: %s documents", len(ingest_data))
 
         if not ingest_data:
             logger.warning(
@@ -858,34 +858,34 @@ class JobReportGenerator:
             doc_name = row_data.get("name", doc_id)
             modified_time = row_data.get("modified_time")
 
-            logger.info(f"Processing doc_id={doc_id}, name={doc_name}, modified_time={modified_time}")
+            logger.info("Processing doc_id=%s, name=%s, modified_time=%s", doc_id, doc_name, modified_time)
 
             # Convert modified_time to ISO 8601 string
             timestamp_str = self._get_timestamp_from_modified_time(modified_time, doc_id)
 
-            logger.info(f"Converted timestamp for doc {doc_id}: {timestamp_str}")
+            logger.info("Converted timestamp for doc %s: %s", doc_id, timestamp_str)
 
             all_docs[doc_id] = self._create_doc_entry(
                 doc_name=doc_name, modified_time=modified_time, timestamp_str=timestamp_str
             )
 
-        logger.info(f"Initialized {len(all_docs)} documents from ingest operator parquet file")
-        logger.info(f"Sample document entry: {next(iter(all_docs.values())) if all_docs else 'No docs'}")
+        logger.info("Initialized %s documents from ingest operator parquet file", len(all_docs))
+        logger.info("Sample document entry: %s", next(iter(all_docs.values())) if all_docs else "No docs")
         return all_docs
 
     def _update_page_count_from_parquet(self, all_docs: dict[str, dict[str, Any]], doc_id: str, row_data: dict) -> bool:
         """Update page count for a single document from parquet data."""
         if doc_id not in all_docs:
-            logger.debug(f"Doc {doc_id} from extract parquet not in all_docs")
+            logger.debug("Doc %s from extract parquet not in all_docs", doc_id)
             return False
 
         page_count = row_data.get("pages_processed") or row_data.get("page_count")
 
         if page_count is not None:
             all_docs[doc_id]["pages"] = str(page_count)
-            logger.debug(f"Updated page count for doc {doc_id}: {page_count}")
+            logger.debug("Updated page count for doc %s: %s", doc_id, page_count)
             return True
-        logger.debug(f"No page count found for doc {doc_id}. Available keys: {list(row_data.keys())}")
+        logger.debug("No page count found for doc %s. Available keys: %s", doc_id, list(row_data.keys()))
         return False
 
     def _read_page_counts_from_batches(
@@ -895,14 +895,14 @@ class JobReportGenerator:
         updated_count = 0
 
         for batch_num in sorted(batch_nums):
-            logger.info(f"Reading extract operator batch {batch_num}")
+            logger.info("Reading extract operator batch %s", batch_num)
             extract_data = self._read_parquet_file(extract_node_id, batch_num=batch_num)
 
             if not extract_data:
-                logger.warning(f"No data found in extract parquet file for batch {batch_num}")
+                logger.warning("No data found in extract parquet file for batch %s", batch_num)
                 continue
 
-            logger.info(f"Extract data retrieved for batch {batch_num}: {len(extract_data)} documents")
+            logger.info("Extract data retrieved for batch %s: %s documents", batch_num, len(extract_data))
 
             for doc_id, row_data in extract_data.items():
                 if self._update_page_count_from_parquet(all_docs, doc_id, row_data):
@@ -919,27 +919,28 @@ class JobReportGenerator:
             all_docs: Dictionary of document information to update
         """
         logger.info("Step 2: Reading page counts from extract operator")
-        logger.info(f"Total documents to update: {len(all_docs)}")
-        logger.info(f"Document IDs in all_docs: {list(all_docs.keys())}")
+        logger.info("Total documents to update: %s", len(all_docs))
+        logger.info("Document IDs in all_docs: %s", list(all_docs.keys()))
 
         # Read from extract operator
         extract_node_id, extract_node_name = self._find_extract_operator()
-        logger.info(f"Extract node ID identified: {extract_node_id} (name: {extract_node_name})")
+        logger.info("Extract node ID identified: %s (name: %s)", extract_node_id, extract_node_name)
 
         if not extract_node_id:
             logger.warning("No extract operator found in flow definition")
-            logger.info(f"Available DAG nodes: {[(n.get('id'), n.get('name'), n.get('op')) for n in self.dag_nodes]}")
+            logger.info("Available DAG nodes: %s", [(n.get("id"), n.get("name"), n.get("op")) for n in self.dag_nodes])
             return
 
         batch_nums = self._get_actual_batch_nums(extract_node_id)
         logger.info(
-            f"DEBUG: batch_node_stats keys: {list(self.job_stats.batch_node_stats.keys()) if self.job_stats.batch_node_stats else 'None'}"
+            "DEBUG: batch_node_stats keys: %s",
+            list(self.job_stats.batch_node_stats.keys()) if self.job_stats.batch_node_stats else "None",
         )
-        logger.info(f"DEBUG: Looking for extract node ID: {extract_node_id}")
-        logger.info(f"Will read {len(batch_nums)} batch(es) for extract operator: {sorted(batch_nums)}")
+        logger.info("DEBUG: Looking for extract node ID: %s", extract_node_id)
+        logger.info("Will read %s batch(es) for extract operator: %s", len(batch_nums), sorted(batch_nums))
 
         updated_count = self._read_page_counts_from_batches(all_docs, extract_node_id, batch_nums)
-        logger.info(f"Updated page counts for {updated_count} documents from extract parquet file(s)")
+        logger.info("Updated page counts for %s documents from extract parquet file(s)", updated_count)
 
     def _calculate_processing_times(self, all_docs: dict[str, dict[str, Any]]) -> None:
         """
@@ -958,7 +959,7 @@ class JobReportGenerator:
             if doc_id in all_docs:
                 all_docs[doc_id]["processing_time"] = processing_time
 
-        logger.info(f"Calculated processing time for {len(doc_to_processing_time)} documents")
+        logger.info("Calculated processing time for %s documents", len(doc_to_processing_time))
 
     def _build_status_lookup_sets(self) -> tuple[set[str], set[str], set[str]]:
         """
@@ -975,10 +976,10 @@ class JobReportGenerator:
         for node_id, node_stats in self.job_stats.node_stats.items():
             node_name = node_stats.name
             if node_stats.failed_docs:
-                logger.info(f"Node {node_name} ({node_id}): {len(node_stats.failed_docs)} failed docs")
+                logger.info("Node %s (%s): %s failed docs", node_name, node_id, len(node_stats.failed_docs))
                 failed_docs_global.update(node_stats.failed_docs)
             if node_stats.skipped_docs:
-                logger.info(f"Node {node_name} ({node_id}): {len(node_stats.skipped_docs)} skipped docs")
+                logger.info("Node %s (%s): %s skipped docs", node_name, node_id, len(node_stats.skipped_docs))
                 skipped_docs_global.update(node_stats.skipped_docs)
 
         # Collect completed docs from destination nodes.
@@ -986,14 +987,17 @@ class JobReportGenerator:
         # overall status — a node can be "Failed" because other docs failed while some
         # completed successfully (e.g. opensearch fails for 10 docs but completes 2).
         destination_node_ids = self._get_destination_node_ids()
-        logger.info(f"Destination node IDs: {destination_node_ids}")
+        logger.info("Destination node IDs: %s", destination_node_ids)
 
         for node_id in destination_node_ids:
             node_stats = self.job_stats.node_stats.get(node_id)
             if node_stats and node_stats.docs_completed:
                 destination_completed_docs.update(node_stats.docs_completed)
                 logger.info(
-                    f"Added {len(node_stats.docs_completed)} docs_completed from destination node {node_stats.name} (status: {node_stats.node_status})"
+                    "Added %s docs_completed from destination node %s (status: %s)",
+                    len(node_stats.docs_completed),
+                    node_stats.name,
+                    node_stats.node_status,
                 )
 
         return failed_docs_global, skipped_docs_global, destination_completed_docs
@@ -1075,7 +1079,10 @@ class JobReportGenerator:
         failed_docs_global, skipped_docs_global, destination_completed_docs = self._build_status_lookup_sets()
 
         logger.info(
-            f"Status sets - Failed: {len(failed_docs_global)}, Skipped: {len(skipped_docs_global)}, Completed: {len(destination_completed_docs)}"
+            "Status sets - Failed: %s, Skipped: %s, Completed: %s",
+            len(failed_docs_global),
+            len(skipped_docs_global),
+            len(destination_completed_docs),
         )
 
         for doc_id, doc_info in all_docs.items():
@@ -1090,7 +1097,7 @@ class JobReportGenerator:
             else:
                 self._handle_unclassified_document(doc_id, doc_info)
 
-        logger.info(f"Calculated status for {len(all_docs)} documents")
+        logger.info("Calculated status for %s documents", len(all_docs))
 
     def _create_report_rows(self, all_docs: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
         """

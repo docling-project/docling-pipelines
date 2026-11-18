@@ -12,7 +12,9 @@
 
 import React, { useState } from 'react';
 import { TextArea } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import { isValidJsonObject, toJsonString } from '@/utils/json';
+import { messages } from './JsonTextArea.messages';
 
 interface JsonTextAreaProps {
   /** Carbon TextArea `id` — must be unique on the page */
@@ -43,6 +45,7 @@ export function JsonTextArea({
   invalid: externalInvalid,
   invalidText: externalInvalidText,
 }: JsonTextAreaProps): React.JSX.Element {
+  const intl = useIntl();
   // The raw string the user is currently typing.
   // null means display the serialised storedValue instead.
   const [rawEdit, setRawEdit] = useState<string | null>(null);
@@ -55,7 +58,7 @@ export function JsonTextArea({
   const showError = (externalInvalid ?? false) || internalInvalid;
   const errorMessage = externalInvalid
     ? (externalInvalidText ?? '')
-    : 'Must be a valid JSON object.';
+    : intl.formatMessage(messages.invalidJson);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
     const raw = e.target.value;

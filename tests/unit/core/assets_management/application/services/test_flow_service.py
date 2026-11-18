@@ -686,7 +686,9 @@ class TestFlowServiceList:
 
         # Assert
         assert len(result) == 5
-        assert result == multiple_sample_flows
+        # Flows are sorted newest-first (descending modified_on: 4 -> 0)
+        expected = sorted(multiple_sample_flows, key=lambda f: f.modified_on, reverse=True)
+        assert result == expected
 
     def test_list_flows_with_pagination(self, mock_flow_repository, multiple_sample_flows):
         """Test listing flows with pagination."""
@@ -694,13 +696,23 @@ class TestFlowServiceList:
         mock_flow_repository.find_all.return_value = multiple_sample_flows
         service = FlowService(repository=mock_flow_repository)
 
-        # Act
+        # Act - sorted newest-first: Flow 4, Flow 3, Flow 2, Flow 1, Flow 0
         result = service.list_flows(skip=2, limit=2)
 
         # Assert
         assert len(result) == 2
         assert result[0].name == "Test Flow 2"
-        assert result[1].name == "Test Flow 3"
+        assert result[1].name == "Test Flow 1"
+
+    def test_list_flows_sorted_by_recent_modification(self, mock_flow_repository, multiple_sample_flows):
+        """Test that list_flows returns flows sorted newest-first (most recently modified at top)."""
+        mock_flow_repository.find_all.return_value = multiple_sample_flows
+        service = FlowService(repository=mock_flow_repository)
+
+        result = service.list_flows()
+
+        assert result[0].name == "Test Flow 4"
+        assert result[4].name == "Test Flow 0"
 
     def test_list_flows_with_name_filter(self, mock_flow_repository, multiple_sample_flows):
         """Test listing flows with name filter."""

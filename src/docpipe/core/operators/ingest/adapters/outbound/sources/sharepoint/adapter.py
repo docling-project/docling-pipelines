@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """SharePoint source adapter using Microsoft Graph API."""
 
-import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, cast
@@ -24,6 +26,8 @@ from docpipe.core.operators.ingest.ingest_utils import (
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.rest_client import RestMethod
+from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -69,6 +73,34 @@ class SharePointSourceAdapter(DocumentSourcePort):
         # secret_hash ensures a rotated client_secret invalidates the cached loader.
         self._loader_cache: dict[tuple[str, str, str, str], MicrosoftGraphLoader] = {}
 
+    @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set one SharePoint item as the only file to ingest.
+
+        ``file_reference`` is a Microsoft Graph drive item id in the document
+        library already configured on the flow, or a SharePoint file URL.
+        ``fetch_documents`` already loads that value from ``file_path`` and
+        checks it with Microsoft Graph, so this method only validates the
+        reference. Credentials and the document library stay in
+        ``provider_config`` and are never read from the event.
+        """
+        if not isinstance(file_reference, str) or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty SharePoint item id or file URL")
+
+        reference = file_reference.strip()
+        lowered = reference.lower()
+        if "://" in reference and not lowered.startswith(("http://", "https://")):
+            raise ValueError("File reference must be a SharePoint item id or file URL, not a URI")
+
+        if lowered.startswith(("http://", "https://")):
+            extracted = extract_msgraph_file_id_from_url(reference)
+            if not isinstance(extracted, str) or not extracted.strip():
+                raise ValueError(
+                    "File reference must be a SharePoint item id or a file URL with an id or sourcedoc parameter"
+                )
+
+        provider_config["file_path"] = reference
+
     def _get_loader(
         self,
         *,
@@ -87,7 +119,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         of client_secret in the key ensures that a rotated secret invalidates the cached
         loader rather than silently reusing a stale one.
         """
-        secret_hash = hashlib.sha256(client_secret.encode()).hexdigest()[:16]
+        secret_hash = cache_key_digest(namespace="sharepoint_loader", parts=[client_secret])
         key = (drive_id, client_id, tenant_id, secret_hash)
         if key not in self._loader_cache:
             self._loader_cache[key] = MicrosoftGraphLoader(
@@ -165,9 +197,6 @@ class SharePointSourceAdapter(DocumentSourcePort):
             "created_time": item.get("createdDateTime"),
             "web_url": source_url,
             OperatorConstants.Config.PROVIDER: "sharepoint",
-            "client_id": config.client_id,
-            "client_secret": config.client_secret,
-            "tenant_id": config.tenant_id,
         }
         if not is_single_file:
             metadata[OperatorConstants.Columns.SOURCE_ID] = doc_id  # Required by binary_content_fetcher
@@ -337,30 +366,24 @@ class SharePointSourceAdapter(DocumentSourcePort):
         self,
         *,
         source_id: str,
-        connection_params: dict[str, Any],
-        credentials: dict[str, Any],
+        provider_config: dict[str, Any],
     ) -> bytes | None:
         """
         Fetch binary content for a specific document from SharePoint on-demand.
 
         Args:
             source_id: SharePoint item ID (file ID) or web URL
-            connection_params: Connection parameters (document_library_id, etc.)
-            credentials: Authentication credentials (client_id, client_secret, tenant_id)
+            provider_config: All provider-specific parameters including credentials.
 
         Returns:
             bytes | None: Binary content of the SharePoint file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
-            credentials = credentials or {}
-            connection_params = connection_params or {}
-            # Extract required parameters and resolve environment variables.
-            # Fall back to connection_params so callers that store credentials
-            # there (instead of the dedicated credentials block) work too.
-            document_library_id = resolve_env_var(connection_params.get("document_library_id"))
-            client_id = resolve_env_var(credentials.get("client_id") or connection_params.get("client_id"))
-            client_secret = resolve_env_var(credentials.get("client_secret") or connection_params.get("client_secret"))
-            tenant_id = resolve_env_var(credentials.get("tenant_id") or connection_params.get("tenant_id"))
+            document_library_id = resolve_env_var(provider_config.get("document_library_id"))
+            client_id = resolve_env_var(provider_config.get("client_id"))
+            client_secret = resolve_env_var(provider_config.get("client_secret"))
+            tenant_id = resolve_env_var(provider_config.get("tenant_id"))
 
             if not all([document_library_id, client_id, client_secret, tenant_id]):
                 logger.error("Missing required parameters for SharePoint binary content fetch")
@@ -369,12 +392,12 @@ class SharePointSourceAdapter(DocumentSourcePort):
             # Handle case where source_id is a web URL instead of item_id
             item_id = source_id
             if source_id.startswith("http"):
-                extracted_id = credentials.get("item_id")
+                extracted_id = provider_config.get("item_id")
                 if not extracted_id:
-                    logger.error("source_id is a web URL but no item_id found in credentials: %s", source_id)
+                    logger.error("source_id is a web URL but no item_id found in provider_config: %s", source_id)
                     return None
                 item_id = str(extracted_id)
-                logger.info("Extracted item_id from credentials: %s (source_id was web URL)", item_id)
+                logger.info("Extracted item_id from provider_config: %s (source_id was web URL)", item_id)
 
             # Reuse cached loader — avoids a new MSAL token request per document
             loader = self._get_loader(
@@ -434,15 +457,14 @@ class SharePointSourceAdapter(DocumentSourcePort):
             logger.info("Successfully downloaded %s bytes from SharePoint: %s", len(content), item_id)
             return content
 
-        except Exception as e:
-            logger.error("Error fetching binary content from SharePoint %s: %s", source_id, e, exc_info=True)
+        except Exception:
+            logger.exception("Error fetching binary content from SharePoint %s", source_id)
             return None
 
     def build_config_from_operator_params(
         self,
         *,
-        connection_params: dict,
-        credentials: dict,
+        provider_config: dict,
         included_extensions: list[str] | None = None,
         max_files: int | None = None,
     ) -> BaseModel:
@@ -450,37 +472,32 @@ class SharePointSourceAdapter(DocumentSourcePort):
         Build SharePoint configuration from operator parameters.
 
         Args:
-            connection_params: Connection parameters (document_library_id, folder_path, etc.)
-            credentials: Credentials (client_id, client_secret, tenant_id)
+            provider_config: All provider-specific parameters including credentials.
             included_extensions: File extensions to include (optional)
-            max_files: Maximum number of files to fetch (optional, not used by SharePoint adapter)
+            max_files: Not used by the SharePoint adapter.
 
         Returns:
             SharePointSourceConfig: Validated configuration object
         """
+        provider_config = reveal_value(provider_config)
         if included_extensions is None:
             included_extensions = []
 
-        # Credential fields fall back to connection_params so flows built from operator
-        # metadata (which places all fields under connection_params) work alongside
-        # legacy flows that use a separate credentials dict.
         config_params = {
-            "client_id": resolve_env_var(credentials.get("client_id") or connection_params.get("client_id", "")),
-            "client_secret": resolve_env_var(
-                credentials.get("client_secret") or connection_params.get("client_secret", "")
-            ),
-            "tenant_id": resolve_env_var(credentials.get("tenant_id") or connection_params.get("tenant_id", "")),
-            "document_library_id": resolve_env_var(connection_params.get("document_library_id", "")),
-            "folder_path": resolve_env_var(connection_params.get("folder_path")),
-            "recursive": connection_params.get("recursive", True),
+            "client_id": resolve_env_var(provider_config.get("client_id", "")),
+            "client_secret": resolve_env_var(provider_config.get("client_secret", "")),
+            "tenant_id": resolve_env_var(provider_config.get("tenant_id", "")),
+            "document_library_id": resolve_env_var(provider_config.get("document_library_id", "")),
+            "folder_path": resolve_env_var(provider_config.get("folder_path")),
+            "recursive": provider_config.get("recursive", True),
             "file_extensions": included_extensions,
-            "max_file_size_mb": connection_params.get("max_file_size_mb"),
+            "max_file_size_mb": provider_config.get("max_file_size_mb"),
         }
 
-        if "file_path" in connection_params:
-            config_params["file_path"] = connection_params["file_path"]
+        if "file_path" in provider_config:
+            config_params["file_path"] = provider_config["file_path"]
 
-        if "graph_api_version" in connection_params:
-            config_params["graph_api_version"] = connection_params["graph_api_version"]
+        if "graph_api_version" in provider_config:
+            config_params["graph_api_version"] = provider_config["graph_api_version"]
 
         return SharePointSourceConfig(**config_params)

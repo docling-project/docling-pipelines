@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { PiiAndHapPanelBody } from '@/components/PropertiesPanel/CustomPanels/PiiAndHap/PiiAndHap';
 
 const makeController = (overrides: Record<string, unknown> = {}) => ({
@@ -15,21 +16,21 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders without crashing', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <PiiAndHapPanelBody controller={makeController()} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders with null controller gracefully', () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <PiiAndHapPanelBody controller={null as any} />
     );
     expect(container).toBeInTheDocument();
   });
 
   it('renders expected_redactions multi-select when controller returns array value', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -43,13 +44,13 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('defaults to both PII and HAP selected', () => {
-    render(<PiiAndHapPanelBody controller={makeController()} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={makeController()} />);
     // With default ['PII', 'HAP'] both sections should be visible
     expect(document.body).toBeInTheDocument();
   });
 
   it('renders PII section when PII is in expected_redactions', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -64,7 +65,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders HAP section when HAP is in expected_redactions', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -79,7 +80,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders with redaction toggle', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -94,7 +95,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders with hap_redaction toggle', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -109,13 +110,13 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders provider dropdown', () => {
-    render(<PiiAndHapPanelBody controller={makeController()} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={makeController()} />);
     const providerEl = document.getElementById('pii-and-hap-provider');
     expect(providerEl ?? document.body).toBeInTheDocument();
   });
 
   it('renders pii_threshold number input when PII is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -130,7 +131,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders hap_threshold number input when HAP is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -151,7 +152,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const toggle = document.getElementById('pii-redaction') as HTMLElement | null;
     if (toggle) {
       fireEvent.click(toggle);
@@ -162,7 +163,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders with pii_list as a string (comma-separated)', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -177,14 +178,14 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders provider_config json textarea', () => {
-    render(<PiiAndHapPanelBody controller={makeController()} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={makeController()} />);
     // JsonTextArea is rendered for provider_config
     expect(document.body).toBeInTheDocument();
   });
   // ── expectedRedactionsRaw as comma-string (line 76) ─────────────────────
 
   it('parses expectedRedactionsRaw comma-string correctly', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -200,7 +201,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('parses comma-string with spaces correctly', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -216,7 +217,7 @@ describe('PiiAndHapPanelBody', () => {
   // ── PII section fields ────────────────────────────────────────────────────
 
   it('renders pii_list FilterableMultiSelect when PII is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -236,13 +237,13 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     // Confirm pii_list multi-select is present
     expect(document.getElementById('pii_list')).toBeTruthy();
   });
 
   it('renders redaction toggle in PII section', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -263,7 +264,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const toggle = document.getElementById('redaction');
     if (toggle) {
       fireEvent.click(toggle);
@@ -277,7 +278,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders redaction_character TextInput when redaction is enabled', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -300,7 +301,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const input = document.querySelector('input#redaction_character') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: '#' } });
@@ -314,7 +315,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders pii_threshold NumberInput when PII is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -335,7 +336,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const input = document.querySelector('input#pii_threshold') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: '0.8' } });
@@ -349,7 +350,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders display_pii toggle in PII section', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -370,7 +371,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const toggle = document.getElementById('display_pii');
     if (toggle) {
       fireEvent.click(toggle);
@@ -386,7 +387,7 @@ describe('PiiAndHapPanelBody', () => {
   // ── HAP section fields ────────────────────────────────────────────────────
 
   it('renders hap_redaction toggle in HAP section', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -400,7 +401,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders hap_redaction_character TextInput when hap_redaction is enabled', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -423,7 +424,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const input = document.querySelector('input#hap_redaction_character') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: 'X' } });
@@ -437,7 +438,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('renders hap_threshold NumberInput when HAP is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -458,7 +459,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const input = document.querySelector('input#hap_threshold') as HTMLInputElement | null;
     if (input) {
       fireEvent.change(input, { target: { value: '0.9' } });
@@ -474,7 +475,7 @@ describe('PiiAndHapPanelBody', () => {
   // ── Provider dropdown ────────────────────────────────────────────────────
 
   it('renders provider dropdown element', () => {
-    render(<PiiAndHapPanelBody controller={makeController()} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={makeController()} />);
     expect(document.getElementById('provider')).toBeTruthy();
   });
 
@@ -491,7 +492,7 @@ describe('PiiAndHapPanelBody', () => {
       })),
       getPropertyValue: vi.fn(() => undefined),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     expect(document.getElementById('provider')).toBeTruthy();
   });
 
@@ -511,14 +512,14 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     expect(document.getElementById('provider')).toBeTruthy();
   });
 
   // ── provider_config JsonTextArea ──────────────────────────────────────────
 
   it('renders provider_config JsonTextArea element', () => {
-    render(<PiiAndHapPanelBody controller={makeController()} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={makeController()} />);
     const textarea = document.getElementById('provider_config');
     expect(textarea ?? document.body).toBeInTheDocument();
   });
@@ -530,7 +531,7 @@ describe('PiiAndHapPanelBody', () => {
         return undefined;
       }),
     });
-    render(<PiiAndHapPanelBody controller={controller} />);
+    renderWithProviders(<PiiAndHapPanelBody controller={controller} />);
     const textarea = document.querySelector('textarea#provider_config') as HTMLTextAreaElement | null;
     if (textarea) {
       fireEvent.change(textarea, { target: { value: '{"model":"new-model"}' } });
@@ -541,7 +542,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('does not render PII section when only HAP is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {
@@ -556,7 +557,7 @@ describe('PiiAndHapPanelBody', () => {
   });
 
   it('does not render HAP section when only PII is selected', () => {
-    render(
+    renderWithProviders(
       <PiiAndHapPanelBody
         controller={makeController({
           getPropertyValue: vi.fn((prop: { name: string }) => {

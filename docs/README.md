@@ -2,6 +2,10 @@
 
 Welcome to the Docling Pipelines documentation! This guide will help you navigate our comprehensive documentation and find exactly what you need.
 
+## 📚 Documentation Book
+
+The [Docling-pipelines Book](book/site/docling-pipelines/1.0/index.html) is a 12-chapter guide covering architecture, installation, flow authoring, document processing, vector storage, LLM integration, deployment, and more. It is authored in AsciiDoc and built with Antora into a static website (hosted on GitHub Pages) and a PDF.
+
 ## 🚀 Getting Started
 
 **New to Docling Pipelines?** Start here:
@@ -27,10 +31,15 @@ Task-oriented guides to help you accomplish specific goals:
 
 ### Advanced Topics
 - **[Advanced Configuration](guides/ADVANCED_CONFIGURATION.md)** - Production deployment and optimization
+- **[Event Streaming Guide](guides/EVENT_STREAMING_GUIDE.md)** - Kafka event-driven execution and routing-key mappings
+- **[Telemetry Setup](guides/TELEMETRY_SETUP.md)** - OpenTelemetry distributed tracing and metrics
+- **[OpenLineage Integration](integrations/openlineage/OPENLINEAGE_GUIDE.md)** - Data lineage events for flow and operator runs, viewable in Marquez
+- **[Job Report Generation](guides/JOB_REPORT_GENERATION.md)** - Automated per-run CSV job reports
 - **[Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)** - Credential management, authentication, ACL, and production hardening
 - **[Unified LLM Architecture](guides/UNIFIED_LLM_ARCHITECTURE_GUIDE.md)** - LLM integration patterns
 - **[Document Libraries](guides/USER_GUIDE_DOCUMENT_LIBRARIES.md)** - Managing document collections
 - **[Document Class Utils](guides/DOCUMENT_CLASS_UTILS.md)** - Document schema utilities
+- **[Secrets Guide](guides/SECRETS_GUIDE.md)** - Reference grammar, path policy, audit records, and custom operator rules
 - **[Vault Integration](guides/VAULT_INTEGRATION_GUIDE.md)** - HashiCorp Vault secret resolution via `vault://` URIs
 - **[UI User Guide](guides/UI_USER_GUIDE.md)** - Using the React frontend
 
@@ -46,7 +55,7 @@ Configuration examples and patterns for all operators:
 - **[Extract](operators/extract/extract_operator_readme.md)** - Extract text and entities from documents
 - **[Chunker](operators/functional/chunker_readme.md)** - Split documents into chunks
 - **[Embeddings](operators/functional/embeddings_readme.md)** - Generate vector embeddings
-- **[VectorDB](operators/vectordb/)** - Store vectors in OpenSearch or Milvus
+- **[VectorDB](operators/vectordb/)** - Store vectors in OpenSearch, Milvus, or Weaviate
 - **[StorageOutput](operators/storage/storage_output_readme.md)** - Write documents to a file destination (filesystem, etc.)
 
 ### All Operator Configurations
@@ -72,6 +81,7 @@ Documentation for the Docling Pipelines REST API server:
 
 Integration-specific documentation:
 
+- **[OpenLineage](integrations/openlineage/OPENLINEAGE_GUIDE.md)** - Data lineage tracking via the OpenLineage standard
 - **[OpenSearch](integrations/opensearch/)** - Vector storage with OpenSearch
   - [Quick Start](integrations/opensearch/OPENSEARCH_QUICKSTART.md)
   - [Environment Setup](integrations/opensearch/ENVIRONMENT_SETUP.md)
@@ -99,6 +109,7 @@ Internal documentation for maintainers:
 
 Deployment guides for production environments:
 
+- **[Docker Compose Deployment](deployment/DOCKER_COMPOSE.md)** - Run Docling Pipelines locally or in containers with Docker Compose
 - **[OpenShift Deployment](deployment/OPENSHIFT.md)** - Deploy Docling Pipelines on OpenShift
 
 ## 💡 Architecture
@@ -117,7 +128,7 @@ docs/
 ├── operators/           # Operator configuration examples
 ├── reference/           # Parameter and API lookups
 ├── api/                 # REST API documentation
-├── integrations/        # Integration-specific docs
+├── integrations/        # Integration-specific docs (OpenLineage, OpenSearch, Milvus, Prefect, Vault)
 ├── internals/           # Internal maintainer docs
 └── deployment/          # Deployment guides
 ```
@@ -138,6 +149,7 @@ docs/
 - **Use the REST API** → [REST API Server](api/REST_API_SERVER.md)
 - **Set up OAuth2 authentication** → [OAuth2 Authentication Guide](api/OAUTH2_AUTHENTICATION.md)
 - **Create a custom connector** → [Create Connector Guide](guides/CREATE_CONNECTOR_GUIDE.md)
+- **Track data lineage** → [OpenLineage Integration Guide](integrations/openlineage/OPENLINEAGE_GUIDE.md)
 - **Secure my deployment** → [Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)
 - **Deploy to production** → [Advanced Configuration](guides/ADVANCED_CONFIGURATION.md)
 - **Troubleshoot an issue** → [Troubleshooting Guide](../TROUBLESHOOTING.md)

@@ -36,9 +36,14 @@ class LRUCache(metaclass=Singleton):
                 self._cache: TTLCache = TTLCache(maxsize=maxsize, ttl=ttl, timer=time.time)
 
                 self._is_initialized = True
-                logger.debug(f"Initialized {self.__class__.__name__} with size {maxsize} and TTL {ttl}")
+                logger.debug(
+                    "Initialized %s with size %s and TTL %s",
+                    self.__class__.__name__,
+                    maxsize,
+                    ttl,
+                )
             else:
-                logger.warning(f"Cache {self.__class__.__name__} already initialized")
+                logger.warning("Cache %s already initialized", self.__class__.__name__)
 
     def get(self, *, cache_key: Hashable) -> Any | None:
         """Get."""
@@ -49,9 +54,9 @@ class LRUCache(metaclass=Singleton):
             container_object = self._cache.get(cache_key)
 
             if container_object is None:
-                logger.info(f"Cache miss for key {cache_key}")
+                logger.info("Cache miss for key %s", cache_key)
             else:
-                logger.info(f"Cache hit for key {cache_key}")
+                logger.info("Cache hit for key %s", cache_key)
 
             return container_object
 
@@ -63,7 +68,7 @@ class LRUCache(metaclass=Singleton):
         with self._cache_lock:
             self._cache[cache_key] = value
 
-            logger.info(f"Current cache size: {len(self._cache)}/{self._cache.maxsize}")
+            logger.info("Current cache size: %s/%s", len(self._cache), self._cache.maxsize)
 
     def remove_keys(self, *, keys: Iterable[Hashable]) -> None:
         """Remove keys."""
@@ -73,7 +78,7 @@ class LRUCache(metaclass=Singleton):
         with self._cache_lock:
             for key in keys:
                 self._cache.pop(key)
-            logger.info(f"Current cache size: {len(self._cache)}/{self._cache.maxsize}")
+            logger.info("Current cache size: %s/%s", len(self._cache), self._cache.maxsize)
 
     def clear(self):
         """Clear all entries from the cache."""
@@ -82,4 +87,4 @@ class LRUCache(metaclass=Singleton):
 
         with self._cache_lock:
             self._cache.clear()
-            logger.debug(f"Cleared cache {self.__class__.__name__}")
+            logger.debug("Cleared cache %s", self.__class__.__name__)

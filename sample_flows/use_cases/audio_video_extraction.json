@@ -14,7 +14,7 @@
       "type": "ingest_source",
       "config": {
         "provider": "filesystem",
-        "connection_params": {"paths": ["./sample_documents"]},
+        "provider_config": {"paths": ["./sample_documents"]},
         "include_filter": "wav,mp3,mp4,m4a"
       }
     },
@@ -64,7 +64,6 @@
         "doc_id_column": "doc_id_hash",
         "embeddings_column": "embeddings",
         "vector_dimension": 768,
-        "create_index": true,
         "provider_config": {
           "index_name": "audio-transcriptions",
           "host": "localhost",

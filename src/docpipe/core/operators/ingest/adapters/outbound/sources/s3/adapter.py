@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """S3 source adapter using boto3."""
 
 import asyncio
@@ -18,6 +21,8 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
+from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -93,7 +98,7 @@ class S3SourceAdapter(DocumentSourcePort):
             # Cache AWS account ID once for all operations
             self._cached_account_id = self._get_aws_account_id(config)
 
-            logger.info(f"Streaming S3 objects from bucket '{config.bucket}' with prefix '{config.prefix}' ")
+            logger.info("Streaming S3 objects from bucket '%s' with prefix '%s' ", config.bucket, config.prefix)
 
             # Process in batches to avoid loading all objects into memory
             batch_size = config.max_concurrent_downloads * 5  # Process 5x concurrency at a time
@@ -105,7 +110,7 @@ class S3SourceAdapter(DocumentSourcePort):
                     try:
                         return await self._download_s3_object(s3_client, config, s3_obj)
                     except Exception as e:
-                        logger.error(f"Failed to download S3 object {s3_obj['Key']}: {e}", exc_info=True)
+                        logger.exception("Failed to download S3 object %s: %s", s3_obj["Key"], e)
                         return None
 
             fetched_count = 0
@@ -119,7 +124,7 @@ class S3SourceAdapter(DocumentSourcePort):
 
                 # Process batch when it reaches batch_size
                 if len(batch) >= batch_size:
-                    logger.info(f"Processing batch of {len(batch)} objects (total listed: {total_listed})")
+                    logger.info("Processing batch of %s objects (total listed: %s)", len(batch), total_listed)
 
                     # Create tasks for this batch
                     tasks = [download_with_semaphore(obj) for obj in batch]
@@ -136,7 +141,7 @@ class S3SourceAdapter(DocumentSourcePort):
 
             # Process remaining objects in final batch
             if batch:
-                logger.info(f"Processing final batch of {len(batch)} objects (total listed: {total_listed})")
+                logger.info("Processing final batch of %s objects (total listed: %s)", len(batch), total_listed)
                 tasks = [download_with_semaphore(obj) for obj in batch]
 
                 # Gather results in order to maintain deterministic ordering
@@ -147,15 +152,17 @@ class S3SourceAdapter(DocumentSourcePort):
                         yield document
 
             logger.info(
-                f"Completed streaming from S3 bucket '{config.bucket}': "
-                f"listed {total_listed} objects, fetched {fetched_count} documents"
+                "Completed streaming from S3 bucket '%s': listed %s objects, fetched %s documents",
+                config.bucket,
+                total_listed,
+                fetched_count,
             )
 
         except (ClientError, BotoCoreError) as e:
-            logger.error(f"S3 error while fetching documents: {e}", exc_info=True)
+            logger.exception("S3 error while fetching documents: %s", e)
             raise
         except Exception as e:
-            logger.error(f"Unexpected error while fetching documents from S3: {e}", exc_info=True)
+            logger.exception("Unexpected error while fetching documents from S3: %s", e)
             raise
 
     async def test_connection(self, config: S3SourceConfig) -> tuple[bool, str]:
@@ -216,8 +223,7 @@ class S3SourceAdapter(DocumentSourcePort):
     def build_config_from_operator_params(
         self,
         *,
-        connection_params: dict,
-        credentials: dict,
+        provider_config: dict,
         included_extensions: list[str] | None = None,
         max_files: int | None = None,
     ) -> S3SourceConfig:
@@ -225,8 +231,7 @@ class S3SourceAdapter(DocumentSourcePort):
         Build S3 configuration from operator parameters.
 
         Args:
-            connection_params: Connection parameters from operator config
-            credentials: Credentials from operator config
+            provider_config: All provider-specific parameters including credentials.
             included_extensions: File extensions to include (optional)
             max_files: Maximum number of files to fetch while listing/downloading (optional)
 
@@ -236,23 +241,18 @@ class S3SourceAdapter(DocumentSourcePort):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
-        # Extract required parameters — credential fields fall back to connection_params
-        # so flows built from operator metadata (which places all fields under connection_params)
-        # work alongside legacy flows that use a separate credentials dict.
-        # Guard against None being passed explicitly (e.g. from UI sending null).
-        credentials = credentials or {}
-        connection_params = connection_params or {}
-        access_key = resolve_env_var(credentials.get("access_key") or connection_params.get("access_key"))
-        secret_key = resolve_env_var(credentials.get("secret_key") or connection_params.get("secret_key"))
-        bucket = resolve_env_var(value=connection_params.get("bucket"))
-        prefix = resolve_env_var(value=connection_params.get("prefix", ""))
+        provider_config = reveal_value(provider_config)
+        access_key = resolve_env_var(provider_config.get("access_key"))
+        secret_key = resolve_env_var(provider_config.get("secret_key"))
+        bucket = resolve_env_var(value=provider_config.get("bucket"))
+        prefix = resolve_env_var(value=provider_config.get("prefix", ""))
 
         if not access_key:
-            raise ValueError("Missing required credential: 'access_key'")
+            raise ValueError("Missing required parameter: 'access_key'")
         if not secret_key:
-            raise ValueError("Missing required credential: 'secret_key'")
+            raise ValueError("Missing required parameter: 'secret_key'")
         if not bucket:
-            raise ValueError("Missing required connection parameter: 'bucket'")
+            raise ValueError("Missing required parameter: 'bucket'")
         # prefix is optional - empty string means scan entire bucket
 
         # Build configuration
@@ -261,18 +261,18 @@ class S3SourceAdapter(DocumentSourcePort):
             "secret_key": secret_key,
             "bucket": bucket,
             "prefix": prefix,
-            "endpoint_url": connection_params.get("endpoint_url"),
-            "region": connection_params.get("region"),
-            "recursive": connection_params.get("recursive", True),
+            "endpoint_url": resolve_env_var(value=provider_config.get("endpoint_url")) or None,
+            "region": provider_config.get("region"),
+            "recursive": provider_config.get("recursive", True),
             "file_extensions": included_extensions or [],
-            "exclude_patterns": connection_params.get("exclude_patterns", []),
-            "max_file_size_mb": connection_params.get("max_file_size_mb"),
-            "skip_hidden_files": connection_params.get("skip_hidden_files", True),
-            "skip_empty_files": connection_params.get("skip_empty_files", True),
-            "max_concurrent_downloads": connection_params.get("max_concurrent_downloads", 20),
-            "download_timeout_seconds": connection_params.get("download_timeout_seconds", 300),
+            "exclude_patterns": provider_config.get("exclude_patterns", []),
+            "max_file_size_mb": provider_config.get("max_file_size_mb"),
+            "skip_hidden_files": provider_config.get("skip_hidden_files", True),
+            "skip_empty_files": provider_config.get("skip_empty_files", True),
+            "max_concurrent_downloads": provider_config.get("max_concurrent_downloads", 20),
+            "download_timeout_seconds": provider_config.get("download_timeout_seconds", 300),
             "max_files": max_files,
-            "verify_expected_bucket_owner": connection_params.get("verify_expected_bucket_owner", False),
+            "verify_expected_bucket_owner": provider_config.get("verify_expected_bucket_owner", False),
         }
 
         return S3SourceConfig(**config_dict)
@@ -346,7 +346,7 @@ class S3SourceAdapter(DocumentSourcePort):
         Yields:
             S3 object metadata dictionaries (filtered)
         """
-        logger.info(f"Listing S3 objects from bucket '{config.bucket}' with prefix '{config.prefix}'")
+        logger.info("Listing S3 objects from bucket '%s' with prefix '%s'", config.bucket, config.prefix)
 
         paginator = s3_client.get_paginator("list_objects_v2")
         pages = paginator.paginate(Bucket=config.bucket, Prefix=config.prefix)
@@ -359,8 +359,11 @@ class S3SourceAdapter(DocumentSourcePort):
             total_listed += len(page_contents)
 
             logger.debug(
-                f"Received S3 page {page_number} with {len(page_contents)} object(s) "
-                f"(total listed: {total_listed}, yielded: {total_yielded})"
+                "Received S3 page %s with %s object(s) (total listed: %s, yielded: %s)",
+                page_number,
+                len(page_contents),
+                total_listed,
+                total_yielded,
             )
 
             if not page_contents:
@@ -374,8 +377,10 @@ class S3SourceAdapter(DocumentSourcePort):
                 yield obj
 
         logger.info(
-            f"Completed listing S3 bucket '{config.bucket}': "
-            f"listed {total_listed} objects, yielded {total_yielded} after filtering"
+            "Completed listing S3 bucket '%s': listed %s objects, yielded %s after filtering",
+            config.bucket,
+            total_listed,
+            total_yielded,
         )
 
     def _should_skip_object(self, obj: dict[str, Any], config: S3SourceConfig) -> bool:
@@ -403,7 +408,7 @@ class S3SourceAdapter(DocumentSourcePort):
         # Skip files exceeding max size
         max_size_bytes = config.get_max_file_size_bytes()
         if max_size_bytes and size > max_size_bytes:
-            logger.debug(f"Skipping {key}: size {size} exceeds max {max_size_bytes} bytes")
+            logger.debug("Skipping %s: size %s exceeds max %s bytes", key, size, max_size_bytes)
             return True
 
         # Skip hidden files/directories
@@ -421,7 +426,7 @@ class S3SourceAdapter(DocumentSourcePort):
             filename = Path(key).name
             for pattern in config.exclude_patterns:
                 if fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(key, pattern):
-                    logger.debug(f"Skipping {key}: matches exclude pattern '{pattern}'")
+                    logger.debug("Skipping %s: matches exclude pattern '%s'", key, pattern)
                     return True
 
         return False
@@ -505,40 +510,37 @@ class S3SourceAdapter(DocumentSourcePort):
                 },
             )
 
-            logger.debug(f"Created document metadata for S3 object: {key} ({size} bytes)")
+            logger.debug("Created document metadata for S3 object: %s (%s bytes)", key, size)
             return document
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            logger.error(f"Failed to get metadata for {key}: S3 error ({error_code}): {e}")
+            logger.error("Failed to get metadata for %s: S3 error (%s): %s", key, error_code, e)
             return None
         except Exception as e:
-            logger.error(f"Failed to process {key}: {e}", exc_info=True)
+            logger.exception("Failed to process %s: %s", key, e)
             return None
 
     def fetch_binary_content(
         self,
         *,
         source_id: str,
-        connection_params: dict[str, Any],
-        credentials: dict[str, Any],
+        provider_config: dict[str, Any],
     ) -> bytes | None:
         """
         Fetch binary content for a specific S3 object on-demand.
 
         Args:
             source_id: S3 URI (s3://bucket/key) or S3 key
-            connection_params: S3 connection parameters (bucket, endpoint_url, region)
-            credentials: S3 credentials (access_key, secret_key)
+            provider_config: All provider-specific parameters including credentials.
 
         Returns:
             bytes | None: Binary content of the S3 object, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
-            # Resolve environment variables in credentials, falling back to
-            # connection_params so callers that store credentials there work too.
-            access_key = resolve_env_var(credentials.get("access_key") or connection_params.get("access_key"))
-            secret_key = resolve_env_var(credentials.get("secret_key") or connection_params.get("secret_key"))
+            access_key = resolve_env_var(provider_config.get("access_key"))
+            secret_key = resolve_env_var(provider_config.get("secret_key"))
 
             if not access_key or not secret_key:
                 logger.error("Missing S3 credentials for fetching %s", source_id)
@@ -550,19 +552,23 @@ class S3SourceAdapter(DocumentSourcePort):
                 bucket = parts[0]
                 key = parts[1] if len(parts) > 1 else ""
             else:
-                bucket_value = resolve_env_var(connection_params.get("bucket"))
+                bucket_value = resolve_env_var(provider_config.get("bucket"))
                 if not bucket_value:
-                    logger.error("Cannot determine S3 bucket from source_id or connection_params")
+                    logger.error("Cannot determine S3 bucket from source_id or provider_config")
                     return None
                 bucket = str(bucket_value)
                 key = source_id
 
-            endpoint_url = resolve_env_var(connection_params.get("endpoint_url"))
-            region = resolve_env_var(connection_params.get("region"))
+            endpoint_url = resolve_env_var(provider_config.get("endpoint_url"))
+            region = resolve_env_var(provider_config.get("region"))
 
             # Reuse cached boto3 client — creating a new client per document causes
             # redundant TCP handshake setup and is the main latency driver here.
-            cache_key = (access_key, endpoint_url or "", region or "")
+            cache_key = (
+                cache_key_digest(namespace="s3_source_client", parts=[access_key, secret_key]),
+                endpoint_url or "",
+                region or "",
+            )
             if cache_key not in self._client_cache:
                 client_kwargs: dict[str, Any] = {
                     "aws_access_key_id": access_key,
@@ -599,11 +605,11 @@ class S3SourceAdapter(DocumentSourcePort):
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            logger.error(f"S3 ClientError ({error_code}) fetching {source_id}: {e}")
+            logger.error("S3 ClientError (%s) fetching %s: %s", error_code, source_id, e)
             return None
         except BotoCoreError as e:
-            logger.error(f"S3 BotoCoreError fetching {source_id}: {e}")
+            logger.error("S3 BotoCoreError fetching %s: %s", source_id, e)
             return None
         except Exception as e:
-            logger.error(f"Unexpected error fetching binary content from S3 {source_id}: {e}", exc_info=True)
+            logger.exception("Unexpected error fetching binary content from S3 %s: %s", source_id, e)
             return None

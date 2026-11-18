@@ -1,8 +1,20 @@
 """Unit tests for OAuth2 provider."""
 
+import base64
+import hashlib
+import hmac
+import json
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qsl
 
+import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.algorithms import RSAAlgorithm
 
 from docpipe.api.auth.models import User
 from docpipe.api.auth.oauth2_config import (
@@ -16,6 +28,16 @@ from docpipe.api.auth.oauth2_provider import (
     GoogleOAuth2Provider,
     get_oauth2_provider,
 )
+from docpipe.exceptions.docpipe_exceptions import ConfigurationError, ExternalServiceError
+
+
+def _raise(exc: Exception):
+    """Build an httpx.MockTransport handler that raises ``exc`` (network-level failure)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exc
+
+    return handler
 
 
 @pytest.fixture
@@ -345,3 +367,341 @@ class TestGetOAuth2Provider:
         provider = get_oauth2_provider(config)
 
         assert isinstance(provider, GenericOIDCProvider)
+
+
+# ---------------------------------------------------------------------------
+# OIDC ID token validation with real RSA keys
+# ---------------------------------------------------------------------------
+
+_KID = "test-kid"
+_ISSUER = "https://provider.com"
+_CLIENT_ID = "test-client-id"
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
+def _rsa_key_pair() -> tuple[str, str]:
+    """Return (private PEM, public PEM) for a fresh RSA key."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    public_pem = (
+        key.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
+    return private_pem, public_pem
+
+
+@pytest.fixture(scope="module")
+def signing_key() -> dict[str, Any]:
+    """The provider's signing key and the JWKS that publishes it."""
+    private_pem, public_pem = _rsa_key_pair()
+    public_key = cast(rsa.RSAPublicKey, serialization.load_pem_public_key(public_pem.encode()))
+    public_jwk = json.loads(RSAAlgorithm.to_jwk(public_key))
+    public_jwk["kid"] = _KID
+    return {"private_pem": private_pem, "public_pem": public_pem, "jwks": {"keys": [public_jwk]}}
+
+
+@pytest.fixture(scope="module")
+def attacker_private_pem() -> str:
+    return _rsa_key_pair()[0]
+
+
+def _claims(**overrides: Any) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    claims: dict[str, Any] = {
+        "iss": _ISSUER,
+        "aud": _CLIENT_ID,
+        "sub": "user-123",
+        "email": "alice@example.com",
+        "name": "Alice Example",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=5)).timestamp()),
+    }
+    claims.update(overrides)
+    return claims
+
+
+def _sign_rs256(claims: dict[str, Any], *, private_pem: str, kid: str = _KID) -> str:
+    return jwt.encode(claims, private_pem, algorithm="RS256", headers={"kid": kid})
+
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _unsigned_token(header: dict[str, Any], claims: dict[str, Any]) -> str:
+    return f"{_b64url(json.dumps(header).encode())}.{_b64url(json.dumps(claims).encode())}"
+
+
+@pytest.fixture
+def oidc_provider(*, oauth2_config, signing_key) -> GenericOIDCProvider:
+    """Generic provider whose JWKS is already cached (no HTTP)."""
+    provider = GenericOIDCProvider(oauth2_config)
+    provider._jwks_cache = signing_key["jwks"]
+    provider._jwks_cache_time = datetime.now(UTC)
+    return provider
+
+
+class TestValidateIdToken:
+    """``validate_id_token`` must only accept untampered RS256 tokens for our client and issuer."""
+
+    async def test_valid_token_returns_claims(self, *, oidc_provider, signing_key):
+        token = _sign_rs256(_claims(), private_pem=signing_key["private_pem"])
+
+        payload = await oidc_provider.validate_id_token(token)
+
+        assert payload["sub"] == "user-123"
+        assert payload["email"] == "alice@example.com"
+
+    async def test_audience_defaults_to_client_id(self, *, oidc_provider, signing_key):
+        oidc_provider.config.oidc_audience = ""
+        token = _sign_rs256(_claims(aud=_CLIENT_ID), private_pem=signing_key["private_pem"])
+
+        payload = await oidc_provider.validate_id_token(token)
+
+        assert payload["aud"] == _CLIENT_ID
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            pytest.param({"aud": "some-other-client"}, id="wrong_audience"),
+            pytest.param({"iss": "https://evil.example.com"}, id="wrong_issuer"),
+            pytest.param({"exp": int((datetime.now(UTC) - timedelta(minutes=5)).timestamp())}, id="expired"),
+        ],
+    )
+    async def test_claim_violations_are_rejected(self, *, oidc_provider, signing_key, overrides):
+        token = _sign_rs256(_claims(**overrides), private_pem=signing_key["private_pem"])
+
+        with pytest.raises(ExternalServiceError, match="ID token validation failed"):
+            await oidc_provider.validate_id_token(token)
+
+    async def test_unknown_kid_raises_configuration_error(self, *, oidc_provider, signing_key):
+        token = _sign_rs256(_claims(), private_pem=signing_key["private_pem"], kid="rotated-away")
+
+        with pytest.raises(ConfigurationError, match="No matching key found for kid: rotated-away"):
+            await oidc_provider.validate_id_token(token)
+
+    async def test_token_signed_by_foreign_key_is_rejected(self, *, oidc_provider, attacker_private_pem):
+        token = _sign_rs256(_claims(), private_pem=attacker_private_pem)
+
+        with pytest.raises(ExternalServiceError, match="ID token validation failed"):
+            await oidc_provider.validate_id_token(token)
+
+    async def test_tampered_payload_is_rejected(self, *, oidc_provider, signing_key):
+        token = _sign_rs256(_claims(), private_pem=signing_key["private_pem"])
+        header, _, signature = token.split(".")
+        forged = _b64url(json.dumps(_claims(email="admin@example.com")).encode())
+
+        with pytest.raises(ExternalServiceError, match="ID token validation failed"):
+            await oidc_provider.validate_id_token(f"{header}.{forged}.{signature}")
+
+    async def test_alg_none_is_rejected(self, oidc_provider):
+        token = _unsigned_token({"alg": "none", "kid": _KID}, _claims()) + "."
+
+        with pytest.raises(ExternalServiceError, match="ID token validation failed"):
+            await oidc_provider.validate_id_token(token)
+
+    async def test_hs256_key_confusion_with_public_key_is_rejected(self, *, oidc_provider, signing_key):
+        """Classic RS256->HS256 confusion: HMAC-sign with the *public* key as the secret."""
+        signing_input = _unsigned_token({"alg": "HS256", "kid": _KID, "typ": "JWT"}, _claims())
+        signature = hmac.new(signing_key["public_pem"].encode(), signing_input.encode(), hashlib.sha256).digest()
+        token = f"{signing_input}.{_b64url(signature)}"
+
+        with pytest.raises(ExternalServiceError, match="ID token validation failed"):
+            await oidc_provider.validate_id_token(token)
+
+    async def test_malformed_token_is_rejected(self, oidc_provider):
+        with pytest.raises(ExternalServiceError, match="ID token validation failed"):
+            await oidc_provider.validate_id_token("not-a-jwt")
+
+    async def test_jwks_fetch_failure_propagates(self, oauth2_config):
+        provider = GenericOIDCProvider(oauth2_config)
+
+        with patch.object(
+            provider, "get_jwks", new_callable=AsyncMock, side_effect=ExternalServiceError("JWKS fetch failed: boom")
+        ):
+            with pytest.raises(ExternalServiceError, match="JWKS fetch failed: boom"):
+                await provider.validate_id_token("irrelevant")
+
+    async def test_unexpected_error_is_wrapped(self, *, oauth2_config, signing_key):
+        provider = GenericOIDCProvider(oauth2_config)
+        token = _sign_rs256(_claims(), private_pem=signing_key["private_pem"])
+
+        # A malformed JWKS document (list instead of object) is not a PyJWTError.
+        with patch.object(provider, "get_jwks", new_callable=AsyncMock, return_value=["not", "a", "jwks"]):
+            with pytest.raises(ExternalServiceError, match=r"^Token validation failed"):
+                await provider.validate_id_token(token)
+
+
+# ---------------------------------------------------------------------------
+# HTTP interactions through httpx.MockTransport (real httpx client, no network)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_http(monkeypatch):
+    """Route every ``httpx.AsyncClient`` to a MockTransport handler.
+
+    Usage: ``requests = mock_http(handler)``; ``requests`` collects every request sent.
+    """
+
+    def install(handler) -> list[httpx.Request]:
+        seen: list[httpx.Request] = []
+
+        def recording_handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return handler(request)
+
+        transport = httpx.MockTransport(recording_handler)
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: _REAL_ASYNC_CLIENT(transport=transport))
+        return seen
+
+    return install
+
+
+class TestProviderHttpInteractions:
+    """Discovery, JWKS, userinfo and token endpoint calls, including failure modes."""
+
+    async def test_jwks_uri_is_resolved_through_discovery(self, *, oauth2_config, signing_key, mock_http):
+        oauth2_config.oauth2_jwks_uri = ""
+        oauth2_config.oauth2_discovery_url = "https://provider.com/.well-known/openid-configuration"
+        responses = {
+            "/.well-known/openid-configuration": {"jwks_uri": "https://provider.com/discovered-jwks"},
+            "/discovered-jwks": signing_key["jwks"],
+        }
+        requests = mock_http(lambda request: httpx.Response(200, json=responses[request.url.path]))
+        provider = GenericOIDCProvider(oauth2_config)
+
+        jwks = await provider.get_jwks()
+
+        assert jwks == signing_key["jwks"]
+        assert [str(r.url) for r in requests] == [
+            "https://provider.com/.well-known/openid-configuration",
+            "https://provider.com/discovered-jwks",
+        ]
+
+    async def test_jwks_missing_from_discovery_raises_configuration_error(self, *, oauth2_config, mock_http):
+        oauth2_config.oauth2_jwks_uri = ""
+        oauth2_config.oauth2_discovery_url = "https://provider.com/.well-known/openid-configuration"
+        mock_http(lambda request: httpx.Response(200, json={"issuer": _ISSUER}))
+
+        with pytest.raises(ConfigurationError, match="JWKS URI not configured or discovered"):
+            await GenericOIDCProvider(oauth2_config).get_jwks()
+
+    async def test_stale_jwks_cache_is_refreshed(self, *, oauth2_config, signing_key, mock_http):
+        requests = mock_http(lambda request: httpx.Response(200, json=signing_key["jwks"]))
+        provider = GenericOIDCProvider(oauth2_config)
+        provider._jwks_cache = {"keys": []}
+        provider._jwks_cache_time = datetime.now(UTC) - timedelta(hours=2)
+
+        jwks = await provider.get_jwks()
+
+        assert jwks == signing_key["jwks"]
+        assert len(requests) == 1
+
+    async def test_jwks_endpoint_error_raises_external_service_error(self, *, oauth2_config, mock_http):
+        mock_http(lambda request: httpx.Response(503))
+
+        with pytest.raises(ExternalServiceError, match="JWKS fetch failed"):
+            await GenericOIDCProvider(oauth2_config).get_jwks()
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(lambda request: httpx.Response(500), id="http_500"),
+            pytest.param(lambda request: httpx.Response(200, text="<html>not json</html>"), id="not_json"),
+            pytest.param(_raise(httpx.ConnectTimeout("timed out")), id="timeout"),
+        ],
+    )
+    async def test_discovery_failures_raise_external_service_error(self, *, oauth2_config, mock_http, failure):
+        oauth2_config.oauth2_discovery_url = "https://provider.com/.well-known/openid-configuration"
+        mock_http(failure)
+        provider = GenericOIDCProvider(oauth2_config)
+
+        with pytest.raises(ExternalServiceError, match="OIDC discovery failed"):
+            await provider.discover_endpoints()
+
+        assert provider._discovery_cache is None
+
+    async def test_userinfo_endpoint_resolved_through_discovery_with_bearer_header(self, *, oauth2_config, mock_http):
+        oauth2_config.oauth2_userinfo_endpoint = ""
+        oauth2_config.oauth2_discovery_url = "https://provider.com/.well-known/openid-configuration"
+        responses = {
+            "/.well-known/openid-configuration": {"userinfo_endpoint": "https://provider.com/me"},
+            "/me": {"sub": "user-123", "email": "alice@example.com"},
+        }
+        requests = mock_http(lambda request: httpx.Response(200, json=responses[request.url.path]))
+
+        userinfo = await GenericOIDCProvider(oauth2_config).get_user_info("access-token-xyz")
+
+        assert userinfo == {"sub": "user-123", "email": "alice@example.com"}
+        assert str(requests[-1].url) == "https://provider.com/me"
+        assert requests[-1].headers["Authorization"] == "Bearer access-token-xyz"
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(lambda request: httpx.Response(401, json={"error": "invalid_token"}), id="http_401"),
+            pytest.param(_raise(httpx.ConnectError("connection refused")), id="network_error"),
+        ],
+    )
+    async def test_userinfo_failures_raise_external_service_error(self, *, oauth2_config, mock_http, failure):
+        mock_http(failure)
+
+        with pytest.raises(ExternalServiceError, match="Userinfo fetch failed"):
+            await GenericOIDCProvider(oauth2_config).get_user_info("expired-access-token")
+
+    async def test_token_exchange_posts_authorization_code_grant(self, *, oauth2_config, mock_http):
+        requests = mock_http(lambda request: httpx.Response(200, json={"access_token": "at", "id_token": "it"}))
+
+        token_data = await GenericOIDCProvider(oauth2_config).exchange_code_for_token("auth-code-123")
+
+        assert token_data == {"access_token": "at", "id_token": "it"}
+        (request,) = requests
+        assert request.method == "POST"
+        assert str(request.url) == "https://provider.com/token"
+        assert dict(parse_qsl(request.content.decode())) == {
+            "client_id": "test-client-id",
+            "client_secret": "test-secret",  # pragma: allowlist secret
+            "code": "auth-code-123",
+            "redirect_uri": "http://localhost:8000/callback",
+            "grant_type": "authorization_code",
+        }
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(lambda request: httpx.Response(400, json={"error": "invalid_grant"}), id="invalid_grant"),
+            pytest.param(_raise(httpx.ReadTimeout("timed out")), id="timeout"),
+            pytest.param(lambda request: httpx.Response(200, text="not json"), id="not_json"),
+        ],
+    )
+    async def test_token_exchange_failures_raise_external_service_error(self, *, oauth2_config, mock_http, failure):
+        mock_http(failure)
+
+        with pytest.raises(ExternalServiceError, match="Token exchange failed"):
+            await GenericOIDCProvider(oauth2_config).exchange_code_for_token("bad-code")
+
+    async def test_token_exchange_error_does_not_leak_client_secret(self, *, oauth2_config, mock_http):
+        mock_http(lambda request: httpx.Response(400, json={"error": "invalid_grant"}))
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            await GenericOIDCProvider(oauth2_config).exchange_code_for_token("bad-code")
+
+        assert "test-secret" not in str(exc_info.value)
+
+    async def test_google_login_end_to_end_with_real_signature(self, *, google_config, signing_key, mock_http):
+        """Full Google extraction: JWKS served over (mocked) HTTP, real RS256 verification."""
+        mock_http(lambda request: httpx.Response(200, json=signing_key["jwks"]))
+        id_token = _sign_rs256(
+            _claims(iss="https://accounts.google.com", aud="google-client-id", email="bob@gmail.com", name="Bob"),
+            private_pem=signing_key["private_pem"],
+        )
+
+        user = await GoogleOAuth2Provider(google_config).extract_user_from_token({"id_token": id_token})
+
+        assert user == User(username="bob@gmail.com", email="bob@gmail.com", full_name="Bob")

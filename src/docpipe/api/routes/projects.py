@@ -113,6 +113,14 @@ _TagsQuery = Annotated[
     ),
 ]
 
+_IsElyraQuery = Annotated[
+    bool | None,
+    Query(
+        description="Filter by format: true=Elyra only, false=Authoring only, null=All formats",
+        examples=[True, False],
+    ),
+]
+
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 
 
@@ -408,6 +416,7 @@ async def list_project_flows(
     name: _NameQuery = None,
     tags: _TagsQuery = None,
     is_hidden: bool | None = Query(default=None, description="Filter by visibility status"),
+    is_elyra: _IsElyraQuery = None,
 ) -> PaginatedProjectFlowResponse:
     """List flows belonging to a project, each enriched with aggregated job run status.
 
@@ -436,7 +445,7 @@ async def list_project_flows(
         PaginatedProjectFlowResponse with flows, total_count, offset, limit,
         and first/next/prev navigation links.
     """
-    logger.debug("Listing flows for project %s (offset=%d limit=%d)", project_id, offset, limit)
+    logger.debug("Listing flows for project %s (offset=%d limit=%d, is_elyra=%s)", project_id, offset, limit, is_elyra)
 
     flows, summaries, total = service.get_project_flows_with_run_summary(
         project_id=project_id,
@@ -445,6 +454,7 @@ async def list_project_flows(
         name_filter=name,
         tags_filter=tags,
         is_hidden=is_hidden,
+        is_elyra=is_elyra,
     )
 
     first_link = str(request.url.include_query_params(offset=0, limit=limit))

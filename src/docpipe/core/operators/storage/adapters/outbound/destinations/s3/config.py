@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for the S3 destination adapter."""
 
 import mimetypes
@@ -13,6 +16,13 @@ class S3DestinationConfig(BaseModel):
     Credentials are expected to be resolved from environment variables before
     constructing this model (see build_config_from_operator_params).
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "access_key",
+        "secret_key",
+        "endpoint_url",
+    )
 
     # AWS credentials
     access_key: str = Field(..., description="AWS access key ID or S3-compatible access key")

@@ -1,8 +1,7 @@
 {
   "parameters": [
     { "id": "provider" },
-    { "id": "connection_params" },
-    { "id": "credentials" },
+    { "id": "provider_config" },
     { "id": "max_files" },
     { "id": "include_filter" },
     { "id": "exclude_filter" },
@@ -14,8 +13,7 @@
     "id": "ingest_source_cpd_uihints",
     "parameter_info": [
       { "parameter_ref": "provider" },
-      { "parameter_ref": "connection_params" },
-      { "parameter_ref": "credentials" },
+      { "parameter_ref": "provider_config" },
       { "parameter_ref": "max_files" },
       { "parameter_ref": "include_filter" },
       { "parameter_ref": "exclude_filter" },

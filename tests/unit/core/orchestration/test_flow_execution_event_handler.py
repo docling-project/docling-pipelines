@@ -390,3 +390,235 @@ class TestUpdateFrameworkStatus:
         mock_job_run_manager.update_job_run_status.side_effect = RuntimeError("Framework error")
         # Should not raise
         handler._update_framework_status(status="Running")
+
+
+# ---------------------------------------------------------------------------
+# Flow-identity tests  (added by fix-job-stats-flow-identity)
+# ---------------------------------------------------------------------------
+# Covers all three execution paths from the event-handler's perspective:
+#
+#   PATH 1 - API  : session_info.flow_id = asset UUID (patched before submit)
+#   PATH 2 - CLI  : session_info.flow_id = job_id slug (set by run_command_line_executor)
+#   PATH 3 - Library: session_info.flow_id = UUID or job_id (set by DocpipeFlowManager)
+#
+# The event handler is path-agnostic: it reads self.flow_id from SessionInfo
+# during initialize() and forwards it unchanged into start_tracking_job.
+# ---------------------------------------------------------------------------
+
+
+class TestFlowIdentityEventHandler:
+    """
+    Verifies that FlowExecutionEventHandler.before_flow_execution_start calls
+    start_tracking_job with:
+      - flow_id = self.flow_id (whatever was set during initialize)
+      - flow_name = flow_def["name"] when present, None when absent
+    Covers all three execution paths by varying self.flow_id.
+    """
+
+    # ------------------------------------------------------------------
+    # PATH 1 — API: event handler receives asset UUID as flow_id
+    # ------------------------------------------------------------------
+
+    def test_api_path_start_tracking_uses_asset_uuid(self, handler, mock_job_stats_service):
+        """
+        After session_info.flow_id is patched to the asset UUID in _create_job_run,
+        the event handler must forward that UUID verbatim to start_tracking_job.
+        """
+        handler.flow_id = "5f429668-ded4-41b5-80b9-f1d6278dc07a"
+        flow_def = {DocpipeConstants.NAME: "flow_06_oct_2026_11_16_PM-jyoti", DocpipeConstants.DAG: []}
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        mock_job_stats_service.start_tracking_job.assert_called_once_with(
+            job_id="job-123",
+            job_run_id="run-456",
+            flow_id="5f429668-ded4-41b5-80b9-f1d6278dc07a",
+            flow_name="flow_06_oct_2026_11_16_PM-jyoti",
+        )
+
+    def test_api_path_flow_id_not_overwritten_by_flow_name(self, handler, mock_job_stats_service):
+        """
+        flow_id must remain the asset UUID — not be replaced by the human name.
+        """
+        handler.flow_id = "5f429668-ded4-41b5-80b9-f1d6278dc07a"
+        flow_def = {DocpipeConstants.NAME: "My Flow Name", DocpipeConstants.DAG: []}
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_id"] == "5f429668-ded4-41b5-80b9-f1d6278dc07a"
+        assert call_kwargs["flow_name"] == "My Flow Name"
+
+    # ------------------------------------------------------------------
+    # PATH 2 — CLI: event handler receives job_id slug as flow_id
+    # ------------------------------------------------------------------
+
+    def test_cli_path_start_tracking_uses_job_id_slug(self, handler, mock_job_stats_service):
+        """
+        CLI sets session_info.flow_id = flow_def.get("flow_id", job_id) which
+        resolves to the job_id slug when the compiled flow has no flow_id key.
+        The event handler must forward that slug as flow_id.
+        """
+        handler.flow_id = "my-flow-a3f2b1"  # job_id slug set by CLI
+        flow_def = {DocpipeConstants.NAME: "my-flow", DocpipeConstants.DAG: []}
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_id"] == "my-flow-a3f2b1"
+        assert call_kwargs["flow_name"] == "my-flow"
+
+    def test_cli_path_flow_name_from_flow_def_name(self, handler, mock_job_stats_service):
+        """
+        The CLI does not call start_tracking_job directly. Tracking happens only
+        in before_flow_execution_start. flow_name must come from flow_def["name"],
+        not from self.flow_id.
+        """
+        handler.flow_id = "my-flow-a3f2b1"
+        flow_def = {DocpipeConstants.NAME: "my-flow", DocpipeConstants.DAG: []}
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        # Exactly one call — CLI has no QUEUED pre-call from _create_job_run
+        assert mock_job_stats_service.start_tracking_job.call_count == 1
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_name"] == "my-flow"
+
+    # ------------------------------------------------------------------
+    # PATH 3 — Library: event handler receives UUID or job_id as flow_id
+    # ------------------------------------------------------------------
+
+    def test_library_path_start_tracking_uses_uuid_flow_id(self, handler, mock_job_stats_service):
+        """
+        DocpipeFlowManager sets session_info.flow_id = flow_id or flow_def_flow_id or job_id.
+        When no explicit flow_id is given, this resolves to a UUID job_id.
+        The event handler must forward that UUID as flow_id.
+        """
+        handler.flow_id = "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a"  # UUID job_id
+        flow_def = {DocpipeConstants.NAME: "My Notebook Flow", DocpipeConstants.DAG: []}
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_id"] == "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a"
+        assert call_kwargs["flow_name"] == "My Notebook Flow"
+
+    # ------------------------------------------------------------------
+    # Edge cases common to all paths
+    # ------------------------------------------------------------------
+
+    def test_flow_id_falls_back_to_unknown_when_none(self, handler, mock_job_stats_service):
+        """
+        When self.flow_id is None (session_info was never patched), the event
+        handler must use the literal string "unknown" rather than passing None.
+        """
+        handler.flow_id = None
+        flow_def = {DocpipeConstants.NAME: "Some Flow", DocpipeConstants.DAG: []}
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_id"] == "unknown"
+        assert call_kwargs["flow_name"] == "Some Flow"
+
+    def test_flow_name_is_none_when_flow_def_has_no_name(self, handler, mock_job_stats_service):
+        """
+        When flow_def exists but has no "name" key, flow_name must be None —
+        not raised, not defaulted to self.flow_id.
+        """
+        handler.flow_id = "my-flow-slug"
+        flow_def: dict = {DocpipeConstants.DAG: []}  # no "name" key
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=flow_def)
+
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_id"] == "my-flow-slug"
+        assert call_kwargs["flow_name"] is None
+
+    def test_flow_name_is_none_when_flow_def_absent(self, handler, mock_job_stats_service):
+        """
+        When flow_def is None entirely, flow_name must be None.
+        """
+        handler.flow_id = "my-flow-slug"
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def=None)
+
+        call_kwargs = mock_job_stats_service.start_tracking_job.call_args.kwargs
+        assert call_kwargs["flow_id"] == "my-flow-slug"
+        assert call_kwargs["flow_name"] is None
+
+    def test_start_tracking_job_not_called_when_job_is_cancelling(self, handler, mock_job_stats_service):
+        """
+        If the job is being cancelled, start_tracking_job must not be called
+        regardless of the flow_id value.
+        """
+        mock_job_stats_service.cancel_job_run_if_cancelling.return_value = True
+        handler.flow_id = "any-flow-id"
+
+        handler.before_flow_execution_start(orchestrator=MagicMock(), flow_def={DocpipeConstants.NAME: "My Flow"})
+
+        mock_job_stats_service.start_tracking_job.assert_not_called()
+
+
+class TestFlowIdentityInitialize:
+    """
+    Verifies that FlowExecutionEventHandler.initialize() reads flow_id from
+    the current thread's SessionInfo, not from any hard-coded or default value.
+    Covers all three paths by varying the SessionInfo.flow_id value.
+    """
+
+    @patch("docpipe.core.orchestration.flow_execution_event_handler.get_session_info")
+    def test_initialize_reads_flow_id_from_session_info_api_path(self, mock_get_session_info):
+        """PATH 1 — API: session_info carries asset UUID after the patch in _create_job_run."""
+        from docpipe.core.models.session_info import SessionInfo
+
+        session = SessionInfo(flow_id="5f429668-ded4-41b5-80b9-f1d6278dc07a")
+        mock_get_session_info.return_value = session
+
+        h = FlowExecutionEventHandler()
+        h.initialize(job_id="job-1", job_run_id="run-1", common_log_arguments={})
+
+        assert h.flow_id == "5f429668-ded4-41b5-80b9-f1d6278dc07a"
+
+    @patch("docpipe.core.orchestration.flow_execution_event_handler.get_session_info")
+    def test_initialize_reads_flow_id_from_session_info_cli_path(self, mock_get_session_info):
+        """PATH 2 — CLI: session_info carries job_id slug."""
+        from docpipe.core.models.session_info import SessionInfo
+
+        session = SessionInfo(flow_id="my-flow-a3f2b1")
+        mock_get_session_info.return_value = session
+
+        h = FlowExecutionEventHandler()
+        h.initialize(job_id="my-flow-a3f2b1", job_run_id="run-1", common_log_arguments={})
+
+        assert h.flow_id == "my-flow-a3f2b1"
+
+    @patch("docpipe.core.orchestration.flow_execution_event_handler.get_session_info")
+    def test_initialize_reads_flow_id_from_session_info_library_path(self, mock_get_session_info):
+        """PATH 3 — Library: session_info carries UUID (job_id when no explicit flow_id)."""
+        from docpipe.core.models.session_info import SessionInfo
+
+        session = SessionInfo(flow_id="d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a")
+        mock_get_session_info.return_value = session
+
+        h = FlowExecutionEventHandler()
+        h.initialize(job_id="d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a", job_run_id="run-1", common_log_arguments={})
+
+        assert h.flow_id == "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a"
+
+    @patch("docpipe.core.orchestration.flow_execution_event_handler.get_session_info")
+    def test_initialize_sets_flow_id_none_when_session_has_no_flow_id(self, mock_get_session_info):
+        """
+        When session_info.flow_id is None (e.g. API path before the fix was applied to
+        a given codepath), h.flow_id must be None — before_flow_execution_start will then
+        substitute "unknown".
+        """
+        from docpipe.core.models.session_info import SessionInfo
+
+        session = SessionInfo(flow_id=None)
+        mock_get_session_info.return_value = session
+
+        h = FlowExecutionEventHandler()
+        h.initialize(job_id="job-1", job_run_id="run-1", common_log_arguments={})
+
+        assert h.flow_id is None

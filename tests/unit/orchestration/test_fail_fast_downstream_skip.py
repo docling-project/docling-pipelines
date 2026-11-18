@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for fail-fast mode downstream operator skipping.
 
@@ -17,6 +20,17 @@ from docpipe.core.orchestration.abstract_orchestrator import AbstractOrchestrato
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults
 
 
+class _StubOperator:
+    """Operator stand-in: the orchestrator reads declared secret fields from the operator class."""
+
+    category = Mock(value="functional")
+
+    @staticmethod
+    def get_metadata() -> dict[str, Any]:
+        """Return metadata that declares no secret fields."""
+        return {}
+
+
 class TestFailFastDownstreamSkip:
     """Test suite for fail-fast mode downstream operator skipping."""
 
@@ -33,6 +47,11 @@ class TestFailFastDownstreamSkip:
         }
         orchestrator.logger = Mock()
         orchestrator.flow_execution_event_handler = Mock()
+        # Instance attributes added by lineage wiring — must be set explicitly on
+        # spec-bound mocks because spec= inspects the class, not __init__ assignments.
+        orchestrator.flow_id = None
+        orchestrator.flow_name = ""
+        orchestrator._observer = None
 
         # Make _execute_step and its helpers use the real implementations
         orchestrator._execute_step = AbstractOrchestrator._execute_step.__get__(orchestrator)
@@ -154,7 +173,7 @@ class TestFailFastDownstreamSkip:
 
         # Mock the executor and execution
         mock_executor = Mock()
-        mock_executor.get_operator.return_value = Mock(category=Mock(value="functional"))
+        mock_executor.get_operator.return_value = _StubOperator()
         mock_orchestrator.create_executor.return_value = mock_executor
 
         # Mock successful execution - use "name" column for PyArrow table

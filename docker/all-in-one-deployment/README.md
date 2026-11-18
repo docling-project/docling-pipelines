@@ -2,6 +2,8 @@
 
 This directory contains a simplified Docker Compose configuration for running Docling Pipelines with all required services in a single deployment.
 
+> **⚠️ Beta notice:** This deployment includes the Docling Pipelines web UI, which is **experimental and not yet production-ready**. The UI may change significantly between releases. For production workloads, use the CLI, Python API, or REST API directly.
+
 ## Quick Start
 
 ### Prerequisites

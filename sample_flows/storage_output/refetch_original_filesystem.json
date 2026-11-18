@@ -15,8 +15,7 @@
         "provider_config": {
           "paths": ["/data/source/documents"],
           "recursive": true
-        },
-        "credentials": {}
+        }
       }
     },
     {

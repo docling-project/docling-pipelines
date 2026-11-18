@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import json
 import unittest
 
@@ -15,6 +18,7 @@ from docpipe.utils.core.strings import (
     get_truncated_text,
     is_null_or_empty,
     split_text_into_chunks,
+    trim_whitespace_span,
 )
 from docpipe.utils.core.validation import (
     is_date_time_as_per_format,
@@ -294,6 +298,37 @@ class TestIsNullOrEmpty(unittest.TestCase):
         """Test with non-empty string."""
         self.assertFalse(is_null_or_empty("hello"))
         self.assertFalse(is_null_or_empty(" hello "))
+
+
+class TestTrimWhitespaceSpan(unittest.TestCase):
+    """Test the trim_whitespace_span function."""
+
+    def test_trims_leading_and_trailing_spaces(self):
+        """Spaces on both sides are excluded from the span."""
+        text = "  hello  "
+        start, end = trim_whitespace_span(text=text, start=0, end=len(text))
+        self.assertEqual((start, end), (2, 7))
+        self.assertEqual(text[start:end], "hello")
+
+    def test_trims_newlines_and_tabs_inside_a_larger_text(self):
+        """Offsets point into the original text, and newlines and tabs count as whitespace."""
+        text = "a\n\tb c \n"
+        start, end = trim_whitespace_span(text=text, start=1, end=8)
+        self.assertEqual(text[start:end], "b c")
+
+    def test_leaves_span_without_surrounding_whitespace_unchanged(self):
+        """A span that starts and ends on non-whitespace keeps its offsets."""
+        self.assertEqual(trim_whitespace_span(text="already", start=0, end=7), (0, 7))
+
+    def test_collapses_whitespace_only_span(self):
+        """A whitespace-only span collapses to an empty span inside its bounds."""
+        start, end = trim_whitespace_span(text="x   y", start=1, end=4)
+        self.assertEqual(start, end)
+        self.assertTrue(1 <= start <= 4)
+
+    def test_empty_span_stays_empty(self):
+        """An empty span is returned unchanged."""
+        self.assertEqual(trim_whitespace_span(text="", start=0, end=0), (0, 0))
 
 
 class TestGetListFromMap(unittest.TestCase):

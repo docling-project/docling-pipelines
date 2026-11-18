@@ -10,7 +10,7 @@ Exception Handling:
 """
 
 import logging
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from docpipe.core.assets.common.application.services.asset_service import AssetService
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
@@ -22,6 +22,9 @@ from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
 )
+
+if TYPE_CHECKING:
+    from docpipe.core.job_management.domain.ports.job_stats_service import JobStatsService
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +57,21 @@ class FlowService(AssetService[Flow]):
     # Fields that cannot be modified after creation
     PROTECTED_FIELDS: ClassVar[set[str]] = {"flow_id", "created_on", "created_by"}
 
-    def __init__(self, *, repository: AssetRepository[Flow]):
+    def __init__(
+        self,
+        *,
+        repository: AssetRepository[Flow],
+        job_stats_service: "JobStatsService | None" = None,
+    ):
         """Initialize the service with a flow repository.
 
         Args:
             repository: Flow repository implementation (LocalFlowRepository or CamsFlowRepository)
+            job_stats_service: Optional job stats service used to cascade-delete job runs
+                when a flow is deleted.  When None, job runs are not deleted.
         """
         super().__init__(repository=repository)
+        self._job_stats_service = job_stats_service
         logger.debug("FlowService initialized with repository: %s", type(repository).__name__)
 
     def _transform_authoring_updates(self, *, updates: dict[str, Any], existing_flow: Flow) -> dict[str, Any]:
@@ -243,7 +254,7 @@ class FlowService(AssetService[Flow]):
             logger.error("Flow validation failed: %s", exc)
             raise FlowInvalidDataException(f"Invalid flow data: {exc!s}") from exc
 
-        logger.info(f"Creating flow with name: {flow.name} (format: {'Elyra' if is_elyra else 'Authoring'})")
+        logger.info("Creating flow with name: %s (format: %s)", flow.name, "Elyra" if is_elyra else "Authoring")
 
         if self._repository.exists_by_name(name=flow.name):
             logger.warning("Attempted to create flow with existing name: %s", flow.name)
@@ -427,9 +438,13 @@ class FlowService(AssetService[Flow]):
         Note:
             - Deletion is permanent and cannot be undone
             - Now raises FlowNotFoundException instead of returning False for missing flows
+            - Cascades to delete all associated job runs when job_stats_service is set
         """
         # Delegate to inherited delete() from AssetService
-        return self.delete(asset_id=flow_id)
+        result = self.delete(asset_id=flow_id)
+        if result:
+            self._delete_job_runs_for_flow(flow_id)
+        return result
 
     def bulk_delete_flows(self, flow_ids: list[str]) -> dict[str, Any]:
         """Delete multiple flows by their IDs in a single operation.
@@ -486,6 +501,10 @@ class FlowService(AssetService[Flow]):
         # Delegate to repository's bulk_delete
         result = self._repository.bulk_delete(asset_ids=flow_ids)
 
+        # Cascade-delete job runs for every successfully deleted flow
+        for flow_id in result.get("deleted", []):
+            self._delete_job_runs_for_flow(flow_id)
+
         logger.info(
             "Bulk delete completed: %d deleted, %d failed out of %d requested",
             result["total_deleted"],
@@ -494,6 +513,28 @@ class FlowService(AssetService[Flow]):
         )
 
         return result
+
+    def _delete_job_runs_for_flow(self, flow_id: str) -> None:
+        """Cascade-delete all job runs for a flow after it has been removed.
+
+        Silently skips if no job_stats_service is configured.  Failures are
+        logged as warnings so a job-stats error never blocks a flow delete.
+
+        Args:
+            flow_id: UUID of the deleted flow.
+        """
+        if self._job_stats_service is None:
+            return
+        try:
+            deleted = self._job_stats_service.delete_job_runs_by_job_id(job_id=flow_id)
+            if deleted:
+                logger.info("Cascade-deleted %d job run(s) for flow %s", deleted, flow_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not cascade-delete job runs for flow %s: %s",
+                flow_id,
+                exc,
+            )
 
     def list_flows(
         self,
@@ -575,6 +616,13 @@ class FlowService(AssetService[Flow]):
         all_flows = self._repository.find_all()
         filtered_flows = self._filter_flows(all_flows, name_filter, tags_filter, is_hidden, container_id)
         filtered_flows = self._filter_flows_by_format(flows=filtered_flows, is_elyra=is_elyra)
+
+        # Sort newest-first (most recently modified at top) using modified_on / updated_at
+        def _sort_key(flow: Flow) -> str:
+            ts = flow.get_updated_at() or flow.get_created_at()
+            return ts.isoformat() if ts is not None else ""
+
+        filtered_flows.sort(key=_sort_key, reverse=True)
         paginated_flows = filtered_flows[skip : skip + limit]
 
         logger.info(

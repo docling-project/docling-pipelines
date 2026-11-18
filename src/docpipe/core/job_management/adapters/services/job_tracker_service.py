@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobTrackerService - Production job stats service using new architecture
 
@@ -17,14 +20,30 @@ from logging import Logger
 from pathlib import Path
 from typing import Any
 
-from docpipe.core.constants.constants import TERMINAL_JOB_STATUSES, TERMINAL_NODE_STATES, ExecutionStatus, Metrics
+from docpipe.core.constants.constants import (
+    TERMINAL_JOB_STATUSES,
+    TERMINAL_NODE_STATES,
+    ExecutionStatus,
+    Metrics,
+)
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.job_management.adapters.services.node_order_resolver import NodeOrderResolver
 from docpipe.core.job_management.application.services import NodeStatsAggregator
-from docpipe.core.job_management.domain.models import JobStats, NodeMetadataItem, NodeStats
+from docpipe.core.job_management.domain.models import (
+    JobStats,
+    NodeMetadataItem,
+    NodeStats,
+)
 from docpipe.core.job_management.domain.ports import JobStatsService, JobStatsStore
-from docpipe.exceptions.docpipe_exceptions import DocpipeException, JobRunInvalidStateException
+from docpipe.exceptions.docpipe_exceptions import (
+    DocpipeException,
+    JobRunInvalidStateException,
+)
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.registry import scrub, scrub_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.orchestration.node_ordering import order_node_items
 
 logger: Logger = get_logger()
 
@@ -42,7 +61,12 @@ class JobTrackerService(JobStatsService):
     - Direct implementation of all job tracking operations
     """
 
-    def __init__(self, *, job_stats_store: JobStatsStore, node_stats_aggregator: NodeStatsAggregator):
+    def __init__(
+        self,
+        *,
+        job_stats_store: JobStatsStore,
+        node_stats_aggregator: NodeStatsAggregator,
+    ):
         """
         Initialize JobTrackerService.
 
@@ -52,13 +76,18 @@ class JobTrackerService(JobStatsService):
         """
         self.job_stats_store = job_stats_store
         self.node_stats_aggregator = node_stats_aggregator
+        # Lambda (not a bound method) so subclass overrides and test patches of get_flow_definition apply
+        self._node_order_resolver = NodeOrderResolver(
+            load_flow_definition=lambda job_run_id: self.get_flow_definition(job_run_id=job_run_id)
+        )
 
     def start_tracking_job(
         self,
         *,
         job_id: str,
         job_run_id: str,
-        flow_name: str,
+        flow_id: str,
+        flow_name: str | None = None,
         user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         initial_status: ExecutionStatus = ExecutionStatus.RUNNING,
@@ -69,9 +98,10 @@ class JobTrackerService(JobStatsService):
         Args:
             job_id: Unique job identifier
             job_run_id: Unique job run identifier
-            flow_name: Name of the flow being executed (stored in flow_id field)
+            flow_id: Stable flow identifier (asset UUID or job_id slug)
+            flow_name: Human-readable name of the flow at run creation time
             user_id: Optional user identifier
-            metadata: Optional metadata dictionary (not used - JobStats has no metadata field)
+            metadata: Optional metadata dictionary
             initial_status: Initial status for the job stats record.
                 Defaults to ExecutionStatus.RUNNING for backward compatibility.
                 Pass ExecutionStatus.QUEUED when called from the HTTP thread
@@ -83,7 +113,8 @@ class JobTrackerService(JobStatsService):
         job_stats: JobStats = JobStats(
             job_id=job_id,
             job_run_id=job_run_id,
-            flow_id=flow_name,  # Store flow_name in flow_id field
+            flow_id=flow_id,
+            flow_name=flow_name,
             user_id=user_id,
             status=initial_status,
             start_time=round(datetime.now(tz=UTC).timestamp()),
@@ -92,7 +123,7 @@ class JobTrackerService(JobStatsService):
         )
 
         self.job_stats_store.store_job_stats(job_stats)
-        logger.info(f"Started tracking job: job_id={job_id}, job_run_id={job_run_id}")
+        logger.info("Started tracking job: job_id=%s, job_run_id=%s", job_id, job_run_id)
 
     def get_job_run_stats(self, *, job_run_id: str) -> JobStats | None:
         """
@@ -108,7 +139,11 @@ class JobTrackerService(JobStatsService):
         return self.job_stats_store.get_job_stats(job_run_id)
 
     def get_job(
-        self, *, job_run_id: str, include_node_stats: bool = True, include_batch_stats: bool = False
+        self,
+        *,
+        job_run_id: str,
+        include_node_stats: bool = True,
+        include_batch_stats: bool = False,
     ) -> JobStats | None:
         """
         Retrieve complete job statistics with optional aggregation.
@@ -185,7 +220,13 @@ class JobTrackerService(JobStatsService):
             msg = f"Invalid status: {status}"
             raise ValueError(msg) from exc
 
-    def end_job(self, *, job_run_id: str, status: str, job_run_stats: dict[str, Any] | None = None) -> None:
+    def end_job(
+        self,
+        *,
+        job_run_id: str,
+        status: str,
+        job_run_stats: dict[str, Any] | None = None,
+    ) -> None:
         """
         End job tracking and update final status.
 
@@ -212,7 +253,7 @@ class JobTrackerService(JobStatsService):
 
         if job_run_stats:
             if "message" in job_run_stats:
-                job_stats.message = job_run_stats["message"]
+                job_stats.message = scrub_value(job_run_stats["message"])
             if "report_status" in job_run_stats:
                 job_stats.report_status = job_run_stats["report_status"]
             if "report_generation_started_at" in job_run_stats:
@@ -221,7 +262,7 @@ class JobTrackerService(JobStatsService):
                 job_stats.report_generation_completed_at = job_run_stats["report_generation_completed_at"]
 
         self.job_stats_store.store_job_stats(job_stats)
-        logger.info(f"Ended job: job_run_id={job_run_id}, status={normalized_status.value}")
+        logger.info("Ended job: job_run_id=%s, status=%s", job_run_id, normalized_status.value)
 
     def start_node_execution(
         self,
@@ -272,7 +313,7 @@ class JobTrackerService(JobStatsService):
 
         # Persist through store interface
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=node_stats)
-        logger.info(f"Started node execution: node_id={node_id}, job_run_id={job_run_id}")
+        logger.info("Started node execution: node_id=%s, job_run_id=%s", node_id, job_run_id)
 
     def complete_node_execution(
         self,
@@ -341,6 +382,7 @@ class JobTrackerService(JobStatsService):
         else:
             # Already in proper format or None
             final_metadata = node_metadata
+        final_metadata = scrub_value(final_metadata)
 
         # Build complete node stats
         completed_node_stats: NodeStats = NodeStats(
@@ -351,7 +393,7 @@ class JobTrackerService(JobStatsService):
             time_taken=time_taken,
             node_status=node_status,
             col_names=col_names,
-            total_docs=total_docs if total_docs else (docs_completed + failed_docs + skipped_docs),
+            total_docs=(total_docs if total_docs else (docs_completed + failed_docs + skipped_docs)),
             docs_completed=docs_completed,
             docs_completed_count=len(docs_completed),
             failed_docs=failed_docs,
@@ -372,7 +414,12 @@ class JobTrackerService(JobStatsService):
 
         # Persist through store interface
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=completed_node_stats)
-        logger.info(f"Completed node execution: node_id={node_id}, job_run_id={job_run_id}, status={node_status}")
+        logger.info(
+            "Completed node execution: node_id=%s, job_run_id=%s, status=%s",
+            node_id,
+            job_run_id,
+            node_status,
+        )
 
     def fail_node_execution(
         self,
@@ -413,10 +460,11 @@ class JobTrackerService(JobStatsService):
         error_message: str
         if exception is not None:
             # Get just the error message, not the full traceback
-            exception_str: str = str(exception)
+            exception_str: str = sanitize_exception(exc=exception, config_key=node_name)
             error_message = exception_str if exception_str else exception.__class__.__name__
         else:
             error_message = error  # type: ignore
+        error_message = scrub_value(error_message)
 
         # Calculate timing
         end_time: int = round(datetime.now(tz=UTC).timestamp())
@@ -460,7 +508,7 @@ class JobTrackerService(JobStatsService):
         )
 
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=failed_node_stats)
-        logger.info(f"Failed node execution: node_id={node_id}, job_run_id={job_run_id}")
+        logger.info("Failed node execution: node_id=%s, job_run_id=%s", node_id, job_run_id)
 
     def cancel_node_execution(
         self,
@@ -518,7 +566,7 @@ class JobTrackerService(JobStatsService):
         )
 
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=canceled_node_stats)
-        logger.info(f"Canceled node execution: node_id={node_id}, job_run_id={job_run_id}")
+        logger.info("Canceled node execution: node_id=%s, job_run_id=%s", node_id, job_run_id)
 
     def abort_node_execution(
         self,
@@ -574,7 +622,7 @@ class JobTrackerService(JobStatsService):
             failed_docs=[],
             skipped_docs=[],
             node_metadata={
-                Metrics.External.TOTAL_DOCS: existing_node.total_docs if existing_node else 0,
+                Metrics.External.TOTAL_DOCS: (existing_node.total_docs if existing_node else 0),
                 Metrics.External.NODE_STATUS: ExecutionStatus.ABORTED.value,
             },
             batch_id=batch_id,
@@ -582,7 +630,12 @@ class JobTrackerService(JobStatsService):
         )
 
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=aborted_node_stats)
-        logger.info(f"Aborted node execution: node_id={node_id}, job_run_id={job_run_id}, reason={reason}")
+        logger.info(
+            "Aborted node execution: node_id=%s, job_run_id=%s, reason=%s",
+            node_id,
+            job_run_id,
+            reason,
+        )
 
     def skip_node_execution(
         self,
@@ -629,9 +682,9 @@ class JobTrackerService(JobStatsService):
             id=node_id,
             operator=node_name,
             node_metadata={
-                Metrics.External.TOTAL_DOCS: len(existing_node.total_docs)
-                if existing_node and existing_node.total_docs
-                else 0,
+                Metrics.External.TOTAL_DOCS: (
+                    len(existing_node.total_docs) if existing_node and existing_node.total_docs else 0
+                ),
                 Metrics.External.NODE_STATUS: ExecutionStatus.SKIPPED.value,
             },
         )
@@ -656,10 +709,20 @@ class JobTrackerService(JobStatsService):
         )
 
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=skipped_node_stats)
-        logger.info(f"Skipped node execution: node_id={node_id}, job_run_id={job_run_id}, reason={reason}")
+        logger.info(
+            "Skipped node execution: node_id=%s, job_run_id=%s, reason=%s",
+            node_id,
+            job_run_id,
+            reason,
+        )
 
     def _merge_node_stats(
-        self, *, existing_node: NodeStats | None, node_stats: dict, node_id: str, batch_id: str | None
+        self,
+        *,
+        existing_node: NodeStats | None,
+        node_stats: dict,
+        node_id: str,
+        batch_id: str | None,
     ) -> dict:
         """
         Helper method to merge existing and new node stats.
@@ -713,11 +776,14 @@ class JobTrackerService(JobStatsService):
 
         # Merge existing and incoming stats
         merged_dict = self._merge_node_stats(
-            existing_node=existing_node, node_stats=incoming_dict, node_id=node_id, batch_id=batch_id
+            existing_node=existing_node,
+            node_stats=incoming_dict,
+            node_id=node_id,
+            batch_id=batch_id,
         )
 
         # Create and persist merged NodeStats
-        node_stats_dto = NodeStats(**merged_dict)
+        node_stats_dto = NodeStats(**scrub_value(merged_dict))
         self.job_stats_store.store_node_stats(job_run_id=job_run_id, node_stats=node_stats_dto)
 
     def get_node_stats(self, *, job_id: str, job_run_id: str) -> dict[str, Any]:
@@ -838,7 +904,11 @@ class JobTrackerService(JobStatsService):
 
         # Check if job is already in a terminal state
         if job_stats.status in TERMINAL_JOB_STATUSES:
-            logger.error(f"Cannot cancel job {job_run_id}: already in terminal state {job_stats.status.value}")
+            logger.error(
+                "Cannot cancel job %s: already in terminal state %s",
+                job_run_id,
+                job_stats.status.value,
+            )
             raise JobRunInvalidStateException(
                 message=f"Cannot cancel job run in {job_stats.status.value} state",
                 job_run_id=job_run_id,
@@ -847,7 +917,7 @@ class JobTrackerService(JobStatsService):
 
         job_stats.status = ExecutionStatus.CANCELING
         self.job_stats_store.store_job_stats(job_stats)
-        logger.info(f"Requested cancellation for job: {job_run_id}")
+        logger.info("Requested cancellation for job: %s", job_run_id)
 
     def cancel_job_run_if_cancelling(self, *, job_run_id: str, job_log_path: str | None = None) -> bool:
         """
@@ -871,7 +941,7 @@ class JobTrackerService(JobStatsService):
 
             if job_log_path:
                 self.write_job_logs(job_stats=job_stats, job_log_path=job_log_path)
-            logger.info(msg=f"Job canceled: {job_run_id}")
+            logger.info("Job canceled: %s", job_run_id)
             return True
 
         return False
@@ -898,8 +968,42 @@ class JobTrackerService(JobStatsService):
         # Delete from store
         self.job_stats_store.delete_job_stats(job_run_id)
 
-        logger.info(f"Deleted job run: {job_run_id}")
+        logger.info("Deleted job run: %s", job_run_id)
         return f"Job run {job_run_id} deleted successfully"
+
+    def delete_job_runs_by_job_id(self, *, job_id: str) -> int:
+        """
+        Delete all job runs associated with a given job_id (flow UUID).
+
+        Fetches all job_run_ids whose job_id matches, then deletes each from
+        the store.  Failures for individual runs are logged as warnings and
+        do not abort the operation.
+
+        Args:
+            job_id: The flow UUID whose job runs should be deleted.
+
+        Returns:
+            Number of job runs successfully deleted.
+        """
+        runs = self.job_stats_store.list_job_runs(job_id=job_id, limit=100_000)
+        if not runs:
+            return 0
+
+        deleted = 0
+        for run in runs:
+            try:
+                self.job_stats_store.delete_job_stats(run.job_run_id)
+                deleted += 1
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete job run %s for flow %s: %s",
+                    run.job_run_id,
+                    job_id,
+                    exc,
+                )
+
+        logger.info("Cascade-deleted %d job run(s) for flow %s", deleted, job_id)
+        return deleted
 
     @staticmethod
     def _format_schema_line(col_names: list[str] | None) -> str:
@@ -950,7 +1054,14 @@ class JobTrackerService(JobStatsService):
             if status == ExecutionStatus.SKIPPED.value and error:
                 batch_line += f" - Reason: {error}"
             lines.append(batch_line)
-            if status in (ExecutionStatus.FAILED.value, ExecutionStatus.COMPLETED_WITH_ERRORS.value) and error:
+            if (
+                status
+                in (
+                    ExecutionStatus.FAILED.value,
+                    ExecutionStatus.COMPLETED_WITH_ERRORS.value,
+                )
+                and error
+            ):
                 failed_batches.append(batch)
 
         # Append error details section for failed batches
@@ -1072,12 +1183,16 @@ class JobTrackerService(JobStatsService):
 
         # Step 3: Mark completed documents (reached destination)
         self._mark_completed_documents(
-            job_stats=job_stats, destination_node_ids=destination_node_ids, final_docs_status=final_docs_status
+            job_stats=job_stats,
+            destination_node_ids=destination_node_ids,
+            final_docs_status=final_docs_status,
         )
 
         # Step 4: Mark skipped documents (not failed or completed)
         self._mark_skipped_documents(
-            job_stats=job_stats, ingest_node_id=ingest_node_id, final_docs_status=final_docs_status
+            job_stats=job_stats,
+            ingest_node_id=ingest_node_id,
+            final_docs_status=final_docs_status,
         )
 
         # Step 5: Update job-level counts with reconciliation
@@ -1094,7 +1209,7 @@ class JobTrackerService(JobStatsService):
                 final_docs_status[doc_id] = "FAILED"
 
         if final_docs_status:
-            logger.info(f"Marked {len(final_docs_status)} documents as FAILED across all nodes")
+            logger.info("Marked %s documents as FAILED across all nodes", len(final_docs_status))
 
     def _identify_ingest_and_destination_nodes(
         self, *, dag_nodes: list[dict[str, Any]]
@@ -1116,21 +1231,29 @@ class JobTrackerService(JobStatsService):
             # Ingest node: has no input edges
             if not node.get("input_edges"):
                 ingest_node_id = node_id
-                logger.info(f"Identified ingest node: {node_id}")
+                logger.info("Identified ingest node: %s", node_id)
 
             # Destination nodes: have no output edges
             if not node.get("output_edges"):
                 destination_node_ids.append(node_id)
 
         if destination_node_ids:
-            logger.info(f"Identified {len(destination_node_ids)} destination nodes: {destination_node_ids}")
+            logger.info(
+                "Identified %s destination nodes: %s",
+                len(destination_node_ids),
+                destination_node_ids,
+            )
         else:
             logger.warning("No destination nodes found in DAG")
 
         return ingest_node_id, destination_node_ids
 
     def _mark_completed_documents(
-        self, *, job_stats, destination_node_ids: list[str], final_docs_status: dict[str, str]
+        self,
+        *,
+        job_stats,
+        destination_node_ids: list[str],
+        final_docs_status: dict[str, str],
     ) -> None:
         """Mark documents that reached destination nodes (and not already failed)."""
         completed_count = 0
@@ -1148,10 +1271,14 @@ class JobTrackerService(JobStatsService):
                     completed_count += 1
 
         if completed_count > 0:
-            logger.info(f"Marked {completed_count} documents as COMPLETED at destination nodes")
+            logger.info("Marked %s documents as COMPLETED at destination nodes", completed_count)
 
     def _mark_skipped_documents(
-        self, *, job_stats, ingest_node_id: str | None, final_docs_status: dict[str, str]
+        self,
+        *,
+        job_stats,
+        ingest_node_id: str | None,
+        final_docs_status: dict[str, str],
     ) -> None:
         """Mark documents from ingest that were neither completed nor failed."""
         if not ingest_node_id:
@@ -1160,7 +1287,7 @@ class JobTrackerService(JobStatsService):
 
         ingest_node = job_stats.node_stats.get(ingest_node_id)
         if not ingest_node:
-            logger.warning(f"Ingest node {ingest_node_id} not found in node_stats")
+            logger.warning("Ingest node %s not found in node_stats", ingest_node_id)
             return
 
         total_docs = ingest_node.total_docs if hasattr(ingest_node, "total_docs") else []
@@ -1172,7 +1299,10 @@ class JobTrackerService(JobStatsService):
                 skipped_count += 1
 
         if skipped_count > 0:
-            logger.info(f"Marked {skipped_count} documents as SKIPPED (not completed or failed)")
+            logger.info(
+                "Marked %s documents as SKIPPED (not completed or failed)",
+                skipped_count,
+            )
 
     def _update_job_stats_counts(self, *, job_stats, final_docs_status: dict[str, str]) -> None:
         """
@@ -1203,27 +1333,33 @@ class JobTrackerService(JobStatsService):
 
         # Reconciliation logging
         logger.info(
-            f"Final document counts: completed={completed_count}, "
-            f"failed={failed_count}, skipped={skipped_count}, "
-            f"total_classified={total_classified}"
+            "Final document counts: completed=%s, failed=%s, skipped=%s, total_classified=%s",
+            completed_count,
+            failed_count,
+            skipped_count,
+            total_classified,
         )
 
         # Check for inconsistencies
         if prev_completed != completed_count or prev_failed != failed_count or prev_skipped != skipped_count:
             logger.info(
-                f"Document count reconciliation: "
-                f"completed {prev_completed}->{completed_count}, "
-                f"failed {prev_failed}->{failed_count}, "
-                f"skipped {prev_skipped}->{skipped_count}"
+                "Document count reconciliation: completed %s->%s, failed %s->%s, skipped %s->%s",
+                prev_completed,
+                completed_count,
+                prev_failed,
+                failed_count,
+                prev_skipped,
+                skipped_count,
             )
 
         # Warn if total_docs doesn't match classified count
         total_docs_count = job_stats.total_docs or 0
         if total_docs_count > 0 and total_classified != total_docs_count:
             logger.warning(
-                f"Document count mismatch: total_docs={total_docs_count} "
-                f"but classified={total_classified} "
-                f"(difference={total_docs_count - total_classified})"
+                "Document count mismatch: total_docs=%s but classified=%s (difference=%s)",
+                total_docs_count,
+                total_classified,
+                total_docs_count - total_classified,
             )
 
     def write_job_logs(self, *, job_stats, job_log_path: str) -> None:
@@ -1248,30 +1384,28 @@ class JobTrackerService(JobStatsService):
             else:
                 job_stats_dict = job_stats
 
-            # Sort node_stats by start_time to match execution order
+            # Sort node_stats by topological order if snapshot is available, falling back to chronological order
             if "node_stats" in job_stats_dict and isinstance(job_stats_dict["node_stats"], dict):
                 node_stats = job_stats_dict["node_stats"]
-                # Sort by start_time, then end_time, then name
-                sorted_node_stats = dict(
-                    sorted(
-                        node_stats.items(),
-                        key=lambda item: (
-                            item[1].get("start_time", 0),
-                            item[1].get("end_time", 0),
-                            item[1].get("name", ""),
-                        ),
-                    )
+                job_run_id = job_stats_dict.get("job_run_id")
+                node_order = self._node_order_resolver.resolve(
+                    job_run_id=job_run_id,
+                    node_stats=node_stats,
+                    flow_id=job_stats_dict.get("flow_id"),
+                    flow_name=job_stats_dict.get("flow_name"),
                 )
-                job_stats_dict["node_stats"] = sorted_node_stats
+                ordered_items = order_node_items(node_stats=node_stats, node_order=node_order)
+                job_stats_dict["node_stats"] = dict(ordered_items)
 
             # Write to file
             with Path(job_log_path).open("w") as f:
-                json.dump(job_stats_dict, f, indent=2)
+                json.dump(scrub_value(job_stats_dict), f, indent=2)
 
-            logger.info(f"Wrote job logs to: {job_log_path}")
+            logger.info("Wrote job logs to: %s", job_log_path)
         except Exception as e:
-            logger.error("Failed to write job logs to %s: %s", job_log_path, e)
-            msg = f"Failed to write job logs: {e}"
+            safe_error = sanitize_exception(exc=e, config_key="job_logs")
+            logger.error("Failed to write job logs to %s: %s", job_log_path, safe_error)
+            msg = f"Failed to write job logs: {safe_error}"
             raise OSError(msg) from e
 
     def list_job_runs(
@@ -1296,6 +1430,26 @@ class JobTrackerService(JobStatsService):
         """
         # Delegate to store
         return self.job_stats_store.list_job_runs(job_id=job_id, job_ids=job_ids, status=status, limit=limit)
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+        """
+        return self.job_stats_store.count_job_runs(job_id=job_id, job_ids=job_ids, status=status)
 
     def get_formatted_job_stats(self, *, job_run_id: str, include_logs: bool = False) -> Any:
         """
@@ -1328,8 +1482,19 @@ class JobTrackerService(JobStatsService):
         if not job_stats:
             raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
 
+        node_order = self._node_order_resolver.resolve(
+            job_run_id=job_run_id,
+            node_stats=job_stats.node_stats,
+            flow_id=job_stats.flow_id,
+            flow_name=job_stats.flow_name,
+        )
+
         # Delegate to mapper for enterprise-compatible model construction
-        return JobStatsMapper.to_status_response(job_stats=job_stats, include_logs=include_logs)
+        return JobStatsMapper.to_status_response(
+            job_stats=job_stats,
+            include_logs=include_logs,
+            node_order=node_order,
+        )
 
     def get_flow_definition(self, *, job_run_id: str) -> dict[str, Any] | None:
         """
@@ -1371,14 +1536,22 @@ class JobTrackerService(JobStatsService):
                 key="flow_definition",
             )
             if flow_definition is None:
-                logger.warning("Flow definition not found for job_run_id=%s, job_id=%s", job_run_id, job_id)
+                logger.warning(
+                    "Flow definition not found for job_run_id=%s, job_id=%s",
+                    job_run_id,
+                    job_id,
+                )
                 return None
-            logger.info("Successfully retrieved flow definition for job_run_id=%s, job_id=%s", job_run_id, job_id)
+            logger.info(
+                "Successfully retrieved flow definition for job_run_id=%s, job_id=%s",
+                job_run_id,
+                job_id,
+            )
             return flow_definition
         except DocpipeException:
             raise
         except Exception as e:
-            logger.error("Failed to read flow definition for job_run_id=%s: %s", job_run_id, e, exc_info=True)
+            logger.exception("Failed to read flow definition for job_run_id=%s: %s", job_run_id, e)
             raise DocpipeException(
                 message=f"Failed to read flow definition for job_run_id={job_run_id}",
                 status_code=500,
@@ -1418,11 +1591,15 @@ class JobTrackerService(JobStatsService):
                 key="flow_definition",
                 data=flow_definition,
             )
-            logger.info("Saved flow definition snapshot for job_run_id=%s, job_id=%s", job_run_id, job_id)
+            logger.info(
+                "Saved flow definition snapshot for job_run_id=%s, job_id=%s",
+                job_run_id,
+                job_id,
+            )
         except DocpipeException:
             raise
         except Exception as e:
-            logger.error("Failed to save flow definition for job_run_id=%s: %s", job_run_id, e, exc_info=True)
+            logger.exception("Failed to save flow definition for job_run_id=%s: %s", job_run_id, e)
             raise DocpipeException(
                 message=f"Failed to save flow definition for job_run_id={job_run_id}",
                 status_code=500,
@@ -1450,7 +1627,8 @@ class JobTrackerService(JobStatsService):
         # Check if micro-batching and continue_on_batch_failure are enabled
         is_batching_enabled = global_config.get(DocpipeConstants.ENABLE_MICRO_BATCHING, False)
         continue_on_failure = global_config.get(
-            DocpipeConstants.CONTINUE_ON_BATCH_FAILURE, DocpipeConstants.CONTINUE_ON_BATCH_FAILURE_DEFAULT
+            DocpipeConstants.CONTINUE_ON_BATCH_FAILURE,
+            DocpipeConstants.CONTINUE_ON_BATCH_FAILURE_DEFAULT,
         )
 
         if not (is_batching_enabled and continue_on_failure):
@@ -1473,23 +1651,6 @@ class JobTrackerService(JobStatsService):
 
         # Partial failure: some failed but not all
         return 0 < failed_batch_count < total_batch_count
-
-    @staticmethod
-    def _calculate_node_sequence(*, node_stats: dict) -> list[str]:
-        """Calculate node execution sequence based on start_time."""
-        if not node_stats:
-            return []
-
-        # Sort nodes by start_time, then end_time, then name
-        sorted_nodes: list[tuple[Any, Any]] = sorted(
-            node_stats.items(),
-            key=lambda item: (
-                item[1].get("start_time", 0) if isinstance(item[1], dict) else getattr(item[1], "start_time", 0),
-                item[1].get("end_time", 0) if isinstance(item[1], dict) else getattr(item[1], "end_time", 0),
-                item[1].get("name", "") if isinstance(item[1], dict) else getattr(item[1], "name", ""),
-            ),
-        )
-        return [node_id for node_id, _ in sorted_nodes]
 
     @staticmethod
     def _build_node_metadata_array(*, node_stats: dict) -> list[dict]:
@@ -1560,7 +1721,12 @@ class JobTrackerService(JobStatsService):
             log_parts.append("\nOperator Metadata:")
             log_parts.append(
                 json.dumps(
-                    {OperatorConstants.Metadata.NODE_METADATA: node_metadata, "id": node_id, "operator": name}, indent=2
+                    {
+                        OperatorConstants.Metadata.NODE_METADATA: node_metadata,
+                        "id": node_id,
+                        "operator": name,
+                    },
+                    indent=2,
                 )
             )
 
@@ -1578,7 +1744,7 @@ class JobTrackerService(JobStatsService):
             log_parts.append("\nError Details:")
             log_parts.append(f"  {error}")
 
-        return "\n".join(log_parts)
+        return scrub("\n".join(log_parts))
 
     def create_pending_batch_node_stats(
         self,
@@ -1641,8 +1807,10 @@ class JobTrackerService(JobStatsService):
         if pending_stats_list:
             self.job_stats_store.bulk_store_node_stats(job_run_id=job_run_id, node_stats_list=pending_stats_list)
             logger.info(
-                f"Created {len(pending_stats_list)} pending batch node stats: "
-                f"{len(batch_ids)} batches x {len(downstream_node_ids)} nodes"
+                "Created %s pending batch node stats: %s batches x %s nodes",
+                len(pending_stats_list),
+                len(batch_ids),
+                len(downstream_node_ids),
             )
 
     def mark_pending_batches_as_skipped(self, *, job_run_id: str, reason: str) -> None:
@@ -1664,7 +1832,7 @@ class JobTrackerService(JobStatsService):
         all_node_stats = self.job_stats_store.get_node_stats(job_run_id=job_run_id)
 
         if not all_node_stats:
-            logger.warning(f"No node stats found for job_run_id={job_run_id}")
+            logger.warning("No node stats found for job_run_id=%s", job_run_id)
             return
 
         # Handle both dict and list return types
@@ -1673,7 +1841,7 @@ class JobTrackerService(JobStatsService):
         elif isinstance(all_node_stats, list):
             records_list = all_node_stats
         else:
-            logger.error(f"Unexpected return type from get_node_stats: {type(all_node_stats)}")
+            logger.error("Unexpected return type from get_node_stats: %s", type(all_node_stats))
             return
 
         # Filter for PENDING/QUEUED batch records
@@ -1685,7 +1853,7 @@ class JobTrackerService(JobStatsService):
         ]
 
         if not pending_records:
-            logger.debug(f"No pending batch node stats found for job_run_id={job_run_id}")
+            logger.debug("No pending batch node stats found for job_run_id=%s", job_run_id)
             return
 
         # Update each pending record to SKIPPED
@@ -1702,10 +1870,10 @@ class JobTrackerService(JobStatsService):
                 end_time=record.end_time if hasattr(record, "end_time") else 0,
                 time_taken=record.time_taken if hasattr(record, "time_taken") else 0,
                 total_docs=record.total_docs if hasattr(record, "total_docs") else [],
-                docs_completed=record.docs_completed if hasattr(record, "docs_completed") else [],
-                docs_completed_count=record.docs_completed_count if hasattr(record, "docs_completed_count") else 0,
-                failed_docs=record.failed_docs if hasattr(record, "failed_docs") else [],
-                skipped_docs=record.skipped_docs if hasattr(record, "skipped_docs") else [],
+                docs_completed=(record.docs_completed if hasattr(record, "docs_completed") else []),
+                docs_completed_count=(record.docs_completed_count if hasattr(record, "docs_completed_count") else 0),
+                failed_docs=(record.failed_docs if hasattr(record, "failed_docs") else []),
+                skipped_docs=(record.skipped_docs if hasattr(record, "skipped_docs") else []),
                 col_names=record.col_names if hasattr(record, "col_names") else [],
                 node_metadata={OperatorConstants.Metadata.NODE_METADATA: {"skip_reason": reason}},
                 error="",
@@ -1715,4 +1883,8 @@ class JobTrackerService(JobStatsService):
         # Bulk update all pending stats to SKIPPED
         if updated_stats:
             self.job_stats_store.bulk_store_node_stats(job_run_id=job_run_id, node_stats_list=updated_stats)
-            logger.info(f"Marked {len(updated_stats)} pending batch node stats as SKIPPED for job_run_id={job_run_id}")
+            logger.info(
+                "Marked %s pending batch node stats as SKIPPED for job_run_id=%s",
+                len(updated_stats),
+                job_run_id,
+            )

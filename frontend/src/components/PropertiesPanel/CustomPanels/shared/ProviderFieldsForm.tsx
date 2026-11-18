@@ -9,30 +9,32 @@
  *
  *   string (sensitive) → VaultInput (supports plaintext or vault:// URI)
  *   string (non-sensitive) → TextInput
- *   int64 / double → NumberInput
+ *   int64 / double (nullable)  → NullableNumberInput (toggle + number input)
+ *   int64 / double (required)  → NumberInput
  *   boolean → Toggle
- *   list → TagInput  (comma-separated string[] stored as array)
+ *   list → ListInput  (Add button + table; string[] stored as array)
  *   json → JsonTextArea  (raw JSON object)
  *
  * Sensitivity is determined by `keyInfo.sensitive === true` from operator metadata.
+ * Nullability is determined by `keyInfo.default === null` from operator metadata.
  *
  * No wiring occurs here.
  * The component calls `onChange(fieldKey, value)` so the parent can
  * decide which controller attribute(s) to write to once.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   NumberInput,
   TextInput,
   Toggle,
 } from '@carbon/react';
 import { DefinitionTooltip } from '@carbon/react';
-import { TagInput } from '@/components/common/TagInput/TagInput';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { VaultInput } from '@/components/common';
+import { useIntl, type IntlShape } from 'react-intl';
+import { JsonTextArea, ListInput, VaultInput } from '@/components/common';
 import type { OperatorFeature } from '@/types';
 import common from '../../CommonPropertiesPanel.module.scss';
+import { messages } from './ProviderFieldsForm.messages';
 
 // ── Hidden fields ─────────────────────────────────────────────────────────────
 // Fields that are intentionally suppressed from the provider form because they
@@ -81,6 +83,109 @@ function asStringArray(v: unknown): string[] {
   return [];
 }
 
+function buildRangeText(intl: IntlShape, minValue?: number, maxValue?: number): string | undefined {
+  if (minValue !== undefined && maxValue !== undefined) {
+    return intl.formatMessage(messages.rangeAllowed, { min: minValue, max: maxValue });
+  }
+  if (minValue !== undefined) {return intl.formatMessage(messages.minimumAllowed, { min: minValue });}
+  if (maxValue !== undefined) {return intl.formatMessage(messages.maximumAllowed, { max: maxValue });}
+  return undefined;
+}
+
+function isOutOfRange(value: number | string, minValue?: number, maxValue?: number): boolean {
+  if (value === '') {return false;}
+  const n = Number(value);
+  if (!Number.isFinite(n)) {return false;}
+  if (minValue !== undefined && n < minValue) {return true;}
+  if (maxValue !== undefined && n > maxValue) {return true;}
+  return false;
+}
+
+// ── NullableNumberInput ───────────────────────────────────────────────────────
+// Used for int64/double fields whose backend type is `int | None`.
+// A toggle controls whether the field is set (on) or null/no-limit (off).
+
+interface NullableNumberInputProps {
+  id: string;
+  label: string;
+  value: number | null | undefined;
+  minValue?: number;
+  maxValue?: number;
+  onChange: (value: number | null) => void;
+}
+
+function NullableNumberInput({
+  id,
+  label,
+  value,
+  minValue,
+  maxValue,
+  onChange,
+}: NullableNumberInputProps): React.JSX.Element {
+  const intl = useIntl();
+  const isEnabled = value !== null && value !== undefined;
+  const [draft, setDraft] = useState<number | string>(isEnabled ? value : '');
+
+  useEffect(() => {
+    setDraft(isEnabled ? value : '');
+  }, [isEnabled, value]);
+
+  const outOfRange = isOutOfRange(draft, minValue, maxValue);
+
+  const rangeText = buildRangeText(intl, minValue, maxValue);
+
+  function handleToggle(checked: boolean): void {
+    if (checked) {
+      const initial = minValue ?? 1;
+      setDraft(initial);
+      onChange(initial);
+    } else {
+      setDraft('');
+      onChange(null);
+    }
+  }
+
+  function handleNumberChange(_e: unknown, { value: v }: { value: number | string }): void {
+    setDraft(v);
+    if (v === '' || v === undefined) {
+      onChange(null);
+      return;
+    }
+    const n = Number(v);
+    if (Number.isFinite(n)) {
+      onChange(n);
+    }
+  }
+
+  return (
+    <div className={common.nullableNumberInputWrapper}>
+      <Toggle
+        id={`${id}-toggle`}
+        labelA={intl.formatMessage(messages.noLimit)}
+        labelB={intl.formatMessage(messages.setLimit)}
+        toggled={isEnabled}
+        onToggle={handleToggle}
+      />
+      {isEnabled && (
+        <NumberInput
+          id={id}
+          label={label}
+          hideLabel
+          value={draft}
+          {...(minValue !== undefined && { min: minValue })}
+          {...(maxValue !== undefined && { max: maxValue })}
+          helperText={!outOfRange ? rangeText : undefined}
+          invalid={outOfRange}
+          invalidText={outOfRange ? rangeText : undefined}
+          onChange={handleNumberChange}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── ProviderFieldsForm ────────────────────────────────────────────────────────
+
 /**
  * Renders one Carbon input per property defined in the provider schema.
  * Ordering follows the natural order of the `properties` object.
@@ -90,6 +195,7 @@ export function ProviderFieldsForm({
   values,
   onChange,
 }: ProviderFieldsFormProps): React.JSX.Element {
+  const intl = useIntl();
   return (
     <>
       {Object.entries(properties).map(([fieldKey, keyInfo]: [string, OperatorFeature]) => {
@@ -97,7 +203,7 @@ export function ProviderFieldsForm({
         const label = keyInfo.name ?? fieldKey;
         const description = keyInfo.description ?? '';
         const isRequired = keyInfo.required === true;
-        const labelText = isRequired ? `${label} (required)` : label;
+        const labelText = isRequired ? intl.formatMessage(messages.requiredLabel, { name: label }) : label;
         const inputId = `provider-field-${fieldKey}`;
 
         // VaultInput owns its own header row.
@@ -125,6 +231,12 @@ export function ProviderFieldsForm({
           );
         }
 
+        const isNumeric = keyInfo.type === 'int64' || keyInfo.type === 'double';
+        const isNullable = isNumeric && keyInfo.default === null;
+        const currentNum = asNumber(values[fieldKey]);
+        const numOutOfRange = currentNum !== '' && isOutOfRange(currentNum, keyInfo.min_value, keyInfo.max_value);
+        const numRangeText = buildRangeText(intl, keyInfo.min_value, keyInfo.max_value);
+
         return (
           <div key={fieldKey} className={common.formField}>
             <div className={common.labelWithTooltip}>
@@ -143,35 +255,52 @@ export function ProviderFieldsForm({
                 id={inputId}
                 labelText={label}
                 hideLabel
-                labelA="Off"
-                labelB="On"
+                labelA={intl.formatMessage(messages.off)}
+                labelB={intl.formatMessage(messages.on)}
                 toggled={asBoolean(values[fieldKey], keyInfo.default as boolean | undefined ?? false)}
                 onToggle={(checked: boolean) => {onChange(fieldKey, checked);}}
               />
             )}
 
-            {/* int64 / double → NumberInput */}
-            {(keyInfo.type === 'int64' || keyInfo.type === 'double') && (
+            {/* int64 / double, nullable (default: null) → NullableNumberInput */}
+            {isNullable && (
+              <NullableNumberInput
+                id={inputId}
+                label={label}
+                value={values[fieldKey] as number | null | undefined}
+                minValue={keyInfo.min_value}
+                maxValue={keyInfo.max_value}
+                onChange={(v) => {onChange(fieldKey, v);}}
+              />
+            )}
+
+            {/* int64 / double, non-null default → NumberInput */}
+            {isNumeric && !isNullable && (
               <NumberInput
                 id={inputId}
                 label={label}
                 hideLabel
-                value={asNumber(values[fieldKey])}
+                value={currentNum !== '' ? currentNum : keyInfo.default as number | undefined}
+                {...(keyInfo.min_value !== undefined && { min: keyInfo.min_value })}
+                {...(keyInfo.max_value !== undefined && { max: keyInfo.max_value })}
+                helperText={!numOutOfRange ? numRangeText : undefined}
+                invalid={numOutOfRange}
+                invalidText={numOutOfRange ? numRangeText : undefined}
                 onChange={(_e: unknown, { value }: { value: number | string }) => {
                   onChange(fieldKey, value === '' ? undefined : Number(value));
                 }}
               />
             )}
 
-            {/* list → TagInput */}
+            {/* list → ListInput (explicit Add button; never commits on blur) */}
             {keyInfo.type === 'list' && (
-              <TagInput
+              <ListInput
                 id={inputId}
                 labelText={label}
-                hideLabel
-                tags={asStringArray(values[fieldKey])}
-                placeholder={`Add ${label.toLowerCase()}`}
-                helperText={`Press Enter or comma to add ${label.toLowerCase()}.`}
+                tableTitle={`Added ${label.toLowerCase()}`}
+                items={asStringArray(values[fieldKey])}
+                placeholder={`Enter ${label.toLowerCase()}`}
+                helperText="Type a value and press Enter, comma, or click Add to add it."
                 onChange={(items: string[]) => {onChange(fieldKey, items);}}
               />
             )}

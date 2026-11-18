@@ -12,14 +12,12 @@
       "name": "ingest",
       "config": {
         "provider": "box_driver",
-        "connection_params": {
+        "provider_config": {
           "folder_id": "${BOX_SOURCE_FOLDER_ID}",
-          "recursive": true
-        },
-        "include_filter": ["pdf"],
-        "credentials": {
+          "recursive": true,
           "credentials_json_path": "${BOX_CONFIG_PATH}"
-        }
+        },
+        "include_filter": ["pdf"]
       }
     },
     {

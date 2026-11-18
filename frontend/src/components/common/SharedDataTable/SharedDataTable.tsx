@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, type ComponentProps } from 'react';
 import {
   DataTable,
   DataTableSkeleton,
@@ -15,6 +15,8 @@ import {
   TableToolbarSearch,
 } from '@carbon/react';
 import { NotFoundEmptyState } from '@carbon/ibm-products';
+import { useIntl } from 'react-intl';
+import { messages } from './SharedDataTable.messages';
 import styles from './SharedDataTable.module.scss';
 import {
   DEFAULT_TABLE_PAGE_SIZE,
@@ -151,7 +153,7 @@ export function SharedDataTable({
   pageSizes = [...DEFAULT_TABLE_PAGE_SIZES],
   initialPageSize = DEFAULT_TABLE_PAGE_SIZE,
   searchable = false,
-  searchPlaceholder = 'Search',
+  searchPlaceholder,
   renderToolbarLeft,
   paginated = true,
   loading = false,
@@ -165,6 +167,9 @@ export function SharedDataTable({
   isSortable,
   sortRow,
 }: SharedDataTableProps): React.JSX.Element {
+  const intl = useIntl();
+  const resolvedSearchPlaceholder = searchPlaceholder ?? intl.formatMessage(messages.searchPlaceholder);
+
   const normalizedInitialPageSize = pageSizes.includes(initialPageSize)
     ? initialPageSize
     : pageSizes[0] ?? DEFAULT_TABLE_PAGE_SIZE;
@@ -224,7 +229,7 @@ export function SharedDataTable({
       rows={filteredRows}
       headers={headers}
       isSortable={isSortable}
-      sortRow={sortRow}
+      sortRow={sortRow as ComponentProps<typeof DataTable>['sortRow']}
     >
       {({
         rows: tableRows,
@@ -244,8 +249,8 @@ export function SharedDataTable({
           tableContent = (
             <div className={styles.emptyStateWrapper}>
               <NotFoundEmptyState
-                title="No results found"
-                subtitle={`No features match "${searchValue}". Try a different search term.`}
+                title={intl.formatMessage(messages.noResultsTitle)}
+                subtitle={intl.formatMessage(messages.noResultsSubtitle, { searchValue })}
                 size="sm"
               />
             </div>
@@ -321,7 +326,7 @@ export function SharedDataTable({
                 <TableToolbarContent>
                   {searchable && (
                     <TableToolbarSearch
-                      placeholder={searchPlaceholder}
+                      placeholder={resolvedSearchPlaceholder}
                       onChange={(_e, value) => { setSearchValue(value ?? ''); }}
                       persistent
                     />

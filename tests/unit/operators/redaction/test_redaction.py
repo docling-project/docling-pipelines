@@ -205,3 +205,87 @@ class TestRedactionOperator:
 
             assert elapsed < 1.0, f"Pattern '{pattern}' took {elapsed:.2f}s on 100KB input — ReDoS regression"
             assert len(table_list) == 1
+
+    def test_doclang_xml_redaction_preserves_dom_structure(self):
+        """Test that doc_format=doclang redacts text inside XML tags while preserving tags and attributes."""
+        xml_content = (
+            '<doc lang="en">'
+            '<paragraph id="1">Customer John Doe submitted report.</paragraph>'
+            '<paragraph id="2">Contact: John at test@example.com</paragraph>'
+            "</doc>"
+        )
+        config = {
+            "doc_column": "content",
+            "stats_column": "redaction_stats",
+            "redaction_masking_character": "*",
+            "redaction_regex": "John",
+            "doc_format": "doclang",
+        }
+        operator = RedactionOperator(config=config)
+
+        input_table = pa.Table.from_arrays(
+            [pa.array([1]), pa.array(["doc1"]), pa.array([xml_content])],
+            names=["id", "name", "content"],
+        )
+
+        table_list, metadata = operator.transform(input_table)
+        assert len(table_list) == 1
+        output_table = table_list[0]
+
+        redacted_content = output_table["content"].to_pylist()[0]
+        # Tags and attributes must be intact
+        assert '<doc lang="en">' in redacted_content
+        assert '<paragraph id="1">' in redacted_content
+        assert '<paragraph id="2">' in redacted_content
+        # Target word "John" redacted inside tags
+        assert "Customer **** Doe submitted report." in redacted_content
+        assert "Contact: **** at test@example.com" in redacted_content
+        assert "John" not in redacted_content
+
+        assert output_table["redaction_stats"].to_pylist()[0] == 2
+        assert metadata["total_redactions"] == 2
+
+    def test_doclang_xml_redaction_handles_tail_text(self):
+        """Test that text in element.tail is also redacted."""
+        xml_content = "<root><bold>John</bold> Doe is here</root>"
+        config = {
+            "doc_column": "content",
+            "stats_column": "redaction_stats",
+            "redaction_masking_character": "X",
+            "redaction_regex": "Doe",
+            "doc_format": "doclang",
+        }
+        operator = RedactionOperator(config=config)
+
+        input_table = pa.Table.from_arrays(
+            [pa.array([1]), pa.array(["doc1"]), pa.array([xml_content])],
+            names=["id", "name", "content"],
+        )
+
+        table_list, metadata = operator.transform(input_table)
+        redacted_content = table_list[0]["content"].to_pylist()[0]
+
+        assert "<root><bold>John</bold> XXX is here</root>" == redacted_content
+        assert metadata["total_redactions"] == 1
+
+    def test_doclang_malformed_xml_fallback(self):
+        """Test that malformed XML falls back to standard text redaction without raising an exception."""
+        malformed_xml = "<doc><unclosed>John Doe"
+        config = {
+            "doc_column": "content",
+            "stats_column": "redaction_stats",
+            "redaction_masking_character": "*",
+            "redaction_regex": "John",
+            "doc_format": "doclang",
+        }
+        operator = RedactionOperator(config=config)
+
+        input_table = pa.Table.from_arrays(
+            [pa.array([1]), pa.array(["doc1"]), pa.array([malformed_xml])],
+            names=["id", "name", "content"],
+        )
+
+        table_list, metadata = operator.transform(input_table)
+        redacted_content = table_list[0]["content"].to_pylist()[0]
+        assert "<doc><unclosed>**** Doe" == redacted_content
+        assert metadata["total_redactions"] == 1

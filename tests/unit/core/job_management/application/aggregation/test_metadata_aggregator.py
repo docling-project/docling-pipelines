@@ -281,3 +281,33 @@ class TestNewHelperMethods:
     def test_custom_strategy_falls_back_to_last_when_not_registered(self):
         result = self.agg._apply_custom_strategy(field_name="unregistered", values=["a", "b", "c"])
         assert result == "c"
+
+
+class TestMetadataAggregatorStaticMethods:
+    """Verify aggregation strategy helpers are static and callable without an instance."""
+
+    STATIC_METHODS = (
+        "_apply_numeric_strategy",
+        "_apply_union_strategy",
+    )
+
+    def test_strategy_helpers_are_static(self):
+        """Every converted strategy helper must be a true staticmethod."""
+        import inspect
+
+        for method_name in self.STATIC_METHODS:
+            assert isinstance(inspect.getattr_static(MetadataAggregator, method_name), staticmethod), (
+                f"{method_name} is not a staticmethod"
+            )
+
+    def test_apply_numeric_strategy_class_call(self):
+        """Numeric strategies work when called directly on the class."""
+        assert MetadataAggregator._apply_numeric_strategy(values=[1, 2, 3], strategy=AggregationStrategy.SUM) == 6
+        assert MetadataAggregator._apply_numeric_strategy(values=[1, 2, 3], strategy=AggregationStrategy.MIN) == 1
+        assert MetadataAggregator._apply_numeric_strategy(values=[1, 2, 3], strategy=AggregationStrategy.MAX) == 3
+
+    def test_apply_union_strategy_class_call(self):
+        """UNION strategy works when called directly on the class."""
+        result = MetadataAggregator._apply_union_strategy(values=[[1, 2], [2, 3], [4]])
+
+        assert result == [1, 2, 3, 4]

@@ -175,6 +175,7 @@ class TestPostgresJobStatsStoreInterface:
             mock_job_run_stats.failed_docs = sample_job_stats_dto.failed_docs
             mock_job_run_stats.skipped_docs = sample_job_stats_dto.skipped_docs
             mock_job_run_stats.heartbeat_timestamp = None
+            mock_job_run_stats.progress_timestamp = 0
             mock_job_run_stats.deleted_doc_count = 0
             mock_job_run_stats.total_pages_processed = 0
             mock_job_run_stats.page_type_stats = {}
@@ -183,6 +184,7 @@ class TestPostgresJobStatsStoreInterface:
             mock_job_run_stats.container_kind = None
             mock_job_run_stats.container_id = None
             mock_job_run_stats.flow_id = None
+            mock_job_run_stats.flow_name = None
             mock_job_run_stats.user_id = None
             mock_job_run_stats.account_id = None
             mock_job_run_stats.user_entitlements = None
@@ -316,6 +318,7 @@ class TestPostgresJobStatsStoreInterface:
             mock_job_run_stats.failed_docs = 0
             mock_job_run_stats.skipped_docs = 0
             mock_job_run_stats.heartbeat_timestamp = None
+            mock_job_run_stats.progress_timestamp = 0
             mock_job_run_stats.deleted_doc_count = 0
             mock_job_run_stats.total_pages_processed = 0
             mock_job_run_stats.page_type_stats = {}
@@ -324,6 +327,7 @@ class TestPostgresJobStatsStoreInterface:
             mock_job_run_stats.container_kind = None
             mock_job_run_stats.container_id = None
             mock_job_run_stats.flow_id = None
+            mock_job_run_stats.flow_name = None
             mock_job_run_stats.user_id = None
             mock_job_run_stats.account_id = None
             mock_job_run_stats.user_entitlements = None
@@ -762,3 +766,25 @@ class TestStoreMethodErrorPaths:
 
         with pytest.raises(JobStatsStoreReadException):
             store.list_job_runs()
+
+    def test_count_job_runs_returns_dal_count(self):
+        store = self._store()
+        store._job_stats_dal.count_job_runs.return_value = 42
+
+        result = store.count_job_runs(job_id="job-1", job_ids=["job-1"], status=ExecutionStatus.COMPLETED)
+
+        assert result == 42
+        store._job_stats_dal.count_job_runs.assert_called_once_with(
+            job_id="job-1",
+            job_ids=["job-1"],
+            status=ExecutionStatus.COMPLETED.value,
+        )
+
+    def test_count_job_runs_raises_on_error(self):
+        from docpipe.exceptions.docpipe_exceptions import JobStatsStoreReadException
+
+        store = self._store()
+        store._job_stats_dal.count_job_runs.side_effect = RuntimeError("db error")
+
+        with pytest.raises(JobStatsStoreReadException):
+            store.count_job_runs()

@@ -51,6 +51,7 @@ def sample_job_stats():
         failed_docs=5,
         message="Test job",
         start_time=1704067200,
+        progress_timestamp=1704067300,
     )
 
 
@@ -180,6 +181,7 @@ class TestJobStatsCRUD:
         assert retrieved.job_run_id == sample_job_stats.job_run_id
         assert retrieved.processed_docs == 100
         assert retrieved.failed_docs == 5
+        assert retrieved.progress_timestamp == 1704067300
 
     def test_update_job_stats(self, *, store, sample_job_stats):
         """Should update existing job stats (upsert behavior)."""
@@ -555,6 +557,39 @@ class TestListJobRuns:
         assert result[0].start_time == 1200
         assert result[1].start_time == 1100
         assert result[2].start_time == 1000
+
+
+class TestCountJobRuns:
+    """Count uses the same filters as list and ignores the list limit."""
+
+    def test_count_job_runs_empty(self, *, store):
+        assert store.count_job_runs() == 0
+
+    def test_count_job_runs_matches_filters_past_list_limit(self, *, store):
+        for index in range(6):
+            store.store_job_stats(
+                JobStats(
+                    job_id="job-a" if index < 4 else "job-b",
+                    job_run_id=str(uuid.uuid4()),
+                    status=ExecutionStatus.COMPLETED if index % 2 == 0 else ExecutionStatus.FAILED,
+                )
+            )
+
+        assert len(store.list_job_runs(job_id="job-a", limit=1)) == 1
+        assert store.count_job_runs(job_id="job-a") == 4
+        assert store.count_job_runs(job_ids=["job-b"]) == 2
+        assert store.count_job_runs(status=ExecutionStatus.COMPLETED) == 3
+        assert store.count_job_runs(job_id="job-a", status=ExecutionStatus.FAILED) == 2
+        assert store.count_job_runs() == 6
+
+    def test_count_job_runs_raises_on_connection_error(self, *, store):
+        from unittest.mock import patch
+
+        from docpipe.exceptions.docpipe_exceptions import JobStatsStoreReadException
+
+        with patch.object(store.connection_manager, "get_connection", side_effect=RuntimeError("no connection")):
+            with pytest.raises(JobStatsStoreReadException, match="Failed to count jobs"):
+                store.count_job_runs()
 
 
 class TestAtomicOperations:

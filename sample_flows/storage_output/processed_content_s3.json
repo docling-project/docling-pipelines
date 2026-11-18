@@ -16,9 +16,7 @@
           "bucket": "my-source-bucket",
           "prefix": "source/",
           "region": "us-east-1",
-          "recursive": true
-        },
-        "credentials": {
+          "recursive": true,
           "access_key": "${S3_ACCESS_KEY}",
           "secret_key": "${S3_SECRET_KEY}"
         },

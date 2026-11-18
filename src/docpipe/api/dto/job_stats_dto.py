@@ -32,6 +32,7 @@ from docpipe.api.dto.field_definitions import (
     EXECUTION_TIME_MIN,
     FAILED_DOCS_DESC,
     FLOW_ID_DESC_JOB,
+    FLOW_NAME_DESC_JOB,
     HEARTBEAT_DESC,
     JOB_ID_DESC,
     JOB_RUN_ID_DESC,
@@ -40,6 +41,7 @@ from docpipe.api.dto.field_definitions import (
     MESSAGE_MAX_LENGTH,
     MESSAGE_MIN_LENGTH,
     MESSAGE_PATTERN,
+    NAME_MAX_LENGTH,
     NODE_STATS_DESC,
     ORCHESTRATOR_DESC,
     ORCHESTRATOR_MAX_LENGTH,
@@ -49,6 +51,7 @@ from docpipe.api.dto.field_definitions import (
     PAGES_COUNT_MAX,
     PAGES_COUNT_MIN,
     PROCESSED_DOCS_DESC,
+    PROGRESS_TIMESTAMP_DESC,
     SKIPPED_DOCS_DESC,
     START_TIME_DESC,
     TIMESTAMP_MAX,
@@ -120,6 +123,13 @@ class JobStatsDto(BaseModel):
     )
     heartbeat_timestamp: int | None = Field(
         default=0, description=HEARTBEAT_DESC, ge=TIMESTAMP_MIN, le=TIMESTAMP_MAX, json_schema_extra={"format": "int64"}
+    )
+    progress_timestamp: int = Field(
+        default=0,
+        description=PROGRESS_TIMESTAMP_DESC,
+        ge=TIMESTAMP_MIN,
+        le=TIMESTAMP_MAX,
+        json_schema_extra={"format": "int64"},
     )
 
     # Document Counts
@@ -219,6 +229,11 @@ class JobStatsDto(BaseModel):
         description=FLOW_ID_DESC_JOB,
         min_length=0,
         max_length=UUID_LENGTH,
+    )
+    flow_name: str | None = Field(
+        default=None,
+        description=FLOW_NAME_DESC_JOB,
+        max_length=NAME_MAX_LENGTH,
     )
 
     # User & Account Context

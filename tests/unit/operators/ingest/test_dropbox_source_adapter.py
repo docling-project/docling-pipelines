@@ -14,6 +14,7 @@ from dropbox.files import FileMetadata, FolderMetadata
 from docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.adapter import DropboxSourceAdapter
 from docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.config import DropboxSourceConfig
 from docpipe.core.operators.ingest.adapters.outbound.sources.factories.source_factory import SourceAdapterFactory
+from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
 
 ADAPTER_MODULE = "docpipe.core.operators.ingest.adapters.outbound.sources.dropbox.adapter"
 
@@ -156,13 +157,13 @@ class TestBuildConfigFromOperatorParams:
     def test_maps_connection_params_and_credentials(self):
         """Operator parameters are mapped onto the Dropbox config."""
         config = DropboxSourceAdapter().build_config_from_operator_params(
-            connection_params={
+            provider_config={
                 "folder_path": "Reports",
                 "recursive": False,
                 "exclude_patterns": ["*.tmp"],
                 "max_file_size_mb": 50,
+                "access_token": "token-value",  # pragma: allowlist secret
             },
-            credentials={"access_token": "token-value"},  # pragma: allowlist secret
             included_extensions=["pdf", "docx"],
             max_files=25,
         )
@@ -178,8 +179,7 @@ class TestBuildConfigFromOperatorParams:
     def test_defaults_to_root_and_recursive(self):
         """Missing connection params fall back to a recursive root ingestion."""
         config = DropboxSourceAdapter().build_config_from_operator_params(
-            connection_params={},
-            credentials={"access_token": "token-value"},  # pragma: allowlist secret
+            provider_config={"access_token": "token-value"},  # pragma: allowlist secret
         )
         assert config.folder_path == ""
         assert config.recursive is True
@@ -191,8 +191,10 @@ class TestBuildConfigFromOperatorParams:
         monkeypatch.setenv("DROPBOX_TEST_FOLDER", "/Env/Folder")
 
         config = DropboxSourceAdapter().build_config_from_operator_params(
-            connection_params={"folder_path": "${DROPBOX_TEST_FOLDER}"},
-            credentials={"access_token": "${DROPBOX_TEST_TOKEN}"},  # pragma: allowlist secret
+            provider_config={
+                "folder_path": "${DROPBOX_TEST_FOLDER}",
+                "access_token": "${DROPBOX_TEST_TOKEN}",
+            },  # pragma: allowlist secret
         )
 
         assert config.access_token == "resolved-token"
@@ -202,15 +204,13 @@ class TestBuildConfigFromOperatorParams:
         """A flow without Dropbox credentials fails with an actionable error."""
         with pytest.raises(ValueError, match="Dropbox credentials missing"):
             DropboxSourceAdapter().build_config_from_operator_params(
-                connection_params={"folder_path": "/Reports"},
-                credentials={},
+                provider_config={"folder_path": "/Reports"},
             )
 
     def test_single_file_mode_param(self):
         """file_path in connection params enables single-file ingestion."""
         config = DropboxSourceAdapter().build_config_from_operator_params(
-            connection_params={"file_path": "Reports/q1.pdf"},
-            credentials={"access_token": "token-value"},  # pragma: allowlist secret
+            provider_config={"file_path": "Reports/q1.pdf", "access_token": "token-value"},  # pragma: allowlist secret
         )
         assert config.file_path == "/Reports/q1.pdf"
 
@@ -454,8 +454,7 @@ class TestFetchBinaryContent:
         with patch.object(DropboxSourceAdapter, "_get_dropbox_client", return_value=client):
             content = DropboxSourceAdapter().fetch_binary_content(
                 source_id="id:abc123",
-                connection_params={},
-                credentials={"access_token": "token-value"},  # pragma: allowlist secret
+                provider_config={"access_token": "token-value"},  # pragma: allowlist secret
             )
 
         assert content == b"PDF-bytes"
@@ -471,8 +470,7 @@ class TestFetchBinaryContent:
         with patch.object(DropboxSourceAdapter, "_get_dropbox_client", return_value=client):
             DropboxSourceAdapter().fetch_binary_content(
                 source_id="Reports/q1.pdf",
-                connection_params={},
-                credentials={"access_token": "token-value"},  # pragma: allowlist secret
+                provider_config={"access_token": "token-value"},  # pragma: allowlist secret
             )
 
         client.files_download.assert_called_once_with("/Reports/q1.pdf")
@@ -487,8 +485,7 @@ class TestFetchBinaryContent:
         with patch.object(DropboxSourceAdapter, "_get_dropbox_client", return_value=client):
             DropboxSourceAdapter().fetch_binary_content(
                 source_id="https://www.dropbox.com/home/Reports/q1.pdf",
-                connection_params={},
-                credentials={"access_token": "token-value"},  # pragma: allowlist secret
+                provider_config={"access_token": "token-value"},  # pragma: allowlist secret
             )
 
         client.files_download.assert_called_once_with("/Reports/q1.pdf")
@@ -501,8 +498,7 @@ class TestFetchBinaryContent:
         with patch.object(DropboxSourceAdapter, "_get_dropbox_client", return_value=client):
             content = DropboxSourceAdapter().fetch_binary_content(
                 source_id="id:missing",
-                connection_params={},
-                credentials={"access_token": "token-value"},  # pragma: allowlist secret
+                provider_config={"access_token": "token-value"},  # pragma: allowlist secret
             )
 
         assert content is None
@@ -515,8 +511,7 @@ class TestFetchBinaryContent:
         with patch.object(DropboxSourceAdapter, "_get_dropbox_client", return_value=client):
             content = DropboxSourceAdapter().fetch_binary_content(
                 source_id="id:abc123",
-                connection_params={},
-                credentials={"access_token": "token-value"},  # pragma: allowlist secret
+                provider_config={"access_token": "token-value"},  # pragma: allowlist secret
             )
 
         assert content is None
@@ -526,8 +521,7 @@ class TestFetchBinaryContent:
         with pytest.raises(ValueError, match="Missing source_id"):
             DropboxSourceAdapter().fetch_binary_content(
                 source_id="",
-                connection_params={},
-                credentials={"access_token": "token-value"},  # pragma: allowlist secret
+                provider_config={"access_token": "token-value"},  # pragma: allowlist secret
             )
 
     def test_missing_credentials_raise(self):
@@ -535,8 +529,7 @@ class TestFetchBinaryContent:
         with pytest.raises(ValueError, match="Dropbox credentials missing"):
             DropboxSourceAdapter().fetch_binary_content(
                 source_id="id:abc123",
-                connection_params={},
-                credentials={},
+                provider_config={},
             )
 
 
@@ -570,3 +563,146 @@ class TestClientCaching:
         kwargs = mock_dropbox.call_args.kwargs
         assert kwargs["oauth2_refresh_token"] == "refresh"
         assert kwargs["app_key"] == "key"
+
+
+class TestBindFileReference:
+    """Test DropboxSourceAdapter.bind_file_reference."""
+
+    def test_valid_path_reference_sets_file_path(self):
+        """A non-empty path reference is set as file_path without any Dropbox API call."""
+        provider_config = {"access_token": "token-value", "folder_path": "/Reports"}  # pragma: allowlist secret
+
+        DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="/Reports/q1.pdf")
+
+        assert provider_config["file_path"] == "/Reports/q1.pdf"
+
+    def test_valid_id_reference_sets_file_path(self):
+        """A Dropbox file id reference is accepted as-is."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="id:abc123")
+
+        assert provider_config["file_path"] == "id:abc123"
+
+    def test_credentials_are_untouched(self):
+        """bind_file_reference only adds file_path; it never reads or rewrites credentials."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="/q1.pdf")
+
+        assert provider_config["access_token"] == "token-value"  # pragma: allowlist secret
+        assert "refresh_token" not in provider_config
+
+    def test_empty_file_reference_raises_value_error(self):
+        """An empty file_reference raises a clear ValueError."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        with pytest.raises(ValueError, match="non-empty Dropbox path or id"):
+            DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="")
+
+        assert "file_path" not in provider_config
+
+    def test_blank_file_reference_raises_value_error(self):
+        """A whitespace-only file_reference raises a clear ValueError."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        with pytest.raises(ValueError, match="non-empty Dropbox path or id"):
+            DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference="   ")
+
+        assert "file_path" not in provider_config
+
+    def test_none_file_reference_raises_value_error(self):
+        """A None file_reference raises a clear ValueError, not an AttributeError."""
+        provider_config = {"access_token": "token-value"}  # pragma: allowlist secret
+
+        with pytest.raises(ValueError, match="non-empty Dropbox path or id"):
+            DropboxSourceAdapter.bind_file_reference(provider_config=provider_config, file_reference=None)
+
+        assert "file_path" not in provider_config
+
+
+@pytest.fixture
+def dropbox_ingest_config(monkeypatch):
+    """Configure real operator binding with isolated worker and credential variables."""
+    monkeypatch.setenv("DOCPIPE_EVENT_CANARY", "worker-canary-value")
+    monkeypatch.setenv("DOCPIPE_EVENT_EMPTY", "")
+    monkeypatch.delenv("DOCPIPE_EVENT_UNSET", raising=False)
+    monkeypatch.setenv("DOCPIPE_TEST_TOKEN", "resolved-test-token")
+    return {
+        "provider": "dropbox",
+        "provider_config": {"access_token": "${DOCPIPE_TEST_TOKEN}", "folder_path": "/Reports"},
+        "include_filter": ".pdf",
+        "input_event": {
+            "event_id": "00000000-0000-0000-0000-000000000001",
+            "event_timestamp": "2026-10-26T00:00:00Z",
+            "routing_key": "test-documents",
+            "operation": "create",
+            "file_reference": "DOCPIPE_EVENT_CANARY",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("file_reference", "expected_path"),
+    [
+        ("$DOCPIPE_EVENT_CANARY", "/$DOCPIPE_EVENT_CANARY"),
+        ("${DOCPIPE_EVENT_CANARY}", "/${DOCPIPE_EVENT_CANARY}"),
+        ("DOCPIPE_EVENT_CANARY", "/DOCPIPE_EVENT_CANARY"),
+        ("${DOCPIPE_EVENT_UNSET}", "/${DOCPIPE_EVENT_UNSET}"),
+        ("${DOCPIPE_EVENT_UNSET:fallback}", "/${DOCPIPE_EVENT_UNSET:fallback}"),
+        ("DOCPIPE_EVENT_EMPTY", "/DOCPIPE_EVENT_EMPTY"),
+        ("Reports/q1.pdf", "/Reports/q1.pdf"),
+        ("id:ABC_DEF", "id:ABC_DEF"),
+    ],
+)
+async def test_event_reference_stays_literal(*, dropbox_ingest_config, file_reference, expected_path):
+    """Event references reach the SDK literally while trusted credential variables resolve."""
+    dropbox_ingest_config["input_event"]["file_reference"] = file_reference
+    original_provider_config = dict(dropbox_ingest_config["provider_config"])
+    operator = IngestSourceOperator(dropbox_ingest_config)
+    adapter, config = operator._build_adapter_config("dropbox")
+    client = Mock()
+    client.files_get_metadata.return_value = make_file(name="q1.pdf", path="/Reports/q1.pdf")
+
+    with patch.object(adapter, "_get_dropbox_client", return_value=client), patch(f"{ADAPTER_MODULE}.logger") as log:
+        documents = await collect(adapter.fetch_documents(config))
+
+    client.files_get_metadata.assert_called_once_with(expected_path)
+    client.files_list_folder.assert_not_called()
+    assert len(documents) == 1
+    assert config.file_path == expected_path
+    assert config.access_token == "resolved-test-token"  # pragma: allowlist secret
+    assert operator.provider_config == original_provider_config
+    assert dropbox_ingest_config["provider_config"] == original_provider_config
+    assert "worker-canary-value" not in repr(log.mock_calls)
+
+
+async def test_event_reference_does_not_expose_environment_in_errors(dropbox_ingest_config):
+    """A failed provider lookup reports the literal reference without disclosing worker values."""
+    operator = IngestSourceOperator(dropbox_ingest_config)
+    adapter, config = operator._build_adapter_config("dropbox")
+    client = Mock()
+    client.files_get_metadata.return_value = FolderMetadata(name="folder", id="id:folder")
+
+    with patch.object(adapter, "_get_dropbox_client", return_value=client), patch(f"{ADAPTER_MODULE}.logger") as log:
+        with pytest.raises(ValueError, match="Dropbox path is not a file") as exc:
+            await collect(adapter.fetch_documents(config))
+
+    client.files_get_metadata.assert_called_once_with("/DOCPIPE_EVENT_CANARY")
+    assert "/DOCPIPE_EVENT_CANARY" in str(exc.value)
+    assert "worker-canary-value" not in str(exc.value)
+    assert "worker-canary-value" not in repr(log.mock_calls)
+
+
+def test_trusted_file_reference_still_resolves_without_event(*, dropbox_ingest_config, monkeypatch):
+    """Batch runs retain environment resolution for trusted file settings and credentials."""
+    dropbox_ingest_config.pop("input_event")
+    dropbox_ingest_config["provider_config"]["file_path"] = "${DOCPIPE_TRUSTED_FILE}"
+    monkeypatch.setenv("DOCPIPE_TRUSTED_FILE", "/Reports/q1.pdf")
+    operator = IngestSourceOperator(dropbox_ingest_config)
+
+    _, config = operator._build_adapter_config("dropbox")
+
+    assert config.file_path == "/Reports/q1.pdf"
+    assert config.access_token == "resolved-test-token"  # pragma: allowlist secret
+    assert operator.provider_config["file_path"] == "${DOCPIPE_TRUSTED_FILE}"

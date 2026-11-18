@@ -1,9 +1,9 @@
-import re
 from enum import Enum
 from typing import Any
 
 import duckdb
 import pyarrow as pa
+import re2 as re
 
 from docpipe.core.constants.constants import (
     AttributeDataTypes,
@@ -198,7 +198,8 @@ class SQLFilterOperator(AbstractOperator):
             # Record the error in metadata and return original table
             error_msg = str(e)
             logger.error(
-                f"SQL filter operation failed: {error_msg}",
+                "SQL filter operation failed: %s",
+                error_msg,
                 extra=self.common_log_arguments,
             )
             metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
@@ -216,9 +217,9 @@ class SQLFilterOperator(AbstractOperator):
             return [table], metadata
         except Exception as e:
             # Handle unexpected errors
-            logger.error(
-                f"Unexpected error in SQL filter operation: {e!s}",
-                exc_info=True,
+            logger.exception(
+                "Unexpected error in SQL filter operation: %s",
+                e,
                 extra=self.common_log_arguments,
             )
             metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
@@ -414,7 +415,10 @@ class SQLFilterOperator(AbstractOperator):
 
         if invalid_columns:
             logger.error(
-                f"Invalid features found in {mode} - {', '.join(invalid_columns)}. {mode} should use only the available features."
+                "Invalid features found in %s - %s. %s should use only the available features.",
+                mode,
+                ", ".join(invalid_columns),
+                mode,
             )
             if metadata is not None:
                 metadata[Metrics.External.PROCESSED_DOCS] = 0
@@ -692,13 +696,10 @@ def extract_columns_list(filter_criteria: list[str]) -> set[str]:
     """Extract column names from filter criteria strings."""
 
     # Pattern to split expressions on AND / OR
-    logical_split_pattern: re.Pattern[str] = re.compile(r"\s+(AND|OR)\s+", flags=re.IGNORECASE)
+    logical_split_pattern = re.compile(r"(?i)\s+(AND|OR)\s+")
 
     # Pattern to match a column name at the start of a condition
-    column_pattern: re.Pattern[str] = re.compile(
-        r"^\s*([\w.]+)\s*(?:IN|NOT IN|LIKE|IS NULL|IS NOT NULL|=|<>|!=|<=|>=|<|>)",
-        flags=re.IGNORECASE,
-    )
+    column_pattern = re.compile(r"(?i)^\s*([\w.]+)\s*(?:IN|NOT IN|LIKE|IS NULL|IS NOT NULL|=|<>|!=|<=|>=|<|>)")
 
     columns: set[str] = set()
     for criterion in filter_criteria:
@@ -707,7 +708,7 @@ def extract_columns_list(filter_criteria: list[str]) -> set[str]:
         for expr in expressions:
             if expr.upper() in {"AND", "OR"}:
                 continue
-            match: re.Match[str] | None = column_pattern.match(expr.strip())
+            match = column_pattern.match(expr.strip())
             if match:
                 columns.add(match.group(1))
 

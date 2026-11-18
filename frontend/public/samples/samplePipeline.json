@@ -29,8 +29,7 @@
     ],
     "parameters": {
       "provider": "filesystem",
-      "connection_params": { "paths": ["./sample_documents"] },
-      "credentials": {},
+      "provider_config": { "paths": ["./sample_documents"] },
       "max_files": 100,
       "include_filter": null,
       "exclude_filter": null,

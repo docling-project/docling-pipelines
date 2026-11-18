@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
 HuggingFace LLM Client for embeddings operations.
@@ -98,7 +98,9 @@ class HuggingFaceLLMClient(BaseLLMClient):
             self._initialize_api_client()
 
         logger.info(
-            f"Initialized HuggingFace client with model '{model_name}' (mode: {'local' if use_local else 'API'})"
+            "Initialized HuggingFace client with model '%s' (mode: %s)",
+            model_name,
+            "local" if use_local else "API",
         )
 
     def _initialize_local_model(self) -> None:
@@ -117,11 +119,11 @@ class HuggingFaceLLMClient(BaseLLMClient):
             cache_key = f"{self.model_name}_{self.device}"
             if cache_key in self._loaded_models:
                 self.model = self._loaded_models[cache_key]
-                logger.debug(f"Using cached model: {cache_key}")
+                logger.debug("Using cached model: %s", cache_key)
                 return
 
             # Load new model
-            logger.info(f"Loading local model: {self.model_name}")
+            logger.info("Loading local model: %s", self.model_name)
             self.model = SentenceTransformer(self.model_name, device=self.device)
             self._loaded_models[cache_key] = self.model
 
@@ -168,7 +170,7 @@ class HuggingFaceLLMClient(BaseLLMClient):
             return self._generate_api_embeddings(text)
 
         except Exception as e:
-            logger.error(f"Failed to generate embeddings with HuggingFace: {e}")
+            logger.error("Failed to generate embeddings with HuggingFace: %s", e)
             raise ExternalServiceError(
                 f"Failed to generate embeddings with HuggingFace model '{self.model_name}': {e}"
             ) from e
@@ -222,7 +224,7 @@ class HuggingFaceLLMClient(BaseLLMClient):
             return self._generate_api_embeddings_batch(texts, self.batch_size)
 
         except Exception as e:
-            logger.error(f"Failed to generate batch embeddings with HuggingFace: {e}")
+            logger.error("Failed to generate batch embeddings with HuggingFace: %s", e)
             raise ExternalServiceError(
                 f"Failed to generate batch embeddings with HuggingFace model '{self.model_name}': {e}"
             ) from e

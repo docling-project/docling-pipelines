@@ -36,7 +36,7 @@ class TestIngestExtractIntegration:
     def _make_ingest_config(self, path: str, **kwargs) -> dict:
         return {
             "provider": "filesystem",
-            "connection_params": {"paths": [path]},
+            "provider_config": {"paths": [path]},
             "include_filter": kwargs.get("include_filter", "pdf"),
             "max_files": kwargs.get("max_files", 3),
             "force_ingest": True,
@@ -155,7 +155,7 @@ def test_basic_integration():
 
     ingest_config = {
         "provider": "filesystem",
-        "connection_params": {"paths": [str(fixtures_dir)]},
+        "provider_config": {"paths": [str(fixtures_dir)]},
         "include_filter": "pdf",
         "max_files": 1,
         "force_ingest": True,

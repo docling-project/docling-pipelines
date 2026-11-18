@@ -335,3 +335,39 @@ class TestAuthoringCompiler:
         assert len(filter_node["input_edges"]) == 1
         assert filter_node["input_edges"][0]["link_name"] == "low_quality"
         assert filter_node["input_edges"][0]["node_id_ref"] == dag_nodes["branch"]["id"]
+
+
+class TestAuthoringCompilerStaticMethods:
+    """Verify compiler helpers are static and callable without an instance."""
+
+    STATIC_METHODS = (
+        "_generate_operator_ids",
+        "_build_dependency_graph",
+        "_build_input_edges",
+        "_build_output_edges",
+        "_transform_operator_config",
+        "_build_merge_input_links",
+    )
+
+    def test_compiler_helpers_are_static(self):
+        """Every converted compiler helper must be a true staticmethod."""
+        import inspect
+
+        for method_name in self.STATIC_METHODS:
+            assert isinstance(inspect.getattr_static(AuthoringCompiler, method_name), staticmethod), (
+                f"{method_name} is not a staticmethod"
+            )
+
+    def test_build_merge_input_links_class_call(self):
+        """Merge input_links construction works when called directly on the class."""
+        input_edges = [
+            {"node_id_ref": "id-1", "link_name": "branch_a"},
+            {"node_id_ref": "id-2"},
+        ]
+
+        links = AuthoringCompiler._build_merge_input_links(input_edges=input_edges)
+
+        assert links == [
+            {"link_name": "branch_a", "node_id_ref": "id-1"},
+            {"link_name": "input_2", "node_id_ref": "id-2"},
+        ]

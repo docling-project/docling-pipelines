@@ -202,6 +202,60 @@ class ValidationService:
         # Fallback for unexpected types
         return {"code": default_code, "message": str(alert)}
 
+    @staticmethod
+    def _format_missing_definition_response() -> dict[str, Any]:
+        """Format standardized response when flow definition is missing or empty."""
+        logger.warning("Flow definition is missing or empty")
+        return {
+            "status": "FAILED",
+            "message": "Flow definition is required for validation",
+            "errors": [{"code": "MISSING_DEFINITION", "message": "Flow definition is required for validation"}],
+            "warnings": [],
+        }
+
+    def _format_validation_exception_response(self, *, exception: Any) -> dict[str, Any]:
+        """Format standardized response from a FlowValidationException.
+
+        Args:
+            exception: FlowValidationException instance containing errors and warnings.
+
+        Returns:
+            Standardized validation result dictionary.
+        """
+        logger.warning("Flow validation failed: %s", str(exception))
+
+        errors = []
+        if hasattr(exception, "errors") and exception.errors:
+            for err in exception.errors:
+                errors.append(self._normalize_validation_alert(alert=err, default_code="VALIDATION_ERROR"))
+
+        warnings = []
+        if hasattr(exception, "warnings") and exception.warnings:
+            for warn in exception.warnings:
+                warnings.append(self._normalize_validation_alert(alert=warn, default_code="VALIDATION_WARNING"))
+
+        if len(errors) == 0 and len(warnings) > 0:
+            status = "SUCCEEDED_WITH_WARNINGS"
+            message = "Flow validation succeeded with warnings."
+        else:
+            status = "FAILED"
+            message = "Flow validation failed."
+
+        return {"status": status, "message": message, "errors": errors, "warnings": warnings}
+
+    @staticmethod
+    def _format_unexpected_exception_response(*, exception: Exception) -> dict[str, Any]:
+        """Format standardized response for unexpected errors during validation."""
+        logger.error("Unexpected error during flow validation: %s", str(exception), exc_info=True)
+        return {
+            "status": "FAILED",
+            "message": "Validation failed with unexpected error.",
+            "errors": [
+                {"code": "VALIDATION_EXCEPTION", "message": f"Validation failed with unexpected error: {exception!s}"}
+            ],
+            "warnings": [],
+        }
+
     def validate_flow(self, *, flow_definition: dict[str, Any] | None, is_elyra: bool = False) -> dict[str, Any]:
         """Validate a flow definition and return comprehensive validation results.
 
@@ -357,13 +411,7 @@ class ValidationService:
 
         # Handle missing flow definition
         if not flow_definition:
-            logger.warning("Flow definition is missing or empty")
-            return {
-                "status": "FAILED",
-                "message": "Flow definition is required for validation",
-                "errors": [{"code": "MISSING_DEFINITION", "message": "Flow definition is required for validation"}],
-                "warnings": [],
-            }
+            return self._format_missing_definition_response()
 
         try:
             logger.debug("Converting flow to internal DAG (is_elyra=%s)", is_elyra)
@@ -376,52 +424,11 @@ class ValidationService:
             # Run validation with feature propagation
             try:
                 propagation_result = validator.validate_dag_with_features(flow_def=dag_flow, global_config={})
-
-                # If validation succeeds, return success response
                 result: dict[str, Any] = {"status": "SUCCEEDED", "message": None, "errors": [], "warnings": []}
-
                 logger.debug("Flow validation successful with %d nodes", len(propagation_result.available_features))
                 return result
-
             except FlowValidationException as e:
-                # Validation failed - extract errors and warnings
-                logger.warning("Flow validation failed: %s", str(e))
-
-                # Convert ValidationAlert/ValidationMessage objects to standardized dict format
-                errors = []
-                if hasattr(e, "errors") and e.errors:
-                    for err in e.errors:
-                        errors.append(self._normalize_validation_alert(alert=err, default_code="VALIDATION_ERROR"))
-
-                warnings = []
-                if hasattr(e, "warnings") and e.warnings:
-                    for warn in e.warnings:
-                        warnings.append(self._normalize_validation_alert(alert=warn, default_code="VALIDATION_WARNING"))
-
-                # Determine status based on errors and warnings
-                # If exception was raised, default to FAILED even if no explicit errors
-                if len(errors) > 0:
-                    status = "FAILED"
-                    message = "Flow validation failed."
-                elif len(warnings) > 0:
-                    status = "SUCCEEDED_WITH_WARNINGS"
-                    message = "Flow validation succeeded with warnings."
-                else:
-                    # Exception raised but no errors/warnings - still a failure
-                    status = "FAILED"
-                    message = "Flow validation failed."
-
-                return {"status": status, "message": message, "errors": errors, "warnings": warnings}
+                return self._format_validation_exception_response(exception=e)
 
         except Exception as e:
-            # Catch any unexpected exceptions and return as validation error
-            logger.error("Unexpected error during flow validation: %s", str(e), exc_info=True)
-
-            return {
-                "status": "FAILED",
-                "message": "Validation failed with unexpected error.",
-                "errors": [
-                    {"code": "VALIDATION_EXCEPTION", "message": f"Validation failed with unexpected error: {e!s}"}
-                ],
-                "warnings": [],
-            }
+            return self._format_unexpected_exception_response(exception=e)

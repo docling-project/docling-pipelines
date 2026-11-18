@@ -97,6 +97,15 @@ The operator also modifies the content column in-place, replacing matched text w
 | IPv4 address | `\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b` |
 | Keyword (case-insensitive) | `(?i)\\b(confidential\|secret\|private)\\b` |
 
+## DocLang XML Considerations & Limitations
+
+When `doc_format == "doclang"`, `RedactionOperator` performs DOM-aware redaction:
+- Text content is parsed into an XML element tree, and redaction is applied individually to `element.text` and `element.tail` nodes.
+- XML tags, attributes, and element hierarchies are preserved intact.
+
+**Known limitation (Cross-node PII)**:
+Redaction is scoped to individual DOM text nodes. Target patterns or words split across separate XML tags (for example, `<text>John </text><bold>Doe</bold>`) cannot be matched across the tag boundary.
+
 ## Troubleshooting
 
 **Pattern matches nothing** — verify the regex in a tool like [regex101.com](https://regex101.com) with a sample document. Remember to double-escape backslashes in JSON (`\\d` not `\d`).

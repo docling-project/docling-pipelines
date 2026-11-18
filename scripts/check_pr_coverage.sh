@@ -56,7 +56,7 @@ import xml.etree.ElementTree as ET, sys
 tree = ET.parse("${COVERAGE_XML}")
 root = tree.getroot()
 # coverage.xml stores paths relative to the source root (src/docpipe/ stripped)
-target = "${file}".removeprefix("src/docpipe/")
+target = "${file}".removeprefix("src/")
 for cls in root.iter("class"):
     if cls.get("filename", "") == target:
         print(cls.get("line-rate", "0"))

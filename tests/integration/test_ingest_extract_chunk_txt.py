@@ -32,7 +32,7 @@ class TestIngestExtractChunkTxtIntegration:
         print("\n=== Step 1: Ingesting .txt files ===")
         ingest_config = {
             "provider": "filesystem",
-            "connection_params": {"paths": [txt_fixtures_dir]},
+            "provider_config": {"paths": [txt_fixtures_dir]},
             "include_filter": "txt",
             "max_files": 5,
             "force_ingest": True,
@@ -145,7 +145,7 @@ class TestIngestExtractChunkTxtIntegration:
         # Step 1: Ingest both .txt and .pdf files
         ingest_config = {
             "provider": "filesystem",
-            "connection_params": {"paths": [str(parent_dir)]},
+            "provider_config": {"paths": [str(parent_dir)]},
             "include_filter": "txt,pdf",
             "max_files": 5,
             "force_ingest": True,
@@ -206,7 +206,7 @@ def test_basic_txt_integration():
 
     ingest_config = {
         "provider": "filesystem",
-        "connection_params": {"paths": [str(txt_dir)]},
+        "provider_config": {"paths": [str(txt_dir)]},
         "include_filter": "txt",
         "max_files": 2,
         "force_ingest": True,

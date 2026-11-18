@@ -13,16 +13,6 @@ export const COLUMN_KEYS = {
   DESCRIPTION: 'description',
 } as const;
 
-// Table column headers
-export const COLUMN_HEADERS = {
-  EXPAND: '',
-  NUMBER: 'Number',
-  TIMESTAMP: 'Timestamp',
-  STATUS: 'Status',
-  NAME: 'Name',
-  DESCRIPTION: 'Description',
-} as const;
-
 // Notification types
 export const NOTIFICATION_TYPES = {
   ERROR: 'error',
@@ -31,22 +21,7 @@ export const NOTIFICATION_TYPES = {
 
 // Default values
 export const DEFAULT_VALUES = {
-  TITLE: 'Validation problems',
   NODE_NAME_PLACEHOLDER: '-',
-  SEARCH_PLACEHOLDER: 'Find',
-} as const;
-
-// Aria labels
-export const ARIA_LABELS = {
-  EXPAND_ROW: 'Expand row',
-  COLLAPSE_ROW: 'Collapse row',
-  COPY_DESCRIPTION: 'Copy description',
-  CLOSE: 'Close',
-} as const;
-
-// Button titles
-export const BUTTON_TITLES = {
-  COPY_TO_CLIPBOARD: 'Copy to clipboard',
 } as const;
 
 // Keys used for client-side search in the notification table

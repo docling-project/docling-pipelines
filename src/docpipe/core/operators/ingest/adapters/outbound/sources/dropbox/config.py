@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for the Dropbox source adapter."""
 
 from typing import ClassVar
@@ -15,19 +18,41 @@ class DropboxSourceConfig(BaseModel):
       The SDK then refreshes the access token automatically.
     """
 
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "access_token",
+        "refresh_token",
+        "app_key",
+        "app_secret",
+    )
+
     # Credentials (never included in repr to keep secrets out of logs and tracebacks)
     access_token: str | None = Field(
-        None, repr=False, description="Dropbox OAuth2 access token (short-lived or legacy long-lived token)"
+        None,
+        repr=False,
+        description="Dropbox OAuth2 access token (short-lived or legacy long-lived token)",
+        json_schema_extra={"sensitive": True},
     )
 
     refresh_token: str | None = Field(
-        None, repr=False, description="Dropbox OAuth2 refresh token. Requires app_key and app_secret."
+        None,
+        repr=False,
+        description="Dropbox OAuth2 refresh token. Requires app_key and app_secret.",
+        json_schema_extra={"sensitive": True},
     )
 
-    app_key: str | None = Field(None, repr=False, description="Dropbox app key, required when using refresh_token")
+    app_key: str | None = Field(
+        None,
+        repr=False,
+        description="Dropbox app key, required when using refresh_token",
+        json_schema_extra={"sensitive": True},
+    )
 
     app_secret: str | None = Field(
-        None, repr=False, description="Dropbox app secret, required when using refresh_token"
+        None,
+        repr=False,
+        description="Dropbox app secret, required when using refresh_token",
+        json_schema_extra={"sensitive": True},
     )
 
     # Dropbox location configuration

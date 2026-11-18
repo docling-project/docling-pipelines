@@ -156,6 +156,39 @@ def _validate_operator_type_format(operator_type: str) -> None:
             raise ValueError(msg)
 
 
+def _validate_single_dag_node(*, node: Any, idx: int, node_ids: set[str]) -> None:
+    """Validate a single DAG node's structure and fields."""
+    if not isinstance(node, dict):
+        msg = f"node at index {idx} must be a dictionary, got {type(node).__name__}"
+        raise ValueError(msg)
+
+    if "id" not in node:
+        msg = f"node at index {idx} is missing required field 'id'"
+        raise ValueError(msg)
+
+    node_id = node["id"]
+    if not isinstance(node_id, str) or not node_id:
+        msg = f"node at index {idx} has invalid 'id': must be a non-empty string"
+        raise ValueError(msg)
+
+    if node_id in node_ids:
+        msg = f"duplicate node id '{node_id}' found at index {idx}"
+        raise ValueError(msg)
+    node_ids.add(node_id)
+
+    operator_field = node.get("operator") or node.get("operator_type")
+    if not operator_field:
+        msg = f"node '{node_id}' at index {idx} is missing required field 'operator' or 'operator_type'"
+        raise ValueError(msg)
+
+    _validate_operator_type_format(operator_field)
+
+    params = node.get("operator_params") or node.get("config")
+    if params is not None and not isinstance(params, dict):
+        msg = f"node '{node_id}' has invalid 'operator_params'/'config': must be a dictionary"
+        raise ValueError(msg)
+
+
 def _validate_dag_nodes(nodes: list[dict[str, Any]]) -> None:
     """Validate DAG nodes structure.
 
@@ -173,41 +206,9 @@ def _validate_dag_nodes(nodes: list[dict[str, Any]]) -> None:
         msg = "nodes list cannot be empty - at least one node is required"
         raise ValueError(msg)
 
-    node_ids = set()
+    node_ids: set[str] = set()
     for idx, node in enumerate(nodes):
-        if not isinstance(node, dict):
-            msg = f"node at index {idx} must be a dictionary, got {type(node).__name__}"
-            raise ValueError(msg)
-
-        # Validate required fields
-        if "id" not in node:
-            msg = f"node at index {idx} is missing required field 'id'"
-            raise ValueError(msg)
-
-        node_id = node["id"]
-        if not isinstance(node_id, str) or not node_id:
-            msg = f"node at index {idx} has invalid 'id': must be a non-empty string"
-            raise ValueError(msg)
-
-        # Check for duplicate IDs
-        if node_id in node_ids:
-            msg = f"duplicate node id '{node_id}' found at index {idx}"
-            raise ValueError(msg)
-        node_ids.add(node_id)
-
-        # Validate operator field (can be 'operator' or 'operator_type')
-        operator_field = node.get("operator") or node.get("operator_type")
-        if not operator_field:
-            msg = f"node '{node_id}' at index {idx} is missing required field 'operator' or 'operator_type'"
-            raise ValueError(msg)
-
-        _validate_operator_type_format(operator_field)
-
-        # Validate operator_params/config if present
-        params = node.get("operator_params") or node.get("config")
-        if params is not None and not isinstance(params, dict):
-            msg = f"node '{node_id}' has invalid 'operator_params'/'config': must be a dictionary"
-            raise ValueError(msg)
+        _validate_single_dag_node(node=node, idx=idx, node_ids=node_ids)
 
 
 def _validate_authoring_format(value: dict[str, Any]) -> None:

@@ -246,20 +246,19 @@ tests/unit/core/assets_management/document_libraries/
 ### Running Tests
 
 ```bash
-# Navigate to backend directory
-cd src/docpipe_app/backend
+# Run from the project root
 
 # Set PYTHONPATH
-export PYTHONPATH="$(cd ../../.. && pwd)/src/docpipe_app/backend:${PYTHONPATH}"
+export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
 
 # Run all document library tests
-uv run pytest ../../../tests/unit/core/assets_management/document_libraries/ -v
+uv run pytest tests/unit/core/assets_management/document_libraries/ -v
 
 # Run specific test file
-uv run pytest ../../../tests/unit/core/assets_management/document_libraries/domain/models/test_document_library_validation.py -v
+uv run pytest tests/unit/core/assets_management/document_libraries/domain/models/test_document_library_validation.py -v
 
 # Run with coverage
-uv run pytest ../../../tests/unit/core/assets_management/document_libraries/ --cov=core.assets_management.document_libraries --cov-report=html
+uv run pytest tests/unit/core/assets_management/document_libraries/ --cov=core.assets_management.document_libraries --cov-report=html
 ```
 
 ## Usage Examples

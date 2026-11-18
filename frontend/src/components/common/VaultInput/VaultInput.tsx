@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { DefinitionTooltip, PasswordInput, Tag, TextArea, TextInput, Toggle } from '@carbon/react';
+import { useIntl } from 'react-intl';
 import { isVaultReference } from '@/utils/vault';
+import { messages } from './VaultInput.messages';
 import styles from './VaultInput.module.scss';
 
 const VAULT_PREFIX = 'vault://';
@@ -47,6 +49,7 @@ export function VaultInput({
   rows = 4,
   labelComponent,
 }: VaultInputProps): React.JSX.Element {
+  const intl = useIntl();
   const [useVault, setUseVault] = useState<boolean>(() => isVaultReference(value));
 
   // Last known direct (non-vault) value — restored when user toggles vault off
@@ -168,12 +171,12 @@ export function VaultInput({
             openOnHover
             align="bottom-right"
           >
-            Use Vault
+            {intl.formatMessage(messages.useVault)}
           </DefinitionTooltip>
           <Toggle
             id={`${id}-vault-toggle`}
             size="sm"
-            aria-label="Use Vault"
+            aria-label={intl.formatMessage(messages.vaultAriaLabel)}
             labelA=""
             labelB=""
             toggled={useVault}
@@ -197,12 +200,12 @@ export function VaultInput({
             invalid={isInvalid}
             invalidText={
               isInvalidVaultUri
-                ? 'Enter the vault path, e.g. hashicorp/docpipe/opensearch#password'
+                ? intl.formatMessage(messages.invalidVaultUri)
                 : invalidText
             }
             onChange={handleVaultChange}
             placeholder={placeholder ?? 'provider/path#key'}
-            helperText={helperText ?? 'Format: <provider>/<mount_or_path>[#<secret_key>]'}
+            helperText={helperText ?? intl.formatMessage(messages.helperText)}
           />
         </div>
       ) : (

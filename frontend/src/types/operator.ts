@@ -38,6 +38,10 @@ export interface ModelsResponse {
 export interface OperatorFeature {
   type: string;
   name?: string;
+  /**
+   * Human-readable description served by the backend operator metadata. It is
+   * English-only and not part of the react-intl catalog.
+   */
   description?: string | null;
   required?: boolean | null;
   default?: unknown;
@@ -45,6 +49,10 @@ export interface OperatorFeature {
   available_for_vector_db?: boolean | null;
   sensitive?: boolean;
   valid_values?: string[];
+  /** Minimum allowed value for numeric fields. */
+  min_value?: number;
+  /** Maximum allowed value for numeric fields. */
+  max_value?: number;
   /** Maps provider id → per-provider schema. Each entry is itself an OperatorFeature. */
   providers?: Record<string, OperatorFeature>;
   /** Sub-field map. Each value is itself an OperatorFeature so nesting is supported. */

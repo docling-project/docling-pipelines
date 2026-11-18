@@ -2,22 +2,6 @@ default_language_version:
   python: python3.12
 
 repos:
-  - repo: https://github.com/astral-sh/uv-pre-commit
-    # until Mend supports `uv` directly, an export to requirements.txt is needed.
-    # the .whitesource.config is adjusted accordingly
-    rev: 0.11.25
-    hooks:
-      - id: uv-export
-        files: ^(pyproject\.toml|uv\.lock)$
-        args:
-          [
-            "--no-hashes",
-            "--frozen",
-            "--output-file=requirements.txt",
-            "--no-dev",
-            "--all-packages",
-          ]
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -47,6 +31,18 @@ repos:
       - id: nbstripout
         files: \.ipynb$
 
+  # License header enforcement
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.6
+    hooks:
+      - id: insert-license
+        name: "Insert license header"
+        args:
+          - --license-filepath=.github/license-header.txt
+          - --comment-style=#
+          - --detect-license-in-X-top-lines=5
+        files: '^(src|tests)/.*\.py$'
+
   # Python linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20
@@ -56,6 +52,14 @@ repos:
       - id: ruff
         args: [--fix]
         files: ^.*\.py$
+
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.9.1
+    hooks:
+      - id: nbqa-ruff-check
+        additional_dependencies: [ruff==0.15.20]
+        args: ["--nbqa-dont-skip-bad-cells"]
+        files: \.ipynb$
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.6
@@ -84,3 +88,29 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
+
+  # OpenSpec spec and change validation
+  - repo: local
+    hooks:
+      - id: check-secret-reveal
+        name: Secret reveal guard (reveal only in adapters, credential fields declared)
+        entry: python3 scripts/check_secret_reveal.py
+        language: system
+        types: [python]
+        files: ^(src/docpipe/|scripts/check_secret_reveal\.py$)
+      - id: openspec-validate
+        name: OpenSpec validate (strict)
+        entry: openspec validate --all --strict --no-interactive
+        language: node
+        language_version: 22.15.1
+        additional_dependencies: ["@fission-ai/openspec@1.15.0"]
+        files: ^openspec/
+        pass_filenames: false
+      - id: openspec-validate-archived
+        name: OpenSpec validate archived changes
+        entry: openspec validate --archived --no-interactive
+        language: node
+        language_version: 22.15.1
+        additional_dependencies: ["@fission-ai/openspec@1.15.0"]
+        files: ^openspec/changes/archive/
+        pass_filenames: false

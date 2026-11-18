@@ -64,6 +64,7 @@ def sample_job_stats():
         status=ExecutionStatus.RUNNING,
         processed_docs=100,
         failed_docs=5,
+        progress_timestamp=1704067300,
     )
 
 
@@ -123,6 +124,7 @@ class TestFilePersistence:
             data = json.load(f)
             assert data["job_run_id"] == job_run_id
             assert data["processed_docs"] == 100
+            assert data["progress_timestamp"] == 1704067300
 
     def test_node_stats_persisted_to_separate_files(self, *, store, temp_data_dir):
         """Each node stat should be written to separate file."""
@@ -450,6 +452,38 @@ class TestListJobRuns:
         store._base_dir = mock_dir
         with pytest.raises(JobStatsStoreReadException, match="Failed to list jobs"):
             store.list_job_runs()
+
+
+class TestCountJobRuns:
+    """Count uses the same filters as list and ignores the list limit."""
+
+    def test_count_job_runs_empty(self, *, store):
+        assert store.count_job_runs() == 0
+
+    def test_count_job_runs_matches_filters_past_list_limit(self, *, store):
+        for index in range(6):
+            store.store_job_stats(
+                JobStats(
+                    job_id="job-a" if index < 4 else "job-b",
+                    job_run_id=str(uuid.uuid4()),
+                    status=ExecutionStatus.COMPLETED if index % 2 == 0 else ExecutionStatus.FAILED,
+                )
+            )
+
+        assert len(store.list_job_runs(job_id="job-a", limit=1)) == 1
+        assert store.count_job_runs(job_id="job-a") == 4
+        assert store.count_job_runs(job_ids=["job-b"]) == 2
+        assert store.count_job_runs(status=ExecutionStatus.COMPLETED) == 3
+        assert store.count_job_runs(job_id="job-a", status=ExecutionStatus.FAILED) == 2
+        assert store.count_job_runs() == 6
+
+    def test_count_job_runs_raises_on_iterdir_error(self, store):
+        mock_dir = MagicMock()
+        mock_dir.exists.return_value = True
+        mock_dir.iterdir.side_effect = OSError("disk error")
+        store._base_dir = mock_dir
+        with pytest.raises(JobStatsStoreReadException, match="Failed to count jobs"):
+            store.count_job_runs()
 
 
 class TestDeleteOperations:

@@ -254,9 +254,8 @@ def _read_stage_based_progress(*, stage_progress: dict[str, Any]) -> tuple[int, 
     stage_totals: list[int] = []
     total_completed = 0
     for stage_data in stage_progress.values():
-        if isinstance(stage_data, dict):
-            stage_totals.append(stage_data.get(OperatorConstants.Extraction.STAGE_DOCUMENTS_TOTAL, 0))
-            total_completed += stage_data.get(OperatorConstants.Extraction.STAGE_DOCUMENTS_COMPLETED, 0)
+        stage_totals.append(stage_data.get(OperatorConstants.Extraction.STAGE_DOCUMENTS_TOTAL, 0))
+        total_completed += stage_data.get(OperatorConstants.Extraction.STAGE_DOCUMENTS_COMPLETED, 0)
 
     total_running = max(stage_totals) if stage_totals else 0
     return total_running, total_completed, float(total_completed)
@@ -695,10 +694,7 @@ def _add_progress_field(
             status_parts.append(f"Skipped: {skipped}")
 
         # Combine base progress with status breakdown
-        if status_parts:
-            metadata[OperatorConstants.Metadata.FIELD_PROGRESS] = f"{base_progress} | {', '.join(status_parts)}"
-        else:
-            metadata[OperatorConstants.Metadata.FIELD_PROGRESS] = base_progress
+        metadata[OperatorConstants.Metadata.FIELD_PROGRESS] = f"{base_progress} | {', '.join(status_parts)}"
 
         # Numeric progress percentage for programmatic UI consumption (float, 0-100)
         metadata[OperatorConstants.Metadata.PROGRESS_PERCENTAGE] = pct
@@ -766,39 +762,35 @@ def _inject_metadata_fields(
 
     Uses data classes to group related parameters and reduce parameter count.
     """
-    if OperatorConstants.Metadata.NODE_METADATA not in aggregated_metadata:
-        aggregated_metadata[OperatorConstants.Metadata.NODE_METADATA] = {}
+    metadata = aggregated_metadata.setdefault(OperatorConstants.Metadata.NODE_METADATA, {})
 
-    if isinstance(aggregated_metadata[OperatorConstants.Metadata.NODE_METADATA], dict):
-        metadata = aggregated_metadata[OperatorConstants.Metadata.NODE_METADATA]
+    # Core document fields
+    metadata[Metrics.External.TOTAL_DOCS] = doc_stats.total_expected
+    metadata[Metrics.External.COMPLETED_DOCS_COUNT] = doc_stats.completed
+    metadata[Metrics.External.PROCESSED_DOCS] = doc_stats.processed
+    metadata[Metrics.External.NODE_STATUS] = aggregated_status
 
-        # Core document fields
-        metadata[Metrics.External.TOTAL_DOCS] = doc_stats.total_expected
-        metadata[Metrics.External.COMPLETED_DOCS_COUNT] = doc_stats.completed
-        metadata[Metrics.External.PROCESSED_DOCS] = doc_stats.processed
-        metadata[Metrics.External.NODE_STATUS] = aggregated_status
+    # Add batch-based Progress field
+    _add_progress_field(
+        metadata=metadata,
+        finished_batches=batch_progress.finished,
+        total_batches=batch_progress.total,
+        status_counts=batch_progress.status_counts,
+    )
 
-        # Add batch-based Progress field
-        _add_progress_field(
-            metadata=metadata,
-            finished_batches=batch_progress.finished,
-            total_batches=batch_progress.total,
-            status_counts=batch_progress.status_counts,
+    # Add per-stage extraction fields for extraction operators
+    if extraction_info.is_extraction_operator:
+        _add_extraction_stage_fields(
+            metadata=metadata, extraction_info=extraction_info, has_pending_batches=batch_progress.has_pending
         )
 
-        # Add per-stage extraction fields for extraction operators
-        if extraction_info.is_extraction_operator:
-            _add_extraction_stage_fields(
-                metadata=metadata, extraction_info=extraction_info, has_pending_batches=batch_progress.has_pending
-            )
-
-        # Add Documents Classified field for classification operators
-        if classification_info.is_classification_operator:
-            _add_classification_field(
-                metadata=metadata,
-                classification_info=classification_info,
-                has_pending_batches=batch_progress.has_pending,
-            )
+    # Add Documents Classified field for classification operators
+    if classification_info.is_classification_operator:
+        _add_classification_field(
+            metadata=metadata,
+            classification_info=classification_info,
+            has_pending_batches=batch_progress.has_pending,
+        )
 
 
 def aggregate_batch_node_stats(
@@ -887,7 +879,7 @@ def aggregate_batch_node_stats(
         classification_info=classification_info,
     )
 
-    node_name = batch_records[0].name if batch_records else "Unknown"
+    node_name = batch_records[0].name
 
     return NodeStats(
         id=node_id,

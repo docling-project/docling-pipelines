@@ -42,7 +42,7 @@ The authoring format is a simplified JSON structure for defining Docling Pipelin
     {
       "name": "ingest",
       "type": "ingest_source",
-      "config": {"provider": "filesystem", "connection_params": {"paths": ["./data"]}}
+      "config": {"provider": "filesystem", "provider_config": {"paths": ["./data"]}}
     },
     {
       "name": "extract",
@@ -126,7 +126,7 @@ The authoring format is a simplified JSON structure for defining Docling Pipelin
       "type": "ingest_source",
       "config": {
         "provider": "filesystem",
-        "connection_params": {"paths": ["./documents"]},
+        "provider_config": {"paths": ["./documents"]},
         "include_filter": "pdf,txt"
       }
     },
@@ -325,7 +325,7 @@ flow_def = {
         {
             "name": "ingest",
             "type": "ingest_source",
-            "config": {"provider": "filesystem", "connection_params": {"paths": ["./data"]}}
+            "config": {"provider": "filesystem", "provider_config": {"paths": ["./data"]}}
         }
     ]
 }
@@ -476,7 +476,7 @@ curl -X POST "http://localhost:8000/api/v1/flows?is_elyra=true" \
       "type": "ingest_source",
       "config": {
         "provider": "filesystem",
-        "connection_params": {"paths": ["./mixed_docs"]}
+        "provider_config": {"paths": ["./mixed_docs"]}
       }
     },
     {

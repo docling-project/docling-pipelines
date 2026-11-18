@@ -17,6 +17,7 @@ Internal Format:
 
 from collections import defaultdict
 from copy import deepcopy
+from typing import Any
 from uuid import uuid4
 
 import networkx as nx
@@ -128,7 +129,7 @@ class ElyraConverter:
         except Exception as e:
             # If metadata loading fails, continue with empty metadata
             # Converter will fall back to generic descriptions
-            logger.warning(f"Failed to load operator metadata: {e}")
+            logger.warning("Failed to load operator metadata: %s", e)
             self.metadata = {}
 
     def transform_elyra_to_internal(self, *, elyra_json: dict, flow_id: str) -> dict:
@@ -261,10 +262,134 @@ class ElyraConverter:
             for pipeline in pipelines:
                 if pipeline.get(ElyraConstants.ID) == primary_id:
                     return pipeline
-            logger.warning(f"Primary pipeline '{primary_id}' not found, using first pipeline")
+            logger.warning("Primary pipeline '%s' not found, using first pipeline", primary_id)
 
         # Fallback to the first pipeline in the document
         return pipelines[0]
+
+    @staticmethod
+    def _collect_elyra_ids(*, nodes: list[dict]) -> tuple[set[str], set[str]]:
+        """Collect all node and port IDs from Elyra nodes."""
+        node_ids: set[str] = set()
+        port_ids: set[str] = set()
+        for node in nodes:
+            node_ids.add(node[OperatorConstants.Misc.ID])
+            port_ids.update(output[OperatorConstants.Misc.ID] for output in node.get(ElyraConstants.OUTPUTS, []))
+            port_ids.update(input_port[OperatorConstants.Misc.ID] for input_port in node.get(ElyraConstants.INPUTS, []))
+        return node_ids, port_ids
+
+    @staticmethod
+    def _extract_branching_link_metadata(*, nodes: list[dict]) -> dict[str, tuple[str | None, str | None]]:
+        """Extract link ID and link name metadata from branching operator parameters."""
+        link_nodes: dict[str, tuple[str | None, str | None]] = {}
+        branching_nodes = [
+            node for node in nodes if node.get(ElyraConstants.OP) == OperatorConstants.Operators.BRANCHING
+        ]
+        for branching_node in branching_nodes:
+            branching_config = branching_node.get(ElyraConstants.PARAMETERS, {})
+            for link in branching_config.get(ElyraConstants.LINK_CONDITIONS, []):
+                link_nodes[link[ElyraConstants.TARGET_NODE_ID]] = (
+                    link.get(ElyraConstants.LINK_ID),
+                    link.get(ElyraConstants.LINK_NAME),
+                )
+        return link_nodes
+
+    @staticmethod
+    def _build_node_input_edges(
+        *, node: dict, node_id: str, node_ids: set[str], port_ids: set[str], graph: nx.DiGraph
+    ) -> tuple[list[dict], bool]:
+        """Build input edges for a node from its input links and add edges to graph."""
+        input_edges: list[dict] = []
+        has_links = False
+
+        for input_port in node.get(ElyraConstants.INPUTS, []):
+            for link in input_port.get(ElyraConstants.LINKS, []):
+                has_links = True
+                ref_node_id = link[ElyraConstants.NODE_ID_REF]
+                ref_port_id = link[ElyraConstants.PORT_ID_REF]
+                link_name_from_link = link.get(DocpipeConstants.LINK_NAME)
+
+                if ref_node_id not in node_ids:
+                    error = ValidationAlert(
+                        code=ErrorCode.FLOW_VALIDATION_FAILED.value,
+                        message=f"Invalid link: node_id_ref '{ref_node_id}' does not exist.",
+                    )
+                    logger.error(str(error))
+                    raise FlowValidationException(errors=[error])
+
+                if ref_port_id not in port_ids:
+                    error = ValidationAlert(
+                        code=ErrorCode.FLOW_VALIDATION_FAILED.value,
+                        message=f"Invalid link: port_id_ref '{ref_port_id}' does not exist.",
+                    )
+                    logger.error(str(error))
+                    raise FlowValidationException(errors=[error])
+
+                input_edges.append(
+                    {
+                        ElyraConstants.NODE_ID_REF: ref_node_id,
+                        DocpipeConstants.LINK_NAME: link_name_from_link,
+                    }
+                )
+                graph.add_edge(ref_node_id, node_id)
+
+        return input_edges, has_links
+
+    @staticmethod
+    def _build_node_output_edges(*, node_id: str, nodes: list[dict]) -> list[dict]:
+        """Build output edges for a node by inspecting all other nodes' input links."""
+        output_edges: list[dict] = []
+        for other_node in nodes:
+            other_id = other_node[OperatorConstants.Misc.ID]
+            if other_id == node_id:
+                continue
+            for input_port in other_node.get(ElyraConstants.INPUTS, []):
+                for link in input_port.get(ElyraConstants.LINKS, []):
+                    if link.get(ElyraConstants.NODE_ID_REF) == node_id:
+                        output_edges.append({ElyraConstants.NODE_ID_REF: other_id})
+        return output_edges
+
+    def _transform_single_elyra_node(
+        self,
+        *,
+        node: dict,
+        node_ids: set[str],
+        port_ids: set[str],
+        link_nodes: dict[str, tuple[str | None, str | None]],
+        graph: nx.DiGraph,
+        nodes: list[dict],
+    ) -> tuple[dict, bool]:
+        """Transform a single Elyra node into internal DAG node structure."""
+        node_id = node[OperatorConstants.Misc.ID]
+        name = self._get_node_name(node=node)
+        operator = node.get(ElyraConstants.OP, "")
+        config = self._extract_node_config(node=node, operator=operator)
+
+        if operator == OperatorConstants.Operators.BRANCHING and ElyraConstants.LINK_CONDITIONS in config:
+            config = self._transform_branching_config(config=config)
+
+        link_id, link_name = link_nodes.get(node_id, (None, None))
+        input_edges, has_links = self._build_node_input_edges(
+            node=node, node_id=node_id, node_ids=node_ids, port_ids=port_ids, graph=graph
+        )
+        output_edges = self._build_node_output_edges(node_id=node_id, nodes=nodes)
+
+        if operator == OperatorConstants.Operators.MERGE:
+            config["input_links"] = input_edges
+
+        is_first_node = not node.get(ElyraConstants.INPUTS) or not has_links
+
+        transformed_node = {
+            OperatorConstants.Misc.ID: node_id,
+            OperatorConstants.Misc.NAME: name,
+            OperatorConstants.Misc.OPERATOR: operator,
+            "config": config,
+            DocpipeConstants.INPUT_EDGES: input_edges,
+            DocpipeConstants.OUTPUT_EDGES: output_edges,
+            ElyraConstants.LINK_ID: link_id,
+            ElyraConstants.LINK_NAME: link_name,
+        }
+        return transformed_node, is_first_node
 
     def _transform_pipeline_to_dag(self, *, nodes: list[dict]) -> list[dict]:
         """
@@ -279,128 +404,26 @@ class ElyraConverter:
         Raises:
             FlowValidationException: If DAG is invalid (cycles, disconnected, etc.)
         """
-        node_ids: set[str] = set()
-        port_ids: set[str] = set()
-
-        # Collect all node and port IDs for validation
-        for node in nodes:
-            node_ids.add(node[OperatorConstants.Misc.ID])
-            # Collect port IDs from both outputs and inputs
-            port_ids.update(output[OperatorConstants.Misc.ID] for output in node.get(ElyraConstants.OUTPUTS, []))
-            port_ids.update(input_port[OperatorConstants.Misc.ID] for input_port in node.get(ElyraConstants.INPUTS, []))
-
-        # Build directed graph for validation
+        node_ids, port_ids = self._collect_elyra_ids(nodes=nodes)
         graph = nx.DiGraph()
-        transformed = []
-        first_nodes = []
-        link_nodes = {}
+        transformed: list[dict] = []
+        first_nodes: list[str] = []
+        link_nodes = self._extract_branching_link_metadata(nodes=nodes)
 
-        # Handle branching operators - extract link metadata
-        branching_nodes = [
-            node for node in nodes if node.get(ElyraConstants.OP) == OperatorConstants.Operators.BRANCHING
-        ]
-        for branching_node in branching_nodes:
-            branching_config = branching_node.get(ElyraConstants.PARAMETERS, {})
-
-            for link in branching_config.get(ElyraConstants.LINK_CONDITIONS, []):
-                link_nodes[link[ElyraConstants.TARGET_NODE_ID]] = (
-                    link.get(ElyraConstants.LINK_ID),
-                    link.get(ElyraConstants.LINK_NAME),
-                )
-
-        # Transform each node
         for node in nodes:
-            node_id = node[OperatorConstants.Misc.ID]
-            name = self._get_node_name(node=node)
-            operator = node.get(ElyraConstants.OP, "")
-            config = self._extract_node_config(node=node, operator=operator)
-
-            # Handle branching operator special case
-            if operator == OperatorConstants.Operators.BRANCHING and ElyraConstants.LINK_CONDITIONS in config:
-                config = self._transform_branching_config(config=config)
-
-            # Determine if this node is a branch target
-            link_id = None
-            link_name = None
-            if node_id in link_nodes:
-                link_id, link_name = link_nodes[node_id]
-
-            # Build input edges from links
-            input_edges = []
-            has_links = False
-
-            for input_port in node.get(ElyraConstants.INPUTS, []):
-                for link in input_port.get(ElyraConstants.LINKS, []):
-                    has_links = True
-                    ref_node_id = link[ElyraConstants.NODE_ID_REF]
-                    ref_port_id = link[ElyraConstants.PORT_ID_REF]
-                    link_name_from_link = link.get(DocpipeConstants.LINK_NAME)
-
-                    # Validate references
-                    if ref_node_id not in node_ids:
-                        error = ValidationAlert(
-                            code=ErrorCode.FLOW_VALIDATION_FAILED.value,
-                            message=f"Invalid link: node_id_ref '{ref_node_id}' does not exist.",
-                        )
-                        logger.error(str(error))
-                        raise FlowValidationException(errors=[error])
-
-                    if ref_port_id not in port_ids:
-                        error = ValidationAlert(
-                            code=ErrorCode.FLOW_VALIDATION_FAILED.value,
-                            message=f"Invalid link: port_id_ref '{ref_port_id}' does not exist.",
-                        )
-                        logger.error(str(error))
-                        raise FlowValidationException(errors=[error])
-
-                    input_edges.append(
-                        {
-                            ElyraConstants.NODE_ID_REF: ref_node_id,
-                            DocpipeConstants.LINK_NAME: link_name_from_link,
-                        }
-                    )
-
-                    graph.add_edge(ref_node_id, node_id)
-
-            # Build output edges
-            output_edges = []
-            for other_node in nodes:
-                if other_node[OperatorConstants.Misc.ID] == node_id:
-                    continue
-                for input_port in other_node.get(ElyraConstants.INPUTS, []):
-                    for link in input_port.get(ElyraConstants.LINKS, []):
-                        if link[ElyraConstants.NODE_ID_REF] == node_id:
-                            output_edges.append(
-                                {
-                                    ElyraConstants.NODE_ID_REF: other_node[OperatorConstants.Misc.ID],
-                                }
-                            )
-
-            # Track nodes without inputs (starting nodes)
-            if not node.get(ElyraConstants.INPUTS) or not has_links:
-                first_nodes.append(node_id)
-
-            # Special handling for merge operator
-            if operator == OperatorConstants.Operators.MERGE:
-                config["input_links"] = input_edges
-
-            transformed.append(
-                {
-                    OperatorConstants.Misc.ID: node_id,
-                    OperatorConstants.Misc.NAME: name,
-                    OperatorConstants.Misc.OPERATOR: operator,
-                    "config": config,
-                    DocpipeConstants.INPUT_EDGES: input_edges,
-                    DocpipeConstants.OUTPUT_EDGES: output_edges,
-                    ElyraConstants.LINK_ID: link_id,
-                    ElyraConstants.LINK_NAME: link_name,
-                }
+            transformed_node, is_first_node = self._transform_single_elyra_node(
+                node=node,
+                node_ids=node_ids,
+                port_ids=port_ids,
+                link_nodes=link_nodes,
+                graph=graph,
+                nodes=nodes,
             )
+            transformed.append(transformed_node)
+            if is_first_node:
+                first_nodes.append(node[OperatorConstants.Misc.ID])
 
-        # Validate DAG structure
         self._validate_dag(graph=graph, first_nodes=first_nodes, node_count=len(transformed))
-
-        # Sort topologically
         return self._sort_dag_topologically(dag=transformed)
 
     def _get_node_name(self, *, node: dict) -> str:
@@ -664,6 +687,167 @@ class ElyraConverter:
             ElyraConstants.SCHEMAS: [],
         }
 
+    @staticmethod
+    def _build_adjacency_maps(*, dag: list[dict]) -> tuple[dict[str, list[str]], list[str]]:
+        """Build children adjacency map and find root nodes for layout generation."""
+        children_map = defaultdict(list)
+        for node in dag:
+            node_id = node[OperatorConstants.Misc.ID]
+            for edge in node.get(DocpipeConstants.INPUT_EDGES, []):
+                parent_id = edge[ElyraConstants.NODE_ID_REF]
+                children_map[parent_id].append(node_id)
+
+        root_nodes = [node[OperatorConstants.Misc.ID] for node in dag if not node.get(DocpipeConstants.INPUT_EDGES)]
+        return children_map, root_nodes
+
+    @staticmethod
+    def _position_branch_chain(
+        *,
+        node_id: str,
+        start_x: int,
+        start_y: int,
+        spacing_x: int,
+        children_map: dict[str, list[str]],
+        positions: dict[str, tuple[int, int]],
+        positioned: set[str],
+    ) -> int:
+        """Position a linear chain of nodes in a branch."""
+        current_id = node_id
+        current_x = start_x
+
+        while current_id and current_id not in positioned:
+            positions[current_id] = (current_x, start_y)
+            positioned.add(current_id)
+
+            children = children_map.get(current_id, [])
+            if len(children) == 1 and children[0] not in positioned:
+                current_id = children[0]
+                current_x += spacing_x
+            else:
+                break
+
+        return current_x
+
+    @staticmethod
+    def _build_branch_child_index_map(
+        *,
+        branches: list[dict],
+        children: list[str],
+        node_by_id: dict[str, dict],
+    ) -> dict[str, int]:
+        """Build mapping of child node ID to branch index."""
+        branch_map: dict[str, int] = {}
+        for idx, branch in enumerate(branches):
+            link_id = branch.get(ElyraConstants.LINK_ID)
+            if not link_id:
+                continue
+            for child_id in children:
+                child_node = node_by_id.get(child_id, {})
+                if child_node.get(ElyraConstants.LINK_ID) == link_id:
+                    branch_map[child_id] = idx
+                    break
+        return branch_map
+
+    @classmethod
+    def _position_branching_node(
+        cls,
+        *,
+        node: dict,
+        children: list[str],
+        current_x: int,
+        start_y: int,
+        spacing_x: int,
+        spacing_y: int,
+        node_by_id: dict[str, dict],
+        children_map: dict[str, list[str]],
+        positions: dict[str, tuple[int, int]],
+        positioned: set[str],
+    ) -> int:
+        """Position branch chains originating from a branching operator node."""
+        config = node.get("config", {})
+        branches = config.get(ElyraConstants.BRANCHES, [])
+        branch_map = cls._build_branch_child_index_map(branches=branches, children=children, node_by_id=node_by_id)
+
+        max_x = current_x
+        for child_id in children:
+            if child_id in branch_map:
+                b_idx = branch_map[child_id]
+                branch_x = current_x + 280
+                branch_y = start_y + (b_idx * spacing_y)
+                branch_max_x = cls._position_branch_chain(
+                    node_id=child_id,
+                    start_x=branch_x,
+                    start_y=branch_y,
+                    spacing_x=spacing_x,
+                    children_map=children_map,
+                    positions=positions,
+                    positioned=positioned,
+                )
+                max_x = max(max_x, branch_max_x)
+
+        return max_x
+
+    @classmethod
+    def _position_subtree(
+        cls,
+        *,
+        node_id: str,
+        start_x: int,
+        start_y: int,
+        spacing_x: int,
+        spacing_y: int,
+        node_by_id: dict[str, dict],
+        children_map: dict[str, list[str]],
+        positions: dict[str, tuple[int, int]],
+        positioned: set[str],
+    ) -> int:
+        """Position a node and its descendants recursively."""
+        if node_id in positioned:
+            return start_x
+
+        node = node_by_id[node_id]
+        operator = node.get(OperatorConstants.Misc.OPERATOR)
+
+        positions[node_id] = (start_x, start_y)
+        positioned.add(node_id)
+
+        current_x = start_x
+        children = children_map.get(node_id, [])
+
+        if operator == OperatorConstants.Operators.BRANCHING:
+            return cls._position_branching_node(
+                node=node,
+                children=children,
+                current_x=current_x,
+                start_y=start_y,
+                spacing_x=spacing_x,
+                spacing_y=spacing_y,
+                node_by_id=node_by_id,
+                children_map=children_map,
+                positions=positions,
+                positioned=positioned,
+            )
+
+        if operator == OperatorConstants.Operators.MERGE:
+            return current_x + spacing_x
+
+        next_x = current_x + spacing_x
+        for child_id in children:
+            if child_id not in positioned:
+                next_x = cls._position_subtree(
+                    node_id=child_id,
+                    start_x=next_x,
+                    start_y=start_y,
+                    spacing_x=spacing_x,
+                    spacing_y=spacing_y,
+                    node_by_id=node_by_id,
+                    children_map=children_map,
+                    positions=positions,
+                    positioned=positioned,
+                )
+
+        return next_x
+
     def _generate_node_layout(self, *, dag: list[dict], spacing_x: int, spacing_y: int) -> dict[str, tuple[int, int]]:
         """
             Processes the graph structure to create a visual layout where:
@@ -680,135 +864,27 @@ class ElyraConverter:
         Returns:
             Dictionary mapping node_id to (x, y) coordinates
         """
-        positions = {}
+        positions: dict[str, tuple[int, int]] = {}
         node_by_id = {node[OperatorConstants.Misc.ID]: node for node in dag}
+        children_map, root_nodes = self._build_adjacency_maps(dag=dag)
+        positioned: set[str] = set()
 
-        # Build graph structure
-        children_map = defaultdict(list)  # node_id -> [child_node_ids]
-        parents_map = defaultdict(list)  # node_id -> [parent_node_ids]
-
-        for node in dag:
-            node_id = node[OperatorConstants.Misc.ID]
-            for edge in node.get(DocpipeConstants.INPUT_EDGES, []):
-                parent_id = edge[ElyraConstants.NODE_ID_REF]
-                children_map[parent_id].append(node_id)
-                parents_map[node_id].append(parent_id)
-
-        # Find root nodes (no parents)
-        root_nodes = [node[OperatorConstants.Misc.ID] for node in dag if not node.get(DocpipeConstants.INPUT_EDGES)]
-
-        # Track which nodes have been positioned
-        positioned = set()
-
-        def _position_branch_chain(node_id: str, start_x: int, start_y: int) -> int:
-            """
-            Position a linear chain of nodes in a branch.
-
-            Args:
-                node_id: Starting node of the branch
-                start_x: Starting x coordinate
-                start_y: Y coordinate for this branch
-
-            Returns:
-                Maximum x position used
-            """
-            current_id = node_id
-            current_x = start_x
-
-            while current_id and current_id not in positioned:
-                positions[current_id] = (current_x, start_y)
-                positioned.add(current_id)
-
-                children = children_map.get(current_id, [])
-
-                # Move to next node in chain (if only one child and it's not positioned)
-                if len(children) == 1 and children[0] not in positioned:
-                    current_id = children[0]
-                    current_x += spacing_x
-                else:
-                    # End of chain or multiple children
-                    break
-
-            return current_x
-
-        def _position_subtree(node_id: str, start_x: int, start_y: int) -> int:
-            """
-            Position a node and its descendants. Returns the maximum x position used.
-
-            Args:
-                node_id: Node to position
-                start_x: Starting x coordinate
-                start_y: Starting y coordinate
-
-            Returns:
-                Maximum x position used by this subtree
-            """
-            if node_id in positioned:
-                return start_x
-
-            node = node_by_id[node_id]
-            operator = node.get(OperatorConstants.Misc.OPERATOR)
-
-            # Position current node
-            positions[node_id] = (start_x, start_y)
-            positioned.add(node_id)
-
-            current_x = start_x
-            children = children_map.get(node_id, [])
-
-            if operator == OperatorConstants.Operators.BRANCHING:
-                # Handle branching: position each branch separately
-                config = node.get("config", {})
-                branches = config.get(ElyraConstants.BRANCHES, [])
-
-                # Build map of link_id to branch index
-                branch_map = {}
-                for idx, branch in enumerate(branches):
-                    link_id = branch.get(ElyraConstants.LINK_ID)
-                    if link_id:
-                        # Find child with this link_id
-                        for child_id in children:
-                            child_node = node_by_id[child_id]
-                            if child_node.get(ElyraConstants.LINK_ID) == link_id:
-                                branch_map[child_id] = idx
-                                break
-
-                # Position each branch
-                max_x = current_x
-                for child_id in children:
-                    if child_id in branch_map:
-                        b_idx = branch_map[child_id]
-                        branch_x = current_x + 280  # Branch starts 280px to the right
-                        branch_y = start_y + (b_idx * spacing_y)
-
-                        # Position this branch's subtree
-                        branch_max_x = _position_branch_chain(child_id, branch_x, branch_y)
-                        max_x = max(max_x, branch_max_x)
-
-                return max_x
-
-            if operator == OperatorConstants.Operators.MERGE:
-                # Merge node: already positioned, return next x
-                return current_x + spacing_x
-
-            # Regular node: position children sequentially
-            next_x = current_x + spacing_x
-            for child_id in children:
-                if child_id not in positioned:
-                    child_max_x = _position_subtree(child_id, next_x, start_y)
-                    next_x = child_max_x
-
-            return next_x
-
-        # Position from root nodes
         x_pos = 100
         y_pos = 100
         for root_id in root_nodes:
             if root_id not in positioned:
-                max_x = _position_subtree(root_id, x_pos, y_pos)
-                x_pos = max_x
+                x_pos = self._position_subtree(
+                    node_id=root_id,
+                    start_x=x_pos,
+                    start_y=y_pos,
+                    spacing_x=spacing_x,
+                    spacing_y=spacing_y,
+                    node_by_id=node_by_id,
+                    children_map=children_map,
+                    positions=positions,
+                    positioned=positioned,
+                )
 
-        # Position any remaining unpositioned nodes (shouldn't happen in valid DAG)
         for node in dag:
             node_id = node[OperatorConstants.Misc.ID]
             if node_id not in positioned:
@@ -816,6 +892,82 @@ class ElyraConverter:
                 x_pos += spacing_x
 
         return positions
+
+    @staticmethod
+    def _build_elyra_output_ports(*, operator: str, output_edges: list[dict]) -> list[dict]:
+        """Build output ports for Elyra node representation."""
+        if not output_edges:
+            return []
+
+        if operator == OperatorConstants.Operators.BRANCHING:
+            return [
+                {
+                    ElyraConstants.ID: f"{operator}_outPort",
+                    ElyraConstants.APP_DATA: {
+                        ElyraConstants.UI_DATA: {
+                            ElyraConstants.CARDINALITY: {
+                                ElyraConstants.MIN: 1,
+                                ElyraConstants.MAX: -1,
+                            },
+                            ElyraConstants.LABEL: "Output Port",
+                        }
+                    },
+                }
+            ]
+
+        port_id = f"{operator}_outPort" if len(output_edges) == 1 else f"{operator}_outPort_0"
+        return [
+            {
+                ElyraConstants.ID: port_id,
+                ElyraConstants.APP_DATA: {
+                    ElyraConstants.UI_DATA: {
+                        ElyraConstants.CARDINALITY: {
+                            ElyraConstants.MIN: 1,
+                            ElyraConstants.MAX: 1,
+                        },
+                        ElyraConstants.LABEL: "Output Port",
+                    }
+                },
+            }
+        ]
+
+    @staticmethod
+    def _build_elyra_input_ports(*, operator: str, input_edges: list[dict]) -> list[dict]:
+        """Build input ports for Elyra node representation."""
+        if not input_edges:
+            return []
+
+        if operator == OperatorConstants.Operators.MERGE:
+            return [
+                {
+                    ElyraConstants.ID: f"{operator}_inPort",
+                    ElyraConstants.APP_DATA: {
+                        ElyraConstants.UI_DATA: {
+                            ElyraConstants.CARDINALITY: {
+                                ElyraConstants.MIN: 1,
+                                ElyraConstants.MAX: -1,
+                            },
+                            ElyraConstants.LABEL: "Input Port",
+                        }
+                    },
+                }
+            ]
+
+        port_id = f"{operator}_inPort" if len(input_edges) == 1 else f"{operator}_inPort_0"
+        return [
+            {
+                ElyraConstants.ID: port_id,
+                ElyraConstants.APP_DATA: {
+                    ElyraConstants.UI_DATA: {
+                        ElyraConstants.CARDINALITY: {
+                            ElyraConstants.MIN: 1,
+                            ElyraConstants.MAX: 1,
+                        },
+                        ElyraConstants.LABEL: "Input Port",
+                    }
+                },
+            }
+        ]
 
     def _convert_dag_node_to_elyra(self, *, node: dict, position: tuple[int, int]) -> tuple[dict, dict]:
         """
@@ -833,91 +985,15 @@ class ElyraConverter:
         operator = node[OperatorConstants.Misc.OPERATOR]
         config = node.get("config", {})
 
-        # Generate port IDs
         input_edges = node.get(DocpipeConstants.INPUT_EDGES, [])
         output_edges = node.get(DocpipeConstants.OUTPUT_EDGES, [])
 
-        # Use the operator name for port IDs (e.g., "ingest_cpd_assets_outPort")
-        # Only create output ports if there are output edges
-        output_ports = []
-        if output_edges:
-            # Branching operator has unlimited output cardinality
-            if operator == OperatorConstants.Operators.BRANCHING:
-                output_port_id = f"{operator}_outPort"
-                output_ports = [
-                    {
-                        ElyraConstants.ID: output_port_id,
-                        ElyraConstants.APP_DATA: {
-                            ElyraConstants.UI_DATA: {
-                                ElyraConstants.CARDINALITY: {
-                                    ElyraConstants.MIN: 1,
-                                    ElyraConstants.MAX: -1,  # Unlimited outputs for branching
-                                },
-                                ElyraConstants.LABEL: "Output Port",
-                            }
-                        },
-                    }
-                ]
-            else:
-                output_port_id = f"{operator}_outPort" if len(output_edges) == 1 else f"{operator}_outPort_0"
-                output_ports = [
-                    {
-                        ElyraConstants.ID: output_port_id,
-                        ElyraConstants.APP_DATA: {
-                            ElyraConstants.UI_DATA: {
-                                ElyraConstants.CARDINALITY: {
-                                    ElyraConstants.MIN: 1,
-                                    ElyraConstants.MAX: 1,
-                                },
-                                ElyraConstants.LABEL: "Output Port",
-                            }
-                        },
-                    }
-                ]
+        output_ports = self._build_elyra_output_ports(operator=operator, output_edges=output_edges)
+        input_ports = self._build_elyra_input_ports(operator=operator, input_edges=input_edges)
 
-        # Only create input ports if there are input edges
-        input_ports = []
-        if input_edges:
-            # Merge operator has unlimited input cardinality
-            if operator == OperatorConstants.Operators.MERGE:
-                input_port_id = f"{operator}_inPort"
-                input_ports = [
-                    {
-                        ElyraConstants.ID: input_port_id,
-                        ElyraConstants.APP_DATA: {
-                            ElyraConstants.UI_DATA: {
-                                ElyraConstants.CARDINALITY: {
-                                    ElyraConstants.MIN: 1,
-                                    ElyraConstants.MAX: -1,  # Unlimited inputs for merge
-                                },
-                                ElyraConstants.LABEL: "Input Port",
-                            }
-                        },
-                    }
-                ]
-            else:
-                input_port_id = f"{operator}_inPort" if len(input_edges) == 1 else f"{operator}_inPort_0"
-                input_ports = [
-                    {
-                        ElyraConstants.ID: input_port_id,
-                        ElyraConstants.APP_DATA: {
-                            ElyraConstants.UI_DATA: {
-                                ElyraConstants.CARDINALITY: {
-                                    ElyraConstants.MIN: 1,
-                                    ElyraConstants.MAX: 1,
-                                },
-                                ElyraConstants.LABEL: "Input Port",
-                            }
-                        },
-                    }
-                ]
-
-        # Handle branching operator special case
         if operator == OperatorConstants.Operators.BRANCHING:
             config = self._convert_branching_to_elyra(config=config, node=node)
 
-        # IBM format: parameters at node level, NOT in app_data
-        # app_data contains react_nodes_data and ui_data
         app_data = {
             ElyraConstants.REACT_NODES_DATA: {
                 ElyraConstants.COLOR: self._get_operator_color(operator=operator),
@@ -937,19 +1013,16 @@ class ElyraConverter:
             ElyraConstants.NODE_TYPE: ElyraConstants.EXECUTION_NODE,
             ElyraConstants.OP: operator,
             ElyraConstants.APP_DATA: app_data,
-            ElyraConstants.PARAMETERS: config,  # Parameters at node level, not in app_data
+            ElyraConstants.PARAMETERS: config,
         }
 
-        # Only add outputs if they exist
         if output_ports:
             elyra_node[ElyraConstants.OUTPUTS] = output_ports
 
-        # Only add inputs if they exist
         if input_ports:
             elyra_node[ElyraConstants.INPUTS] = input_ports
 
         port_mappings = {"input_ports": input_ports, "output_ports": output_ports}
-
         return elyra_node, port_mappings
 
     def _get_operator_color(self, *, operator: str) -> str:
@@ -1046,6 +1119,51 @@ class ElyraConverter:
         config[ElyraConstants.LINK_CONDITIONS] = link_conditions
         return config
 
+    @staticmethod
+    def _create_elyra_link(*, edge: dict, dag_node: dict, port_mappings: dict) -> dict[str, Any]:
+        """Create a single Elyra link dictionary from an input edge."""
+        source_node_id = edge.get(ElyraConstants.NODE_ID_REF)
+        link_name = edge.get(DocpipeConstants.LINK_NAME)
+
+        source_ports = port_mappings.get(source_node_id, {}).get("output_ports", [])
+        source_port_id = source_ports[0][ElyraConstants.ID] if source_ports else f"{source_node_id}-out-0"
+
+        link_id = dag_node.get(ElyraConstants.LINK_ID) if dag_node.get(ElyraConstants.LINK_ID) else str(uuid4())
+
+        link: dict[str, Any] = {
+            ElyraConstants.ID: link_id,
+            ElyraConstants.NODE_ID_REF: source_node_id,
+            ElyraConstants.PORT_ID_REF: source_port_id,
+        }
+        if link_name:
+            link[DocpipeConstants.LINK_NAME] = link_name
+
+        return link
+
+    @classmethod
+    def _add_links_for_single_node(
+        cls,
+        *,
+        dag_node: dict,
+        elyra_node: dict,
+        port_mappings: dict,
+    ) -> None:
+        """Add input links to a single Elyra node based on its DAG input edges."""
+        input_edges = dag_node.get(DocpipeConstants.INPUT_EDGES, [])
+        if not input_edges:
+            return
+
+        input_ports = elyra_node.get(ElyraConstants.INPUTS, [])
+        if not input_ports:
+            return
+
+        if ElyraConstants.LINKS not in input_ports[0]:
+            input_ports[0][ElyraConstants.LINKS] = []
+
+        for edge in input_edges:
+            link = cls._create_elyra_link(edge=edge, dag_node=dag_node, port_mappings=port_mappings)
+            input_ports[0][ElyraConstants.LINKS].append(link)
+
     def _add_links_to_elyra_nodes(self, *, elyra_nodes: list[dict], dag: list[dict], port_mappings: dict) -> None:
         """
         Add link information to Elyra nodes based on DAG edges.
@@ -1053,55 +1171,18 @@ class ElyraConverter:
         Modifies elyra_nodes in place by adding links to input ports.
         Generates link UUIDs for Elyra links.
         """
-        # Build node lookup
         elyra_node_by_id = {node[ElyraConstants.ID]: node for node in elyra_nodes}
         dag_node_by_id = {node[OperatorConstants.Misc.ID]: node for node in dag}
 
-        # Process each node's input edges
         for dag_node in dag:
             node_id = dag_node[OperatorConstants.Misc.ID]
-            input_edges = dag_node.get(DocpipeConstants.INPUT_EDGES, [])
-
-            if not input_edges:
-                continue
-
             elyra_node = elyra_node_by_id[node_id]
-            input_ports = elyra_node.get(ElyraConstants.INPUTS, [])
+            self._add_links_for_single_node(
+                dag_node=dag_node,
+                elyra_node=elyra_node,
+                port_mappings=port_mappings,
+            )
 
-            # All operators have only 1 input port with multiple links
-            # Initialize links array for the first (and only) input port
-            if input_ports and ElyraConstants.LINKS not in input_ports[0]:
-                input_ports[0][ElyraConstants.LINKS] = []
-
-            # Add all links to the single input port
-            for edge in input_edges:
-                # Internal format only has node_id_ref, not port_id_ref
-                source_node_id = edge.get(ElyraConstants.NODE_ID_REF)
-                link_name = edge.get(DocpipeConstants.LINK_NAME)
-
-                # Generate port_id from the source node's output ports
-                # This ensures the generated link points to the correct Elyra output port
-                source_ports = port_mappings.get(source_node_id, {}).get("output_ports", [])
-                source_port_id = source_ports[0][ElyraConstants.ID] if source_ports else f"{source_node_id}-out-0"
-
-                # Use the node's link_id if it exists (for branching targets), otherwise generate new UUID
-                # This ensures branching link_conditions match the actual link IDs in target nodes
-                link_id = dag_node.get(ElyraConstants.LINK_ID) if dag_node.get(ElyraConstants.LINK_ID) else str(uuid4())
-
-                # Build Elyra link structure
-                link = {
-                    ElyraConstants.ID: link_id,
-                    ElyraConstants.NODE_ID_REF: source_node_id,
-                    ElyraConstants.PORT_ID_REF: source_port_id,
-                }
-
-                if link_name:
-                    link[DocpipeConstants.LINK_NAME] = link_name
-
-                # Add link to the single input port
-                input_ports[0][ElyraConstants.LINKS].append(link)
-
-        # Update branching operators with target_node_id
         for elyra_node in elyra_nodes:
             if elyra_node[ElyraConstants.OP] == OperatorConstants.Operators.BRANCHING:
                 self._update_branching_targets(elyra_node=elyra_node, dag_node_by_id=dag_node_by_id)

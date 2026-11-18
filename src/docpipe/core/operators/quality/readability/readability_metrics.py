@@ -4,10 +4,10 @@ Provides all standard readability formulas using pyphen and basic regex for toke
 """
 
 import math
-import re
 from pathlib import Path
 from typing import Any
 
+import re2 as re
 from pyphen import Pyphen
 
 from docpipe.utils.infrastructure.logging import get_logger
@@ -26,8 +26,20 @@ DIFFICULT_WORDS = "difficult_words"
 
 def split_sentences(text: str) -> list[str]:
     """Split text into sentences using regex."""
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [s for s in sentences if s]
+    # RE2 does not support lookbehind; split on sentence-ending punctuation followed by
+    # whitespace, then reassemble each sentence with its trailing punctuation mark.
+    parts = re.split(r"([.!?])\s+", text.strip())
+    sentences = []
+    i = 0
+    while i < len(parts):
+        if i + 1 < len(parts) and parts[i + 1] in ".!?":
+            sentences.append(parts[i] + parts[i + 1])
+            i += 2
+        else:
+            if parts[i]:
+                sentences.append(parts[i])
+            i += 1
+    return sentences
 
 
 # Load easy words list
@@ -55,7 +67,8 @@ class ReadabilityMetrics:
 
     # ==================== Tokenization ====================
 
-    def get_words(self, *, text: str) -> list[str]:
+    @staticmethod
+    def get_words(*, text: str) -> list[str]:
         """Extract words from text using regex."""
         return re.findall(r"\b[a-zA-Z]+\b", text.lower())
 
@@ -81,7 +94,8 @@ class ReadabilityMetrics:
 
     # ==================== Character and Word Counting ====================
 
-    def count_characters(self, *, words: list[str]) -> int:
+    @staticmethod
+    def count_characters(*, words: list[str]) -> int:
         """Count total characters in words (excluding spaces)."""
         return sum(len(w) for w in words)
 
@@ -138,7 +152,8 @@ class ReadabilityMetrics:
 
     # ==================== Readability Formulas ====================
 
-    def flesch_reading_ease(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def flesch_reading_ease(*, stats: dict[str, Any]) -> float:
         """
         Flesch Reading Ease: 206.835 - 1.015(words/sentences) - 84.6(syllables/words)
         Higher scores = easier reading (0-100 scale)
@@ -152,7 +167,8 @@ class ReadabilityMetrics:
 
         return 206.835 - 1.015 * (words_count / sentences_count) - 84.6 * (syllables_count / words_count)
 
-    def flesch_kincaid_grade(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def flesch_kincaid_grade(*, stats: dict[str, Any]) -> float:
         """
         Flesch-Kincaid Grade Level: 0.39(words/sentences) + 11.8(syllables/words) - 15.59
         Returns U.S. grade level
@@ -166,7 +182,8 @@ class ReadabilityMetrics:
 
         return 0.39 * (words_count / sentences_count) + 11.8 * (syllables_count / words_count) - 15.59
 
-    def gunning_fog(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def gunning_fog(*, stats: dict[str, Any]) -> float:
         """
         Gunning Fog Index: 0.4((words/sentences) + 100(complex_words/words))
         Returns grade level needed
@@ -180,7 +197,8 @@ class ReadabilityMetrics:
 
         return 0.4 * ((words_count / sentences_count) + 100 * (complex_words_count / words_count))
 
-    def smog_index(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def smog_index(*, stats: dict[str, Any]) -> float:
         """
         SMOG Index: 1.0430 * sqrt(complex_words * (30/sentences)) + 3.1291
         Returns grade level
@@ -193,7 +211,8 @@ class ReadabilityMetrics:
 
         return 1.043 * math.sqrt(complex_words_count * (30 / sentences_count)) + 3.1291
 
-    def coleman_liau_index(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def coleman_liau_index(*, stats: dict[str, Any]) -> float:
         """
         Coleman-Liau Index: 0.0588*letters_per_100 - 0.296*sentences_per_100 - 15.8
         Where letters_per_100 = letters per 100 words, sentences_per_100 = sentences per 100 words
@@ -210,7 +229,8 @@ class ReadabilityMetrics:
 
         return 0.0588 * letters_per_100 - 0.296 * sentences_per_100 - 15.8
 
-    def automated_readability_index(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def automated_readability_index(*, stats: dict[str, Any]) -> float:
         """
         Automated Readability Index: 4.71(chars/words) + 0.5(words/sentences) - 21.43
         Returns grade level
@@ -224,7 +244,8 @@ class ReadabilityMetrics:
 
         return 4.71 * (chars_count / words_count) + 0.5 * (words_count / sentences_count) - 21.43
 
-    def dale_chall_readability_score(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def dale_chall_readability_score(*, stats: dict[str, Any]) -> float:
         """
         Dale-Chall Readability Score: 0.1579(pct_difficult) + 0.0496(avg_sentence_len)
         Where pct_difficult = percentage of difficult words, avg_sentence_len = average sentence length
@@ -247,7 +268,8 @@ class ReadabilityMetrics:
 
         return score
 
-    def difficult_words(self, *, stats: dict[str, Any]) -> int:
+    @staticmethod
+    def difficult_words(*, stats: dict[str, Any]) -> int:
         """
         Return count of difficult words (not in easy word list).
         """
@@ -283,22 +305,24 @@ class ReadabilityMetrics:
 
         return max(0, score)
 
-    def text_standard(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def text_standard(*, stats: dict[str, Any]) -> float:
         """
         Text Standard: Average of multiple grade-level metrics
         """
         scores = [
-            self.flesch_kincaid_grade(stats=stats),
-            self.gunning_fog(stats=stats),
-            self.smog_index(stats=stats),
-            self.coleman_liau_index(stats=stats),
-            self.automated_readability_index(stats=stats),
+            ReadabilityMetrics.flesch_kincaid_grade(stats=stats),
+            ReadabilityMetrics.gunning_fog(stats=stats),
+            ReadabilityMetrics.smog_index(stats=stats),
+            ReadabilityMetrics.coleman_liau_index(stats=stats),
+            ReadabilityMetrics.automated_readability_index(stats=stats),
         ]
 
         avg = sum(scores) / len(scores)
         return round(avg, 1)
 
-    def spache_readability(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def spache_readability(*, stats: dict[str, Any]) -> float:
         """
         Spache Readability Formula: 0.141(avg_sentence_len) + 0.086(pct_difficult) + 0.839
         Where avg_sentence_len = average sentence length, pct_difficult = percentage of difficult words
@@ -316,7 +340,8 @@ class ReadabilityMetrics:
 
         return 0.141 * avg_sentence_len + 0.086 * pct_difficult_words + 0.839
 
-    def mcalpine_eflaw(self, *, stats: dict[str, Any]) -> float:
+    @staticmethod
+    def mcalpine_eflaw(*, stats: dict[str, Any]) -> float:
         """
         McAlpine EFLAW (Easy Listening Formula for Adult Learners)
         Formula: (words + miniwords) / sentences
@@ -333,7 +358,8 @@ class ReadabilityMetrics:
 
         return (words_count + miniwords_count) / sentences_count
 
-    def reading_time(self, *, stats: dict[str, Any], wpm: int = 200) -> float:
+    @staticmethod
+    def reading_time(*, stats: dict[str, Any], wpm: int = 200) -> float:
         """
         Calculate reading time in minutes.
 

@@ -1,10 +1,13 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow validation module for docpipe orchestrator.
 
 This module contains the FlowValidator class which handles all flow validation logic
 that was previously embedded in AbstractOrchestrator.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 from docpipe.core.constants.constants import DocpipeConstants, OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
@@ -18,12 +21,14 @@ from docpipe.core.orchestration.feature_propagation import (
     disambiguate_features,
 )
 from docpipe.core.orchestration.operator_factory import OperatorFactory, OperatorFactoryProvider
+from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 from docpipe.exceptions.docpipe_exceptions import (
     ErrorCode,
     FlowValidationException,
     ValidationAlert,
 )
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
+from docpipe.integrations.secrets.resolver import FindingKind, inspect_node_references
 from docpipe.types import FlowConfig
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.flow_utils import add_validation_alert
@@ -202,11 +207,16 @@ class FlowValidator:
             self.operator_metadata.get_operator_metadata(internal_features=True)
         except Exception as e:
             self.logger.warning(
-                f"Some operators failed to load metadata (this is normal if external services are unavailable): {e!s}"
+                "Some operators failed to load metadata (this is normal if external services are unavailable): %s",
+                e,
             )
             # Continue with whatever metadata was successfully loaded
         # Use injected propagator when available to avoid a redundant metadata load.
-        self.feature_propagator = feature_propagator if feature_propagator is not None else FeaturePropagator()
+        # Otherwise build one from the same orchestrator, so custom operators enabled only
+        # through the orchestrator (not the environment) contribute their output features.
+        self.feature_propagator = (
+            feature_propagator if feature_propagator is not None else FeaturePropagator(orchestrator=orchestrator)
+        )
 
     def validate(self, *, flow_def: FlowConfig, params: FlowConfig) -> None:
         """Main validation entry point for a flow definition.
@@ -248,23 +258,77 @@ class FlowValidator:
         self.validate_dag(flow_def=flow_def, global_config=global_config)
 
     @staticmethod
-    def _sanitize_vault_refs_for_validation(value: object, *, key: str | None = None) -> object:
-        """Replace vault:// references with safe validation mock values.
+    def _sanitize_vault_refs_for_validation(value: object) -> object:
+        """Replace every string that holds ``vault://`` with the one validation sentinel.
 
-        Operators receive non-empty mock structures rather than unresolved URIs
-        so that required presence checks and dict validation pass cleanly.
+        The sentinel is a plain string that passes the non-empty and ``http(s)://`` checks of
+        secret-capable fields, so a reference there never causes a format or missing-field
+        error. Problems with the references themselves are reported separately by
+        ``_report_reference_findings``. No provider is contacted.
         """
         from docpipe.integrations.secrets.secret_provider import is_vault_reference
 
         if isinstance(value, str) and is_vault_reference(value):
-            if key in ("credentials", "credentials_json", "provider_credentials"):
-                return {"__vault_mock__": True}
-            return "__vault_placeholder__"
+            return DocpipeConstants.VALIDATION_SECRET_SENTINEL
         if isinstance(value, dict):
-            return {k: FlowValidator._sanitize_vault_refs_for_validation(v, key=str(k)) for k, v in value.items()}
+            return {k: FlowValidator._sanitize_vault_refs_for_validation(v) for k, v in value.items()}
         if isinstance(value, list):
-            return [FlowValidator._sanitize_vault_refs_for_validation(item, key=key) for item in value]
+            return [FlowValidator._sanitize_vault_refs_for_validation(item) for item in value]
         return value
+
+    # Findings that ``_validate_vault_references`` already reports for the whole DAG; the
+    # per-node check reports only the others, so a problem is never listed twice.
+    _REPORTED_BY_DAG_CHECK: ClassVar[frozenset[FindingKind]] = frozenset(
+        {FindingKind.MALFORMED, FindingKind.PROVIDER_NOT_REGISTERED}
+    )
+    _FINDING_MESSAGES: ClassVar[dict[FindingKind, tuple[str, str]]] = {
+        FindingKind.FIELD_NOT_SECRET_CAPABLE: (
+            "VAULT_FIELD_NOT_SECRET_CAPABLE",
+            "Config key '{key}' holds a vault reference but is not a secret-capable field for this operator.",
+        ),
+        FindingKind.PATH_NOT_PERMITTED: (
+            "VAULT_PATH_NOT_PERMITTED",
+            "Config key '{key}' holds a vault reference that is outside secrets.vault.allowed_paths.",
+        ),
+        FindingKind.DESTINATION_NOT_PERMITTED: (
+            "VAULT_DESTINATION_NOT_PERMITTED",
+            "Config key '{key}' is a literal destination whose host is not in secrets.vault.allowed_destinations, "
+            "while the node reads credentials from Vault.",
+        ),
+    }
+
+    @staticmethod
+    def _report_reference_findings(
+        *,
+        operator_class: Any,
+        config: dict[str, Any],
+        op_def: dict[str, Any],
+        validate_results: ValidateStepResults,
+    ) -> bool:
+        """Report undeclared, out-of-policy, and misdirected references of one node as errors.
+
+        Messages name the config key (and the provider where there is one) and never the
+        reference text. Returns True when the node holds a reference problem that makes
+        the operator's own checks meaningless, so the caller skips them.
+        """
+        blocking = False
+        for finding in inspect_node_references(operator_class=operator_class, config=config):
+            if finding.kind is not FindingKind.PROVIDER_NOT_REGISTERED:
+                blocking = True
+            if finding.kind in FlowValidator._REPORTED_BY_DAG_CHECK:
+                continue
+            code, template = FlowValidator._FINDING_MESSAGES[finding.kind]
+            message = template.format(key=finding.config_key)
+            if finding.kind is FindingKind.PATH_NOT_PERMITTED and (
+                getattr(operator_class, "trust_class", None) == TrustClass.UNTRUSTED
+            ):
+                message = message.replace("secrets.vault.allowed_paths", "secrets.vault.custom_operator_allowed_paths")
+            add_validation_alert(
+                message=ValidationMessage(message=message, message_code=code),
+                op_def=op_def,
+                alerts=validate_results.errors,
+            )
+        return blocking
 
     @staticmethod
     def _collect_vault_refs(obj: object, *, prefix: str = "") -> list[tuple[str, str]]:
@@ -293,18 +357,25 @@ class FlowValidator:
         op_def: dict[str, Any],
         validate_results: ValidateStepResults,
     ) -> None:
-        """Validate a single vault reference URI and record any error or warning."""
+        """Validate a single vault reference URI and record any error or warning.
+
+        The error for a malformed reference names the config key only; the value
+        is never echoed.
+        """
         from docpipe.integrations.secrets.secret_provider import (
+            MalformedSecretReferenceError,
             get_provider,
-            parse_vault_reference,
+            parse_reference,
         )
 
         try:
-            provider_name, _, _ = parse_vault_reference(ref)
-        except Exception:
+            parsed = parse_reference(value=ref)
+        except MalformedSecretReferenceError:
+            parsed = None
+        if parsed is None:
             add_validation_alert(
                 message=ValidationMessage(
-                    message=f"Config key '{path}' contains a malformed vault URI: '{ref}'.",
+                    message=f"Config key '{path}' contains a malformed vault URI.",
                     message_code="VAULT_URI_MALFORMED",
                 ),
                 op_def=op_def,
@@ -312,7 +383,8 @@ class FlowValidator:
             )
             return
 
-        if not provider_name or get_provider(name=provider_name) is None:
+        provider_name = parsed.provider
+        if get_provider(name=provider_name) is None:
             add_validation_alert(
                 message=ValidationMessage(
                     message=(
@@ -415,7 +487,7 @@ class FlowValidator:
                     operators=duplicates,
                 )
             )
-            self.logger.error(f"Duplicate operator names have been found with: {','.join(duplicates)}")
+            self.logger.error("Duplicate operator names have been found with: %s", ",".join(duplicates))
 
         validate_results = ValidateStepResults(available_features={}, errors=errors, warnings=warnings)
         session_info = get_session_info()
@@ -443,9 +515,9 @@ class FlowValidator:
         self.validate_last_operator(dag=dag, validate_results=validate_results)
 
         if validate_results.warnings:
-            self.logger.warning(f"Validation warnings: {validate_results.warnings}")
+            self.logger.warning("Validation warnings: %s", validate_results.warnings)
         if validate_results.errors:
-            self.logger.error(f"Validation errors: {validate_results.errors}")
+            self.logger.error("Validation errors: %s", validate_results.errors)
 
         # Raise exception if there are errors OR warnings (warnings need to be returned to API)
         if validate_results.errors or validate_results.warnings:
@@ -547,7 +619,8 @@ class FlowValidator:
         self._traverse_dag(dag=dag, task=feature_propagation_task)
 
         logger.info(
-            f"Feature propagation complete: {len(propagation_result.available_features)} nodes processed",
+            "Feature propagation complete: %d nodes processed",
+            len(propagation_result.available_features),
             extra=self.common_log_arguments,
         )
 
@@ -599,8 +672,23 @@ class FlowValidator:
                     config = (
                         global_config
                         | op_def.get(OperatorConstants.Config.CONFIG, {})
-                        | {DocpipeConstants.VALIDATING_FLOW: True}
+                        | {
+                            DocpipeConstants.VALIDATING_FLOW: True,
+                            DocpipeConstants.VALIDATION_FEATURE_TYPES: {
+                                name: feature.get("type")
+                                for name, feature in node_result.get_input_features(node_id=node_id).items()
+                            },
+                        }
                     )
+                    if self._report_reference_findings(
+                        operator_class=operator_class,
+                        config=dict(op_def.get(OperatorConstants.Config.CONFIG, {})),
+                        op_def=op_def,
+                        validate_results=validate_results,
+                    ):
+                        # The reference errors above are the actionable ones; format checks on a
+                        # field whose reference was rejected would only report the stand-in.
+                        return node_result
                     config = self._sanitize_vault_refs_for_validation(config)
                     operator = operator_class(config=config)
                     operator.name = op_def.get(OperatorConstants.Columns.NAME)
@@ -638,7 +726,8 @@ class FlowValidator:
 
         return node_result
 
-    def _get_parent_results(self, *, prev_result: Any) -> list[FeaturePropagationResult]:
+    @staticmethod
+    def _get_parent_results(*, prev_result: Any) -> list[FeaturePropagationResult]:
         """Normalize Prefect traversal input into a list of parent propagation results."""
         if isinstance(prev_result, FeaturePropagationResult):
             return [prev_result]
@@ -648,7 +737,8 @@ class FlowValidator:
             return [parent for parent in prev_result.values() if isinstance(parent, FeaturePropagationResult)]
         return []
 
-    def _feature_metadata_to_dict(self, *, result: FeaturePropagationResult) -> dict[str, dict[str, Any]]:
+    @staticmethod
+    def _feature_metadata_to_dict(*, result: FeaturePropagationResult) -> dict[str, dict[str, Any]]:
         """Convert node feature metadata into plain dictionaries for downstream propagation/debugging."""
         return {
             name: {
@@ -664,7 +754,8 @@ class FlowValidator:
             for name, meta in result.feature_metadata.items()
         }
 
-    def _get_required_node_fields(self, *, op_def: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    @staticmethod
+    def _get_required_node_fields(*, op_def: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
         """Extract required propagation fields from a DAG node definition."""
         node_id = op_def.get(OperatorConstants.Misc.ID)
         operator = op_def.get(OperatorConstants.Misc.OPERATOR)
@@ -902,7 +993,8 @@ class FlowValidator:
         self._node_features_cache = node_features
         return node_features
 
-    def _traverse_dag(self, *, dag: list, task: Any) -> None:
+    @staticmethod
+    def _traverse_dag(*, dag: list, task: Any) -> None:
         """Traverse the DAG in topological order, calling task for each node.
 
         Replaces the previous Prefect-based traversal. Delegates ordering to
@@ -944,9 +1036,8 @@ class FlowValidator:
 
             results[node_id] = task(task_name, op_def, prev_result, link_name)
 
-    def _validate_global_config_values(
-        self, *, global_config: dict[str, Any], validate_results: ValidateStepResults
-    ) -> None:
+    @staticmethod
+    def _validate_global_config_values(*, global_config: dict[str, Any], validate_results: ValidateStepResults) -> None:
         """Validate global configuration values such as doc_format."""
         doc_format = global_config.get(OperatorConstants.DOC_FORMAT_KEY)
         if doc_format is not None:
@@ -986,13 +1077,13 @@ class FlowValidator:
             dag: List of operator definitions
             validate_results: Container for validation results
         """
-        graph = self._build_graph(dag)
+        graph = self._build_graph(dag=dag)
         undirected = self._make_undirected_graph(graph)
         components = self._find_connected_components(undirected)
 
         id_to_index = {n["id"]: i for i, n in enumerate(dag)}
         reported_nodes: set[str] = set()
-        reverse_graph: dict[str, list[str]] = self._build_reverse_graph(dag)
+        reverse_graph: dict[str, list[str]] = self._build_reverse_graph(dag=dag)
 
         if len(components) > 1:
             self._validate_disconnected_components(
@@ -1012,7 +1103,8 @@ class FlowValidator:
             validate_results=validate_results,
         )
 
-    def _build_reverse_graph(self, dag: list) -> dict:
+    @staticmethod
+    def _build_reverse_graph(*, dag: list) -> dict:
         """Build reverse graph to find nodes without inputs."""
         reverse_graph: dict[str, list[str]] = {n["id"]: [] for n in dag}
         for node in dag:
@@ -1034,7 +1126,7 @@ class FlowValidator:
     ):
         """Validate disconnected components and report terminal nodes that are not VectorDB operators."""
         for component in components:
-            terminal_node_id = self._find_terminal_node(component, graph)
+            terminal_node_id = self._find_terminal_node(component=component, graph=graph)
             if terminal_node_id is None:
                 continue
 
@@ -1046,14 +1138,16 @@ class FlowValidator:
                 reported_nodes=reported_nodes,
             )
 
-    def _find_terminal_node(self, component: set, graph: dict) -> str | None:
+    @staticmethod
+    def _find_terminal_node(*, component: set, graph: dict) -> str | None:
         """Find the terminal node (node with no outgoing edges) in a component."""
         for node_id in component:
             if not graph.get(node_id, []):
                 return node_id
         return None
 
-    def _find_all_terminal_nodes(self, graph: dict) -> list[str]:
+    @staticmethod
+    def _find_all_terminal_nodes(graph: dict) -> list[str]:
         """Find all terminal nodes (nodes with no outgoing edges) in a graph."""
         return [node_id for node_id, neighbors in graph.items() if not neighbors]
 
@@ -1085,8 +1179,9 @@ class FlowValidator:
             )
             reported_nodes.add(terminal_node_id)
 
+    @staticmethod
     def _validate_isolated_nodes(
-        self, *, dag: list, graph: dict, reverse_graph: dict, reported_nodes: set, validate_results: ValidateStepResults
+        *, dag: list, graph: dict, reverse_graph: dict, reported_nodes: set, validate_results: ValidateStepResults
     ):
         """Check for isolated nodes (nodes with no input AND no output)."""
         for node in dag:
@@ -1107,6 +1202,66 @@ class FlowValidator:
                     alerts=validate_results.errors,
                 )
 
+    @staticmethod
+    def _find_acl_parent_operators(*, dag: list, acl_node_id: str) -> list[dict]:
+        """Find parent operators of the ACL operator from DAG output edges."""
+        parent_map: dict[str, list[str]] = {n[OperatorConstants.Misc.ID]: [] for n in dag}
+        for node in dag:
+            output_edges = node.get(DocpipeConstants.OUTPUT_EDGES, [])
+            for edge in output_edges:
+                target_id = edge.get("node_id_ref")
+                if target_id and target_id in parent_map:
+                    parent_map[target_id].append(node[OperatorConstants.Misc.ID])
+
+        parent_ids = parent_map.get(acl_node_id, [])
+        return [node for node in dag if node.get(OperatorConstants.Misc.ID) in parent_ids]
+
+    @staticmethod
+    def _validate_acl_ingest_provider(
+        *, acl_node: dict, ingest_source_parent: dict, validate_results: ValidateStepResults
+    ) -> None:
+        """Validate that ingest_source parent uses SharePoint provider."""
+        provider = ingest_source_parent.get(OperatorConstants.Config.CONFIG, {}).get("provider", "").lower()
+        if provider != "sharepoint":
+            add_validation_alert(
+                message=ValidationMessage(
+                    message=ValidationCodeMessages.ACL_INVALID_PROVIDER.value.format(provider=provider),
+                    message_code=ValidationCodeMessages.ACL_INVALID_PROVIDER.name,
+                ),
+                op_def=acl_node,
+                alerts=validate_results.errors,
+            )
+
+    def _validate_acl_parent_operator(
+        self,
+        *,
+        acl_node: dict,
+        parent_operator: dict,
+        validate_results: ValidateStepResults,
+    ) -> None:
+        """Validate single parent operator of ACL operator."""
+        parent_op_name = parent_operator.get(OperatorConstants.Misc.OPERATOR)
+        parent_metadata = self.operator_metadata.operator_metadata.get(parent_op_name, {})
+        parent_category = parent_metadata.get(OperatorConstants.Misc.CATEGORY)
+
+        if parent_category != OperatorCategory.Ingest:
+            add_validation_alert(
+                message=ValidationMessage(
+                    message=ValidationCodeMessages.ACL_OPERATOR_MISPLACED.value.format(
+                        predecessor_operator=parent_op_name or "unknown"
+                    ),
+                    message_code=ValidationCodeMessages.ACL_OPERATOR_MISPLACED.name,
+                ),
+                op_def=acl_node,
+                alerts=validate_results.errors,
+            )
+        elif parent_op_name == OperatorConstants.Operators.INGEST_SOURCE:
+            self._validate_acl_ingest_provider(
+                acl_node=acl_node,
+                ingest_source_parent=parent_operator,
+                validate_results=validate_results,
+            )
+
     def _validate_acl_operator_placement(self, *, dag: list, validate_results: ValidateStepResults):
         """Validate ACL operator placement in the DAG.
 
@@ -1115,9 +1270,8 @@ class FlowValidator:
 
         Args:
             dag: List of operator definitions
-            global_config: Global configuration dictionary
+            validate_results: Step results tracking validation errors/warnings
         """
-        # Early exit if no ACL operator present
         acl_nodes = [
             node
             for node in dag
@@ -1126,7 +1280,6 @@ class FlowValidator:
         if not acl_nodes:
             return
 
-        # Check for multiple ACL operators
         if len(acl_nodes) > 1:
             for acl_node in acl_nodes:
                 add_validation_alert(
@@ -1141,19 +1294,9 @@ class FlowValidator:
 
         acl_node = acl_nodes[0]
         acl_node_id = acl_node.get(OperatorConstants.Misc.ID)
+        parent_operators = self._find_acl_parent_operators(dag=dag, acl_node_id=acl_node_id)
 
-        # Build reverse graph to find parent nodes
-        parent_map: dict[str, list[str]] = {n[OperatorConstants.Misc.ID]: [] for n in dag}
-        for node in dag:
-            output_edges = node.get(DocpipeConstants.OUTPUT_EDGES, [])
-            for edge in output_edges:
-                target_id = edge.get("node_id_ref")
-                if target_id and target_id in parent_map:
-                    parent_map[target_id].append(node[OperatorConstants.Misc.ID])
-
-        # Get parent nodes of ACL operator
-        parent_ids = parent_map.get(acl_node_id, [])
-        if not parent_ids:
+        if not parent_operators:
             add_validation_alert(
                 message=ValidationMessage(
                     message=ValidationCodeMessages.ACL_OPERATOR_NO_INPUT.value,
@@ -1164,10 +1307,6 @@ class FlowValidator:
             )
             return
 
-        # Find parent operator details
-        parent_operators = [node for node in dag if node.get(OperatorConstants.Misc.ID) in parent_ids]
-
-        # ACL operator should have only one parent
         if len(parent_operators) > 1:
             add_validation_alert(
                 message=ValidationMessage(
@@ -1181,48 +1320,14 @@ class FlowValidator:
             )
             return
 
-        # Check if any parent is an ingest_source operator
-        has_valid_parent = False
-        predecessor_operator = None
-        ingest_source_parent = None
+        self._validate_acl_parent_operator(
+            acl_node=acl_node,
+            parent_operator=parent_operators[0],
+            validate_results=validate_results,
+        )
 
-        for parent in parent_operators:
-            parent_op_name = parent.get(OperatorConstants.Misc.OPERATOR)
-            parent_metadata = self.operator_metadata.operator_metadata.get(parent_op_name, {})
-            parent_category = parent_metadata.get(OperatorConstants.Misc.CATEGORY)
-            if parent_category == OperatorCategory.Ingest:
-                has_valid_parent = True
-                if parent_op_name == OperatorConstants.Operators.INGEST_SOURCE:
-                    ingest_source_parent = parent
-                break
-            predecessor_operator = parent_op_name
-
-        if not has_valid_parent:
-            add_validation_alert(
-                message=ValidationMessage(
-                    message=ValidationCodeMessages.ACL_OPERATOR_MISPLACED.value.format(
-                        predecessor_operator=predecessor_operator or "unknown"
-                    ),
-                    message_code=ValidationCodeMessages.ACL_OPERATOR_MISPLACED.name,
-                ),
-                op_def=acl_node,
-                alerts=validate_results.errors,
-            )
-        elif ingest_source_parent is not None:
-            # Validate that ingest_source uses SharePoint provider
-            provider = ingest_source_parent.get(OperatorConstants.Config.CONFIG, {}).get("provider", "").lower()
-            if provider != "sharepoint":
-                add_validation_alert(
-                    message=ValidationMessage(
-                        message=ValidationCodeMessages.ACL_INVALID_PROVIDER.value.format(provider=provider),
-                        message_code=ValidationCodeMessages.ACL_INVALID_PROVIDER.name,
-                    ),
-                    op_def=acl_node,
-                    alerts=validate_results.errors,
-                )
-        # Early exit if no ACL operator present
-
-    def _validate_storage_output_operator_placement(self, *, dag: list, validate_results: ValidateStepResults):
+    @staticmethod
+    def _validate_storage_output_operator_placement(*, dag: list, validate_results: ValidateStepResults):
         """Validate that storage_output operators using refetch_original or comprehensive_export
         have an upstream ingest_source operator in the DAG.
 
@@ -1280,7 +1385,8 @@ class FlowValidator:
                     alerts=validate_results.errors,
                 )
 
-    def _build_graph(self, dag: list) -> dict:
+    @staticmethod
+    def _build_graph(*, dag: list) -> dict:
         """Build a directed graph representation from the DAG.
 
         Args:
@@ -1296,7 +1402,8 @@ class FlowValidator:
                 graph[node["id"]].append(edge["node_id_ref"])
         return graph
 
-    def _make_undirected_graph(self, graph: dict) -> dict:
+    @staticmethod
+    def _make_undirected_graph(graph: dict) -> dict:
         """Convert a directed graph into an undirected graph for disjoint detection.
 
         Args:
@@ -1312,7 +1419,8 @@ class FlowValidator:
                 undirected[dst].add(src)
         return undirected
 
-    def _find_connected_components(self, undirected: dict) -> list:
+    @staticmethod
+    def _find_connected_components(undirected: dict) -> list:
         """Find connected components in an undirected graph.
 
         Args:
@@ -1378,7 +1486,7 @@ class FlowValidator:
         if not dag:
             return
 
-        graph = self._build_graph(dag)
+        graph = self._build_graph(dag=dag)
         id_to_index = {node["id"]: i for i, node in enumerate(dag)}
 
         for terminal_node_id in self._find_all_terminal_nodes(graph):
@@ -1406,7 +1514,7 @@ class FlowValidator:
             dag: List of operator definitions
             validate_results: Container for validation results
         """
-        graph = self._build_graph(dag)
+        graph = self._build_graph(dag=dag)
         visited = set()
         rec_stack = set()
 
@@ -1557,7 +1665,8 @@ class FlowValidator:
 
         return category
 
-    def create_validation_alerts(self, op_def: dict, messages: list, alerts: list, **kwargs):
+    @staticmethod
+    def create_validation_alerts(*, op_def: dict, messages: list, alerts: list, **kwargs):
         """Create validation alerts from a list of messages.
 
         Args:
@@ -1569,7 +1678,8 @@ class FlowValidator:
         for message in messages:
             add_validation_alert(message=message, op_def=op_def, alerts=alerts, **kwargs)
 
-    def get_duplicate_node_names(self, *, nodes):
+    @staticmethod
+    def get_duplicate_node_names(*, nodes):
         """Get duplicate names of nodes from pipeline.
 
         Args:
@@ -1580,8 +1690,9 @@ class FlowValidator:
         """
         return [item for item in set(nodes) if nodes.count(item) > 1]
 
+    @staticmethod
     def _evaluate_node_validation_skip(
-        self, operator: str, operator_factory: OperatorFactory, global_config: dict
+        *, operator: str, operator_factory: OperatorFactory, global_config: dict
     ) -> bool:
         """Evaluate whether to skip validation for a custom operator.
 

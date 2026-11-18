@@ -21,8 +21,7 @@
         },
         "include_filter": [
           "pdf"
-        ],
-        "credentials": {}
+        ]
       }
     },
     {

@@ -29,6 +29,7 @@ import {
   TextInput,
 } from '@carbon/react';
 import { Tearsheet } from '@carbon/ibm-products';
+import { useIntl } from 'react-intl';
 import type { FeatureAttributes } from '@/types';
 import {
   type Condition,
@@ -41,6 +42,7 @@ import {
   convertFromEpoch,
   isEpochValue,
 } from '@/utils/dateTimeUtils';
+import { messages } from './LinkConditionTearsheet.messages';
 import styles from './LinkConditionTearsheet.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -106,6 +108,7 @@ export function LinkConditionTearsheet({
   isReadOnly = false,
   inputFeatures = {},
 }: LinkConditionTearsheetProps): React.JSX.Element {
+  const intl = useIntl();
 
   const [linkName, setLinkName] = useState(initialValues.linkName);
   const [activeTab, setActiveTab] = useState<TabType>(TAB_SIMPLE);
@@ -243,18 +246,18 @@ export function LinkConditionTearsheet({
   // ── Actions ────────────────────────────────────────────────────────────────
 
   const tearsheetActions = isReadOnly
-    ? [{ kind: 'primary' as const, label: 'Close', onClick: onClose }]
+    ? [{ kind: 'primary' as const, label: intl.formatMessage(messages.actionClose), onClick: onClose }]
     : [
-        { kind: 'secondary' as const, label: 'Cancel', onClick: onClose },
-        { kind: 'primary' as const, label: 'Save', onClick: handleSave, disabled: isSaveDisabled() },
+        { kind: 'secondary' as const, label: intl.formatMessage(messages.actionCancel), onClick: onClose },
+        { kind: 'primary' as const, label: intl.formatMessage(messages.actionSave), onClick: handleSave, disabled: isSaveDisabled() },
       ];
 
   return (
     <Tearsheet
       open={open}
       onClose={onClose}
-      label={isMergingNode ? 'Link Name' : 'Link Condition'}
-      title={isMergingNode ? 'Edit Link Name' : 'Edit Link Condition'}
+      label={isMergingNode ? intl.formatMessage(messages.labelLinkName) : intl.formatMessage(messages.labelLinkCondition)}
+      title={isMergingNode ? intl.formatMessage(messages.titleEditLinkName) : intl.formatMessage(messages.titleEditLinkCondition)}
       actions={tearsheetActions}
     >
       <div className={styles.container}>
@@ -263,8 +266,8 @@ export function LinkConditionTearsheet({
           onChange={({ selectedIndex }) => { handleTabChange(selectedIndex); }}
         >
           <TabList aria-label="Condition type">
-            <Tab disabled={isReadOnly}>Simple</Tab>
-            {!isMergingNode && <Tab disabled={isReadOnly}>Advanced</Tab>}
+            <Tab disabled={isReadOnly}>{intl.formatMessage(messages.tabSimple)}</Tab>
+            {!isMergingNode && <Tab disabled={isReadOnly}>{intl.formatMessage(messages.tabAdvanced)}</Tab>}
           </TabList>
 
           <TabPanels>
@@ -273,7 +276,7 @@ export function LinkConditionTearsheet({
               <div className={styles.linkNameField}>
                 <TextInput
                   id="lct-link-name"
-                  labelText="Link Name"
+                  labelText={intl.formatMessage(messages.linkNameLabel)}
                   value={linkName}
                   onChange={(e) => { setLinkName(e.target.value); }}
                   required
@@ -300,7 +303,7 @@ export function LinkConditionTearsheet({
                 <div className={styles.linkNameField}>
                   <TextInput
                     id="lct-link-name-adv"
-                    labelText="Link Name"
+                    labelText={intl.formatMessage(messages.linkNameLabel)}
                     value={linkName}
                     onChange={(e) => { setLinkName(e.target.value); }}
                     required
@@ -309,8 +312,8 @@ export function LinkConditionTearsheet({
                 </div>
                 <TextArea
                   id="lct-advanced-condition"
-                  labelText="Complex Condition"
-                  placeholder="Enter custom condition expression here…"
+                  labelText={intl.formatMessage(messages.complexConditionLabel)}
+                  placeholder={intl.formatMessage(messages.complexConditionPlaceholder)}
                   value={advancedExpression}
                   onChange={(e) => { setAdvancedExpression(e.target.value); }}
                   readOnly={isReadOnly}
@@ -327,14 +330,14 @@ export function LinkConditionTearsheet({
             <ModalHeader
               title={
                 pendingTab === TAB_ADVANCED
-                  ? 'Switching to Advanced will overwrite the previously saved Simple condition. Do you want to continue?'
-                  : 'Switching to Simple will overwrite the Advanced expression. Do you want to continue?'
+                  ? intl.formatMessage(messages.confirmSwitchToAdvanced)
+                  : intl.formatMessage(messages.confirmSwitchToSimple)
               }
               closeModal={cancelTabSwitch}
             />
             <ModalFooter>
-              <Button kind="secondary" onClick={cancelTabSwitch}>Cancel</Button>
-              <Button kind="primary" onClick={confirmTabSwitch}>Confirm</Button>
+              <Button kind="secondary" onClick={cancelTabSwitch}>{intl.formatMessage(messages.cancel)}</Button>
+              <Button kind="primary" onClick={confirmTabSwitch}>{intl.formatMessage(messages.confirm)}</Button>
             </ModalFooter>
           </ComposedModal>
         )}

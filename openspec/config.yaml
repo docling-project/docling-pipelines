@@ -1,0 +1,92 @@
+schema: spec-driven
+
+context: |
+  Monorepo: Python backend (src/docpipe/) + React frontend (frontend/src/)
+
+  Backend: Python 3.12, FastAPI, pyarrow, DuckDB/Postgres, docling
+  - Package: docpipe | source root: src/ | Python >=3.12,<3.13
+  - REST API: FastAPI app at src/docpipe/api/main.py
+  - Routes: src/docpipe/api/routes/ (flows, projects, job_runs, operators, validation, document_sets, document_libraries, documents, providers)
+  - Core engine: src/docpipe/core/ — operators, orchestration, job_management, assets, adapters
+  - Operators extend AbstractOperator; registered in DOCPIPE_OPERATORS frozenset in src/docpipe/core/operators/operator_registry.py
+  - 21 built-in operators across categories: Ingest, Extract, Functional, Quality, VectorDB, Storage
+  - Storage: DuckDB (default) or Postgres; abstracted via TableStorage / KeyValueStorage interfaces
+  - Orchestrators: PythonOrchestrator (default, in-process), PrefectEngine (distributed)
+  - Inter-operator data is pyarrow Tables; transform() returns tuple[list[pa.Table], dict]
+  - DDD layering in core/assets/ and core/job_management/: domain/ -> application/ -> adapters/
+  - LLM adapters in src/docpipe/core/adapters/; accessed via port interfaces only (LLMInferencePort, LLMEmbeddingPort)
+  - Logging: always use get_logger() from docpipe.utils.infrastructure.logging; %s-style, no f-strings, no emoji
+  - SessionInfo (job_id, job_run_id) is thread-local; access via get_session_info(), never pass as function args
+  - Entrypoints: CLI (docpipe_cli.py), REST API (api/main.py), Python lib (DocpipeFlowManager)
+
+  Frontend: TypeScript 5, React 18, Vite 6, Redux Toolkit 2, Elyra Canvas 13, Carbon React 1.25
+  - React 18 + TypeScript 5 (Vite 6 build system under frontend/src/)
+  - Routing: <BrowserRouter basename="/ui"> with routes defined in frontend/src/config/routes.config.ts
+  - State Management: Redux Toolkit (frontend/src/slices/ for flows, projects, jobRuns, operators, assets, notifications)
+  - Pipeline Canvas: Elyra Canvas (@elyra/canvas) for DAG editor and ReadOnlyCanvas for execution monitoring
+  - Design System: Carbon Design System (@carbon/react) for UI primitives, Modals, Tearsheets, and DataTables
+  - Styling: SCSS Modules (*.module.scss) with Carbon design tokens (var(--cds-*)); no hard-coded px or hex literals
+  - BFF Proxy: Node/Express server proxying relative /api/* requests to backend with error normalization
+  - Logging: Centralized logger via frontend/src/utils/logger.ts (log4js / logUtil); no raw console.* calls
+  - Code Style: Functional components (React.JSX.Element return type), strict TypeScript (no any), path aliases (@/*)
+
+  ### Spec Directory Structure & Namespace Rules
+
+  - Canonical Frontend Specs: openspec/specs/frontend/ (prefixed with frontend/*)
+  - Canonical Backend Specs: openspec/specs/backend/ (prefixed with backend/*)
+  - In-flight change proposals must place spec deltas in specs/frontend/<capability>/spec.md or specs/backend/<capability>/spec.md
+  - Full-stack features spanning both backend and frontend must split their requirements into separate spec files in their respective folders
+
+  ### Spec Naming Conventions (Path Suffixes)
+
+  - Frontend Pages:                  <name>-page           (e.g. canvas-page, home-page)
+  - Frontend Panels & Flyouts:       <name>-panel          (e.g. properties-panel, run-side-panel)
+  - Frontend Canvas Components:      <name>-canvas         (e.g. elyra-canvas, read-only-canvas)
+  - Frontend Operator Config:        properties-panel      (consolidated under frontend/properties-panel; notable deviations specified within)
+  - Frontend Shared UI Primitives:   <name> under common/  (e.g. shared-data-table, delete-modal)
+  - Frontend Navigation & Routing:   navigation            (frontend/navigation)
+  - Frontend API Client Boundary:    api-client            (frontend/api-client)
+  - Frontend Redux Slices:           <name>-slice          (e.g. flows-slice, projects-slice)
+  - Backend REST APIs:               <name>-api            (e.g. flows-api, projects-api)
+  - Backend Core Engine:             <name> under backend/ (e.g. backend/flow-execution-engine)
+  - Backend Operators:               <operator_short_name>-operator  (e.g. backend/ededup-operator)
+rules:
+  proposal:
+    - Always include a Non-goals section
+    - "State clearly which layer(s) are affected: frontend-only, backend-only, or full-stack"
+    - For frontend UI changes, identify relevant Carbon Design System components and layout patterns
+    - Specify if changes affect routing under /ui, BFF proxy routes, or Redux state slices
+    - "For backend changes, specify affected REST routes, operators, or storage adapters"
+
+  specs:
+    - Focus specs strictly on externally observable capabilities and behavioral contracts, not 1:1 component file mirrors
+    - Interactive frontend capabilities (pages, canvases, complex forms) must specify keyboard navigation, focus management, or ARIA semantics
+    - Form and flyout specs must define required-field validation gating for submit/save actions
+    - Frontend API integrations must specify error normalization, loading indicators, and empty-state fallbacks
+    - Redux slice specs must document data invariants (e.g. normalized entity maps, unread counters, dirty state tracking)
+    - Backend operator specs must define input/output pyarrow Table schema requirements and transform metadata contracts
+
+  design:
+    - For frontend changes, include a component hierarchy tree identifying Carbon components used
+    - Map each user interaction to the corresponding Redux action/thunk or API client call
+    - For backend changes, specify DDD layer boundaries (domain models, application services, ports, adapters)
+    - Identify new SCSS modules to create and verify adherence to Carbon design tokens
+    - Detail risk mitigations and architectural trade-offs
+
+  tasks:
+    - Break tasks into chunks of maximum 2 hours
+    - "Tag each task with the layer it touches: [frontend], [backend], or [both]"
+    - "Order tasks by dependency: Backend API/adapters -> BFF -> Redux -> UI components -> Integration"
+    - Include explicit validation tasks (tests, linting, build verification)
+
+operations:
+  apply:
+    guidance:
+      - "Backend Python: run `uv run ruff check --fix .` and `uv run mypy .` after code changes"
+      - "Frontend React: run `npm run lint` and verify TypeScript compilation in frontend/"
+      - Ensure all git commits include -s (DCO sign-off) and follow single-line commit message format
+  archive:
+    guidance:
+      - Confirm all spec deltas merge cleanly into canonical openspec/specs/
+      - Verify no hard-coded color hex values or px spacing literals were introduced in frontend SCSS
+      - Run backend unit tests (`uv run pytest`) and frontend verification (`npm run lint && npm run build`)

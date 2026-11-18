@@ -14,7 +14,7 @@
       "name": "ingest_documents",
       "config": {
         "provider": "filesystem",
-        "connection_params": {
+        "provider_config": {
           "paths": [
             "./sample_documents"
           ]

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenSearch adapter for vector database operations.
 
 This adapter implements the VectorStorePort interface.
@@ -16,11 +19,15 @@ from docpipe.core.operators.vectordb.adapters.outbound.opensearch.client import 
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.index_manager import OpenSearchIndexManager
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
     detect_vector_dimension,
     generate_positional_pk,
+    is_binary_vector_feature,
 )
 
 logger = get_logger(__name__)
@@ -80,10 +87,11 @@ class OpenSearchAdapter(VectorStorePort):
                 - aws_region: AWS region for authentication
                 - jwt_token: JWT token for authentication
         """
+        adapter_config = reveal_value(adapter_config)
         # Extract operator-level parameters (added by VectorDBOperator)
         self.index_name = adapter_config.get(OperatorConstants.VectorDB.INDEX_NAME)
         if not self.index_name:
-            raise ValueError("provider_config.index_name is required for the OpenSearch adapter")
+            raise ValueError("index_name is required for the OpenSearch adapter")
         available_features = adapter_config.get(OperatorConstants.Config.AVAILABLE_FEATURES, {})
         feature_mappings: list[dict[str, str]] = adapter_config.get(OperatorConstants.Config.FEATURE_MAPPINGS, [])
 
@@ -147,8 +155,12 @@ class OpenSearchAdapter(VectorStorePort):
         )
 
         logger.info(
-            f"Initialized OpenSearchAdapter for index: {self.index_name} "
-            f"(host: {host}:{port}, engine: {engine}, algorithm: {algorithm})"
+            "Initialized OpenSearchAdapter for index: %s (host: %s:%s, engine: %s, algorithm: %s)",
+            self.index_name,
+            host,
+            port,
+            engine,
+            algorithm,
         )
 
     @staticmethod
@@ -171,7 +183,7 @@ class OpenSearchAdapter(VectorStorePort):
         # Process batches
         success_count, failed_items = self.batch_processor.process_batches(batches)
 
-        logger.debug(f"Indexed {success_count} documents in {len(batches)} batches, {len(failed_items)} failed")
+        logger.debug("Indexed %s documents in %s batches, %s failed", success_count, len(batches), len(failed_items))
 
         return success_count, failed_items
 
@@ -213,7 +225,7 @@ class OpenSearchAdapter(VectorStorePort):
             dimension_mapping: Dictionary mapping vector column names to their dimensions
         """
         self.index_manager.create_index(dimension_mapping=dimension_mapping)
-        logger.info(f"Created index: {self.index_name} with dimension mapping: {dimension_mapping}")
+        logger.info("Created index: %s with dimension mapping: %s", self.index_name, dimension_mapping)
 
     def refresh_index(self) -> None:
         """Refresh the index to make recent changes visible."""
@@ -222,6 +234,29 @@ class OpenSearchAdapter(VectorStorePort):
     def validate_existing_schema(self, *, dimension_mapping: dict[str, int]) -> None:
         """Validate existing OpenSearch index schema against runtime vector dimensions."""
         self.index_manager.validate_existing_index(dimension_mapping=dimension_mapping)
+
+    def validate_vector_feature_types(self, *, feature_types: dict[str, str | None]) -> None:
+        """Reject binary vector features, which the OpenSearch adapter cannot index.
+
+        Args:
+            feature_types: Mapping of input feature name to its propagated feature type.
+
+        Raises:
+            DocpipeException: An upstream operator emits a binary vector feature.
+        """
+        binary_features = sorted(
+            name for name, ftype in feature_types.items() if is_binary_vector_feature(feature_config={"type": ftype})
+        )
+        if binary_features:
+            raise DocpipeException(
+                message=(
+                    f"OpenSearch Error: Binary vector features are not supported (found: {', '.join(binary_features)}). "
+                    "Remove 'quantization' from the embeddings operator or use a provider that supports binary vectors "
+                    "(e.g. Milvus)."
+                ),
+                status_code=400,
+                error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
+            )
 
     def index_exists(self) -> bool:
         """Check if the OpenSearch index exists.

@@ -150,10 +150,11 @@ def test_list_project_flows_name_filter_forwarded_to_service():
     svc = _mock_service(flows=[], summaries={}, count=0)
     client = _client_with(svc)
 
-    client.get(f"/api/v1/projects/{PROJECT_ID}/flows?name=invoice")
+    client.get(f"/api/v1/projects/{PROJECT_ID}/flows?name=invoice&is_elyra=true")
 
     call_kwargs = svc.get_project_flows_with_run_summary.call_args.kwargs
     assert call_kwargs["name_filter"] == "invoice"
+    assert call_kwargs["is_elyra"] is True
 
 
 def test_list_project_flows_pagination_links_preserve_filters():

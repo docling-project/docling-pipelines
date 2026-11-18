@@ -4,19 +4,20 @@
  */
 
 import React, { useState } from 'react';
-import { Button } from '@carbon/react';
-import { Close, WarningAlt, ErrorFilled, ChevronRight, ChevronDown, Copy } from '@carbon/react/icons';
+import { Button, CopyButton } from '@carbon/react';
+import { Close, WarningAlt, ErrorFilled, ChevronRight, ChevronDown } from '@carbon/react/icons';
+import { useIntl } from 'react-intl';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
 import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
+import { messages } from './BottomNotificationPanel.messages';
 import styles from './BottomNotificationPanel.module.scss';
 import {
   COLUMN_KEYS,
-  COLUMN_HEADERS,
   NOTIFICATION_TYPES,
   DEFAULT_VALUES,
-  ARIA_LABELS,
-  BUTTON_TITLES,
 } from '@/constants/notificationPanel';
+
+import type { ValidationActionType } from '@/services/api';
 
 export interface NotificationItem {
   id: string;
@@ -26,6 +27,7 @@ export interface NotificationItem {
   node_name?: string | null;
   node_id?: string | null;
   message_code?: string | null;
+  action_type?: ValidationActionType | null;
   timestamp: string;
 }
 
@@ -33,17 +35,8 @@ interface BottomNotificationPanelProps {
   notifications: NotificationItem[];
   onClose: () => void;
   title?: string;
-  onNodeClick?: (nodeId: string, messageCode?: string | null) => void;
+  onNodeClick?: (nodeId: string, messageCode?: string | null, actionType?: ValidationActionType | null) => void;
 }
-
-const HEADERS: SharedDataTableHeader[] = [
-  { key: COLUMN_KEYS.EXPAND,      header: COLUMN_HEADERS.EXPAND },
-  { key: COLUMN_KEYS.NUMBER,      header: COLUMN_HEADERS.NUMBER },
-  { key: COLUMN_KEYS.TIMESTAMP,   header: COLUMN_HEADERS.TIMESTAMP },
-  { key: COLUMN_KEYS.STATUS,      header: COLUMN_HEADERS.STATUS },
-  { key: COLUMN_KEYS.NAME,        header: COLUMN_HEADERS.NAME },
-  { key: COLUMN_KEYS.DESCRIPTION, header: COLUMN_HEADERS.DESCRIPTION },
-];
 
 /**
  * BottomNotificationPanel
@@ -57,9 +50,18 @@ const HEADERS: SharedDataTableHeader[] = [
 const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
   notifications,
   onClose,
-  title = DEFAULT_VALUES.TITLE,
+  title,
   onNodeClick,
 }) => {
+  const intl = useIntl();
+  const headers: SharedDataTableHeader[] = [
+    { key: COLUMN_KEYS.EXPAND,      header: '' },
+    { key: COLUMN_KEYS.NUMBER,      header: intl.formatMessage(messages.headerNumber) },
+    { key: COLUMN_KEYS.TIMESTAMP,   header: intl.formatMessage(messages.headerTimestamp) },
+    { key: COLUMN_KEYS.STATUS,      header: intl.formatMessage(messages.headerStatus) },
+    { key: COLUMN_KEYS.NAME,        header: intl.formatMessage(messages.headerName) },
+    { key: COLUMN_KEYS.DESCRIPTION, header: intl.formatMessage(messages.headerDescription) },
+  ];
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const toggleRow = (rowId: string): void => {
@@ -76,15 +78,22 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
 
   // ── Row data ──────────────────────────────────────────────────────────────
 
-  const rows: SharedDataTableRow[] = notifications.map((notif, index) => ({
-    id: notif.id,
-    [COLUMN_KEYS.EXPAND]:      '',
-    [COLUMN_KEYS.NUMBER]:      (index + 1).toString(),
-    [COLUMN_KEYS.TIMESTAMP]:   notif.timestamp,
-    [COLUMN_KEYS.STATUS]:      notif.type,
-    [COLUMN_KEYS.NAME]:        notif.node_name ?? DEFAULT_VALUES.NODE_NAME_PLACEHOLDER,
-    [COLUMN_KEYS.DESCRIPTION]: notif.message ?? '',
-  }));
+  const rows: SharedDataTableRow[] = notifications.map((notif, index) => {
+    const rawMessage = notif.message ?? '';
+    const truncatedMessage = rawMessage.length > 100
+      ? `${rawMessage.slice(0, 100)}...`
+      : rawMessage;
+
+    return {
+      id: notif.id,
+      [COLUMN_KEYS.EXPAND]:      '',
+      [COLUMN_KEYS.NUMBER]:      (index + 1).toString(),
+      [COLUMN_KEYS.TIMESTAMP]:   notif.timestamp,
+      [COLUMN_KEYS.STATUS]:      notif.type,
+      [COLUMN_KEYS.NAME]:        notif.node_name ?? DEFAULT_VALUES.NODE_NAME_PLACEHOLDER,
+      [COLUMN_KEYS.DESCRIPTION]: truncatedMessage,
+    };
+  });
 
   // ── Cell renderer ─────────────────────────────────────────────────────────
 
@@ -102,7 +111,7 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
           type="button"
           className={styles.expandIcon}
           onClick={() => { toggleRow(row.id); }}
-          aria-label={isExpanded ? ARIA_LABELS.COLLAPSE_ROW : ARIA_LABELS.EXPAND_ROW}
+          aria-label={intl.formatMessage(isExpanded ? messages.collapseRow : messages.expandRow)}
         >
           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
@@ -118,12 +127,14 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
     if (colKey === COLUMN_KEYS.NAME) {
       const nodeId = notification?.node_id;
       const messageCode = notification?.message_code;
-      if (nodeId && onNodeClick) {
+      const actionType = notification?.action_type;
+      const isNavigable = actionType !== 'none';
+      if (nodeId && onNodeClick && isNavigable) {
         return (
           <button
             type="button"
             className={styles.nodeLink}
-            onClick={() => { onNodeClick(nodeId, messageCode); }}
+            onClick={() => { onNodeClick(nodeId, messageCode, actionType); }}
           >
             {cell.value}
           </button>
@@ -137,15 +148,14 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
       return (
         <div className={styles.descriptionCell}>
           <span className={styles.descriptionText}>{cell.value}</span>
-          <button
-            type="button"
+          <CopyButton
             className={styles.copyButton}
             onClick={() => { handleCopy(fullMessage); }}
-            aria-label={ARIA_LABELS.COPY_DESCRIPTION}
-            title={BUTTON_TITLES.COPY_TO_CLIPBOARD}
-          >
-            <Copy size={16} />
-          </button>
+            iconDescription={intl.formatMessage(messages.copyToClipboard)}
+            feedback={intl.formatMessage(messages.copied)}
+            feedbackTimeout={2000}
+            align="left"
+          />
         </div>
       );
     }
@@ -161,7 +171,7 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
     if (!notification) { return null; }
     return (
       <tr className={styles.expandedRow}>
-        <td colSpan={HEADERS.length} className={styles.expandedCell}>
+        <td colSpan={headers.length} className={styles.expandedCell}>
           <span className={styles.expandedContent}>{notification.message}</span>
         </td>
       </tr>
@@ -173,24 +183,24 @@ const BottomNotificationPanel: React.FC<BottomNotificationPanelProps> = ({
   return (
     <div className={styles.bottomPanel}>
       <div className={styles.header}>
-        <h3 className={styles.title}>{title}</h3>
+        <h3 className={styles.title}>{title ?? intl.formatMessage(messages.title)}</h3>
         <div className={styles.actions}>
           <Button
             kind="ghost"
             size="sm"
             hasIconOnly
             renderIcon={Close}
-            iconDescription={ARIA_LABELS.CLOSE}
+            iconDescription={intl.formatMessage(messages.close)}
             onClick={onClose}
           />
         </div>
       </div>
       <div className={styles.tableContainer}>
         <SharedDataTable
-          headers={HEADERS}
+          headers={headers}
           rows={rows}
           searchable
-          searchPlaceholder={DEFAULT_VALUES.SEARCH_PLACEHOLDER}
+          searchPlaceholder={intl.formatMessage(messages.searchPlaceholder)}
           size="sm"
           renderCell={renderCell}
           renderRowExtras={renderRowExtras}

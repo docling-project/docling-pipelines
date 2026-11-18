@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2026
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Unit tests for LiteLLMPIIAndHAPAdapter."""
 
@@ -108,3 +108,41 @@ def test_detect_passes_thresholds_in_prompt(adapter, mock_llm_adapter):
     prompt = call_args[1]["messages"][0]["content"]
     assert "hap=0.9" in prompt
     assert "pii=0.7" in prompt
+    assert "Report ONLY" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Capability-scoped detection (PIIDetectionPort / HAPDetectionPort)
+# ---------------------------------------------------------------------------
+
+_MIXED_RESPONSE = (
+    '{"detections": ['
+    '{"detection": "EmailAddress", "detection_type": "pii", "score": 0.9, "start": 0, "end": 16, "text": "t@e.com"},'
+    '{"detection": "has_HAP", "detection_type": "hap", "score": 0.9, "start": 17, "end": 30, "text": "insult"}'
+    "]}"
+)
+
+
+def test_adapter_declares_both_capabilities():
+    assert LiteLLMPIIAndHAPAdapter.SUPPORTS_PII is True
+    assert LiteLLMPIIAndHAPAdapter.SUPPORTS_HAP is True
+
+
+def test_detect_pii_scopes_prompt_and_filters_hap(adapter, mock_llm_adapter):
+    mock_llm_adapter.chat.return_value = _MIXED_RESPONSE
+    response = adapter.detect_pii(text="some text", threshold=0.6)
+
+    prompt = mock_llm_adapter.chat.call_args[1]["messages"][0]["content"]
+    assert "Report ONLY PII detections" in prompt
+    assert "pii=0.6" in prompt
+    assert [d.detection for d in response.detections] == ["EmailAddress"]
+
+
+def test_detect_hap_scopes_prompt_and_filters_pii(adapter, mock_llm_adapter):
+    mock_llm_adapter.chat.return_value = _MIXED_RESPONSE
+    response = adapter.detect_hap(text="some text", threshold=0.85)
+
+    prompt = mock_llm_adapter.chat.call_args[1]["messages"][0]["content"]
+    assert "Report ONLY HAP detections" in prompt
+    assert "hap=0.85" in prompt
+    assert [d.detection for d in response.detections] == ["has_HAP"]

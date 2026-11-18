@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project-wide string constants, enums, and configuration keys for docpipe."""
 
 import os
@@ -58,6 +61,7 @@ class DocpipeConstants:
     DATA_FOLDER = "data_folder"
     OPERAND_NAMESPACE = "OPERAND_NAMESPACE"
     DAG = "dag"
+    VAULT_PLACEHOLDER = "__vault_placeholder__"
     DEFINITION = "definition"
     DESCRIPTION = "description"
     FLOW = "flow"
@@ -115,6 +119,11 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    # Stands in for every vault:// reference while a flow is validated. A plain string (pydantic
+    # turns str subclasses back into str) that passes the non-empty and http(s) URL checks of
+    # secret-capable fields. No provider is contacted and nothing is resolved.
+    VALIDATION_SECRET_SENTINEL = "https://vault-reference.invalid"  # nosec B105  # pragma: allowlist secret
+    VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
     TMP = "tmp"
@@ -125,7 +134,7 @@ class DocpipeConstants:
 
     # Custom Operator Control
     ENABLE_CUSTOM_OPERATORS = "enable_custom_operators"
-    ENABLE_CUSTOM_OPERATORS_DEFAULT = True
+    ENABLE_CUSTOM_OPERATORS_DEFAULT = False
 
     # Operator Ownership Tiers
     OWNER_DOCPIPE = "docpipe"
@@ -200,15 +209,15 @@ class DocpipeConstants:
     BATCH_NODE_STATS = "batch_node_stats"
 
     # Document Library constants
-    # Use same database as document sets for consistency
-    DOCUMENT_LIBRARY_DEFAULT_DB_PATH = "data/duckdb/document_sets.duckdb"
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
     LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
-    _PROJECT_ROOT = _find_project_root()
-    DOCUMENT_SET_DEFAULT_DB_PATH = str(_PROJECT_ROOT / "data" / "duckdb" / "document_sets.duckdb")
-    JOB_STATS_DEFAULT_DB_PATH = str(_PROJECT_ROOT / "data" / "duckdb" / "job_stats.duckdb")
+    _DEFAULT_DATA_ROOT = _find_project_root() / "data"
+    _DUCKDB_ROOT = Path(os.getenv(DOCPIPE_DATA_PATH, _DEFAULT_DATA_ROOT)).resolve()
+    DOCUMENT_SET_DEFAULT_DB_PATH = str(_DUCKDB_ROOT / "duckdb" / "document_sets.duckdb")
+    DOCUMENT_LIBRARY_DEFAULT_DB_PATH = DOCUMENT_SET_DEFAULT_DB_PATH
+    JOB_STATS_DEFAULT_DB_PATH = str(_DUCKDB_ROOT / "duckdb" / "job_stats.duckdb")
 
     # Prefect Constants
     PREFECT_CONFIG = "prefect"
@@ -300,6 +309,12 @@ class DocpipeConfigKeys:
     # Global storage configuration keys (shared defaults for all services)
     GLOBAL_STORAGE = "global_storage"
 
+    # Docling converter pool configuration keys (docling.converter_pool.*)
+    DOCLING = "docling"
+    CONVERTER_POOL = "converter_pool"
+    SIZE = "size"
+    IDLE_TTL_SECONDS = "idle_ttl_seconds"
+
 
 class EnvironmentVariables:
     """Environment variable names used across Docpipe runtime components."""
@@ -334,12 +349,26 @@ class EnvironmentVariables:
     DOCPIPE_POSTGRES_USER = "DOCPIPE_POSTGRES_USER"
     DOCPIPE_POSTGRES_PASSWORD = "DOCPIPE_POSTGRES_PASSWORD"  # pragma: allowlist secret  # nosec B105
 
+    # Docling converter pool (process-wide reuse of DocumentConverter / DocumentExtractor)
+    DOCPIPE_DOCLING_CONVERTER_POOL_SIZE = "DOCPIPE_DOCLING_CONVERTER_POOL_SIZE"
+    DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS = "DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS"
+
     # OpenLineage Configuration
     DOCPIPE_LINEAGE_ENABLED = "DOCPIPE_LINEAGE_ENABLED"
     DOCPIPE_LINEAGE_MODE = "DOCPIPE_LINEAGE_MODE"
     DOCPIPE_LINEAGE_NAMESPACE = "DOCPIPE_LINEAGE_NAMESPACE"
     DOCPIPE_LINEAGE_PRODUCER = "DOCPIPE_LINEAGE_PRODUCER"
     DOCPIPE_LINEAGE_STRICT = "DOCPIPE_LINEAGE_STRICT"
+
+    # Hugging Face offline mode (read natively by huggingface_hub / transformers)
+    HF_HUB_OFFLINE = "HF_HUB_OFFLINE"
+    TRANSFORMERS_OFFLINE = "TRANSFORMERS_OFFLINE"
+
+    DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
+    KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
+    KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
+    KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
+    SCHEMA_REGISTRY_URL = "SCHEMA_REGISTRY_URL"
 
 
 class LineageConstants:
@@ -354,9 +383,35 @@ class LineageConstants:
     DEFAULT_MODE = os.getenv(EnvironmentVariables.DOCPIPE_LINEAGE_MODE, MODE_FLOW)
     DEFAULT_NAMESPACE = os.getenv(EnvironmentVariables.DOCPIPE_LINEAGE_NAMESPACE, "docpipe://local")
     DEFAULT_PRODUCER = os.getenv(
-        EnvironmentVariables.DOCPIPE_LINEAGE_PRODUCER, "https://github.com/IBM/docling-pipelines"
+        EnvironmentVariables.DOCPIPE_LINEAGE_PRODUCER, "https://github.com/docling-project/docling-pipelines"
     )
     DEFAULT_STRICT = os.getenv(EnvironmentVariables.DOCPIPE_LINEAGE_STRICT, "false")
+
+    # Standard dataset namespaces & schemes
+    NAMESPACE_INMEMORY = "inmemory://"
+    NAMESPACE_FILE = "file"
+    NAMESPACE_GOOGLE_DRIVE = "googledrive://drive.google.com"
+    NAMESPACE_DOCUMENT_SET = "docpipe://document_set"
+    NAMESPACE_DROPBOX = "dropbox://api.dropbox.com"
+    NAMESPACE_MILVUS_LITE = "milvus://lite"
+
+    # Known storage & vector providers
+    PROVIDER_FILESYSTEM = "filesystem"
+    PROVIDER_LOCAL = "local"
+    PROVIDER_FILE = "file"
+    PROVIDER_S3 = "s3"
+    PROVIDER_OPENSEARCH = "opensearch"
+    PROVIDER_MILVUS = "milvus"
+    PROVIDER_QDRANT = "qdrant"
+    PROVIDER_WEAVIATE = "weaviate"
+    PROVIDER_PINECONE = "pinecone"
+    PROVIDER_CHROMA = "chroma"
+    PROVIDER_BOX = "box"
+    PROVIDER_SHAREPOINT = "sharepoint"
+    PROVIDER_GOOGLE_DRIVE = "google_drive"
+    PROVIDER_ONEDRIVE = "onedrive"
+    PROVIDER_DROPBOX = "dropbox"
+    PROVIDER_WEB = "web"
 
     # Job and processing types
     JOB_TYPE_FLOW = "FLOW"
@@ -374,13 +429,17 @@ class LineageConstants:
     DOCUMENTATION_JOB_FACET_URL = "https://openlineage.io/spec/facets/1-0-0/DocumentationJobFacet.json"
 
     # Custom facet schema URLs
-    DOCPIPE_STATUS_FACET_URL = "https://github.com/IBM/docling-pipelines/schemas/docpipe-status-facet-1-0-0.json"
-    DOCPIPE_PROGRESS_FACET_URL = "https://github.com/IBM/docling-pipelines/schemas/docpipe-progress-facet-1-0-0.json"
+    DOCPIPE_STATUS_FACET_URL = (
+        "https://github.com/docling-project/docling-pipelines/schemas/docpipe-status-facet-1-0-0.json"
+    )
+    DOCPIPE_PROGRESS_FACET_URL = (
+        "https://github.com/docling-project/docling-pipelines/schemas/docpipe-progress-facet-1-0-0.json"
+    )
     DOCPIPE_NODE_STATS_FACET_URL = (
-        "https://github.com/IBM/docling-pipelines/spec/facets/1-0-0/DocpipeNodeStatsFacet.json"
+        "https://github.com/docling-project/docling-pipelines/spec/facets/1-0-0/DocpipeNodeStatsFacet.json"
     )
     DOCPIPE_NODE_STATUS_FACET_URL = (
-        "https://github.com/IBM/docling-pipelines/spec/facets/1-0-0/DocpipeNodeStatusFacet.json"
+        "https://github.com/docling-project/docling-pipelines/spec/facets/1-0-0/DocpipeNodeStatusFacet.json"
     )
 
 
@@ -393,6 +452,52 @@ class ServiceConstants:
 
     # Embeddings batch processing
     DEFAULT_EMBEDDINGS_BATCH_SIZE = 32  # Default batch size for embeddings generation
+    # Default number of embedding sub-batch requests kept in flight at once for HTTP-based
+    # providers (LiteLLM). Kept low so a single operator stays well below typical hosted-API
+    # rate limits; a local Ollama server queues requests beyond its own OLLAMA_NUM_PARALLEL.
+    DEFAULT_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 4
+    # watsonx.ai embeddings: texts per request, and requests in flight (the service enforces
+    # a per-instance limit of 8 req/s, so concurrency stays opt-in).
+    DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
+    DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
+    # watsonx.ai request timeout (seconds) applied by every watsonx path (inference, embeddings,
+    # text detection).
+    DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
+
+    # Hugging Face local HAP text classification (text_detection capability).
+    # Model id, revision and toxic labels are one unit: change them together, in a release.
+    # The pinned revision and default labels apply only to the default model; any other
+    # model must name its toxic labels explicitly, because generic labels do not mean
+    # "toxic" for every model.
+    DEFAULT_HUGGINGFACE_HAP_MODEL_ID = "ibm-granite/granite-guardian-hap-38m"
+    DEFAULT_HUGGINGFACE_HAP_REVISION = "faf9291163c7363d4a7ba7fc1dc72243214af931"  # pragma: allowlist secret
+    DEFAULT_HUGGINGFACE_HAP_TOXIC_LABELS: tuple[str, ...] = ("LABEL_1",)
+    DEFAULT_HUGGINGFACE_HAP_MAX_LENGTH = 512  # model tokens per scored window
+    DEFAULT_HUGGINGFACE_HAP_BATCH_SIZE = 32  # spans per forward pass
+    DEFAULT_HUGGINGFACE_HAP_THRESHOLD = 0.8
+    HUGGINGFACE_HAP_TOXIC_LABELS_HINT = (
+        "Check the model's config.json id2label on Hugging Face for available label names."
+    )
+
+    # Local Hugging Face sequence-classification option values
+    HUGGINGFACE_ACTIVATION_SOFTMAX = "softmax"
+    HUGGINGFACE_ACTIVATION_SIGMOID = "sigmoid"
+    HUGGINGFACE_ACTIVATION_AUTO = "auto"  # sigmoid for multi-label models, softmax otherwise
+    HUGGINGFACE_ACTIVATIONS: tuple[str, ...] = (
+        HUGGINGFACE_ACTIVATION_SOFTMAX,
+        HUGGINGFACE_ACTIVATION_SIGMOID,
+        HUGGINGFACE_ACTIVATION_AUTO,
+    )
+    HUGGINGFACE_DEVICE_AUTO = "auto"  # cuda when available, cpu otherwise
+    HUGGINGFACE_DEVICE_CPU = "cpu"
+    HUGGINGFACE_DEVICE_CUDA = "cuda"
+    HUGGINGFACE_DEVICE_MPS = "mps"
+    HUGGINGFACE_DEVICES: tuple[str, ...] = (
+        HUGGINGFACE_DEVICE_AUTO,
+        HUGGINGFACE_DEVICE_CPU,
+        HUGGINGFACE_DEVICE_CUDA,
+        HUGGINGFACE_DEVICE_MPS,
+    )
 
 
 class ProviderConstants:
@@ -408,6 +513,7 @@ class ProviderConstants:
 
     OLLAMA: Final[str] = "ollama"
     WATSONX: Final[str] = "watsonx"
+    HUGGINGFACE: Final[str] = "huggingface"
 
 
 class DoclingClientConstants:
@@ -471,6 +577,7 @@ class Metrics:
         FAILED_DOCS = "failed_docs"
         SKIPPED_DOCS_COUNT = "skipped_docs_count"
         SKIPPED_DOCS = "skipped_docs"
+        DOCUMENT_URL = "document_url"
         TOTAL_PAGES_CONVERTED = "total_pages_converted"
         NODE_STATUS = "node_status"
         UNPROCESSED_DOC_COUNT = "unprocessed_doc_count"

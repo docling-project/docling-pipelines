@@ -17,6 +17,14 @@
   white-space: nowrap;
 }
 
+.betaTag {
+  display: flex;
+  align-items: center;
+  margin-left: $spacing-03;
+  margin-right: $spacing-05;
+  flex-shrink: 0;
+}
+
 // Carbon hides HeaderNavigation below ~1056 px by default.
 // Override to always show it as a flex row.
 :global(.cds--header__nav),

@@ -4,6 +4,7 @@ Unit tests for IngestSourceOperator (filesystem provider) output schema.
 Tests that the operator produces the expected columns and metadata.
 """
 
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ EXPECTED_METADATA_COLUMNS = {
 def _make_config(path: str, **kwargs) -> dict:
     return {
         "provider": "filesystem",
-        "connection_params": {"paths": [path]},
+        "provider_config": {"paths": [path]},
         "max_files": kwargs.get("max_files", 10),
         "force_ingest": True,
     }
@@ -92,7 +93,7 @@ class TestIngestSourceOperatorOutput:
         operator = IngestSourceOperator(
             {
                 "provider": "filesystem",
-                "connection_params": {"paths": [str(tmp_path)]},
+                "provider_config": {"paths": [str(tmp_path)]},
                 "include_filter": "pdf",  # Only pdf, but we have .xyz
                 "force_ingest": True,
             }
@@ -104,6 +105,29 @@ class TestIngestSourceOperatorOutput:
         assert "path" in table.column_names
         assert metadata["processed_docs"] == 0
 
+    def test_transform_expands_archive_entries_with_synthetic_source_id(self, tmp_path):
+        archive_path = tmp_path / "documents.zip"
+        with zipfile.ZipFile(archive_path, mode="w") as archive:
+            archive.writestr("folder/report.txt", b"report")
+
+        operator = IngestSourceOperator(
+            {
+                "provider": "filesystem",
+                "provider_config": {"paths": [str(tmp_path)]},
+                "include_filter": "zip,txt",
+                "force_ingest": True,
+            }
+        )
+
+        tables, metadata = operator.transform(None)
+        row = tables[0].to_pylist()[0]
+
+        assert metadata["processed_docs"] == 1
+        assert row["path"].startswith("zip://")
+        assert row["source_id"] == row["path"]
+        assert row["name"] == "folder/report.txt"
+        assert row["document_format"] == ".txt"
+
 
 def test_table_output_basic():
     """Basic test for output schema without fixtures."""
@@ -114,7 +138,7 @@ def test_table_output_basic():
 
     config = {
         "provider": "filesystem",
-        "connection_params": {"paths": [str(fixtures_dir)]},
+        "provider_config": {"paths": [str(fixtures_dir)]},
         "include_filter": "pdf",
         "max_files": 2,
         "force_ingest": True,

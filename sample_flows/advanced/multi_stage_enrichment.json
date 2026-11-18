@@ -17,7 +17,7 @@
       "type": "ingest_source",
       "config": {
         "provider": "filesystem",
-        "connection_params": {
+        "provider_config": {
           "paths": [
             "./tests/fixtures/invoices"
           ]

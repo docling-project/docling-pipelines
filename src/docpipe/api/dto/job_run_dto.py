@@ -424,6 +424,11 @@ class JobRunListItemResponse(BaseModel):
         max_length=UUID_LENGTH,
         pattern=UUID_PATTERN,
     )
+    flow_name: str | None = Field(
+        default=None,
+        description="Name of the flow being executed",
+        examples=["Invoice Extraction Pipeline"],
+    )
     status: str = Field(
         ...,
         description=JOB_STATUS_DESC,

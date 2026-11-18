@@ -44,6 +44,9 @@ build/
 .env
 .env.local
 
+# Local mise overrides
+/mise.local.toml
+
 # Runtime data and logs
 /data/
 *.parquet
@@ -62,6 +65,7 @@ src/models/
 .bob/mcp.json
 .bob/*.bak
 .bob/
+.claude/
 
 
 # OS
@@ -94,7 +98,6 @@ frontend/.vite/
 frontend/bff/
 sonar/
 skills/
-openspec/
 
 # Private execution-granularity benchmark inputs and generated artifacts
 benchmarks/

@@ -81,7 +81,7 @@ export const getFlow = async (flowId: string): Promise<AxiosResponse<Flow>> => {
  * List flows for a specific project via BFF.
  *
  * Calls BFF endpoint: GET /api/projects/:projectId/flows
- * BFF proxies to Python backend: GET /api/v1/projects/:projectId/flows
+ * BFF proxies to Python backend: GET /api/v1/projects/:projectId/flows?is_elyra=true
  */
 export const getFlowsByProjectId = async (
   projectId: string,

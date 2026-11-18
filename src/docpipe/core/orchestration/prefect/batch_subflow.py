@@ -98,16 +98,31 @@ def batch_subflow(
         job_run_manager = job_management_factory.create_job_run_manager()
 
         # 5. Create minimal orchestrator context for execution
-        # This provides the necessary infrastructure for PrefectEngine
+        # This provides the necessary infrastructure for PrefectEngine.
+        # Reconstruct lineage observer from env vars so operator-level events
+        # are emitted even when running inside a Prefect batch subflow worker.
+        from docpipe.core.lineage.application import lineage_factory
+
+        observer = lineage_factory.create_lineage_observer()
         orchestrator = PythonOrchestrator(
             job_stats_service=job_stats_service,
             job_run_manager=job_run_manager,
+            observer=observer,
         )
         orchestrator.initialize(job_id=job_id, job_run_id=job_run_id)
 
         # Set context_id for incremental update functionality
         # This matches the behavior in AbstractOrchestrator.execute() (line 99)
         orchestrator.context_id = job_id
+        # Restore flow_name so node-level lineage events use the human-readable name.
+        # flow_name is nested under FLOW_DEFINITION (mirrors prefect_engine.py:280-283);
+        # fall back to the top-level key for legacy / edge-case configs.
+        flow_def = batch_config.get(DocpipeConstants.FLOW_DEFINITION, {})
+        orchestrator.flow_name = (
+            flow_def.get(DocpipeConstants.FLOW_NAME)
+            or flow_def.get(DocpipeConstants.NAME)
+            or batch_config.get(DocpipeConstants.FLOW_NAME, "")
+        )
 
         # 6. Set session info for the worker
         session_info: SessionInfo = SessionInfo(

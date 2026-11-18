@@ -1,5 +1,6 @@
 """Unit tests for ReadabilityOperator using pyphen-based implementation."""
 
+import inspect
 import unittest
 
 import pyarrow as pa
@@ -205,6 +206,79 @@ class TestReadabilityMetrics(unittest.TestCase):
         # Complex words should not be in easy word list
         self.assertNotIn("sophisticated", metrics.easy_words)
         self.assertNotIn("implementation", metrics.easy_words)
+
+
+class TestReadabilityMetricsStaticMethods(unittest.TestCase):
+    """Verify formula methods are static and callable without an instance."""
+
+    STATIC_FORMULA_METHODS = (
+        "get_words",
+        "count_characters",
+        "flesch_reading_ease",
+        "flesch_kincaid_grade",
+        "gunning_fog",
+        "smog_index",
+        "coleman_liau_index",
+        "automated_readability_index",
+        "dale_chall_readability_score",
+        "difficult_words",
+        "text_standard",
+        "spache_readability",
+        "mcalpine_eflaw",
+        "reading_time",
+    )
+
+    def test_formula_methods_are_static(self):
+        from docpipe.core.operators.quality.readability.readability_metrics import ReadabilityMetrics
+
+        for method_name in self.STATIC_FORMULA_METHODS:
+            with self.subTest(method=method_name):
+                self.assertIsInstance(inspect.getattr_static(ReadabilityMetrics, method_name), staticmethod)
+
+    def test_formula_methods_callable_on_class_without_instance(self):
+        from docpipe.core.operators.quality.readability.readability_metrics import ReadabilityMetrics
+
+        stats = ReadabilityMetrics().text_stats(text="The cat sat on the mat. It was sunny.")
+
+        # Every static formula must be invocable directly on the class.
+        for method_name in self.STATIC_FORMULA_METHODS:
+            method = getattr(ReadabilityMetrics, method_name)
+            with self.subTest(method=method_name):
+                if method_name == "get_words":
+                    result = method(text="Hello world")
+                elif method_name == "count_characters":
+                    result = method(words=["hello", "world"])
+                elif method_name == "reading_time":
+                    result = method(stats=stats, wpm=200)
+                else:
+                    result = method(stats=stats)
+                self.assertIsNotNone(result)
+
+    def test_instance_and_class_calls_agree(self):
+        from docpipe.core.operators.quality.readability.readability_metrics import ReadabilityMetrics
+
+        metrics = ReadabilityMetrics()
+        stats = metrics.text_stats(text="The cat sat on the mat. It was sunny.")
+
+        self.assertEqual(
+            metrics.flesch_reading_ease(stats=stats),
+            ReadabilityMetrics.flesch_reading_ease(stats=stats),
+        )
+        self.assertEqual(
+            metrics.text_standard(stats=stats),
+            ReadabilityMetrics.text_standard(stats=stats),
+        )
+
+    def test_syllable_methods_remain_instance_methods(self):
+        """count_syllables/count_syllables_in_text use self.dic and must stay instance-bound."""
+        from docpipe.core.operators.quality.readability.readability_metrics import ReadabilityMetrics
+
+        self.assertNotIsInstance(inspect.getattr_static(ReadabilityMetrics, "count_syllables"), staticmethod)
+        self.assertNotIsInstance(inspect.getattr_static(ReadabilityMetrics, "count_syllables_in_text"), staticmethod)
+
+        metrics = ReadabilityMetrics()
+        self.assertEqual(metrics.count_syllables(word="hello"), 2)
+        self.assertEqual(metrics.count_syllables_in_text(words=["hello", "cat"]), 3)
 
 
 if __name__ == "__main__":

@@ -119,11 +119,11 @@ class FastTextModelManager:
         with self._download_lock:
             # Double-check after acquiring lock (another thread may have downloaded it)
             if model_path.exists():
-                logger.info(f"FastText model already exists at {model_path}")
+                logger.info("FastText model already exists at %s", model_path)
                 return
 
             model_url = FastTextConstants.MODEL_URL
-            logger.info(f"Downloading FastText model from {model_url} to {model_path}")
+            logger.info("Downloading FastText model from %s to %s", model_url, model_path)
 
             try:
                 # Try with default SSL verification first
@@ -132,7 +132,10 @@ class FastTextModelManager:
                     logger.info("Model downloaded successfully with SSL verification")
                 except (ssl.SSLError, urllib.error.URLError) as ssl_error:
                     # Fallback to unverified SSL for corporate proxies
-                    logger.warning(f"SSL verification failed ({ssl_error}), retrying with unverified context...")
+                    logger.warning(
+                        "SSL verification failed (%s), retrying with unverified context...",
+                        ssl_error,
+                    )
                     ssl_context = ssl._create_unverified_context()  # NOSONAR  # nosec B323 — intentional fallback for corporate proxy environments; primary attempt uses full SSL verification
                     with urllib.request.urlopen(model_url, context=ssl_context) as response:  # nosec B310 — intentional SSL fallback; only reached after verified attempt fails
                         with Path(model_path).open("wb") as out_file:
@@ -157,33 +160,6 @@ class FastTextModelManager:
 
         try:
             import fasttext
-            import numpy as np
-            from fasttext.FastText import _FastText
-
-            # Patch fasttext predict for NumPy 2.x compatibility where copy=False is disallowed
-            if not getattr(_FastText, "_numpy2_patched", False):
-
-                def _patched_predict(self, text, k=1, threshold=0.0, on_unicode_error="strict"):
-                    def check(entry):
-                        if entry.find("\n") != -1:
-                            raise ValueError("predict processes one line at a time (remove '\\n')")
-                        entry += "\n"
-                        return entry
-
-                    if isinstance(text, list):
-                        text = [check(entry) for entry in text]
-                        return self.f.multilinePredict(text, k, threshold, on_unicode_error)
-
-                    text = check(text)
-                    predictions = self.f.predict(text, k, threshold, on_unicode_error)
-                    if predictions:
-                        probs, labels = zip(*predictions, strict=False)
-                    else:
-                        probs, labels = ((), ())
-                    return labels, np.asarray(probs)
-
-                _FastText.predict = _patched_predict
-                _FastText._numpy2_patched = True
 
             model_path = self._get_model_path()
 
@@ -247,7 +223,7 @@ class FastTextModelManager:
                 try:
                     self._load_model()
                 except Exception as e:
-                    logger.error(f"Model load failed: {e}")
+                    logger.error("Model load failed: %s", e)
                     # Don't raise here - let caller handle None return
 
             return self._model

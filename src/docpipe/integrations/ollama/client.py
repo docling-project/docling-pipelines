@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2025
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """
 Ollama Client Wrapper for PII and HAP Detection.
@@ -9,14 +9,18 @@ with support for JSON output parsing and retry logic.
 """
 
 import json
+import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Any
 
+import ollama
 from ollama import GenerateResponse
 from ollama._types import ChatResponse
 
 from docpipe.core.constants.constants import ServiceConstants
-from docpipe.exceptions.docpipe_exceptions import TROUBLESHOOTING_DOCS_URL, DocpipeException
+from docpipe.exceptions.docpipe_exceptions import TROUBLESHOOTING_DOCS_URL, ConfigurationError, DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.base_llm_client import BaseLLMClient, retry_with_backoff
 from docpipe.utils.infrastructure.logging import get_logger
@@ -115,7 +119,11 @@ class OllamaClient(BaseLLMClient):
         self.max_concurrent_requests = max_concurrent_requests
 
         logger.info(
-            f"Initialized OllamaClient: host={self.host}, model={model_name}, mode={self.mode.value}, max_concurrent_requests={max_concurrent_requests}"
+            "Initialized OllamaClient: host=%s, model=%s, mode=%s, max_concurrent_requests=%s",
+            self.host,
+            model_name,
+            self.mode.value,
+            max_concurrent_requests,
         )
 
         if validate_model:
@@ -163,7 +171,7 @@ class OllamaClient(BaseLLMClient):
                     more_info=f"{TROUBLESHOOTING_DOCS_URL}#issue-ollama-model-not-found",
                 )
 
-            logger.info(f"Model '{self.model_name}' validated successfully")
+            logger.info("Model '%s' validated successfully", self.model_name)
         except DocpipeException:
             raise
         except (ConnectionError, TimeoutError) as exc:
@@ -174,7 +182,7 @@ class OllamaClient(BaseLLMClient):
                 more_info=f"{TROUBLESHOOTING_DOCS_URL}#issue-ollama-connection-refused",
             ) from exc
         except Exception as exc:
-            logger.warning(f"Could not validate model availability: {exc!s}")
+            logger.warning("Could not validate model availability: %s", exc)
             # Don't fail initialization if validation check itself fails
 
     def run(self, *, prompt: str) -> str:
@@ -227,10 +235,10 @@ class OllamaClient(BaseLLMClient):
             if hasattr(response, "response"):
                 # GenerateResponse object from newer ollama versions
                 return response.response or ""
-            logger.warning(f"Unexpected response type: {type(response).__name__}")
+            logger.warning("Unexpected response type: %s", type(response).__name__)
             return ""
         except (ConnectionError, TimeoutError) as exc:
-            logger.error(f"Connection failed: {exc}")
+            logger.error("Connection failed: %s", exc)
             raise DocpipeException(
                 message=f"Failed to connect to Ollama server: {exc}",
                 status_code=503,
@@ -238,7 +246,7 @@ class OllamaClient(BaseLLMClient):
                 more_info=f"{TROUBLESHOOTING_DOCS_URL}#issue-ollama-connection-refused",
             ) from exc
         except ValueError as exc:
-            logger.error(f"Invalid model or parameters: {exc}")
+            logger.error("Invalid model or parameters: %s", exc)
             raise DocpipeException(
                 message=f"Model '{self.model_name}' not found or invalid parameters: {exc}",
                 status_code=404,
@@ -246,7 +254,7 @@ class OllamaClient(BaseLLMClient):
                 more_info=f"{TROUBLESHOOTING_DOCS_URL}#issue-ollama-model-not-found",
             ) from exc
         except Exception as exc:
-            logger.error(f"Unexpected error during model execution: {exc}")
+            logger.error("Unexpected error during model execution: %s", exc)
             raise
 
     def _parse_json_response(self, raw: str) -> dict[str, Any] | None:
@@ -270,9 +278,6 @@ class OllamaClient(BaseLLMClient):
             return json.loads(raw)
         except json.JSONDecodeError:
             pass
-
-        # Try extracting JSON from markdown code blocks
-        import re
 
         # Look for JSON in markdown code blocks
         markdown_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
@@ -342,7 +347,7 @@ class OllamaClient(BaseLLMClient):
                 return parsed
 
             if attempt < retries - 1:
-                logger.warning(f"Failed to parse JSON from model (attempt {attempt + 1}/{retries}). Retrying...")
+                logger.warning("Failed to parse JSON from model (attempt %s/%s). Retrying...", attempt + 1, retries)
                 # Add emphasis only once
                 if len(prompt_parts) == 3:
                     prompt_parts.append("\nIMPORTANT: Respond ONLY with JSON, nothing else.")
@@ -368,14 +373,9 @@ class OllamaClient(BaseLLMClient):
             List of floats representing the embedding vector
 
         Raises:
-            ImportError: If ollama package is not installed
-            Exception: For other errors during embedding generation
+            Exception: For errors during embedding generation
         """
         self._validate_text_input(text=text)
-        try:
-            import ollama
-        except ImportError as exc:
-            raise ImportError(f"ollama package not installed: {exc}") from exc
 
         try:
             # Create client with trust_env=False to avoid proxy issues
@@ -485,8 +485,6 @@ class OllamaClient(BaseLLMClient):
             executor: The ThreadPoolExecutor (used to cancel remaining futures on error)
             lock: Threading lock protecting all_embeddings writes
         """
-        from concurrent.futures import as_completed
-
         for future in as_completed(futures):
             try:
                 index, embedding = future.result()
@@ -519,21 +517,11 @@ class OllamaClient(BaseLLMClient):
         Raises:
             DocpipeException: If embedding generation fails
         """
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        from docpipe.exceptions.docpipe_exceptions import ConfigurationError
-
         if not texts or not isinstance(texts, list):
             raise ConfigurationError("texts must be a non-empty list")
 
         if not all(isinstance(t, str) and t for t in texts):
             raise ConfigurationError("all texts must be non-empty strings")
-
-        try:
-            import ollama
-        except ImportError as exc:
-            raise ImportError(f"ollama package not installed: {exc}") from exc
 
         client = ollama.Client(host=self.host, trust_env=False)
         all_embeddings: list[list[float] | None] = [None] * len(texts)
@@ -669,13 +657,13 @@ class OllamaClient(BaseLLMClient):
                 if OllamaClient.is_server_running():
                     logger.info("Ollama server started successfully")
                     return True
-                logger.debug(f"Waiting for server... ({i + 1}/{wait_timeout})")
+                logger.debug("Waiting for server... (%s/%s)", i + 1, wait_timeout)
 
             logger.warning("Ollama server may not have started properly")
             return False
 
         except Exception as e:
-            logger.error(f"Failed to start Ollama server: {e}")
+            logger.error("Failed to start Ollama server: %s", e)
             return False
 
     @staticmethod
@@ -721,7 +709,7 @@ class OllamaClient(BaseLLMClient):
             return False
 
         except Exception as e:
-            logger.error(f"Failed to check model availability: {e}")
+            logger.error("Failed to check model availability: %s", e)
             return False
 
     @staticmethod
@@ -741,7 +729,7 @@ class OllamaClient(BaseLLMClient):
 
         try:
             if show_progress:
-                logger.info(f"Pulling model '{model_name}'... (this may take several minutes)")
+                logger.info("Pulling model '%s'... (this may take several minutes)", model_name)
 
             # Resolve absolute path to avoid B607 (partial executable path)
             ollama_path = shutil.which("ollama") or "ollama"
@@ -759,18 +747,18 @@ class OllamaClient(BaseLLMClient):
                 for line in process.stdout:
                     line = line.strip()
                     if line:
-                        logger.debug(f"Pull progress: {line}")
+                        logger.debug("Pull progress: %s", line)
 
             process.wait()
 
             if process.returncode == 0:
-                logger.info(f"Model '{model_name}' pulled successfully")
+                logger.info("Model '%s' pulled successfully", model_name)
                 return True
-            logger.error(f"Failed to pull model '{model_name}'")
+            logger.error("Failed to pull model '%s'", model_name)
             return False
 
         except Exception as e:
-            logger.error(f"Failed to pull model: {e}")
+            logger.error("Failed to pull model: %s", e)
             return False
 
     @classmethod
@@ -817,7 +805,7 @@ class OllamaClient(BaseLLMClient):
                 f"Model '{model_name}' not available. Pull with: ollama pull {model_name}",
             )
 
-        logger.info(f"Model '{model_name}' not found, attempting to pull...")
+        logger.info("Model '%s' not found, attempting to pull...", model_name)
         if cls.pull_model(model_name, show_progress=False):
             return True, ""
 

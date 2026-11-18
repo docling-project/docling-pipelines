@@ -13,7 +13,7 @@
 #
 # Image build (run from repo root):
 #   docker build -f docker/Dockerfile    -t docling-pipelines:latest .
-#   docker build -f docker/Dockerfile.bff -t docling-pipelines-bff:latest .
+#   docker build -f docker/bff.Dockerfile -t docling-pipelines-bff:latest .
 apiVersion: apps/v1
 kind: Deployment
 metadata:

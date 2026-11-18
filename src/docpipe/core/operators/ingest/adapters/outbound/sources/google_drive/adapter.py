@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Google Drive source adapter using Google Drive API."""
 
-import hashlib
 import json
 from collections import deque
 from datetime import datetime
@@ -18,6 +20,8 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.google_drive.config
 from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
+from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -54,25 +58,69 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         self._service_cache: dict[str, tuple[Any, Any]] = {}
 
     @staticmethod
+    def bind_file_reference(*, provider_config: dict[str, Any], file_reference: str) -> None:
+        """Set a Google Drive file ID as the single file to ingest.
+
+        ``file_reference`` is the Drive file ID the producer supplies for the
+        event; batch ingestion (``fetch_documents``) already accepts a file ID
+        via ``file_id`` and fetches/validates it against the Drive API, so this
+        only does basic input validation rather than duplicating that call here.
+        """
+        if not file_reference or not file_reference.strip():
+            raise ValueError("File reference must be a non-empty Google Drive file ID")
+
+        provider_config["file_id"] = file_reference
+
+    @staticmethod
     def _credentials_cache_key(config: GoogleDriveSourceConfig) -> str:
         """Return a stable cache key for the given credentials configuration."""
+        sa_json_str = ""
+        if config.service_account_json:
+            sa_json_str = (
+                json.dumps(config.service_account_json, sort_keys=True)
+                if isinstance(config.service_account_json, dict)
+                else str(config.service_account_json)
+            )
+
+        oauth_json_str = ""
+        if config.credentials_json:
+            oauth_json_str = (
+                json.dumps(config.credentials_json, sort_keys=True)
+                if isinstance(config.credentials_json, dict)
+                else str(config.credentials_json)
+            )
+
         key_material = json.dumps(
             {
-                "credentials_path": config.credentials_path,
+                "service_account_json": sa_json_str,
                 "service_account_json_path": config.service_account_json_path,
+                "credentials_json": oauth_json_str,
+                "credentials_path": config.credentials_path,
                 "scopes": sorted(config.scopes),
             },
             sort_keys=True,
         )
-        return hashlib.sha256(key_material.encode()).hexdigest()
+        return cache_key_digest(namespace="google_drive_client", parts=[key_material])
 
     @staticmethod
     def _load_service_account_credentials(config: GoogleDriveSourceConfig) -> ServiceAccountCredentials:
-        """Load service account credentials from file, raising clear errors on failure."""
+        """Load service account credentials from inline JSON or file, raising clear errors on failure."""
+        if config.service_account_json is not None:
+            try:
+                info = (
+                    config.service_account_json
+                    if isinstance(config.service_account_json, dict)
+                    else json.loads(config.service_account_json)
+                )
+                return ServiceAccountCredentials.from_service_account_info(info, scopes=config.scopes)
+            except Exception as e:
+                msg = f"Failed to load service account credentials from inline service_account_json: {e}"
+                raise ValueError(msg) from e
+
         service_account_path = None
         try:
             if config.service_account_json_path is None:
-                msg = "Service account JSON path is None"
+                msg = "Service account JSON or path must be provided"
                 raise ValueError(msg)
             service_account_path = Path(config.service_account_json_path)
             if not service_account_path.exists():
@@ -91,7 +139,12 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
 
     @staticmethod
     def _refresh_or_run_oauth_flow(
-        *, creds: Credentials | None, credentials_path: Path, token_path: Path, scopes: list[str]
+        *,
+        creds: Credentials | None,
+        credentials_path: Path | None = None,
+        token_path: Path,
+        scopes: list[str],
+        credentials_json: dict | str | None = None,
     ) -> Credentials:
         """Return valid OAuth2 credentials, refreshing or re-running the flow as needed."""
         if creds and creds.expired and creds.refresh_token:
@@ -102,24 +155,32 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
 
         if not creds:
             try:
-                if not credentials_path.exists():
-                    msg = f"Credentials file not found: {credentials_path}"
-                    raise FileNotFoundError(msg)
-                if not credentials_path.is_file():
-                    msg = f"Credentials path is not a file: {credentials_path}"
+                if credentials_json:
+                    info = credentials_json if isinstance(credentials_json, dict) else json.loads(credentials_json)
+                    flow = InstalledAppFlow.from_client_config(info, scopes=scopes)
+                elif credentials_path:
+                    if not credentials_path.exists():
+                        msg = f"Credentials file not found: {credentials_path}"
+                        raise FileNotFoundError(msg)
+                    if not credentials_path.is_file():
+                        msg = f"Credentials path is not a file: {credentials_path}"
+                        raise ValueError(msg)
+                    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), scopes=scopes)
+                else:
+                    msg = "Either credentials_json or credentials_path must be provided for OAuth"
                     raise ValueError(msg)
-                flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), scopes=scopes)
+
                 creds = flow.run_local_server(port=0)
             except PermissionError as e:
                 msg = (
-                    f"Permission denied accessing credentials file: {credentials_path}. "
+                    f"Permission denied accessing credentials: {credentials_path}. "
                     "On macOS, you may need to grant Terminal/Python access to the file location in "
                     "System Preferences > Security & Privacy > Files and Folders. "
                     f"Original error: {e}"
                 )
                 raise PermissionError(msg) from e
             except Exception as e:
-                msg = f"Failed to load credentials from {credentials_path}: {e}"
+                msg = f"Failed to load OAuth credentials: {e}"
                 raise ValueError(msg) from e
 
         token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,12 +200,13 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         if config.is_service_account():
             return self._load_service_account_credentials(config)
 
-        if config.credentials_path is None:
-            msg = "OAuth credentials path is None"
+        if config.credentials_json is None and config.credentials_path is None:
+            msg = "OAuth credentials_json or credentials_path is required"
             raise ValueError(msg)
 
-        token_path = Path(config.get_token_path())
-        credentials_path = Path(config.credentials_path)
+        token_path_str = config.get_token_path() or str(Path.home() / ".docpipe" / "google_drive_token.json")
+        token_path = Path(token_path_str)
+        credentials_path = Path(config.credentials_path) if config.credentials_path else None
 
         creds = None
         if token_path.exists():
@@ -157,6 +219,7 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         if not creds or not creds.valid:
             creds = self._refresh_or_run_oauth_flow(
                 creds=creds,
+                credentials_json=config.credentials_json,
                 credentials_path=credentials_path,
                 token_path=token_path,
                 scopes=config.scopes,
@@ -523,20 +586,19 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         self,
         *,
         source_id: str,
-        connection_params: dict[str, Any],
-        credentials: dict[str, Any],
+        provider_config: dict[str, Any],
     ) -> bytes | None:
         """
         Fetch binary content for a specific document from Google Drive on-demand.
 
         Args:
             source_id: Google Drive file ID
-            connection_params: Connection parameters (folder_id, etc.)
-            credentials: Authentication credentials (credentials_path or service_account_json_path)
+            provider_config: All provider-specific parameters including credentials.
 
         Returns:
             bytes | None: Binary content of the Google Drive file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             from io import BytesIO
         except ImportError:
@@ -544,25 +606,31 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             return None
 
         try:
-            # Build minimal config for authentication — used as cache key
-            credentials_path = credentials.get("credentials_path")
-            service_account_json_path = credentials.get("service_account_json_path")
-            folder_id = connection_params.get("folder_id") or "root"
+            service_account_json = provider_config.get("service_account_json")
+            service_account_json_path = provider_config.get("service_account_json_path")
+            credentials_json = provider_config.get("credentials_json")
+            credentials_path = provider_config.get("credentials_path")
+            folder_id = provider_config.get("folder_id") or "root"
 
             config_dict: dict[str, Any] = {
                 "folder_id": folder_id,
                 "recursive": False,
                 "file_extensions": [],
                 "exclude_patterns": [],
-                "scopes": credentials.get("scopes", ["https://www.googleapis.com/auth/drive.readonly"]),
+                "scopes": provider_config.get("scopes", ["https://www.googleapis.com/auth/drive.readonly"]),
             }
 
-            if credentials_path:
-                config_dict["credentials_path"] = credentials_path
-                config_dict["token_path"] = credentials.get("token_path", "~/.docpipe/google_drive_token.json")
-
-            if service_account_json_path:
+            if service_account_json:
+                config_dict["service_account_json"] = service_account_json
+            elif service_account_json_path:
                 config_dict["service_account_json_path"] = service_account_json_path
+
+            if credentials_json:
+                config_dict["credentials_json"] = credentials_json
+                config_dict["token_path"] = provider_config.get("token_path", "~/.docpipe/google_drive_token.json")
+            elif credentials_path:
+                config_dict["credentials_path"] = credentials_path
+                config_dict["token_path"] = provider_config.get("token_path", "~/.docpipe/google_drive_token.json")
 
             temp_config = GoogleDriveSourceConfig(**config_dict)
 
@@ -612,29 +680,23 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             return content
 
         except Exception as e:
-            logger.error("Error fetching binary content from Google Drive %s: %s", source_id, e, exc_info=True)
+            logger.exception("Error fetching binary content from Google Drive %s: %s", source_id, e)
             return None
 
     def build_config_from_operator_params(
         self,
         *,
-        connection_params: dict,
-        credentials: dict,
+        provider_config: dict,
         included_extensions: list[str] | None = None,
         max_files: int | None = None,
     ) -> GoogleDriveSourceConfig:
         """
         Build Google Drive configuration from operator parameters.
 
-        Maps IngestSource operator parameters to GoogleDriveSourceConfig.
-        This encapsulates the knowledge of how to construct the config within
-        the adapter itself, following the Single Responsibility Principle.
-
         Args:
-            connection_params: Connection parameters from operator config
-            credentials: Credentials from operator config
+            provider_config: All provider-specific parameters including credentials.
             included_extensions: File extensions to include (optional)
-            max_files: Maximum number of files to fetch (optional, not used by Google Drive adapter)
+            max_files: Maximum number of files to fetch (optional).
 
         Returns:
             GoogleDriveSourceConfig: Validated configuration object
@@ -642,43 +704,42 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
-        # Build config dict with either OAuth or Service Account credentials.
-        # Credential fields fall back to connection_params so flows built from operator
-        # metadata (which places all fields under connection_params) work alongside
-        # legacy flows that use a separate credentials dict.
+        provider_config = reveal_value(provider_config)
         config_dict = {
-            "folder_id": resolve_env_var(connection_params.get("folder_id")),
-            "recursive": connection_params.get("recursive", False),
+            "folder_id": resolve_env_var(provider_config.get("folder_id")),
+            "recursive": provider_config.get("recursive", False),
             "file_extensions": included_extensions or [],
             "exclude_patterns": [],
-            "scopes": credentials.get(
-                "scopes", connection_params.get("scopes", ["https://www.googleapis.com/auth/drive.readonly"])
-            ),
+            "scopes": provider_config.get("scopes", ["https://www.googleapis.com/auth/drive.readonly"]),
         }
 
-        # Add OAuth credentials if provided — check credentials dict first, then connection_params
-        credentials_path = credentials.get("credentials_path") or connection_params.get("credentials_path")
-        token_path = credentials.get("token_path") or connection_params.get("token_path")
+        # Add OAuth credentials if provided
+        credentials_path = provider_config.get("credentials_path")
+        token_path = provider_config.get("token_path")
         if credentials_path:
             config_dict["credentials_path"] = resolve_env_var(credentials_path)
             config_dict["token_path"] = resolve_env_var(token_path)
+        # Inline OAuth client JSON (a dict or JSON text), for example resolved from a secret provider
+        if provider_config.get("credentials_json"):
+            config_dict["credentials_json"] = provider_config["credentials_json"]
 
-        # Add Service Account credentials if provided — check credentials dict first, then connection_params
-        service_account_json_path = credentials.get("service_account_json_path") or connection_params.get(
-            "service_account_json_path"
-        )
+        # Add Service Account credentials if provided
+        service_account_json_path = provider_config.get("service_account_json_path")
         if service_account_json_path:
             config_dict["service_account_json_path"] = resolve_env_var(service_account_json_path)
+        # Inline service account JSON (a dict or JSON text), for example resolved from a secret provider
+        if provider_config.get("service_account_json"):
+            config_dict["service_account_json"] = provider_config["service_account_json"]
 
         # Add optional fields only if they exist
-        if "drive_id" in connection_params:
-            config_dict["drive_id"] = resolve_env_var(connection_params["drive_id"])
-        if "folder_path" in connection_params:
-            config_dict["folder_path"] = resolve_env_var(connection_params["folder_path"])
-        if "file_id" in connection_params:
-            config_dict["file_id"] = resolve_env_var(connection_params["file_id"])
-        if "max_file_size_mb" in connection_params:
-            config_dict["max_file_size_mb"] = connection_params["max_file_size_mb"]
+        if "drive_id" in provider_config:
+            config_dict["drive_id"] = resolve_env_var(provider_config["drive_id"])
+        if "folder_path" in provider_config:
+            config_dict["folder_path"] = resolve_env_var(provider_config["folder_path"])
+        if "file_id" in provider_config:
+            config_dict["file_id"] = resolve_env_var(provider_config["file_id"])
+        if "max_file_size_mb" in provider_config:
+            config_dict["max_file_size_mb"] = provider_config["max_file_size_mb"]
 
         # Add max_files from operator parameter
         if max_files is not None:
