@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow execution reporter for clean, user-friendly console output.
 
 This module provides reporting for flow execution using the logging system
@@ -197,10 +200,6 @@ class FlowExecutionReporter:
             logger.info("   Existing (%s): %s", len(existing_columns), ", ".join(existing_columns[:10]))
             if len(existing_columns) > 10:
                 logger.info("      ... and %s more", len(existing_columns) - 10)
-
-        if not new_columns and not removed_columns and not existing_columns:
-            # No columns at all (shouldn't happen, but handle gracefully)
-            logger.info("   (no columns)")
 
     def _print_column_list(self, columns: list[str], *, indent: str = "     ") -> None:
         """Print a list of columns with appropriate formatting based on count.
@@ -500,8 +499,7 @@ class FlowExecutionReporter:
             logger.info("   %s:", display_name)
             for k, v in list(value.items())[:10]:
                 logger.info("      %s: %s", k, v)
-            if len(value) > 10:
-                logger.info("      ... and %s more", len(value) - 10)
+            logger.info("      ... and %s more", len(value) - 10)
 
     @staticmethod
     def _print_other_fields(fields: dict[str, Any]) -> None:
