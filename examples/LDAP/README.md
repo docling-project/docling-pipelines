@@ -67,13 +67,17 @@ Use whichever option matches your tooling. All three run from `examples/LDAP`.
 
 ```bash
 # Option 1: ldapadd from the host (needs the ldap-utils package)
-ldapadd -x -H ldap://localhost:1389 -D "cn=admin,dc=abc,dc=com" -w changeme -f abc_users.ldif
+TEST_USER_PASSWORD="${TEST_USER_PASSWORD:?Set TEST_USER_PASSWORD}"
+sed "s|\${TEST_USER_PASSWORD}|${TEST_USER_PASSWORD}|g" abc_users.ldif | \
+  ldapadd -x -H ldap://localhost:1389 -D "cn=admin,dc=abc,dc=com" -w "${LDAP_ADMIN_PASSWORD:?Set LDAP_ADMIN_PASSWORD}"
 
 # Option 2: Podman, using the client tools inside the container
-podman exec -i local-ldap ldapadd -x -H ldap://localhost:389 -D "cn=admin,dc=abc,dc=com" -w changeme < abc_users.ldif
+sed "s|\${TEST_USER_PASSWORD}|${TEST_USER_PASSWORD}|g" abc_users.ldif | \
+  podman exec -i local-ldap ldapadd -x -H ldap://localhost:389 -D "cn=admin,dc=abc,dc=com" -w "${LDAP_ADMIN_PASSWORD:?Set LDAP_ADMIN_PASSWORD}"
 
 # Option 3: Docker, using the client tools inside the container
-docker exec -i local-ldap ldapadd -x -H ldap://localhost:389 -D "cn=admin,dc=abc,dc=com" -w changeme < abc_users.ldif
+sed "s|\${TEST_USER_PASSWORD}|${TEST_USER_PASSWORD}|g" abc_users.ldif | \
+  docker exec -i local-ldap ldapadd -x -H ldap://localhost:389 -D "cn=admin,dc=abc,dc=com" -w "${LDAP_ADMIN_PASSWORD:?Set LDAP_ADMIN_PASSWORD}"
 ```
 
 **Note:**

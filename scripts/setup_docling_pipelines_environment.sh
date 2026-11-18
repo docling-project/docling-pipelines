@@ -865,11 +865,6 @@ setup_auth_env() {
         log "DOCPIPE_AUTH_ENABLED=$auth_enabled already set in .env (kept)"
     fi
 
-    if [ -z "$(get_env_value "$env_file" "BFF_URL")" ]; then
-        set_env_value "$env_file" "BFF_URL" "http://localhost:3001"
-        log "Set BFF_URL=http://localhost:3001 in .env"
-    fi
-
     save_config "AUTH_ENV_FILE" "$env_file"
 }
 
@@ -962,10 +957,21 @@ start_ldap() {
         return 1
     fi
 
+    local test_user_password
+    test_user_password=$(get_env_value "$ldap_dir/.env" "TEST_USER_PASSWORD")
+    if [ -z "$test_user_password" ] || [ "$test_user_password" = '${TEST_USER_PASSWORD}' ]; then
+        test_user_password="${TEST_USER_PASSWORD:-}"
+    fi
+    if [ -z "$test_user_password" ]; then
+        log_error "TEST_USER_PASSWORD is not set in examples/LDAP/.env or the environment"
+        return 1
+    fi
+
     log "Seeding LDAP users (alice: editors, charlie: viewers)..."
     local output
-    if output=$("$runtime" exec -i "$LDAP_CONTAINER_NAME" ldapadd -x -H ldap://localhost:389 \
-        -D "cn=admin,dc=abc,dc=com" -w "$admin_password" < "$ldap_dir/abc_users.ldif" 2>&1); then
+    if output=$(sed "s|\${TEST_USER_PASSWORD}|$test_user_password|g" "$ldap_dir/abc_users.ldif" | \
+        "$runtime" exec -i "$LDAP_CONTAINER_NAME" ldapadd -x -H ldap://localhost:389 \
+        -D "cn=admin,dc=abc,dc=com" -w "$admin_password" 2>&1); then
         log "LDAP users seeded"
     elif echo "$output" | grep -q "Already exists"; then
         log "LDAP users already present"
@@ -1082,7 +1088,11 @@ show_summary() {
         else
             echo "  JWT_SECRET_KEY: NOT SET (the API refuses to start while auth is enabled)"
         fi
-        echo "  BFF_URL: $(get_env_value "$env_file" "BFF_URL")"
+        local bff_url
+        bff_url=$(get_env_value "$env_file" "BFF_URL")
+        if [ -n "$bff_url" ]; then
+            echo "  BFF_URL: $bff_url"
+        fi
         if [ -n "$(get_env_value "$env_file" "LDAP_SERVER")" ]; then
             echo "  LDAP: $(get_env_value "$env_file" "LDAP_SERVER") (group attribute: $(get_env_value "$env_file" "LDAP_GROUP_ATTRIBUTE"))"
         fi
