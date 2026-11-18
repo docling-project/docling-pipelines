@@ -839,7 +839,7 @@ class JobTrackerService(JobStatsService):
             if isinstance(pages_count, int):
                 job_stats.total_pages_processed += pages_count
                 # Set execution_time to duration in seconds (current time - start time)
-                current_timestamp = int(datetime.now(UTC).timestamp())
+                current_timestamp = round(datetime.now(UTC).timestamp())
                 job_stats.execution_time = current_timestamp - job_stats.start_time
 
         # Update page_type_stats if present in metadata
