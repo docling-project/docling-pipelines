@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service for flow management operations.
 
 Provides CRUD operations for flows with validation, filtering, and pagination.
@@ -440,10 +443,10 @@ class FlowService(AssetService[Flow]):
             - Now raises FlowNotFoundException instead of returning False for missing flows
             - Cascades to delete all associated job runs when job_stats_service is set
         """
-        # Delegate to inherited delete() from AssetService
+        # Delegate to inherited delete() from AssetService; it raises when nothing was
+        # deleted, so reaching the next line means the flow is gone.
         result = self.delete(asset_id=flow_id)
-        if result:
-            self._delete_job_runs_for_flow(flow_id)
+        self._delete_job_runs_for_flow(flow_id)
         return result
 
     def bulk_delete_flows(self, flow_ids: list[str]) -> dict[str, Any]:
