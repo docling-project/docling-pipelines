@@ -247,3 +247,38 @@ def test_ingest_validation_runs_adapter_checks_for_a_sentinel_filled_config() ->
     operator.validate(errors=errors, warnings=[], available_features=[])
 
     assert any("secret_key" in error for error in errors)
+
+
+class TestUntrustedCustomOperatorFinding:
+    """An untrusted custom operator is held to ``custom_operator_allowed_paths`` and the error names that setting."""
+
+    def test_path_finding_names_the_custom_operator_setting(self, provider: _CountingProvider) -> None:
+        from docpipe.core.operators.abstract_operator import OperatorCategory
+        from docpipe.core.orchestration.flow_validator import FlowValidator, ValidateStepResults
+        from docpipe.core.orchestration.operator_loader.ports.operator_source import OperatorInfo, TrustClass
+        from docpipe.core.orchestration.operator_loader.untrusted_descriptor import build_untrusted_descriptor
+
+        _set_policy(allowed_paths=["hashicorp:**"])
+        info = OperatorInfo(
+            name="Cust",
+            short_name="cust",
+            module_path="cust",
+            category=OperatorCategory.Functional.value,
+            source_location="x",
+            trust_class=TrustClass.UNTRUSTED,
+            source_file="/nonexistent/cust.py",
+            static_metadata={"secret_fields": ["api_key"]},
+        )
+        descriptor = build_untrusted_descriptor(operator_info=info)
+        results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+
+        blocking = FlowValidator._report_reference_findings(
+            operator_class=descriptor,
+            config={"api_key": _ref("custom/svc")},
+            op_def={"id": "n1", "name": "n1", "operator": "cust"},
+            validate_results=results,
+        )
+
+        assert blocking is True
+        assert "secrets.vault.custom_operator_allowed_paths" in _text({"errors": results.errors, "warnings": []})
+        assert provider.requests == 0

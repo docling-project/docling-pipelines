@@ -13,6 +13,7 @@ budget the parent measures, and a worker that fails to start should still be abl
 """
 
 import argparse
+import json
 import sys
 from multiprocessing.connection import Connection
 from typing import Any
@@ -25,6 +26,22 @@ from docpipe.core.orchestration.operator_loader.isolation.protocol import (
     receive_message,
     send_message,
 )
+
+
+def attach_secrets(*, config: dict[str, Any], secrets: dict[str, Any]) -> None:
+    """Put each handed-over value into ``config`` as a ``SecretValue`` at its field path (design D12).
+
+    ``secrets`` maps a JSON-encoded path (a list of keys and list indexes) to the value. The operator calls
+    ``reveal()`` only where it builds its own client.
+    """
+    from docpipe.integrations.secrets.secret_value import SecretValue
+
+    for encoded_path, value in secrets.items():
+        path = json.loads(encoded_path)
+        current: Any = config
+        for segment in path[:-1]:
+            current = current[segment]
+        current[path[-1]] = SecretValue(value=value)
 
 
 class _Worker:
@@ -58,7 +75,9 @@ class _Worker:
         """Build a fresh operator for this batch, transform, and return the reply header and tables."""
         if self._operator_class is None:
             raise RuntimeError("worker received a run message before a load message")
-        operator = self._operator_class(config=header["config"])
+        config = header["config"]
+        attach_secrets(config=config, secrets=header.get("secrets") or {})
+        operator = self._operator_class(config=config)
         try:
             if header.get("multiple_tables"):
                 raise NotImplementedError("untrusted custom operators cannot take several input tables")

@@ -130,9 +130,17 @@ class IsolatedWorker:
             raise IsolatedWorkerError(f"isolated worker for '{self._label}' failed: {reply.get('message', 'unknown')}")
         return reply, out_tables
 
-    def run(self, *, config: dict[str, Any], table: pa.Table) -> tuple[list[pa.Table], dict[str, Any], dict[str, Any]]:
-        """Run one batch: returns the output tables, the operator metadata and the remaining reply fields."""
-        reply, out_tables = self._request(header={"type": TYPE_RUN, "config": config}, tables=[table])
+    def run(
+        self, *, config: dict[str, Any], table: pa.Table, secrets: dict[str, Any] | None = None
+    ) -> tuple[list[pa.Table], dict[str, Any], dict[str, Any]]:
+        """Run one batch: returns the output tables, the operator metadata and the remaining reply fields.
+
+        ``secrets`` maps JSON-encoded field paths to revealed values. They travel in the message header over the
+        private pipe, to this worker only.
+        """
+        reply, out_tables = self._request(
+            header={"type": TYPE_RUN, "config": config, "secrets": secrets or {}}, tables=[table]
+        )
         metadata = reply.pop("metadata", {})
         return out_tables, metadata, reply
 

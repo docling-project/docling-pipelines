@@ -52,6 +52,12 @@ Global configuration is specified in the `global_config` section of your flow de
 }
 ```
 
+### Secrets
+
+The platform does not resolve `vault://` references placed in `global_config`. Put a reference in the `config` of the
+operator node that declares the field. Each node resolves only its own references. See the
+[Secrets Guide](../guides/SECRETS_GUIDE.md).
+
 ---
 
 ## Execution Control

@@ -51,6 +51,7 @@ from docpipe.core.operators.secret_fields import (
     STRUCTURED_FIELD_NAMES,
     effective_secret_fields,
 )
+from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.secrets.registry import register_secret
@@ -201,16 +202,20 @@ class SecretPolicy:
     destinations: tuple[str, ...]
 
     @staticmethod
-    def _read_settings() -> tuple[Any, Any]:
-        """Return the raw ``allowed_paths`` and ``allowed_destinations`` values.
+    def _vault_section() -> dict[str, Any]:
+        """Return the ``secrets.vault`` settings, or an empty dict when absent or of the wrong type.
 
         Reads through ``DocpipeConfigLoader.get_config()`` rather than ``get()``:
         ``get()`` substitutes its default for any falsy value and logs on every call.
         """
         secrets_section = DocpipeConfigLoader.get_config().get("secrets")
         vault_section = secrets_section.get("vault") if isinstance(secrets_section, dict) else None
-        if not isinstance(vault_section, dict):
-            return None, None
+        return vault_section if isinstance(vault_section, dict) else {}
+
+    @staticmethod
+    def _read_settings() -> tuple[Any, Any]:
+        """Return the raw ``allowed_paths`` and ``allowed_destinations`` values."""
+        vault_section = SecretPolicy._vault_section()
         return vault_section.get("allowed_paths"), vault_section.get("allowed_destinations")
 
     @staticmethod
@@ -274,6 +279,22 @@ class SecretPolicy:
         """Load the policy from ``docling-pipelines-config.yaml`` through ``DocpipeConfigLoader``."""
         allowed_paths, allowed_destinations = cls._read_settings()
         return cls.from_settings(allowed_paths=allowed_paths, allowed_destinations=allowed_destinations)
+
+    @classmethod
+    def load_for(cls, *, operator_class: "type[AbstractOperator]") -> "SecretPolicy":
+        """Load the policy that applies to ``operator_class``.
+
+        An untrusted custom operator is held to ``secrets.vault.custom_operator_allowed_paths``
+        (empty by default, design D12) instead of ``secrets.vault.allowed_paths``. Destination
+        binding is shared: a destination host is allowed or not regardless of who asks.
+        """
+        if getattr(operator_class, "trust_class", None) != TrustClass.UNTRUSTED:
+            return cls.load()
+        vault_section = cls._vault_section()
+        return cls.from_settings(
+            allowed_paths=vault_section.get("custom_operator_allowed_paths"),
+            allowed_destinations=vault_section.get("allowed_destinations"),
+        )
 
     def permits(self, *, reference: SecretReference, operator: str, config_key: str) -> bool:
         """Return True when an entry allows ``reference`` for ``operator`` at ``config_key``.
@@ -685,7 +706,7 @@ class SecretResolver:
             return []
         operator = str(getattr(operator_class, "short_name", "") or "")
         declared = SecretResolver._declared_paths(metadata=operator_class.get_metadata(), config=config)
-        policy = SecretPolicy.load()
+        policy = SecretPolicy.load_for(operator_class=operator_class)
         findings: list[ReferenceFinding] = []
         passed = False
         for path, text in SecretResolver._iter_strings(node=config):
@@ -763,7 +784,7 @@ class SecretResolver:
         correlation_id = SecretResolver._new_correlation_id()
         operator = str(getattr(operator_class, "short_name", "") or "")
         declared = SecretResolver._declared_paths(metadata=operator_class.get_metadata(), config=config)
-        policy = SecretPolicy.load()
+        policy = SecretPolicy.load_for(operator_class=operator_class)
 
         sites = SecretResolver._plan(
             node_name=node_name,

@@ -21,6 +21,7 @@ from docpipe.core.orchestration.feature_propagation import (
     disambiguate_features,
 )
 from docpipe.core.orchestration.operator_factory import OperatorFactory, OperatorFactoryProvider
+from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 from docpipe.exceptions.docpipe_exceptions import (
     ErrorCode,
     FlowValidationException,
@@ -317,8 +318,13 @@ class FlowValidator:
             if finding.kind in FlowValidator._REPORTED_BY_DAG_CHECK:
                 continue
             code, template = FlowValidator._FINDING_MESSAGES[finding.kind]
+            message = template.format(key=finding.config_key)
+            if finding.kind is FindingKind.PATH_NOT_PERMITTED and (
+                getattr(operator_class, "trust_class", None) == TrustClass.UNTRUSTED
+            ):
+                message = message.replace("secrets.vault.allowed_paths", "secrets.vault.custom_operator_allowed_paths")
             add_validation_alert(
-                message=ValidationMessage(message=template.format(key=finding.config_key), message_code=code),
+                message=ValidationMessage(message=message, message_code=code),
                 op_def=op_def,
                 alerts=validate_results.errors,
             )
