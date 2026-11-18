@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -65,6 +66,8 @@ class OpenSearchResourceMetadata:
             on any connection failure.
         """
         from docpipe.core.operators.vectordb.adapters.outbound.opensearch.client import OpenSearchClient
+
+        provider_config = reveal_value(provider_config)
 
         if not provider_config.get(OperatorConstants.VectorDB.HOST):
             logger.debug("OpenSearch provider_config missing host - skipping metadata fetch")

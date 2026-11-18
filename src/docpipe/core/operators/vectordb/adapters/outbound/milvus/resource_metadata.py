@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import is_binary_vector_feature
@@ -65,6 +66,8 @@ class MilvusResourceMetadata:
             on any connection failure.
         """
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.client import MilvusClient
+
+        provider_config = reveal_value(provider_config)
 
         has_host = bool(provider_config.get(OperatorConstants.VectorDB.HOST))
         has_uri = bool(provider_config.get(OperatorConstants.VectorDB.URI))
