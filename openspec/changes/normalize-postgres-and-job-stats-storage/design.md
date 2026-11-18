@@ -36,6 +36,18 @@ Current behavior:
 - **Mixed-config scenario**: `config: {host: db-a, postgres: {password: secret}}` gives host `db-a` and the nested password. `config: {host: db-a, postgres: {host: db-b}}` gives host `db-b`, because nested wins for the key it defines.
 - **Alternatives considered**: Raising an error for mixed configs (rejected: adds a failure mode the current code does not have). Normalizing in each factory (rejected: drift).
 
+### Decision 2a: Callers pass the whole storage config
+- **Choice**: Callers that today extract `config["postgres"]` before calling the connection helpers (incremental metadata store, ededup store, asset repository engine access, `get_shared_postgres_engine`, and the worker env loop in `JobManagementFactory`) pass the whole storage `config` instead. `get_shared_postgres_engine` builds its settings with `_postgres_settings`, so a bare section still works as flat settings.
+- **Rationale**: Updating only `_postgres_settings` would leave `{host: company-db, postgres: {password: ...}}` broken in every caller that drops the root `host` first.
+
+### Decision 2b: Legacy `job_management.postgres` keeps precedence
+- **Choice**: `JobManagementFactory.create_default_factory` keeps replacing `storage.config.postgres` with `job_management.postgres` when both exist, as it does today. A warning names the ignored section and logs no values.
+- **Rationale**: This preserves the behavior of the existing configuration format. The warning makes the silent override visible, so adding new settings cannot quietly leave a deployment on the old database.
+
+### Decision 2c: Alias handling reaches the table storage factory
+- **Choice**: `EntityStoreOperator` normalizes `"postgresql"` to `"postgres"` before validating `data_backend`, and `StorageFactory.create_table_storage` maps the alias before its type check.
+- **Rationale**: The operator passes `data_backend` to the factory unchanged, so accepting the alias in only one of the two steps would still reject it.
+
 ### Decision 3: `job_stats` suffix on explicit `base_dir`
 - **Choice**: In `JsonJobStatsStore.__init__`, when `base_dir` is given, set `resolved = Path(base_dir)` and append `job_stats` unless `resolved.name == "job_stats"`. The default branch is unchanged.
 - **`DOCPIPE_JOB_STATS_BASE_DIR`**: This env var reaches the store through `_resolve_filesystem_base_dir` and the same constructor, so it gets the same suffix rule. It is not a special case. This is a breaking change for any deployment that sets the variable to a path not ending in `job_stats`; the proposal's migration note covers it.

@@ -21,6 +21,10 @@ Every storage factory and operator that supports PostgreSQL SHALL accept `"postg
 - **WHEN** the ededup storage factory or `EntityStoreOperator` receives `"postgres"` or `"postgresql"`
 - **THEN** it selects the PostgreSQL backend instead of rejecting the value
 
+#### Scenario: Entity store alias passes through the table storage factory
+- **WHEN** `EntityStoreOperator` is configured with `data_backend: "postgresql"`
+- **THEN** both the operator and `StorageFactory.create_table_storage` accept the name and the PostgreSQL table storage is created
+
 ### Requirement: Flat PostgreSQL connection settings
 When PostgreSQL is the selected backend, connection settings (`host`, `port`, `database`, `user`, `password`, `schema`, `pool_size`, `max_overflow`, `pool_timeout`) SHALL be accepted at the root of the storage `config` without a nested `postgres` key.
 
@@ -49,6 +53,28 @@ When both a nested `postgres` mapping and root-level connection settings are pre
 #### Scenario: Environment fallback for undefined keys
 - **WHEN** neither the root nor the nested mapping sets `port` and `DOCPIPE_POSTGRES_PORT` is set
 - **THEN** the connection uses the environment value
+
+### Requirement: Mixed settings reach every PostgreSQL caller
+Every component that builds a PostgreSQL connection from a storage `config` SHALL apply the mixed flat and nested precedence, including the incremental metadata store, the ededup store, asset repositories, the shared engine, and the worker environment propagated by job management. No caller SHALL drop root-level connection settings because a nested `postgres` mapping is present.
+
+#### Scenario: Root host with nested password in a caller
+- **WHEN** `config` is `{host: company-db, postgres: {password: example-password}}` and any of those components connects
+- **THEN** it uses host `company-db` and password `example-password`
+
+#### Scenario: Schema resolved from either form
+- **WHEN** `config` sets `schema` at its root and no `postgres.schema`
+- **THEN** the incremental metadata store and the ededup store use the root `schema`
+
+### Requirement: Legacy job management PostgreSQL section keeps precedence
+`job_management.postgres` (the legacy format) SHALL keep replacing `job_management.storage.config.postgres` as a whole, as it does before this change. The mixed flat and nested rule then applies to the resulting `postgres` mapping and the root keys. When both sections are present, a warning that names the ignored `storage.config.postgres` section SHALL be logged, without logging any setting values.
+
+#### Scenario: Old and new formats both present
+- **WHEN** `job_management.postgres.host` is `old-db` and `job_management.storage.config.postgres.host` is `new-db`
+- **THEN** the connection uses `old-db`, the nested `storage.config.postgres` section is ignored, and a warning is logged
+
+#### Scenario: Only the new format
+- **WHEN** only `job_management.storage.config.postgres.host` is set to `new-db`
+- **THEN** the connection uses `new-db` and no warning is logged
 
 ### Requirement: Deterministic job stats directory layout
 The filesystem job stats store SHALL place job statistics and node run directories under a `job_stats` directory. When an explicit `base_dir` is provided, the store SHALL append `job_stats` unless the path already ends with `job_stats`. This rule SHALL apply equally to `base_dir` from the config file and to `DOCPIPE_JOB_STATS_BASE_DIR`.
