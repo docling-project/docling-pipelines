@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for WatsonX adapter embeddings, configuration validation and detection guards."""
 
 from unittest.mock import Mock, patch
@@ -10,7 +13,6 @@ from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
 _WATSONX_CLIENT = "docpipe.core.adapters.watsonx.watsonx_adapter.WatsonXClient"
 _WATSONX_REST_CLIENT = "docpipe.core.adapters.watsonx.watsonx_adapter.WatsonxRestEmbeddingClient"
-_IAM_TOKEN = "docpipe.core.adapters.watsonx.watsonx_adapter.WatsonxPipelineOptionsProvider._get_iam_access_token"
 
 _FULL_CONFIG = {
     "api_key": "watsonx-test-credential",  # pragma: allowlist secret
@@ -233,22 +235,14 @@ class TestWatsonXDetectionGuards:
         with pytest.raises(ValueError, match="Detection prompt cannot be empty"):
             adapter.detect_entities_batch(texts=["text"], prompt="  ")
 
-    def test_missing_api_key_raises_on_token_request(self):
-        """Requesting an access token without an api_key raises ValueError."""
+    def test_detect_reports_missing_api_key(self):
+        """detect() reports a missing api_key as a failed result."""
         adapter = self._make_adapter(api_key=None)
 
-        with pytest.raises(ValueError, match="API key is required"):
-            adapter._get_access_token()
+        result = adapter.detect(text="some text")
 
-    def test_access_token_is_cached(self):
-        """The IAM token is fetched once and reused."""
-        adapter = self._make_adapter()
-
-        with patch(_IAM_TOKEN, return_value="token-1") as token_mock:
-            assert adapter._get_access_token() == "token-1"
-            assert adapter._get_access_token() == "token-1"
-
-        token_mock.assert_called_once_with(api_key="watsonx-test-credential")  # pragma: allowlist secret
+        assert result["success"] is False
+        assert result["error"] == "WatsonX API key is required for text detection"
 
     def test_detect_reports_missing_api_base(self):
         """detect() reports a missing API base URL as a failed result."""
