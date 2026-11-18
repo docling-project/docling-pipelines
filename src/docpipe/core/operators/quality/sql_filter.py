@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from enum import Enum
 from typing import Any
 
@@ -313,7 +316,7 @@ class SQLFilterOperator(AbstractOperator):
                             docs_filtered: int = total_docs - keep_count
                             metadata[f"docs_filtered_out_by '{criterion}'"] = docs_filtered
 
-                    filtered_table: pa.Table = con.execute(sql_statement).arrow()
+                    filtered_table: pa.Table = con.execute(sql_statement).fetch_arrow_table()
                 except duckdb_binding_errors as ex:  # type: ignore[misc]
                     binding_err_msg: str = f"Filter condition is invalid due to mismatched data types. (e.g. comparing text to numbers). Please review the filter expression and table schema. {ex}"
                     raise DocpipeException(
