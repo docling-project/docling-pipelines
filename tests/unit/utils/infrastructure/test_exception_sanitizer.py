@@ -15,6 +15,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.utils.infrastructure.exception_sanitizer import (
+    CATEGORY_CLIENT,
     CATEGORY_CONNECTION,
     CATEGORY_DATABASE,
     CATEGORY_HTTP,
@@ -443,3 +444,57 @@ class TestMessageWriters:
 
         assert CANARY not in str(orchestrator.message)
         assert CATEGORY_CONNECTION in str(orchestrator.message)
+
+
+class _OddModuleError(Exception):
+    """Neutral base for the dynamically named test exceptions; only the subclass name carries a category keyword."""
+
+
+class TestCategoryFallbacks:
+    """Categories derived from the built-in hierarchy, the class name, or the client module."""
+
+    def test_builtin_timeout_subclass(self):
+        """A TimeoutError subclass is a timeout even outside HTTP libraries."""
+
+        class _SlowError(TimeoutError):
+            pass
+
+        assert sanitize_exception(exc=_SlowError(CANARY), config_key=KEY) == f"{KEY}: {CATEGORY_TIMEOUT}"
+
+    def test_builtin_connection_error_subclass(self):
+        """A ConnectionError subclass such as ConnectionRefusedError is a connection failure."""
+        exc = ConnectionRefusedError(f"refused {CANARY}")
+
+        assert sanitize_exception(exc=exc, config_key=KEY) == f"{KEY}: {CATEGORY_CONNECTION}"
+
+    @pytest.mark.parametrize(
+        ("class_name", "category"),
+        [
+            ("CertificateVerifyError", CATEGORY_TLS),
+            ("ReadTimeoutish", CATEGORY_TIMEOUT),
+            ("ProxyError", CATEGORY_CONNECTION),
+            ("NameResolutionFailure", CATEGORY_CONNECTION),
+        ],
+    )
+    def test_class_name_implies_network_category(self, class_name, category):
+        """An unrelated exception class is categorised by keywords in its name."""
+        exc_type = type(class_name, (_OddModuleError,), {})
+
+        assert sanitize_exception(exc=exc_type(CANARY), config_key=KEY) == f"{KEY}: {category}"
+
+    def test_client_module_exception(self):
+        """A botocore error without a network keyword falls into the client category."""
+        from botocore.exceptions import NoCredentialsError
+
+        text = sanitize_exception(exc=NoCredentialsError(), config_key=KEY)
+
+        assert text == f"{KEY}: {CATEGORY_CLIENT}"
+
+    def test_wrapper_with_empty_message_falls_back_to_the_category(self):
+        """A wrapper that has no text of its own is replaced by the cause category."""
+        try:
+            raise RuntimeError from requests.exceptions.ConnectionError(f"https://u:{CANARY}@host")
+        except RuntimeError as wrapper:
+            text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert text == f"{KEY}: {CATEGORY_CONNECTION}"

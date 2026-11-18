@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for TelemetryService and TelemetryConfig."""
 
 from unittest.mock import MagicMock, patch
@@ -548,20 +551,6 @@ def test_record_exception_swallows_exception():
 # ---------------------------------------------------------------------------
 
 
-def test_get_current_span_returns_span_when_enabled():
-    """Patch the module-level trace import used inside get_current_span."""
-    svc = TelemetryService()
-    svc.initialize(config=TelemetryConfig(enabled=False))
-    svc._enabled = True
-    mock_span = MagicMock()
-
-    with patch(
-        "docpipe.utils.infrastructure.telemetry_service.TelemetryService.get_current_span", return_value=mock_span
-    ):
-        result = svc.get_current_span()
-    assert result is mock_span
-
-
 def test_get_current_span_swallows_import_error():
     """When opentelemetry is absent, get_current_span returns None."""
     svc = TelemetryService()
@@ -747,3 +736,95 @@ def test_shutdown_swallows_meter_provider_exception():
     mock_mp.shutdown.side_effect = RuntimeError("mp broken")
     svc._meter_provider = mock_mp
     svc.shutdown()  # Must not raise
+
+
+# ---------------------------------------------------------------------------
+# Metrics initialization failure and current-span fallbacks
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_metrics_failure_keeps_traces_enabled():
+    """A broken metrics SDK is logged; tracing stays enabled and metrics are reported inactive."""
+    svc = TelemetryService()
+    modules, *_ = _make_mock_otel_modules()
+    modules["opentelemetry.sdk.metrics"].MeterProvider.side_effect = RuntimeError("metrics broken")
+    with (
+        patch.dict("sys.modules", modules),
+        patch("docpipe.utils.infrastructure.telemetry_service.logger") as mock_logger,
+    ):
+        svc.initialize(config=TelemetryConfig(enabled=True, otlp_endpoint="http://localhost:4317"))
+
+    assert svc.is_enabled is True
+    assert svc.metrics_enabled is False
+    mock_logger.warning.assert_called_once_with(
+        "Failed to initialize metrics. Traces will still be exported.",
+        extra={"error": "metrics broken"},
+    )
+
+
+def _enabled_service_with_trace(*, current_span):
+    """Return an enabled service and mock opentelemetry modules whose current span is ``current_span``."""
+    svc = TelemetryService()
+    svc.initialize(config=TelemetryConfig(enabled=False))
+    svc._enabled = True
+    mock_trace = MagicMock()
+    mock_trace.get_current_span.return_value = current_span
+    modules = {"opentelemetry": MagicMock(trace=mock_trace), "opentelemetry.trace": mock_trace}
+    return svc, mock_trace, modules
+
+
+def test_set_span_attribute_defaults_to_current_span():
+    """Without an explicit span the attribute is set on the active span."""
+    current = MagicMock()
+    svc, _, modules = _enabled_service_with_trace(current_span=current)
+    with patch.dict("sys.modules", modules):
+        svc.set_span_attribute("k", "v")
+    current.set_attribute.assert_called_once_with("k", "v")
+
+
+def test_record_exception_defaults_to_current_span_and_sets_error_status():
+    """Without an explicit span the exception and an ERROR status go to the active span."""
+    current = MagicMock()
+    svc, mock_trace, modules = _enabled_service_with_trace(current_span=current)
+    error = ValueError("oops")
+    with patch.dict("sys.modules", modules):
+        svc.record_exception(error)
+    current.record_exception.assert_called_once_with(error)
+    mock_trace.Status.assert_called_once_with(mock_trace.StatusCode.ERROR, "oops")
+    current.set_status.assert_called_once_with(mock_trace.Status.return_value)
+
+
+def test_record_exception_with_explicit_span_sets_error_status():
+    """An explicitly passed span gets the exception event and an ERROR status."""
+    span = MagicMock()
+    svc, mock_trace, modules = _enabled_service_with_trace(current_span=None)
+    error = ValueError("oops")
+    with patch.dict("sys.modules", modules):
+        svc.record_exception(error, span=span)
+    span.record_exception.assert_called_once_with(error)
+    mock_trace.Status.assert_called_once_with(mock_trace.StatusCode.ERROR, "oops")
+    span.set_status.assert_called_once_with(mock_trace.Status.return_value)
+
+
+def test_record_exception_without_any_span_is_noop():
+    """When there is no active span nothing is recorded and nothing raises."""
+    svc, mock_trace, modules = _enabled_service_with_trace(current_span=None)
+    with patch.dict("sys.modules", modules):
+        svc.record_exception(ValueError("oops"))
+    mock_trace.Status.assert_not_called()
+
+
+def test_get_current_span_returns_active_span():
+    """get_current_span delegates to opentelemetry.trace.get_current_span."""
+    current = MagicMock()
+    svc, _, modules = _enabled_service_with_trace(current_span=current)
+    with patch.dict("sys.modules", modules):
+        assert svc.get_current_span() is current
+
+
+def test_get_current_span_returns_none_when_lookup_fails():
+    """An error from opentelemetry while looking up the span yields None."""
+    svc, mock_trace, modules = _enabled_service_with_trace(current_span=None)
+    mock_trace.get_current_span.side_effect = RuntimeError("context broken")
+    with patch.dict("sys.modules", modules):
+        assert svc.get_current_span() is None
