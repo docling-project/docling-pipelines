@@ -15,6 +15,7 @@ from docpipe.core.operators.quality.pii_and_hap.domain.models import DetectionCa
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.detection_adapter_port import DetectionAdapterPort
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.hap_detection_port import HAPDetectionPort
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.pii_detection_port import PIIDetectionPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -173,6 +174,7 @@ class PIIAndHAPDetectionFactory:
             ValueError: If ``provider`` is not registered (the message lists all
                 registered names) or does not support ``capability``.
         """
+        provider_config = reveal_value(provider_config)
         key = provider.lower()
         adapter_class = cls._registry.get(key)
         if not adapter_class:

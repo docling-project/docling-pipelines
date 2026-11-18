@@ -18,6 +18,7 @@ from weaviate.classes.config import Tokenization
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import WeaviateClient, redact_secrets
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import CONTENT_NAMES, tokenization_for
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -76,6 +77,8 @@ class WeaviateResourceMetadata:
             returns the plain empty result; any other failure returns it with
             is_docpipe_supported_resource set to ``{"supported": False, "error": <redacted>}``.
         """
+        provider_config = reveal_value(provider_config)
+
         is_cloud = (
             provider_config.get(OperatorConstants.VectorDB.CONNECTION_TYPE)
             == OperatorConstants.VectorDB.CONNECTION_TYPE_CLOUD

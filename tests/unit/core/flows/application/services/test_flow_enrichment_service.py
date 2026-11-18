@@ -1043,7 +1043,8 @@ class TestVectorDbSecretResolutionDuringEnrichment:
             result = _fetch(node_result=node_result)
 
         assert result == expected
-        assert fetch.call_args.kwargs["provider_config"]["token"] == CANARY
+        # The fetcher receives the opaque value; the vectordb adapter reveals it when it builds its client.
+        assert fetch.call_args.kwargs["provider_config"]["token"].reveal() == CANARY
         assert provider.requests == ["milvus/token"]
 
     def test_resolution_does_not_mutate_the_snapshot_config(self, provider: _FakeProvider) -> None:

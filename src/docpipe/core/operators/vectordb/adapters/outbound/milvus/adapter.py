@@ -23,6 +23,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager impo
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -88,6 +89,7 @@ class MilvusAdapter(VectorStorePort):
                 - index_parameters: Index-specific parameters
                 - add_sparse_vector: Legacy sparse mode flag (maps to vector_mode='sparse')
         """
+        adapter_config = reveal_value(adapter_config)
         # collection_name is now part of provider_config — read it from config
         self.collection_name = adapter_config.get(OperatorConstants.VectorDB.COLLECTION_NAME)
         if not self.collection_name:
