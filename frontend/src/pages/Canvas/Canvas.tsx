@@ -71,8 +71,7 @@ import { selectCurrentFlow, selectFlowError, selectFlowRunProperties } from '@/s
 import { selectCurrentJobRunId, selectCurrentJobId, selectIsRunning } from '@/selectors/jobRunSelectors';
 import { createJobRun, cancelJobRun } from '@/services/api/actions/job-run-actions';
 import { setCurrentRun, setRunning, setExecutionLogs } from '@/slices/jobRunSlice';
-import { LinkConditionTearsheet } from '@/components/ElyraCanvas/LinkConditionTearsheet';
-import type { LinkConditionValues } from '@/components/ElyraCanvas/LinkConditionTearsheet';
+import { LinkConditionTearsheet, type LinkConditionValues } from '@/components/ElyraCanvas';
 import type { CriteriaJson } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
 import type { FeatureAttributes } from '@/types';
 import { messages } from './Canvas.messages';

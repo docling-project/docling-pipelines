@@ -1,16 +1,17 @@
 export { ProjectsCard, RunsCard, FlowsCard } from './cards';
-export { AppHeader } from './layout/AppHeader';
-export { ErrorBoundary } from './common/ErrorBoundary';
-export { Loading } from './common/Loading';
-export { Breadcrumb } from './common/Breadcrumb';
-export { PageLayout } from './layout/PageLayout';
-export { ElyraCanvas } from './ElyraCanvas';
-export { SharedDataTable } from './common/SharedDataTable';
+export { AppHeader, PageLayout } from './layout';
+export {
+  ErrorBoundary,
+  Loading,
+  Breadcrumb,
+  SharedDataTable,
+  SharedTearsheet,
+  FlowInfoPanel,
+} from './common';
 export type {
   SharedDataTableHeader,
   SharedDataTableRow,
-} from './common/SharedDataTable';
-export { SharedTearsheet } from './common/SharedTearsheet';
-export { FlowInfoPanel } from './common/FlowInfoPanel';
-export type { FlowPanelData } from './common/FlowInfoPanel';
+  FlowPanelData,
+} from './common';
+export { ElyraCanvas } from './ElyraCanvas';
 export { ReadOnlyCanvas, RunStatusTopPanel, RunSidePanel } from './ReadOnlyCanvas';

@@ -10,7 +10,7 @@ import {
 import { View, Information, Renew as RenewIcon } from '@carbon/icons-react';
 import { ErrorEmptyState, NoDataEmptyState } from '@carbon/ibm-products';
 import { PageLayout } from '@/components';
-import { DeleteModal, EditDetailsModal } from '@/components/common';
+import { DeleteModal, EditDetailsModal, FlowInfoPanel } from '@/components/common';
 import { getFlow, getProject, patchFlow, getJobRuns, deleteJobRun } from '@/services/api';
 import type { JobRunListItem } from '@/types';
 import { cancelJobRun } from '@/services/api/actions/job-run-actions';
@@ -26,7 +26,6 @@ import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
 import { ROUTES, generateRoute } from '@/config';
 import { useBreadcrumbActions } from '@/contexts';
 import { formatEpochToDisplay, formatElapsedTime } from '@/utils/dateTimeUtils';
-import { FlowInfoPanel } from '@/components/common/FlowInfoPanel';
 import { FlowMetrics, FlowRunsTable } from '@/components/FlowDetail';
 import type { RunMetrics, RunRow } from '@/components/FlowDetail';
 import { messages } from './FlowDetail.messages';
