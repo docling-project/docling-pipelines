@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for BatchManager - batch semaphore, validation, and batch operations.
 
@@ -1640,6 +1643,18 @@ class TestBatchHelperMethods:
         batches = self.bm.create_batches(table=table, batch_size=10)
         assert len(batches) == 1
         assert batches[0].table.num_rows == 1
+
+    def test_create_batches_balances_by_file_size(self):
+        """Greedy bin-packing (lowercase 'size' column) spreads large files across batches and keeps the schema."""
+        table = pa.table({"id": ["a", "b", "c", "d"], "size": [100, 90, 10, 5]})
+
+        batches = self.bm.create_batches(table=table, batch_size=2)
+
+        assert [b.batch_num for b in batches] == [0, 1]
+        assert len({b.batch_id for b in batches}) == 2
+        assert sorted(batches[0].table.column("id").to_pylist()) == ["a", "d"]
+        assert sorted(batches[1].table.column("id").to_pylist()) == ["b", "c"]
+        assert all(b.table.schema == table.schema for b in batches)
 
 
 if __name__ == "__main__":

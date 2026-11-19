@@ -457,6 +457,7 @@ class IngestSourceOperator(AbstractOperator):
 
         # Initialize metadata
         metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=0)
+        metadata[Metrics.Internal.ALL_DOC_IDS] = []
 
         # Process documents
         doc_data: list[dict[str, Any]] = self.process_documents(metadata)
@@ -495,6 +496,7 @@ class IngestSourceOperator(AbstractOperator):
             len(doc_data) + metadata[Metrics.External.SKIPPED_DOCS_COUNT] + metadata[Metrics.External.FAILED_DOCS_COUNT]
         )
         metadata[Metrics.External.PROCESSED_DOCS] = len(doc_data)
+        metadata[Metrics.Internal.ALL_DOC_IDS] = list(dict.fromkeys(metadata.get(Metrics.Internal.ALL_DOC_IDS, [])))
 
         # Determine node status using common utility
         metadata[Metrics.External.NODE_STATUS] = OperatorUtils.determine_execution_status(
@@ -817,6 +819,8 @@ class IngestSourceOperator(AbstractOperator):
                 return None
 
             doc_id: str = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()
+            if Metrics.Internal.ALL_DOC_IDS in metadata:
+                metadata[Metrics.Internal.ALL_DOC_IDS].append(doc_id)
             modified_time = self._parse_modified_time(doc.metadata.get("last_modified", 0))
 
             if self.previously_processed_docs_dict and is_doc_previously_processed(
