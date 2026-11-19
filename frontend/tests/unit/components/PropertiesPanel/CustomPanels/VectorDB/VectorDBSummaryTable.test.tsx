@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { VectorDBSummaryTable } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDBSummaryTable';
+import { VectorDBSummaryTable } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 const makeRows = () => [
   { feature: 'content', column: 'text', isMandatory: true },

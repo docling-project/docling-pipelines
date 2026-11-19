@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import { AppHeader } from '@/components/layout/AppHeader/AppHeader';
+import { AppHeader } from '@/components/layout/AppHeader';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 
 function renderAppHeader(_initialPath = '/home', unreadCount = 0) {

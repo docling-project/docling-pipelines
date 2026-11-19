@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen, fireEvent } from '@testing-library/react';
-import { NoopPanelBody } from '@/components/PropertiesPanel/CustomPanels/Noop/Noop';
+import { NoopPanelBody } from '@/components/PropertiesPanel/CustomPanels/Noop';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { MergingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Merging/Merging';
+import { MergingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Merging';
 
 // Mock enrichFlowFeatures - not needed for unit panel tests
 vi.mock('@/services/api', () => ({

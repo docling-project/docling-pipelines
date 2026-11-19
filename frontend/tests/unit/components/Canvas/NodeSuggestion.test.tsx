@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import NodeSuggestion from '@/components/Canvas/NodeSuggestion/NodeSuggestion';
-import type { NodeSuggestionProps } from '@/components/Canvas/NodeSuggestion/NodeSuggestion';
+import NodeSuggestion from '@/components/Canvas/NodeSuggestion';
+import type { NodeSuggestionProps } from '@/components/Canvas/NodeSuggestion';
 import type { PaletteData } from '@/types/palette';
 
 const SAMPLE_PALETTE: PaletteData = {

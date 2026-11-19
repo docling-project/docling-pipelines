@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen } from '@testing-library/react';
-import { DocQualityPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocQuality/DocQuality';
+import { DocQualityPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocQuality';
 
 function makeController() {
   return {

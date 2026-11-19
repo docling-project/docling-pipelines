@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowsTable } from '@/components/ProjectDetail/FlowsTable/FlowsTable';
+import { FlowsTable } from '@/components/ProjectDetail/FlowsTable';
 import type { FlowRow } from '@/types';
 
 const SAMPLE_FLOWS: FlowRow[] = [

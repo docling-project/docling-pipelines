@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen } from '@testing-library/react';
-import { EdedupPanelBody } from '@/components/PropertiesPanel/CustomPanels/Ededup/Ededup';
+import { EdedupPanelBody } from '@/components/PropertiesPanel/CustomPanels/Ededup';
 
 describe('EdedupPanelBody', () => {
   it('renders info notification about no configuration', () => {

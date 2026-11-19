@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { AddFeatureMappingModal } from '@/components/PropertiesPanel/CustomPanels/VectorDB/AddFeatureMappingModal';
+import { AddFeatureMappingModal } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 const makeAvailableFeatures = () => ({
   content: { description: 'Document content', data_type: 'string' } as any,

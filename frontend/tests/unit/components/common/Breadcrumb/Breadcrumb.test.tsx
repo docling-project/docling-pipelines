@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { Breadcrumb } from '@/components/common/Breadcrumb/Breadcrumb';
+import { Breadcrumb } from '@/components/common/Breadcrumb';
 
 describe('Breadcrumb', () => {
   it('renders null on top-level /projects route with no actions', () => {

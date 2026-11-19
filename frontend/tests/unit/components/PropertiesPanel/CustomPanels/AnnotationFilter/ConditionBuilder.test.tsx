@@ -1,9 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen, fireEvent } from '@testing-library/react';
-import { ConditionBuilder } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
-import type { ConditionBuilderProps } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
-import type { Condition } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
+import { ConditionBuilder } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
+import type { Condition, ConditionBuilderProps } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
 import type { FeatureAttributes } from '@/types';
 
 // ---------------------------------------------------------------------------

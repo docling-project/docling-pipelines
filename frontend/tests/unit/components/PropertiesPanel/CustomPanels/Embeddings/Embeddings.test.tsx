@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, act, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { EmbeddingsPanelBody } from '@/components/PropertiesPanel/CustomPanels/Embeddings/Embeddings';
+import { EmbeddingsPanelBody } from '@/components/PropertiesPanel/CustomPanels/Embeddings';
 
 // Mock the provider models API
 vi.mock('@/services/api', () => ({

@@ -10,7 +10,7 @@ import {
   OPERATORS_BY_TYPE,
   DATETIME_PLACEHOLDER,
   TIMESTAMP_REGEX,
-} from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
+} from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
 
 describe('conditionTypes', () => {
 

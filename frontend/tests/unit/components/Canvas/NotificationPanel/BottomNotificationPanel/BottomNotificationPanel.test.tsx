@@ -6,8 +6,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import BottomNotificationPanel from '@/components/Canvas/NotificationPanel/BottomNotificationPanel/BottomNotificationPanel';
-import type { NotificationItem } from '@/components/Canvas/NotificationPanel/BottomNotificationPanel/BottomNotificationPanel';
+import BottomNotificationPanel from '@/components/Canvas/NotificationPanel/BottomNotificationPanel';
+import type { NotificationItem } from '@/components/Canvas/NotificationPanel/BottomNotificationPanel';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
