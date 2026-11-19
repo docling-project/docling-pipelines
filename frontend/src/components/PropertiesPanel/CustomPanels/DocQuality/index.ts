@@ -1,0 +1,1 @@
+export { DocQualityPanelBody } from './DocQuality';

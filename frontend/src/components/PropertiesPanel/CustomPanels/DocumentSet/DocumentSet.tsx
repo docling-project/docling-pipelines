@@ -6,12 +6,11 @@
 
 import React from 'react';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
-import { RequiredParamTooltip } from '@/components/common';
+import { JsonTextArea, RequiredParamTooltip } from '@/components/common';
 import { Dropdown, TextInput } from '@carbon/react';
 import { useIntl } from 'react-intl';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
 import { DOCUMENT_SET_ATTRIBUTE as ATTR } from './constants';
 import { messages } from './DocumentSet.messages';
 import common from '../../CommonPropertiesPanel.module.scss';

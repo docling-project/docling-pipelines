@@ -20,9 +20,8 @@ import { useIntl, type MessageDescriptor } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import { RequiredParamTooltip } from '@/components/common';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { ProviderFieldsForm } from '../shared/ProviderFieldsForm';
+import { JsonTextArea, RequiredParamTooltip } from '@/components/common';
+import { ProviderFieldsForm } from '../shared';
 import {
   Accordion,
   AccordionItem,
