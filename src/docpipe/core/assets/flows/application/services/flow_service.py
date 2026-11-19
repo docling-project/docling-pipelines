@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service for flow management operations.
 
 Provides CRUD operations for flows with validation, filtering, and pagination.
@@ -101,6 +104,8 @@ class FlowService(AssetService[Flow]):
 
         # If any authoring field is provided, rebuild complete authoring definition
         if has_authoring_fields:
+            from pydantic import ValidationError
+
             from docpipe.api.dto.authoring_flow_dto import AuthoringFlowCreateRequest
             from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
 
@@ -116,17 +121,25 @@ class FlowService(AssetService[Flow]):
                 existing_def.get(OperatorConstants.Config.GLOBAL_CONFIG, {}) if isinstance(existing_def, dict) else {}
             )
 
-            authoring_dto = AuthoringFlowCreateRequest(
-                flow_name=updates.get(DocpipeConstants.NAME, existing_flow_name),
-                flow=updates.get(DocpipeConstants.FLOW, existing_flow_list),
-                global_config=updates.get(OperatorConstants.Config.GLOBAL_CONFIG, existing_global_config),
-                description=updates.get(DocpipeConstants.DESCRIPTION, existing_flow.description),
-                tags=updates.get(OperatorConstants.Misc.TAGS, existing_flow.tags),
-            )
+            try:
+                authoring_dto = AuthoringFlowCreateRequest(
+                    flow_name=updates.get(DocpipeConstants.NAME, existing_flow_name),
+                    flow=updates.get(DocpipeConstants.FLOW, existing_flow_list),
+                    global_config=updates.get(OperatorConstants.Config.GLOBAL_CONFIG, existing_global_config),
+                    description=updates.get(DocpipeConstants.DESCRIPTION, existing_flow.description),
+                    tags=updates.get(OperatorConstants.Misc.TAGS, existing_flow.tags),
+                )
+            except ValidationError as exc:
+                raise FlowInvalidDataException(f"Invalid flow data: {exc!s}") from exc
+
             authoring_flow = AuthoringFlow.from_dict(data=authoring_dto.model_dump())
             authoring_flow.validate()
 
-            updates[DocpipeConstants.DEFINITION] = authoring_dto.model_dump()
+            # Merge over the stored definition so keys the authoring DTO does not
+            # manage (flow_source, flow_id, ...) survive a partial update.
+            merged_definition = dict(existing_def) if isinstance(existing_def, dict) else {}
+            merged_definition.update(authoring_dto.model_dump())
+            updates[DocpipeConstants.DEFINITION] = merged_definition
             # Remove authoring-specific fields after transformation
             updates.pop(DocpipeConstants.FLOW, None)
             updates.pop(OperatorConstants.Config.GLOBAL_CONFIG, None)
