@@ -24,6 +24,7 @@ from docpipe.utils.operators.logging import (
     get_logs,
     read_json_if_exists,
     retrieve_node_specific_operator_logs,
+    retrieve_operator_logs,
     retrieve_operators_sequence,
 )
 
@@ -241,6 +242,30 @@ class TestGetLogs:
         result = get_logs(content=None)
 
         assert result == {"node_sequence": []}
+
+
+class TestRetrieveOperatorLogs:
+    """Test retrieve_operator_logs function."""
+
+    def test_no_log_files_returns_empty_structure(self):
+        """A job run with no log file at all returns the empty structure, not UnboundLocalError (#673)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("docpipe.utils.operators.logging.get_data_path", return_value=tmpdir):
+                result = retrieve_operator_logs(job_id="job", jobrun_id="run")
+
+        assert result == {"node_sequence": []}
+
+    def test_no_log_files_same_as_empty_log_file(self):
+        """No log file and an empty flow_execute.log give the same result (#673)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("docpipe.utils.operators.logging.get_data_path", return_value=tmpdir):
+                missing = retrieve_operator_logs(job_id="job", jobrun_id="run")
+                log_path, *_ = get_log_and_job_file_path(job_id="job", jobrun_id="run")
+                Path(log_path).parent.mkdir(parents=True)
+                Path(log_path).write_text("")
+                empty = retrieve_operator_logs(job_id="job", jobrun_id="run")
+
+        assert missing == empty
 
 
 class TestRetrieveNodeSpecificOperatorLogs:

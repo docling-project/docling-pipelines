@@ -241,6 +241,38 @@ class TestGoogleDriveDestinationAdapterWriteDocumentSuccess:
         assert list_call_count_after_second == list_call_count_after_first
 
 
+class TestGoogleDriveDestinationAdapterQuoting:
+    """Names with an apostrophe must be escaped in the Drive ``q`` query (#669)."""
+
+    def test_folder_lookup_escapes_apostrophe(self):
+        adapter = GoogleDriveDestinationAdapter()
+        service = _mock_service(find_folder_files=[{"id": "obrien_folder_id"}])
+
+        folder_id = adapter._find_folder_id(service=service, name="O'Brien", parent_id="root", drive_id=None)
+
+        assert folder_id == "obrien_folder_id"
+        query = service.files.return_value.list.call_args.kwargs["q"]
+        assert query.startswith("name='O\\'Brien' and ")
+
+    def test_nested_write_with_apostrophe_escapes_folder_query(self):
+        adapter = GoogleDriveDestinationAdapter()
+        service = _mock_service()
+        service.files.return_value.create.return_value.execute.side_effect = [
+            {"id": "obrien_folder_id"},
+            {"id": "file_id", "webViewLink": "https://drive.google.com/file/d/file_id"},
+        ]
+
+        with patch.object(adapter, "_build_service", return_value=service):
+            result = adapter.write_document(
+                content=b"data", destination_path="O'Brien/report.md", overwrite=True, config=_make_config()
+            )
+
+        assert result.success is True
+        queries = [c.kwargs["q"] for c in service.files.return_value.list.call_args_list]
+        assert queries, "expected a folder lookup"
+        assert all("'O'Brien'" not in q for q in queries)
+
+
 class TestGoogleDriveDestinationAdapterOverwriteFalse:
     def test_skips_when_file_exists_and_overwrite_false(self):
         adapter = GoogleDriveDestinationAdapter()

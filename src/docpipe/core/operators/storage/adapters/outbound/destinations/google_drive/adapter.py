@@ -370,7 +370,10 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
         drive_id: str | None,
     ) -> str | None:
         """Return the Drive ID of an existing subfolder, or None if not found."""
-        query = f"name='{name}' and mimeType='{_GDRIVE_FOLDER_MIME}' and '{parent_id}' in parents and trashed=false"
+        escaped_name = name.replace("'", "\\'")
+        query = (
+            f"name='{escaped_name}' and mimeType='{_GDRIVE_FOLDER_MIME}' and '{parent_id}' in parents and trashed=false"
+        )
         list_kwargs: dict[str, Any] = {
             "q": query,
             "spaces": "drive",

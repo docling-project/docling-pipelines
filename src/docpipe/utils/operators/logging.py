@@ -82,7 +82,9 @@ def retrieve_operator_logs(*, job_id, jobrun_id):
             # Aggregated file has complete structure, return it
             return aggregated_content
 
-    # Fall back to old sequential flow format (backward compatibility)
+    # Fall back to old sequential flow format (backward compatibility).
+    # No log file at all gives the same empty result as an empty log file.
+    content = ""
     if Path(log_final_path).exists():
         with Path(log_final_path).open() as file:
             content = file.read()

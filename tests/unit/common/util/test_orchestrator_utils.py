@@ -88,6 +88,15 @@ class TestCreateLogFolders:
 
             assert "flow_execute_aggregated.json" in result
 
+    def test_create_log_folders_unknown_type_raises_before_creating_folders(self):
+        """An unknown log type raises ValueError and leaves the disk untouched (#668)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("docpipe.utils.orchestration.flow_utils.get_data_path", return_value=tmpdir):
+                with pytest.raises(ValueError, match="other"):
+                    create_log_folders("job_x", "run_y", "other")
+
+            assert not (Path(tmpdir) / "job_x").exists()
+
 
 class TestWriteJobLogs:
     """Test write_job_logs function."""
