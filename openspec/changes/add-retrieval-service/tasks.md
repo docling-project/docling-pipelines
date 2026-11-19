@@ -37,6 +37,7 @@ All tasks are `[backend]` and scoped to <= 2 hours each, ordered by dependency.
 
 - [ ] 5.1 `[backend]` Create `retrieval-v2`-compatible Pydantic DTOs and domain↔DTO mappers in `src/docpipe/api/dto/retrieval_dto.py` (`QueryRequest` with `searchConfig` alias, `QueryResponse`, `ResultItem`, `ResultMetadata`, `AdditionalInfo`, `ErrorResponse`).
 - [ ] 5.2 `[backend]` Create `src/docpipe/api/routes/retrieval.py` exposing v1 (`/v1/retrieval/advanced/search`, `/v1/retrieval/search`), v2 (`/v2/retrieval/advanced/search`, `/v2/retrieval/search`, `/v2/retrieval/advanced/search/result/{query_id}`, `/v2/retrieval/search/result/{query_id}`, `/v2/retrieval/search_data_assets`), disabled-by-default feature gate (`503 retrieval_disabled`), and unauthenticated probes (`/v2/retrieval/healthz`, `/v2/retrieval/readyz`), and wire lifespan initialization/shutdown in `src/docpipe/api/main.py`.
+- [ ] 5.3 `[backend]` Add `DocumentLibraryDerivativesResponse` DTOs and read-only `GET /api/v1/document-libraries/{library_id}/derivatives` to `src/docpipe/api/routes/document_libraries.py` with opaque `bookmark`/`limit` pagination, tolerated `container_id`/`container_type` params, and strict redaction of credentials and DuckDB file paths.
 
 ## Group 6: Verification, Tests & Documentation
 

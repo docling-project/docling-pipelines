@@ -86,6 +86,7 @@ To allow existing `retrieval-v2` clients and SDKs to talk directly to `docling-p
   - `GET /v2/retrieval/advanced/search/result/{query_id}` and `GET /v2/retrieval/search/result/{query_id}`
   - `POST /v2/retrieval/search_data_assets`
   - `GET /v2/retrieval/healthz` and `GET /v2/retrieval/readyz` (unauthenticated)
+- **Read-only Derivatives View**: Mounted on `document_libraries_router` at `GET /api/v1/document-libraries/{library_id}/derivatives` (with `limit`, opaque `bookmark`, and tolerated `container_id`/`container_type` query params). Reuses `DocumentLibraryCatalogPort` directly and maps to credential-free DTOs (`DocumentLibraryDerivativesResponse`), redacting all secrets, `${VAR}`/`vault://` references, connection strings, and DuckDB `database_path` values.
 - **Request resolution**: Accepts `QueryRequest` verbatim:
   - `document_library_id` or (`asset_type == "document_library"` and `asset_id`) → targets a `DocumentLibrary`.
   - `document_set_id` or (`asset_type == "document_set"` and `asset_id`) → targets a single `DocumentSet`.

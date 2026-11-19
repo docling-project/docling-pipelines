@@ -39,7 +39,7 @@ In addition, PR #639 (`add-document-set-data-card`) introduces a structured `Dat
   - **ACL**: `DocpipeACLAdapter` integrating with `docpipe.api.auth.models.User` (enforces `allowed_users` filter on OpenSearch when `propagate_source_acls` or auth is active).
 - **Factories (`factories/`)**: `RetrievalServiceFactory` reading the `retrieval:` block from `docling-pipelines-config.yaml` via `DocpipeConfigLoader`.
 
-### 3. `retrieval-v2`-Compatible REST API Surface (`src/docpipe/api/routes/retrieval.py`)
+### 3. `retrieval-v2`-Compatible REST API Surface (`src/docpipe/api/routes/retrieval.py`) & Derivatives Read View
 Mounted directly on the FastAPI app in `src/docpipe/api/main.py` to preserve exact `retrieval-v2` wire compatibility (`query-api/spec.md`):
 - **v1 Synchronous**:
   - `POST /v1/retrieval/advanced/search`
@@ -53,6 +53,8 @@ Mounted directly on the FastAPI app in `src/docpipe/api/main.py` to preserve exa
 - **Health (unauthenticated)**:
   - `GET /v2/retrieval/healthz` → `200 OK` `{"status": "ok"}`
   - `GET /v2/retrieval/readyz` → `200 OK` when wired / `503 Service Unavailable` otherwise
+- **Document Library Derivatives (read-only, under `/api/v1`)**:
+  - `GET /api/v1/document-libraries/{library_id}/derivatives` — paginated (`limit`, opaque `bookmark`), credential-free read-only view of resolved DuckDB and vector store (`milvus`, `opensearch`, `weaviate`) derivatives per document set, backed by `DocumentLibraryCatalogPort` (`DataCard` + DuckDB attachments).
 - Dedicated Pydantic DTOs in `src/docpipe/api/dto/retrieval_dto.py` matching `retrieval-v2`'s `QueryRequest` (including `searchConfig` alias, `container_id`/`container_type`, `document_library_id`, `document_set_id`, `asset_id`, `asset_type`, `search_inference_config`, `disable_cache`, `evaluate`) and `QueryResponse` (`request_id`, `generated_text`, `results`, `additional_info`, `status`, `execution_time`).
 
 ### 4. Configuration & Dependencies
@@ -66,7 +68,7 @@ Mounted directly on the FastAPI app in `src/docpipe/api/main.py` to preserve exa
 - `backend/retrieval-engine`: Derivative-driven store routing backed by local `DocumentLibrary`/`DocumentSet`/`DataCard`, DuckDB Text-to-SQL with `sqlglot` validation/authorization and self-correction, concurrent vector retrieval across Milvus, OpenSearch, and Weaviate with optional reranking, hybrid SQL+vector correlation and LLM synthesis, multi-Document-Set DAG planning, and result caching.
 
 ### Modified Capabilities
-- None. Existing `document-sets-api`, `document-libraries-api`, `document-set-data-card` (PR #639), and `documents-api` contracts remain unchanged.
+- `backend/document-libraries-api`: Adds read-only `GET /api/v1/document-libraries/{library_id}/derivatives` endpoint exposing credential-free resolved derivatives for each document set in the library. Existing library endpoints remain unchanged.
 
 ## Non-goals
 
