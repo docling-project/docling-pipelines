@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { CriteriaFullViewTearsheet } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/CriteriaFullViewTearsheet';
-import type { CriteriaDisplayRow } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/CriteriaFullViewTearsheet';
+import { CriteriaFullViewTearsheet } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
+import type { CriteriaDisplayRow } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { JobRunLogs } from '@/components/ReadOnlyCanvas/RunSidePanel/JobRunLogs/JobRunLogs';
+import { JobRunLogs } from '@/components/ReadOnlyCanvas/RunSidePanel/JobRunLogs';
 import type { JobRunStatusResponse } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 

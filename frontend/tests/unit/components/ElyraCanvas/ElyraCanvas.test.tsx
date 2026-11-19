@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { ElyraCanvas } from '@/components/ElyraCanvas/ElyraCanvas';
+import { ElyraCanvas } from '@/components/ElyraCanvas';
 import type { CanvasConfig } from '@elyra/canvas';
 
 const BASE_CONFIG: CanvasConfig = {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen, fireEvent } from '@testing-library/react';
-import { LanguageDetectPanelBody } from '@/components/PropertiesPanel/CustomPanels/LanguageDetect/LanguageDetect';
+import { LanguageDetectPanelBody } from '@/components/PropertiesPanel/CustomPanels/LanguageDetect';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

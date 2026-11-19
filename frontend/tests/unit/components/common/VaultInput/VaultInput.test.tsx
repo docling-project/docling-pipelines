@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import React from 'react';
-import { VaultInput, type VaultInputProps } from '@/components/common/VaultInput/VaultInput';
+import { VaultInput, type VaultInputProps } from '@/components/common/VaultInput';
 
 function renderVaultInput(props: Partial<VaultInputProps> = {}) {
   const defaults: VaultInputProps = {

@@ -3,7 +3,7 @@ import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import { EditDetailsModal } from '@/components/common/EditDetailsModal/EditDetailsModal';
+import { EditDetailsModal } from '@/components/common/EditDetailsModal';
 
 function renderModal(props: Partial<Parameters<typeof EditDetailsModal>[0]> = {}) {
   const defaults = {

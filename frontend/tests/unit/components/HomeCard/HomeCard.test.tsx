@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { HomeCard } from '@/components/HomeCard/HomeCard';
+import { HomeCard } from '@/components/HomeCard';
 import { Add } from '@carbon/icons-react';
 
 describe('HomeCard', () => {

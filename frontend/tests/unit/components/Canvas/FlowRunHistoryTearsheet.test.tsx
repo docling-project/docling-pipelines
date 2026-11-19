@@ -3,7 +3,7 @@ import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowRunHistoryTearsheet } from '@/components/Canvas/FlowRunHistoryTearsheet/FlowRunHistoryTearsheet';
+import { FlowRunHistoryTearsheet } from '@/components/Canvas/FlowRunHistoryTearsheet';
 import { server } from '../../../mocks/server';
 
 // Mock SharedTearsheet to render children directly — bypasses Carbon's React portal

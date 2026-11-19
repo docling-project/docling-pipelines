@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { RequiredParamTooltip } from '@/components/common/RequiredParamTooltip/RequiredParamTooltip';
+import { RequiredParamTooltip } from '@/components/common/RequiredParamTooltip';
 import type { OperatorFeature } from '@/types';
 
 const requiredAttr: OperatorFeature = {

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { FlowInfoPanel } from '@/components/common/FlowInfoPanel/FlowInfoPanel';
-import type { FlowPanelData } from '@/components/common/FlowInfoPanel/FlowInfoPanel';
+import { FlowInfoPanel } from '@/components/common/FlowInfoPanel';
+import type { FlowPanelData } from '@/components/common/FlowInfoPanel';
 
 const SAMPLE_FLOW: FlowPanelData = {
   flow_id: 'flow-1',

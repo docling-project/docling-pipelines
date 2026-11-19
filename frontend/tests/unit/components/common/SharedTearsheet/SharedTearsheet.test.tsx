@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SharedTearsheet } from '@/components/common/SharedTearsheet/SharedTearsheet';
+import { SharedTearsheet } from '@/components/common/SharedTearsheet';
 
 // Mock @carbon/ibm-products Tearsheet components
 vi.mock('@carbon/ibm-products', () => ({

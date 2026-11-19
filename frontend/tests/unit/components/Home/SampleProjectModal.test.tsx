@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { SampleProjectModal } from '@/components/Home/SampleProjectModal/SampleProjectModal';
+import { SampleProjectModal } from '@/components/Home/SampleProjectModal';
 
 // MSW intercepts the API calls; we just verify mounting/rendering behaviour.
 

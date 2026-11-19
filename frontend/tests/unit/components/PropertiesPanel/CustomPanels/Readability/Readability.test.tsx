@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen } from '@testing-library/react';
-import { ReadabilityPanelBody } from '@/components/PropertiesPanel/CustomPanels/Readability/Readability';
+import { ReadabilityPanelBody } from '@/components/PropertiesPanel/CustomPanels/Readability';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

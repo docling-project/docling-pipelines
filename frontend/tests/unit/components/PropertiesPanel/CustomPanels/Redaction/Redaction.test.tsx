@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { fireEvent } from '@testing-library/react';
-import { RedactionPanelBody } from '@/components/PropertiesPanel/CustomPanels/Redaction/Redaction';
+import { RedactionPanelBody } from '@/components/PropertiesPanel/CustomPanels/Redaction';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { enrichFlowFeaturesForNode } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-enrichment';
-import { getProviderConfig } from '@/components/PropertiesPanel/CustomPanels/VectorDB/constants';
+import { getProviderConfig } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 // Mock enrichment API
 vi.mock(
@@ -107,7 +107,7 @@ vi.mock('@carbon/react', async (importOriginal) => {
   };
 });
 
-import { VectorDBFeatureMappingTearsheet } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDBFeatureMappingTearsheet';
+import { VectorDBFeatureMappingTearsheet } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 const mockEnrich = vi.mocked(enrichFlowFeaturesForNode);
 

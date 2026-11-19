@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import TopNotificationBar from '@/components/Canvas/NotificationPanel/TopNotificationBar/TopNotificationBar';
+import TopNotificationBar from '@/components/Canvas/NotificationPanel/TopNotificationBar';
 
 describe('TopNotificationBar', () => {
   it('renders nothing when errorCount and warningCount are both 0', () => {

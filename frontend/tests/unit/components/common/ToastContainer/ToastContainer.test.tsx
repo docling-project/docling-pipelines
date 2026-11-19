@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import { ToastContainer } from '@/components/common/ToastContainer/ToastContainer';
+import { ToastContainer } from '@/components/common/ToastContainer';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 
 describe('ToastContainer', () => {

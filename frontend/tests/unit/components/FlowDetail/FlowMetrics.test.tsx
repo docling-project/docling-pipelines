@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowMetrics } from '@/components/FlowDetail/FlowMetrics/FlowMetrics';
-import type { RunMetrics } from '@/components/FlowDetail/FlowMetrics/FlowMetrics';
+import { FlowMetrics } from '@/components/FlowDetail/FlowMetrics';
+import type { RunMetrics } from '@/components/FlowDetail/FlowMetrics';
 
 const SAMPLE_METRICS: RunMetrics = {
   total: 10,

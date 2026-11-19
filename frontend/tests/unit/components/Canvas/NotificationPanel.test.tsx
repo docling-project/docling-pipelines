@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { NotificationPanel } from '@/components/Canvas/NotificationPanel/NotificationPanel';
+import { NotificationPanel } from '@/components/Canvas/NotificationPanel';
 
 // The module-level panelState store is reset by the component's own unmount cleanup,
 // which testing-library triggers after each test.
