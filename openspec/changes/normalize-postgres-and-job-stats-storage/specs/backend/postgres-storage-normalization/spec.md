@@ -93,4 +93,4 @@ The filesystem job stats store SHALL place job statistics and node run directori
 
 #### Scenario: Existing runs under the old layout
 - **WHEN** runs exist at `<base_dir>/<job_run_id>/` and `base_dir` does not end in `job_stats`
-- **THEN** those runs are not listed by the store, and operators SHALL move them into `<base_dir>/job_stats/` or set `base_dir` to `<base_dir>/job_stats` as described in the proposal's Breaking Changes section
+- **THEN** those runs are not listed by the store, and operators SHALL move them into `<base_dir>/job_stats/` as described in the proposal's Breaking Changes section

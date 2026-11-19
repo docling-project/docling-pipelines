@@ -25,8 +25,6 @@ This change is independent of the `central-config-loader` change, which owns the
     [ "$name" = "job_stats" ] || mv "$d" <base_dir>/job_stats/
   done
   ```
-
-  Alternatively, set `base_dir` to `<base_dir>/job_stats` in the config file, which keeps existing paths readable without moving files.
 - **Environment override `DOCPIPE_JOB_STATS_BASE_DIR`**: This variable is also a `base_dir` and is subject to the same rule. The `job_stats` suffix is appended to it in the same way. Its value is not used verbatim. The migration note above applies to it as well.
 
 ## Non-goals
