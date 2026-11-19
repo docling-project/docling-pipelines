@@ -16,7 +16,7 @@ All tasks are `[backend]` and scoped to <= 2 hours each, ordered by dependency.
 ## Group 3: Adapters (Catalog, DuckDB SQL, Vector Backends, LLM, Cache, ACL)
 
 - [ ] 3.1 `[backend]` Implement `LocalDocumentLibraryCatalogAdapter` (`adapters/catalog/local_catalog_adapter.py`) reading `DocumentLibraryService`, `DocumentSetService`, `DocumentSet.data_card` (PR #639 `derivative_store`, `embeddings`, `propagate_source_acls`), and `src/docpipe/core/document_classes/*.json`, merging with `retrieval.vector_stores` config defaults and optional `DocumentSet.metadata["retrieval_derivatives"]` overrides with `$VAR`/`${VAR}` secret resolution.
-- [ ] 3.2 `[backend]` Implement `SqlValidator` (`application/sql_validator.py`) using `sqlglot` (`duckdb` dialect) to enforce single-statement read-only `SELECT` and strict table-allowlist authorization.
+- [ ] 3.2 `[backend]` Implement `SqlValidator` (`application/sql_validator.py`) using `sqlglot` (`duckdb` dialect) to enforce single-statement read-only `SELECT`, strict table-allowlist authorization, DuckDB table-function refusal (`read_csv`, `read_parquet`, `read_text`, `glob`), and CTE-shadowing rejection.
 - [ ] 3.3 `[backend]` Implement `DuckDBSqlEngine` (`adapters/sql/duckdb_sql_engine.py`) with `read_only=True`, `SET enable_external_access = false`, `DESCRIBE` schema introspection, `asyncio.to_thread` offloading, timeout enforcement, and `conn.interrupt()` cancellation via `CancelHandle`.
 - [ ] 3.4 `[backend]` Implement `MilvusVectorQueryAdapter` (`adapters/vector/milvus_query_adapter.py`) supporting hybrid dense + BM25 RRF search with dense-only fallback via `pymilvus` in `asyncio.to_thread`.
 - [ ] 3.5 `[backend]` Implement `OpenSearchVectorQueryAdapter` (`adapters/vector/opensearch_query_adapter.py`) supporting k-NN / hybrid search and `allowed_users` ACL filtering via `opensearch-py`.
@@ -26,17 +26,17 @@ All tasks are `[backend]` and scoped to <= 2 hours each, ordered by dependency.
 
 ## Group 4: Application Layer & Factory Wiring
 
-- [ ] 4.1 `[backend]` Implement `SqlRetriever` (`application/sql_retriever.py`) with schema + document-class prompt synthesis, correlation-key instruction, `SqlValidator` gate, and bounded `max_retries` self-correction loop.
+- [ ] 4.1 `[backend]` Implement `SqlRetriever` (`application/sql_retriever.py`) with `retrieval.sql.enabled` gating, schema + document-class prompt synthesis, correlation-key instruction, `SqlValidator` gate, and bounded `max_retries` self-correction loop that fails fast on non-repairable errors (authorization, timeout, cancellation, connection).
 - [ ] 4.2 `[backend]` Implement `VectorRetriever` (`application/vector_retriever.py`) with concurrent per-target dispatch, expanded `max(limit, rerank_candidates)` pool when reranker is configured, and graceful reranker fallback.
 - [ ] 4.3 `[backend]` Implement `Synthesizer` (`application/synthesizer.py`) for unified SQL Markdown + deduplicated vector-chunk context formatting and grounded LLM answer generation.
-- [ ] 4.4 `[backend]` Implement `SearchOrchestrator` (`application/search_orchestrator.py`) and `SearchJobQueue` (`application/job_queue.py`) with cache lookup/write, concurrent SQL + vector execution, partial-status degradation, queue depth limit (100 → `503`), and result TTL (900s / max 2,048).
+- [ ] 4.4 `[backend]` Implement `SearchOrchestrator` (`application/search_orchestrator.py`) and `SearchJobQueue` (`application/job_queue.py`) with cache lookup/write, concurrent SQL + vector execution, partial-status degradation, per-user job ownership (`404` on cross-user poll), queue depth limit (100 → `503`), and result TTL (900s / max 2,048).
 - [ ] 4.5 `[backend]` Implement `OuterQueryPlanner`, `DAGExecutor`, and `MultiDocSetOrchestrator` (`application/outer_planner.py`, `dag_executor.py`, `multi_docset_orchestrator.py`) with single-set fast-path and wave-parallel multi-set execution.
 - [ ] 4.6 `[backend]` Implement `RetrievalServiceFactory` (`factories/retrieval_factory.py`) wiring all adapters from `DocpipeConfigLoader`.
 
 ## Group 5: `retrieval-v2`-Compatible REST API Routes & DTOs
 
 - [ ] 5.1 `[backend]` Create `retrieval-v2`-compatible Pydantic DTOs and domain↔DTO mappers in `src/docpipe/api/dto/retrieval_dto.py` (`QueryRequest` with `searchConfig` alias, `QueryResponse`, `ResultItem`, `ResultMetadata`, `AdditionalInfo`, `ErrorResponse`).
-- [ ] 5.2 `[backend]` Create `src/docpipe/api/routes/retrieval.py` exposing v1 (`/v1/retrieval/advanced/search`, `/v1/retrieval/search`), v2 (`/v2/retrieval/advanced/search`, `/v2/retrieval/search`, `/v2/retrieval/advanced/search/result/{query_id}`, `/v2/retrieval/search/result/{query_id}`, `/v2/retrieval/search_data_assets`), and unauthenticated probes (`/v2/retrieval/healthz`, `/v2/retrieval/readyz`), and wire lifespan initialization/shutdown in `src/docpipe/api/main.py`.
+- [ ] 5.2 `[backend]` Create `src/docpipe/api/routes/retrieval.py` exposing v1 (`/v1/retrieval/advanced/search`, `/v1/retrieval/search`), v2 (`/v2/retrieval/advanced/search`, `/v2/retrieval/search`, `/v2/retrieval/advanced/search/result/{query_id}`, `/v2/retrieval/search/result/{query_id}`, `/v2/retrieval/search_data_assets`), disabled-by-default feature gate (`503 retrieval_disabled`), and unauthenticated probes (`/v2/retrieval/healthz`, `/v2/retrieval/readyz`), and wire lifespan initialization/shutdown in `src/docpipe/api/main.py`.
 
 ## Group 6: Verification, Tests & Documentation
 

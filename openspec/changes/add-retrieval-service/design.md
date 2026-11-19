@@ -96,10 +96,11 @@ To allow existing `retrieval-v2` clients and SDKs to talk directly to `docling-p
 
 ### D3. DuckDB Read-Only SQL Engine with AST Authorization & Cancellation
 Unlike Presto, DuckDB runs in-process on a local file (`database_path`). Opening it safely for LLM-generated SQL requires three layers of defense:
-1. **AST Authorization (`sql_validator.py`)**: Parse with `sqlglot.parse(sql, read="duckdb")`. Reject multi-statement queries, non-`SELECT` statements (DDL/DML/PRAGMA/COPY/ATTACH/INSTALL/LOAD), and any table reference not in the allowlist of tables belonging to the target `DocumentSet`(s).
-2. **Read-Only Connection**: Open DuckDB with `duckdb.connect(database=db_path, read_only=True)` in a worker thread (`asyncio.to_thread`), executing `SET enable_external_access = false;` so SQL cannot read local files (`read_csv`, `read_parquet`, `httpfs`).
-3. **Deadline & Cancellation**: Enforce a per-query deadline (`sql.timeout_seconds`, default 30s). On timeout or caller cancellation, invoke `conn.interrupt()` via `CancelHandle` from the coordinator thread to abort long-running scans cleanly.
+1. **AST Authorization (`sql_validator.py`)**: Parse with `sqlglot.parse(sql, read="duckdb")`. Reject multi-statement queries, non-`SELECT` statements (DDL/DML/PRAGMA/COPY/ATTACH/INSTALL/LOAD), DuckDB table-valued file/external functions (`read_csv`, `read_parquet`, `read_text`, `glob`, etc.), CTE names that shadow allowlisted tables, and any table reference not in the allowlist of tables belonging to the target `DocumentSet`(s).
+2. **Read-Only Connection**: Open DuckDB with `duckdb.connect(database=db_path, read_only=True)` in a worker thread (`asyncio.to_thread`), executing `SET enable_external_access = false;` so SQL cannot read local files or network resources.
+3. **Deadline, Cancellation & Fail-Fast Retries**: Enforce a per-query deadline (`sql.timeout_seconds`, default 30s). On timeout or caller cancellation, invoke `conn.interrupt()` via `CancelHandle` from the coordinator thread to abort long-running scans cleanly. Non-repairable errors (authorization refusal, timeout, cancellation, connection failure) fail fast without invoking the self-correction LLM.
 4. **Schema & Document Class Enrichment**: Introspect column names/types via `DESCRIBE <table>` and enrich them with descriptions/examples/extraction instructions from `src/docpipe/core/document_classes/<document_class_id>.json` when `document_class_id` is set.
+5. **SQL Kill-Switch (`retrieval.sql.enabled`)**: Operators can set `retrieval.sql.enabled: false` (for example, on deployments with ACL-restricted documents where DuckDB tables do not enforce per-row ACLs); SQL routing is skipped cleanly with a note in `additional_info`.
 
 ### D4. Vector Query Adapters (Milvus, OpenSearch, Weaviate)
 All three vector backends implement `VectorStoreQueryPort.search(...)` and offload blocking SDK calls via `asyncio.to_thread`:
@@ -117,9 +118,10 @@ All three vector backends implement `VectorStoreQueryPort.search(...)` and offlo
 ### D6. Configuration Schema (`docling-pipelines-config.yaml`)
 ```yaml
 retrieval:
-  enabled: true
+  enabled: false              # Disabled by default; routes return 503 retrieval_disabled until enabled
   default_limit: 10
   sql:
+    enabled: true             # Set false to disable SQL retrieval (e.g. for ACL-restricted libraries)
     timeout_seconds: 30
     max_retries: 2
   vector:

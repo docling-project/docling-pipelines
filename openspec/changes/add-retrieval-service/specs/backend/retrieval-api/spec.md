@@ -51,6 +51,17 @@ The service SHALL accept `GET /v2/retrieval/advanced/search/result/{query_id}` (
 - **WHEN** the provided `query_id` is not found (never submitted or TTL expired)
 - **THEN** the service returns `404 Not Found`
 
+#### Scenario: Poll returns 404 when owned by another user
+- **WHEN** an authenticated user polls a `query_id` that was submitted by a different user
+- **THEN** the service returns `404 Not Found`
+
+### Requirement: Feature gate when retrieval is disabled
+Retrieval SHALL be disabled by default (`retrieval.enabled: false`). When disabled, all v1 and v2 search and result-polling endpoints SHALL return `503 Service Unavailable` with error code `retrieval_disabled`, while `/v2/retrieval/healthz` continues to return `200 OK` and `/v2/retrieval/readyz` returns `503 Service Unavailable`.
+
+#### Scenario: Search rejected with 503 when retrieval is disabled
+- **WHEN** `retrieval.enabled` is false and a client calls `POST /v1/retrieval/advanced/search` or `POST /v2/retrieval/advanced/search`
+- **THEN** the service returns `503 Service Unavailable` with error code `retrieval_disabled`
+
 ### Requirement: Direct asset search endpoint (v2)
 The service SHALL accept `POST /v2/retrieval/search_data_assets` and execute the same asynchronous retrieval pipeline as `POST /v2/retrieval/advanced/search`.
 

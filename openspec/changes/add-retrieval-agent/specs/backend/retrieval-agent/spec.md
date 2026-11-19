@@ -21,6 +21,10 @@ The service SHALL expose `POST /v2/retrieval/agent/search` (returning `202 Accep
 - **WHEN** a client submits an agent request with a blank `query` or missing `document_library_id`
 - **THEN** the service returns `400 Bad Request` (via Docling Pipelines' global validation error handler)
 
+#### Scenario: Poll returns 404 when owned by another user
+- **WHEN** an authenticated user polls an agent `query_id` submitted by a different user
+- **THEN** the service returns `404 Not Found`
+
 ### Requirement: Agent mode selection
 The agent SHALL support `auto`, `tool`, and `plan` modes (default `auto`). `auto` SHALL select `tool` mode only when the active model is confirmed to support native tool calling; otherwise it SHALL select `plan` mode.
 

@@ -32,13 +32,17 @@ The SQL retriever SHALL synthesize a schema description from DuckDB `DESCRIBE` m
 - **WHEN** the generated SQL is a single `SELECT` statement referencing only allowlisted table(s) for the target `DocumentSet`
 - **THEN** it executes on a `read_only=True` DuckDB connection with `enable_external_access = false` and returns a single `ResultItem` with `source: "sql"`, `data`, and `metadata.sql`
 
-#### Scenario: Disallowed SQL statement or out-of-scope table is rejected before execution
-- **WHEN** the generated SQL contains DDL/DML (`DROP`, `INSERT`, `COPY`, `ATTACH`, `PRAGMA`), multiple statements, or references a table outside the target `DocumentSet` allowlist
-- **THEN** the SQL is NOT executed and the retriever requests a corrected SQL statement (if retries remain)
+#### Scenario: Disallowed SQL statement, table function, or CTE shadowing is rejected without retry
+- **WHEN** the generated SQL contains DDL/DML (`DROP`, `INSERT`, `COPY`, `ATTACH`, `PRAGMA`), multiple statements, DuckDB file/external table functions (`read_csv`, `read_parquet`, `read_text`, `glob`), CTEs shadowing allowlisted tables, or references a table outside the target `DocumentSet` allowlist
+- **THEN** the SQL is NOT executed and the authorization failure fails fast without invoking the self-correction LLM
 
-#### Scenario: Self-correction retry loop stops after max_retries
-- **WHEN** SQL validation or execution fails on every attempt up to `max_retries + 1` total attempts
-- **THEN** no further correction call is made after the final attempt, the SQL store is marked failed, and any succeeding vector results are still returned with `status: "partial"`
+#### Scenario: Self-correction retry loop skips non-repairable failures and stops after max_retries
+- **WHEN** SQL fails with a repairable syntax or binder error up to `max_retries + 1` total attempts, or fails with a non-repairable error (authorization, timeout, cancellation, connection error)
+- **THEN** non-repairable errors fail fast with no correction call, no correction call is made after the final attempt, the SQL store is marked failed, and any succeeding vector results are still returned with `status: "partial"`
+
+#### Scenario: SQL retrieval skipped when retrieval.sql.enabled is false
+- **WHEN** `retrieval.sql.enabled` is false and a `DocumentSet` has a DuckDB table
+- **THEN** the SQL retriever is not dispatched, a note is recorded in `additional_info`, and vector retrieval (if configured) proceeds normally
 
 #### Scenario: Query timeout triggers DuckDB interruption
 - **WHEN** a DuckDB query exceeds `sql.timeout_seconds`

@@ -56,7 +56,7 @@ Mounted directly on the FastAPI app in `src/docpipe/api/main.py` to preserve exa
 - Dedicated Pydantic DTOs in `src/docpipe/api/dto/retrieval_dto.py` matching `retrieval-v2`'s `QueryRequest` (including `searchConfig` alias, `container_id`/`container_type`, `document_library_id`, `document_set_id`, `asset_id`, `asset_type`, `search_inference_config`, `disable_cache`, `evaluate`) and `QueryResponse` (`request_id`, `generated_text`, `results`, `additional_info`, `status`, `execution_time`).
 
 ### 4. Configuration & Dependencies
-- Add a `retrieval:` section to `docling-pipelines-config.yaml.example` (including default provider connection blocks for `milvus`, `opensearch`, and `weaviate` so `DataCard.derivative_store` names resolve without storing credentials in `DataCard`).
+- Add a `retrieval:` section to `docling-pipelines-config.yaml.example` (disabled by default via `retrieval.enabled: false` returning `503 retrieval_disabled`, with a `retrieval.sql.enabled` toggle for ACL-restricted libraries and default provider connection blocks for `milvus`, `opensearch`, and `weaviate` so `DataCard.derivative_store` names resolve without storing credentials in `DataCard`).
 - Add pinned `cachetools` to `[project.dependencies]` in `pyproject.toml`, and optional `retrieval-redis` extra (`redis`) under `[project.optional-dependencies]`. Regenerate `uv.lock`.
 
 ## Capabilities
