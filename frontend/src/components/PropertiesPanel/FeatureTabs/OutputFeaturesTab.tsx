@@ -14,9 +14,12 @@ import { Button, Checkbox, DefinitionTooltip } from '@carbon/react';
 import { Maximize } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import { NoDataEmptyState } from '@carbon/ibm-products';
-import { SharedDataTable } from '@/components/common/SharedDataTable';
-import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
-import { SharedTearsheet } from '@/components/common/SharedTearsheet';
+import {
+  SharedDataTable,
+  SharedTearsheet,
+  type SharedDataTableHeader,
+  type SharedDataTableRow,
+} from '@/components/common';
 import type { FeatureAttributes } from '@/types';
 import styles from './FeaturesTab.module.scss';
 import { messages } from './OutputFeaturesTab.messages';

@@ -11,8 +11,7 @@ import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import { ACL_ATTR as ATTR } from './constants';
 import { messages } from './ACL.messages';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { RequiredParamTooltip } from '@/components/common';
+import { JsonTextArea, RequiredParamTooltip } from '@/components/common';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import common from '../../CommonPropertiesPanel.module.scss';
 

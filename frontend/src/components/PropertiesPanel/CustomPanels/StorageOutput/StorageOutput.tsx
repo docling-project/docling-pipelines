@@ -19,11 +19,9 @@ import {
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
-import { RequiredParamTooltip, VaultInput } from '@/components/common';
+import { JsonTextArea, RequiredParamTooltip, TagInput, VaultInput } from '@/components/common';
 import { isVaultReference } from '@/utils/vault';
 import { isValidJsonObject, toJsonString } from '@/utils/json';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { TagInput } from '@/components/common/TagInput/TagInput';
 import {
   BOX_CONFIG_KEY,
   DESTINATION_CONFIG_KEY,
