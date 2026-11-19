@@ -31,17 +31,83 @@ _shared_engines: dict[tuple[str, int, int, int], Engine] = {}
 _shared_engines_lock = threading.Lock()
 
 
-def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> str | None:
+def _postgres_settings(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Extract resolved PostgreSQL settings using nested-over-root precedence.
+
+    Configuration precedence for each setting:
+    1. Key in nested config['postgres'] (if config is a dict and has 'postgres' dict)
+    2. Key in root config (if config is a dict)
+    3. Environment variable fallback (DOCPIPE_POSTGRES_*)
+    4. Built-in defaults
     """
-    Build PostgreSQL connection string from config or environment variables.
+    config = config or {}
+    nested_value = config.get(DocpipeConfigKeys.POSTGRES)
+    nested: dict[str, Any] = nested_value if isinstance(nested_value, dict) else {}
+
+    def _resolve(key: str, env_var: str | None = None, default: Any = None) -> Any:
+        if key in nested and nested[key] is not None:
+            return nested[key]
+        if key in config and config[key] is not None:
+            return config[key]
+        if env_var:
+            env_val = os.getenv(env_var)
+            if env_val is not None:
+                return env_val
+        return default
+
+    # Database name can be specified as 'database' or 'db'
+    database = (
+        nested.get(DocpipeConfigKeys.DATABASE)
+        or nested.get("db")
+        or config.get(DocpipeConfigKeys.DATABASE)
+        or config.get("db")
+        or os.getenv(EnvironmentVariables.DOCPIPE_POSTGRES_DB, "docpipe")
+    )
+
+    password = _resolve(DocpipeConfigKeys.PASSWORD, EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD, None)
+    host = _resolve(DocpipeConfigKeys.HOST, EnvironmentVariables.DOCPIPE_POSTGRES_HOST, "localhost")
+    port = _resolve(DocpipeConfigKeys.PORT, EnvironmentVariables.DOCPIPE_POSTGRES_PORT, "5432")
+    user = _resolve(DocpipeConfigKeys.USER, EnvironmentVariables.DOCPIPE_POSTGRES_USER, "docpipe_user")
+    schema = _resolve("schema", None, None)
+    pool_size = _resolve(DocpipeConfigKeys.POOL_SIZE, None, 5)
+    max_overflow = _resolve(DocpipeConfigKeys.MAX_OVERFLOW, None, 10)
+    pool_timeout = _resolve(DocpipeConfigKeys.POOL_TIMEOUT, None, 30)
+
+    return {
+        DocpipeConfigKeys.HOST: str(host),
+        DocpipeConfigKeys.PORT: str(port),
+        DocpipeConfigKeys.DATABASE: str(database),
+        "db": str(database),
+        DocpipeConfigKeys.USER: str(user),
+        DocpipeConfigKeys.PASSWORD: password,
+        "schema": schema,
+        DocpipeConfigKeys.POOL_SIZE: int(pool_size),
+        DocpipeConfigKeys.MAX_OVERFLOW: int(max_overflow),
+        DocpipeConfigKeys.POOL_TIMEOUT: int(pool_timeout),
+    }
+
+
+def get_postgres_pool_settings(*, config: dict[str, Any] | None = None) -> dict[str, int]:
+    """Get pool settings (pool_size, max_overflow, pool_timeout) from config or defaults."""
+    settings = _postgres_settings(config)
+    return {
+        DocpipeConfigKeys.POOL_SIZE: int(settings[DocpipeConfigKeys.POOL_SIZE]),
+        DocpipeConfigKeys.MAX_OVERFLOW: int(settings[DocpipeConfigKeys.MAX_OVERFLOW]),
+        DocpipeConfigKeys.POOL_TIMEOUT: int(settings[DocpipeConfigKeys.POOL_TIMEOUT]),
+    }
+
+
+def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> str | None:
+    """Build PostgreSQL connection string from config or environment variables.
 
     Configuration precedence:
-    1. Config dict (from YAML): config['postgres']['host'], etc.
-    2. Environment variables: DOCPIPE_POSTGRES_HOST, etc.
-    3. Built-in defaults
+    1. Nested config: config['postgres']['host'], etc.
+    2. Root config: config['host'], etc.
+    3. Environment variables: DOCPIPE_POSTGRES_HOST, etc.
+    4. Built-in defaults
 
     Args:
-        config: Optional configuration dict from YAML
+        config: Optional configuration dict from YAML (flat, nested, or mixed)
 
     Environment Variables (fallback):
         DOCPIPE_POSTGRES_HOST: Database host (default: localhost)
@@ -53,30 +119,19 @@ def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> s
     Returns:
         Connection string if password is available, None otherwise
     """
-    config = config or {}
-    postgres_config = config.get(DocpipeConfigKeys.POSTGRES, {})
+    settings = _postgres_settings(config)
 
-    # Get password (required) - check config first, then env
-    password = postgres_config.get(DocpipeConfigKeys.PASSWORD) or os.getenv(
-        EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD
-    )
+    password = settings.get(DocpipeConfigKeys.PASSWORD)
     if not password:
         logger.warning(
             "PostgreSQL password not configured (YAML or %s)", EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD
         )
         return None
 
-    # Get other connection parameters with fallback chain: config -> env -> default
-    host = postgres_config.get(DocpipeConfigKeys.HOST) or os.getenv(
-        EnvironmentVariables.DOCPIPE_POSTGRES_HOST, "localhost"
-    )
-    port = postgres_config.get(DocpipeConfigKeys.PORT) or os.getenv(EnvironmentVariables.DOCPIPE_POSTGRES_PORT, "5432")
-    database = postgres_config.get(DocpipeConfigKeys.DATABASE) or os.getenv(
-        EnvironmentVariables.DOCPIPE_POSTGRES_DB, "docpipe"
-    )
-    user = postgres_config.get(DocpipeConfigKeys.USER) or os.getenv(
-        EnvironmentVariables.DOCPIPE_POSTGRES_USER, "docpipe_user"
-    )
+    host = settings[DocpipeConfigKeys.HOST]
+    port = settings[DocpipeConfigKeys.PORT]
+    database = settings[DocpipeConfigKeys.DATABASE]
+    user = settings[DocpipeConfigKeys.USER]
 
     connection_string = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
     logger.info("PostgreSQL connection string built: %s@%s:%s/%s", user, host, port, database)
@@ -85,8 +140,7 @@ def get_postgres_connection_string(*, config: dict[str, Any] | None = None) -> s
 
 
 def create_postgres_engine(*, connection_string: str, config: dict[str, Any] | None = None) -> Engine:
-    """
-    Create SQLAlchemy engine for PostgreSQL.
+    """Create SQLAlchemy engine for PostgreSQL.
 
     Args:
         connection_string: PostgreSQL connection string
@@ -100,13 +154,10 @@ def create_postgres_engine(*, connection_string: str, config: dict[str, Any] | N
     """
     from docpipe.exceptions.docpipe_exceptions import PostgresConnectionException
 
-    config = config or {}
-    postgres_config = config.get(DocpipeConfigKeys.POSTGRES, {})
-
-    # Get pool settings from config or use defaults
-    pool_size = postgres_config.get(DocpipeConfigKeys.POOL_SIZE, 5)
-    max_overflow = postgres_config.get(DocpipeConfigKeys.MAX_OVERFLOW, 10)
-    pool_timeout = postgres_config.get(DocpipeConfigKeys.POOL_TIMEOUT, 30)
+    settings = _postgres_settings(config)
+    pool_size = settings[DocpipeConfigKeys.POOL_SIZE]
+    max_overflow = settings[DocpipeConfigKeys.MAX_OVERFLOW]
+    pool_timeout = settings[DocpipeConfigKeys.POOL_TIMEOUT]
 
     try:
         engine = create_engine(
@@ -133,8 +184,8 @@ def create_postgres_engine(*, connection_string: str, config: dict[str, Any] | N
         logger.error("Failed to create PostgreSQL engine: %s", e)
         raise PostgresConnectionException(
             message=f"PostgreSQL engine creation failed: {e}",
-            host=postgres_config.get(DocpipeConfigKeys.HOST, "unknown"),
-            database=postgres_config.get(DocpipeConfigKeys.DATABASE, "unknown"),
+            host=settings.get(DocpipeConfigKeys.HOST, "unknown"),
+            database=settings.get(DocpipeConfigKeys.DATABASE, "unknown"),
         ) from e
 
 
@@ -150,7 +201,7 @@ def get_shared_postgres_engine(
     connection attempt never blocks the components whose engine already exists.
 
     Args:
-        postgres: The ``postgres`` config section. A setting that is not given falls
+        postgres: The storage configuration or ``postgres`` section. A setting that is not given falls
             back to its ``DOCPIPE_POSTGRES_*`` environment variable.
         owner: Human-readable name of the component asking, for the log messages.
 
@@ -160,17 +211,16 @@ def get_shared_postgres_engine(
     Raises:
         PostgresConnectionException: If a new engine cannot connect.
     """
-    config = {DocpipeConfigKeys.POSTGRES: dict(postgres or {})}
-    connection_string = get_postgres_connection_string(config=config)
+    connection_string = get_postgres_connection_string(config=postgres)
     if not connection_string:
         return None
 
-    section = config[DocpipeConfigKeys.POSTGRES]
+    settings = _postgres_settings(postgres)
     cache_key = (
         connection_string,
-        int(section.get(DocpipeConfigKeys.POOL_SIZE, 5)),
-        int(section.get(DocpipeConfigKeys.MAX_OVERFLOW, 10)),
-        int(section.get(DocpipeConfigKeys.POOL_TIMEOUT, 30)),
+        settings[DocpipeConfigKeys.POOL_SIZE],
+        settings[DocpipeConfigKeys.MAX_OVERFLOW],
+        settings[DocpipeConfigKeys.POOL_TIMEOUT],
     )
     url = make_url(connection_string)
     target = f"{url.username}@{url.host}:{url.port}/{url.database}"
@@ -185,7 +235,7 @@ def get_shared_postgres_engine(
         # Another thread may have created the engine while this one waited for the lock.
         engine = _shared_engines.get(cache_key)
         if engine is None:
-            engine = create_postgres_engine(connection_string=connection_string, config=config)
+            engine = create_postgres_engine(connection_string=connection_string, config=postgres)
             _shared_engines[cache_key] = engine
             logger.info("Created shared PostgreSQL engine for %s: %s", owner, target)
     return engine

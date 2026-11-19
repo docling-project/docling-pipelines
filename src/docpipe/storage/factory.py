@@ -90,6 +90,9 @@ class StorageFactory:
                 database_path="data/tables.db"
             )
         """
+        if isinstance(storage_type, str) and storage_type.lower() == "postgresql":
+            storage_type = "postgres"
+
         logger.debug("Creating table storage: %s", storage_type)
 
         if storage_type not in StorageFactory.TABLE_STORAGE_SETTINGS:

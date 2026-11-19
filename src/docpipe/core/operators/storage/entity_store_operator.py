@@ -47,10 +47,15 @@ class EntityStoreOperator(AbstractOperator):
     def __init__(self, config: FlowConfig) -> None:
         super().__init__(config)
 
-        self.data_backend = config.get(
+        raw_backend = config.get(
             OperatorConstants.Storage.DATA_BACKEND,
             OperatorConstants.Storage.DEFAULT_DATA_BACKEND,
         )
+        if isinstance(raw_backend, str) and raw_backend.lower() == "postgresql":
+            self.data_backend = OperatorConstants.Storage.BACKEND_POSTGRES
+        else:
+            self.data_backend = raw_backend
+
         self.database_path = config.get(
             OperatorConstants.Storage.DATABASE_PATH,
             OperatorConstants.Storage.DEFAULT_DATABASE_PATH,

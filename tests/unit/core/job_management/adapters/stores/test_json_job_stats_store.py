@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JsonJobStatsStore - Phase 5 compatibility tests
 
@@ -1164,10 +1167,14 @@ class TestReadJobStatsIfMatch:
 
 class TestJsonJobStatsStore:
     def test_init_with_explicit_base_dir(self, tmp_path, monkeypatch):
-        """Passing base_dir skips get_data_path and uses the provided path."""
+        """Passing base_dir appends job_stats suffix unless already ending in job_stats."""
         explicit_dir = str(tmp_path / "custom_stats")
         store = JsonJobStatsStore(base_dir=explicit_dir, lock_timeout=5.0)
-        assert store._base_dir == Path(explicit_dir)
+        assert store._base_dir == Path(explicit_dir) / "job_stats"
+
+        explicit_with_suffix = str(tmp_path / "custom_stats" / "job_stats")
+        store_suffix = JsonJobStatsStore(base_dir=explicit_with_suffix, lock_timeout=5.0)
+        assert store_suffix._base_dir == Path(explicit_with_suffix)
 
     def test_atomic_write_json_cleans_up_temp_on_error(self, store, tmp_path):
         """_atomic_write_json removes temp file and raises on write failure."""

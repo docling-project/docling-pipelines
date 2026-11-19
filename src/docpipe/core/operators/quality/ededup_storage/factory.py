@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Independent configuration and lazy construction of ededup stores."""
 
 import os
@@ -18,9 +21,16 @@ class EdedupStoreFactory:
     _providers: ClassVar[dict[str, type[EdedupStore]]] = {}
 
     def __init__(self, *, backend: str = "filesystem", config: dict[str, Any] | None = None):
-        if backend not in {"filesystem", "postgresql"} and backend not in self._providers:
+        backend_normalized = backend.lower() if isinstance(backend, str) else backend
+        if backend_normalized == "postgresql":
+            backend_normalized = "postgres"
+        if (
+            backend not in self._providers
+            and backend_normalized not in {"filesystem", "postgres"}
+            and backend_normalized not in self._providers
+        ):
             raise DocpipeException(f"Invalid storage backend '{backend}' for ededup")
-        self.backend = backend
+        self.backend = backend_normalized if backend_normalized in {"filesystem", "postgres"} else backend
         self.config = config or {}
         self._store: EdedupStore | None = None
         self._lock = threading.Lock()

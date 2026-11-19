@@ -169,6 +169,17 @@ class TestPostgresStorageUtilsEngine:
             PostgresStorageUtils.get_engine(config={}, owner="x")
         assert "envpw@envhost:" in create.call_args.kwargs["connection_string"]
 
+    def test_mixed_company_db_and_example_password(self, monkeypatch):
+        monkeypatch.delenv("DOCPIPE_POSTGRES_PASSWORD", raising=False)
+        with patch(f"{DATABASE_MODULE}.create_postgres_engine", return_value=MagicMock()) as create:
+            PostgresStorageUtils.get_engine(
+                config={"host": "company-db", "postgres": {"password": "example-password"}},  # pragma: allowlist secret
+                owner="x",
+            )
+        conn_str = create.call_args.kwargs["connection_string"]
+        assert "company-db" in conn_str
+        assert "example-password" in conn_str
+
     def test_dispose_engines_disposes_and_clears(self):
         config = {"postgres": {"password": "p"}}  # pragma: allowlist secret
         mock_engine = MagicMock()

@@ -28,6 +28,7 @@ from docpipe.core.job_management.adapters.stores import (
 )
 from docpipe.core.job_management.adapters.stores.postgres import PostgresJobStatsStore
 from docpipe.core.job_management.adapters.stores.postgres.database import (
+    _postgres_settings,
     get_postgres_connection_string,
     run_migrations,
 )
@@ -51,6 +52,7 @@ class StorageBackend(StrEnum):
 
     IN_MEMORY = "inmemory"
     FILESYSTEM = "filesystem"
+    POSTGRES = "postgres"
     POSTGRESQL = "postgresql"
     DUCKDB = "duckdb"
 
@@ -121,7 +123,7 @@ class JobManagementFactory:
         Currently this applies PostgreSQL schema migrations when PostgreSQL
         job stats storage is selected. Safe to call repeatedly.
         """
-        if self.storage_backend != StorageBackend.POSTGRESQL:
+        if self.storage_backend not in (StorageBackend.POSTGRES, StorageBackend.POSTGRESQL):
             return
 
         if self.config.get(DocpipeConfigKeys.STORAGE_INITIALIZED, False):
@@ -185,7 +187,7 @@ class JobManagementFactory:
             if resolved_base_dir:
                 env[EnvironmentVariables.DOCPIPE_JOB_STATS_BASE_DIR] = resolved_base_dir
 
-        if self.storage_backend == StorageBackend.POSTGRESQL:
+        if self.storage_backend in (StorageBackend.POSTGRES, StorageBackend.POSTGRESQL):
             postgres_config_mapping = {
                 EnvironmentVariables.DOCPIPE_POSTGRES_HOST: DocpipeConfigKeys.HOST,
                 EnvironmentVariables.DOCPIPE_POSTGRES_PORT: DocpipeConfigKeys.PORT,
@@ -194,10 +196,9 @@ class JobManagementFactory:
                 EnvironmentVariables.DOCPIPE_POSTGRES_PASSWORD: DocpipeConfigKeys.PASSWORD,  # pragma: allowlist secret
             }
 
+            settings = _postgres_settings(self.config)
             for env_key, config_key in postgres_config_mapping.items():
-                # Use environment variable if set, otherwise fallback to config
-                postgres_config = self.config.get(DocpipeConfigKeys.POSTGRES, {})
-                val = os.getenv(env_key) or postgres_config.get(config_key)
+                val = os.getenv(env_key) or settings.get(config_key)
                 if val:
                     env[env_key] = str(val)
 
@@ -254,7 +255,7 @@ class JobManagementFactory:
                     lock_timeout,
                 )
 
-            case StorageBackend.POSTGRESQL:
+            case StorageBackend.POSTGRES | StorageBackend.POSTGRESQL:
                 self.initialize_storage()
                 self._job_stats_store = PostgresJobStatsStore(config=self.config)
                 logger.info("Created PostgresJobStatsStore")
@@ -383,6 +384,11 @@ class JobManagementFactory:
         # from the top level of self.config.
         merged_config: dict[str, Any] = dict(storage_config or {})
         if DocpipeConfigKeys.POSTGRES in job_mgmt_config:
+            if DocpipeConfigKeys.POSTGRES in merged_config:
+                logger.warning(
+                    "Both 'job_management.postgres' and 'job_management.storage.config.postgres' are configured; "
+                    "using 'job_management.postgres' and ignoring 'job_management.storage.config.postgres'"
+                )
             merged_config[DocpipeConfigKeys.POSTGRES] = job_mgmt_config[DocpipeConfigKeys.POSTGRES]
         merged_config.update(job_mgmt_config.get(DocpipeConfigKeys.FRAMEWORK_CONFIG, {}) or {})
         merged_config.update(framework_config.get(DocpipeConfigKeys.CONFIG, {}) or {})

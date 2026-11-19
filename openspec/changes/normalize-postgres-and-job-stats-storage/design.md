@@ -57,7 +57,7 @@ Current behavior:
 ## Risks / Trade-offs
 
 - **[Risk] Existing runs disappear from listings after upgrade** (BREAKING):
-  - *Mitigation*: Migration commands in proposal.md.
+  - *Mitigation*: Migration commands in proposal.md. Note that changing `base_dir` in configuration (such as setting `base_dir: <base_dir>/job_stats`) does not keep existing runs readable without moving files; existing run directories located directly under `<base_dir>/<job_run_id>/` must be moved into `<base_dir>/job_stats/`.
 - **[Risk] Existing test fixtures expect `<base_dir>/<job_run_id>` directly**:
   - *Mitigation*: Update fixtures to expect the `job_stats` segment, or pass a path already ending in `job_stats`.
 - **[Risk] Mixed flat/nested configs are hard to read**:

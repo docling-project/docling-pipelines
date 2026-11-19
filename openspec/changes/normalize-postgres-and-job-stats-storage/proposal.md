@@ -16,7 +16,7 @@ This change is independent of the `central-config-loader` change, which owns the
 
 ## Breaking Changes
 
-- **BREAKING (on-disk layout)**: With `job_management.storage.config.base_dir` set to a path that does not end in `job_stats` (for example `./data/job_stats_store_data` in the shipped `docling-pipelines-config.yaml`), existing run directories at `<base_dir>/<job_run_id>/` are no longer listed or read. Operators upgrading must move them:
+- **BREAKING (on-disk layout)**: The filesystem job stats store now always appends `job_stats` to explicit base directories that do not already end in `job_stats`. Existing run directories located directly at `<base_dir>/<job_run_id>/` (for example under `./data/job_stats_store_data/` in previous versions) are no longer listed or read by the store. Changing `base_dir` in configuration (such as setting `base_dir: <base_dir>/job_stats`) does not keep existing runs readable without moving files. Operators upgrading must move existing run directories into the `<base_dir>/job_stats/` subdirectory:
 
   ```bash
   mkdir -p <base_dir>/job_stats
@@ -25,7 +25,7 @@ This change is independent of the `central-config-loader` change, which owns the
     [ "$name" = "job_stats" ] || mv "$d" <base_dir>/job_stats/
   done
   ```
-- **Environment override `DOCPIPE_JOB_STATS_BASE_DIR`**: This variable is also a `base_dir` and is subject to the same rule. The `job_stats` suffix is appended to it in the same way. Its value is not used verbatim. The migration note above applies to it as well.
+- **Environment override `DOCPIPE_JOB_STATS_BASE_DIR`**: This variable is also a `base_dir` and is subject to the same rule. The `job_stats` suffix is appended to it in the same way. Its value is not used verbatim. The file migration above is required regardless of whether `base_dir` is configured via YAML or `DOCPIPE_JOB_STATS_BASE_DIR`.
 
 ## Non-goals
 

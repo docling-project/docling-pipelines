@@ -92,5 +92,5 @@ The filesystem job stats store SHALL place job statistics and node run directori
 - **THEN** job statistics are written to `/mnt/stats/job_stats/<job_run_id>/job_stats.json`
 
 #### Scenario: Existing runs under the old layout
-- **WHEN** runs exist at `<base_dir>/<job_run_id>/` and `base_dir` does not end in `job_stats`
-- **THEN** those runs are not listed by the store, and operators SHALL move them into `<base_dir>/job_stats/` as described in the proposal's Breaking Changes section
+- **WHEN** runs exist at `<base_dir>/<job_run_id>/`
+- **THEN** those runs are not listed by the store until moved, and changing `base_dir` in configuration does not keep them readable without moving files; operators SHALL move existing run directories into `<base_dir>/job_stats/` as described in the proposal's Breaking Changes section
