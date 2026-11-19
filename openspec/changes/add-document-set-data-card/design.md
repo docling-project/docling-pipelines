@@ -57,6 +57,13 @@ Field names follow the enterprise schema (`purpose`, `summary`, `curator`, `lang
 A card that carries them loads, and the unmodelled keys are dropped on re-serialization. The "round trip" requirement
 therefore speaks of *documented* fields, and a contract fixture pins exactly which fields those are.
 
+**Two fields go beyond the enterprise schema.** `embeddings[].provider` and `derivative_store.add_sparse_vector` are OSS
+additions. A consumer that reads the card to run retrieval needs them: without `provider` it must fall back to a
+configured default embedding provider, and without `add_sparse_vector` it must inspect the live index schema to choose
+between hybrid and dense-only search. Both are non-secret values the operators already hold. An enterprise card loads
+with both null, and an enterprise reader that ignores unknown keys is unaffected. Enterprise convergence can adopt or
+rename them later. `provider` reads the node's own `provider` key, not `provider_config`, which may hold credentials.
+
 `FlowItem.type` for OSS-written entries is `docpipe_flow`. Enterprise values (`ibm_udp_flow`,
 `ibm_unstructured_data_curation`) are preserved when loaded.
 
@@ -123,8 +130,8 @@ sees.
 |---|---|---|
 | `ingest_source` | `sources[0]` = `{input: provider, name, paths}` | provider-specific location keys only (see D5) |
 | `chunker` | `chunk_details = {type, size}` | `chunk_type`, `chunk_size` in node config |
-| `embeddings` | `embeddings[0] = {type: "dense", model_id, feature, dimension_size}` | `provider_config.model_id`; `embeddings_column` (default `embeddings`); dimension from the stored table |
-| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name}` | `provider`, `provider_config.index_name` / `collection_name` |
+| `embeddings` | `embeddings[0] = {type: "dense", provider, model_id, feature, dimension_size}` | node `provider` (default `litellm`, the operator default); `provider_config.model_id`; `embeddings_column` (default `embeddings`); dimension from the stored table |
+| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name, add_sparse_vector}` | `provider`, `provider_config.index_name` / `collection_name`, `add_sparse_vector` (default `false`, the operator default) |
 | `lang_detect`, `acl_operator` | `type`, `node_id`, `name` only | used for derived fields |
 
 Everything is read with `.get()` and type-checked, so malformed node configs degrade to null fields.

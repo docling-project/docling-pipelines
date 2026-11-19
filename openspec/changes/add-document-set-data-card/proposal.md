@@ -16,8 +16,9 @@ same field names where they apply, so that a card is meaningful on both sides an
 
 - **Data card model.** Replace the unused flat `DataCard` with a nested provenance model: descriptive fields plus
   `flows[] -> jobs[] -> runs[] -> operators[]`, with per-operator `sources`, `embeddings`, `chunk_details`, and
-  `derivative_store`. Field names follow the enterprise schema. Loading is lenient, so a card shaped like an enterprise
-  card loads and re-serializes without losing known fields.
+  `derivative_store`. Field names follow the enterprise schema, with two additions that retrieval needs:
+  `embeddings[].provider` and `derivative_store.add_sparse_vector`. Loading is lenient, so a card shaped like an
+  enterprise card loads and re-serializes without losing known fields, and the two additions load as null.
 - **Automatic population.** The `document_set` operator records the current job run in the target document set's card
   after it stores rows. The run lists the operators upstream of the node, with details for ingest sources, chunker,
   embeddings, and vector database nodes, and derives `language` and `propagate_source_acls` from the flow.

@@ -28,6 +28,10 @@ Loading a card from a dictionary SHALL accept every field of the enterprise data
 - **WHEN** a sample enterprise card containing flows of type `ibm_udp_flow`, jobs, runs, sources, embeddings, chunk details, and a derivative store is loaded and serialized
 - **THEN** every documented field of the input is present and equal in the output
 
+#### Scenario: Fields absent from an enterprise card load as null
+- **WHEN** an enterprise card has embeddings without `provider` and a derivative store without `add_sparse_vector`
+- **THEN** loading succeeds, `provider` is null, and `add_sparse_vector` is null
+
 #### Scenario: Unknown keys ignored
 - **WHEN** a card dictionary contains a key that the schema does not define
 - **THEN** loading succeeds and the key is absent from the serialized card
@@ -154,23 +158,42 @@ For an upstream `ingest_source` node, the operator entry SHALL carry one `source
 - **WHEN** a web ingest node lists the URL `https://example.com/a/b` with user information, a query string, and a fragment added
 - **THEN** the recorded path is `https://example.com/a/b`
 
-### Requirement: Chunking and embedding details
-For an upstream `chunker` node, the entry SHALL carry `chunk_details` with `type` set to the chunk type and `size` set to the configured chunk size or null. For an upstream `embeddings` node, the entry SHALL carry one `embeddings` item with `type` `dense`, `model_id` from the provider configuration, `feature` set to the embeddings column name, and `dimension_size` set to the length of the first non-null vector in that column of the stored table, or null.
+### Requirement: Chunking details
+For an upstream `chunker` node, the entry SHALL carry `chunk_details` with `type` set to the chunk type and `size` set to the configured chunk size or null.
 
 #### Scenario: Chunker details
 - **WHEN** a chunker node is configured with type `hybrid` and size 512
 - **THEN** its entry shows `chunk_details` with type `hybrid` and size 512
+
+### Requirement: Embedding details
+For an upstream `embeddings` node, the entry SHALL carry one `embeddings` item with `type` `dense`, `provider` set to the node's embedding provider (`litellm` when the node does not set one), `model_id` from the provider configuration, `feature` set to the embeddings column name, and `dimension_size` set to the length of the first non-null vector in that column of the stored table, or null. A provider value that is a `vault://` reference SHALL be omitted.
+
+#### Scenario: Provider recorded
+- **WHEN** an embeddings node sets provider `watsonx` and model `ibm/slate-125m-english-rtrvr`
+- **THEN** its entry shows `provider` `watsonx` and that `model_id`
+
+#### Scenario: Default provider recorded
+- **WHEN** an embeddings node sets no provider
+- **THEN** its entry shows `provider` `litellm`
 
 #### Scenario: Embedding dimension from data
 - **WHEN** an embeddings node writes the `embeddings` column and the stored vectors have 384 values
 - **THEN** its entry shows `dimension_size` 384 and `feature` `embeddings`
 
 ### Requirement: Vector database derivative store
-For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whose `name` is the provider and whose `path` is the index or collection name. The entry SHALL NOT record hosts, URIs, ports, or any connection parameter.
+For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whose `name` is the provider, whose `path` is the index or collection name, and whose `add_sparse_vector` is the node's `add_sparse_vector` setting (false when unset). The entry SHALL NOT record hosts, URIs, ports, or any connection parameter.
 
 #### Scenario: OpenSearch index
 - **WHEN** a vectordb node uses provider `opensearch` with index `docs_v1`
 - **THEN** its entry shows a derivative store with name `opensearch` and path `docs_v1`
+
+#### Scenario: Sparse vectors enabled
+- **WHEN** a vectordb node sets `add_sparse_vector` to true
+- **THEN** its derivative store shows `add_sparse_vector` true
+
+#### Scenario: Sparse vectors default
+- **WHEN** a vectordb node does not set `add_sparse_vector`
+- **THEN** its derivative store shows `add_sparse_vector` false
 
 #### Scenario: Connection parameters excluded
 - **WHEN** the vectordb node sets `host`, `port`, and `uri`
