@@ -361,6 +361,15 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
 
         return current_id
 
+    @staticmethod
+    def _escape_query_value(value: str) -> str:
+        """Escape *value* for use inside a single-quoted string in a Drive ``q`` query.
+
+        Drive treats a backslash as the escape character, so backslashes are
+        escaped first, then single quotes.
+        """
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
     def _find_folder_id(
         self,
         *,
@@ -370,9 +379,11 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
         drive_id: str | None,
     ) -> str | None:
         """Return the Drive ID of an existing subfolder, or None if not found."""
-        escaped_name = name.replace("'", "\\'")
+        escaped_name = self._escape_query_value(name)
+        escaped_parent = self._escape_query_value(parent_id)
         query = (
-            f"name='{escaped_name}' and mimeType='{_GDRIVE_FOLDER_MIME}' and '{parent_id}' in parents and trashed=false"
+            f"name='{escaped_name}' and mimeType='{_GDRIVE_FOLDER_MIME}' "
+            f"and '{escaped_parent}' in parents and trashed=false"
         )
         list_kwargs: dict[str, Any] = {
             "q": query,
@@ -399,8 +410,9 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
         drive_id: str | None,
     ) -> str | None:
         """Return the Drive ID of an existing file in parent_id, or None."""
-        escaped_name = name.replace("'", "\\'")
-        query = f"name='{escaped_name}' and '{parent_id}' in parents and trashed=false"
+        escaped_name = self._escape_query_value(name)
+        escaped_parent = self._escape_query_value(parent_id)
+        query = f"name='{escaped_name}' and '{escaped_parent}' in parents and trashed=false"
         list_kwargs: dict[str, Any] = {
             "q": query,
             "spaces": "drive",

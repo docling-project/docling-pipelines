@@ -241,36 +241,60 @@ class TestGoogleDriveDestinationAdapterWriteDocumentSuccess:
         assert list_call_count_after_second == list_call_count_after_first
 
 
-class TestGoogleDriveDestinationAdapterQuoting:
-    """Names with an apostrophe must be escaped in the Drive ``q`` query (#669)."""
+class TestGoogleDriveDestinationAdapterQueryEscaping:
+    """Values put into a Drive ``q`` query are escaped: backslash first, then single quote (#669)."""
 
-    def test_folder_lookup_escapes_apostrophe(self):
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("plain", "plain"),
+            ("O'Brien", "O\\'Brien"),
+            ("a\\b", "a\\\\b"),
+            ("trail\\", "trail\\\\"),
+            ("it\\'s", "it\\\\\\'s"),
+        ],
+    )
+    def test_escape_query_value(self, value, expected):
+        assert GoogleDriveDestinationAdapter._escape_query_value(value) == expected
+
+    @pytest.mark.parametrize(
+        ("name", "escaped"),
+        [
+            ("O'Brien", "O\\'Brien"),
+            ("a\\b", "a\\\\b"),
+            ("trail\\", "trail\\\\"),
+        ],
+    )
+    def test_folder_lookup_query_escapes_name(self, name, escaped):
         adapter = GoogleDriveDestinationAdapter()
-        service = _mock_service(find_folder_files=[{"id": "obrien_folder_id"}])
+        service = _mock_service(find_folder_files=[{"id": "found_folder_id"}])
 
-        folder_id = adapter._find_folder_id(service=service, name="O'Brien", parent_id="root", drive_id=None)
+        folder_id = adapter._find_folder_id(service=service, name=name, parent_id="root", drive_id=None)
 
-        assert folder_id == "obrien_folder_id"
-        query = service.files.return_value.list.call_args.kwargs["q"]
-        assert query.startswith("name='O\\'Brien' and ")
+        assert folder_id == "found_folder_id"
+        assert service.files.return_value.list.call_args.kwargs["q"] == (
+            f"name='{escaped}' and mimeType='application/vnd.google-apps.folder' "
+            "and 'root' in parents and trashed=false"
+        )
 
-    def test_nested_write_with_apostrophe_escapes_folder_query(self):
+    @pytest.mark.parametrize(
+        ("name", "escaped"),
+        [
+            ("O'Brien.md", "O\\'Brien.md"),
+            ("a\\b.md", "a\\\\b.md"),
+            ("trail\\", "trail\\\\"),
+        ],
+    )
+    def test_file_lookup_query_escapes_name(self, name, escaped):
         adapter = GoogleDriveDestinationAdapter()
-        service = _mock_service()
-        service.files.return_value.create.return_value.execute.side_effect = [
-            {"id": "obrien_folder_id"},
-            {"id": "file_id", "webViewLink": "https://drive.google.com/file/d/file_id"},
-        ]
+        service = _mock_service(find_folder_files=[{"id": "found_file_id"}])
 
-        with patch.object(adapter, "_build_service", return_value=service):
-            result = adapter.write_document(
-                content=b"data", destination_path="O'Brien/report.md", overwrite=True, config=_make_config()
-            )
+        file_id = adapter._find_file_id(service=service, name=name, parent_id="root", drive_id=None)
 
-        assert result.success is True
-        queries = [c.kwargs["q"] for c in service.files.return_value.list.call_args_list]
-        assert queries, "expected a folder lookup"
-        assert all("'O'Brien'" not in q for q in queries)
+        assert file_id == "found_file_id"
+        assert service.files.return_value.list.call_args.kwargs["q"] == (
+            f"name='{escaped}' and 'root' in parents and trashed=false"
+        )
 
 
 class TestGoogleDriveDestinationAdapterOverwriteFalse:

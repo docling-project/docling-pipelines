@@ -10,6 +10,9 @@ from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.job_management.domain.models import NodeStats
 from docpipe.utils.infrastructure.filesystem import get_data_path
+from docpipe.utils.infrastructure.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def epoch_to_datetime(*, epoch_time):
@@ -88,6 +91,8 @@ def retrieve_operator_logs(*, job_id, jobrun_id):
     if Path(log_final_path).exists():
         with Path(log_final_path).open() as file:
             content = file.read()
+    else:
+        logger.debug("No log file found for job_id=%s jobrun_id=%s", job_id, jobrun_id)
 
     return get_logs(
         content=content,

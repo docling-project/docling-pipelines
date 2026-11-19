@@ -267,6 +267,23 @@ class TestRetrieveOperatorLogs:
 
         assert missing == empty
 
+    def test_missing_log_file_is_logged_at_debug(self):
+        """A missing log file leaves a debug hint; an empty log file does not (#673)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                patch("docpipe.utils.operators.logging.get_data_path", return_value=tmpdir),
+                patch("docpipe.utils.operators.logging.logger") as mock_logger,
+            ):
+                retrieve_operator_logs(job_id="job", jobrun_id="run")
+                mock_logger.debug.assert_called_once_with("No log file found for job_id=%s jobrun_id=%s", "job", "run")
+
+                mock_logger.reset_mock()
+                log_path, *_ = get_log_and_job_file_path(job_id="job", jobrun_id="run")
+                Path(log_path).parent.mkdir(parents=True)
+                Path(log_path).write_text("")
+                retrieve_operator_logs(job_id="job", jobrun_id="run")
+                mock_logger.debug.assert_not_called()
+
 
 class TestRetrieveNodeSpecificOperatorLogs:
     """Test retrieve_node_specific_operator_logs function."""

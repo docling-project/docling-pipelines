@@ -92,7 +92,7 @@ class TestCreateLogFolders:
         """An unknown log type raises ValueError and leaves the disk untouched (#668)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("docpipe.utils.orchestration.flow_utils.get_data_path", return_value=tmpdir):
-                with pytest.raises(ValueError, match="other"):
+                with pytest.raises(ValueError, match=r"^Unknown log type 'other'"):
                     create_log_folders("job_x", "run_y", "other")
 
             assert not (Path(tmpdir) / "job_x").exists()
