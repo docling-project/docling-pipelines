@@ -131,8 +131,15 @@ sees.
 | `ingest_source` | `sources[0]` = `{input: provider, name, paths}` | provider-specific location keys only (see D5) |
 | `chunker` | `chunk_details = {type, size}` | `chunk_type`, `chunk_size` in node config |
 | `embeddings` | `embeddings[0] = {type: "dense", provider, model_id, feature, dimension_size}` | node `provider` (default `litellm`, the operator default); `provider_config.model_id`; `embeddings_column` (default `embeddings`); dimension from the stored table |
-| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name, add_sparse_vector}` | `provider`, `provider_config.index_name` / `collection_name`, `add_sparse_vector` (default `false`, the operator default) |
+| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name, add_sparse_vector}` | `provider`, `provider_config.index_name` / `collection_name`, effective sparse mode (see below) |
 | `lang_detect`, `acl_operator` | `type`, `node_id`, `name` only | used for derived fields |
+
+**Effective sparse mode.** `add_sparse_vector` is not a single key. The vectordb operator copies the node-level
+`add_sparse_vector` over the same key in `provider_config` when the node sets it (so the node wins), the Milvus and
+Weaviate adapters read it from `provider_config`, and Milvus also enters sparse mode from `provider_config.vector_mode`
+equal to `sparse`. The builder mirrors that order: node key if present, else `provider_config.add_sparse_vector`, else
+`vector_mode == "sparse"`, else false. Reading only the node key would record `false` for flows that follow the Milvus
+documentation. The value is a boolean derived from three non-secret settings, so it adds no secret exposure.
 
 Everything is read with `.get()` and type-checked, so malformed node configs degrade to null fields.
 

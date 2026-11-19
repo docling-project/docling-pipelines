@@ -181,7 +181,7 @@ For an upstream `embeddings` node, the entry SHALL carry one `embeddings` item w
 - **THEN** its entry shows `dimension_size` 384 and `feature` `embeddings`
 
 ### Requirement: Vector database derivative store
-For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whose `name` is the provider, whose `path` is the index or collection name, and whose `add_sparse_vector` is the node's `add_sparse_vector` setting (false when unset). The entry SHALL NOT record hosts, URIs, ports, or any connection parameter.
+For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whose `name` is the provider, whose `path` is the index or collection name, and whose `add_sparse_vector` is true when the node runs in sparse mode and false otherwise. Sparse mode is set by the node's `add_sparse_vector` when present, otherwise by `provider_config.add_sparse_vector`, or by `provider_config.vector_mode` equal to `sparse`. The entry SHALL NOT record hosts, URIs, ports, or any connection parameter.
 
 #### Scenario: OpenSearch index
 - **WHEN** a vectordb node uses provider `opensearch` with index `docs_v1`
@@ -191,8 +191,20 @@ For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whos
 - **WHEN** a vectordb node sets `add_sparse_vector` to true
 - **THEN** its derivative store shows `add_sparse_vector` true
 
+#### Scenario: Sparse flag in provider configuration
+- **WHEN** a vectordb node sets `add_sparse_vector` to true only inside `provider_config`
+- **THEN** its derivative store shows `add_sparse_vector` true
+
+#### Scenario: Node setting wins
+- **WHEN** a vectordb node sets `add_sparse_vector` to false and `provider_config.add_sparse_vector` to true
+- **THEN** its derivative store shows `add_sparse_vector` false
+
+#### Scenario: Sparse vector mode
+- **WHEN** a Milvus vectordb node sets `provider_config.vector_mode` to `sparse` and no `add_sparse_vector`
+- **THEN** its derivative store shows `add_sparse_vector` true
+
 #### Scenario: Sparse vectors default
-- **WHEN** a vectordb node does not set `add_sparse_vector`
+- **WHEN** no sparse setting is present
 - **THEN** its derivative store shows `add_sparse_vector` false
 
 #### Scenario: Connection parameters excluded
