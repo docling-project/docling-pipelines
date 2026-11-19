@@ -7,7 +7,7 @@
 import { enrichFlowFeatures } from '@/services/api';
 import { log4js, logUtil } from '@/utils/logger';
 import type { FeatureAttributes } from '@/types';
-import { VECTORDB_ATTRIBUTES } from '@/components/PropertiesPanel/CustomPanels/VectorDB/constants';
+import { VECTORDB_ATTRIBUTES } from '@/components/PropertiesPanel';
 
 const logger = log4js.getLogger('fetchNodeFeatures');
 

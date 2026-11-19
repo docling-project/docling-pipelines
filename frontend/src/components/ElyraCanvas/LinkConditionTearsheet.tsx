@@ -34,9 +34,9 @@ import type { FeatureAttributes } from '@/types';
 import {
   type Condition,
   type CriteriaJson,
+  ConditionBuilder,
   LOGICAL,
-} from '../PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
-import { ConditionBuilder } from '../PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilder';
+} from '@/components/PropertiesPanel';
 import {
   convertToEpoch,
   convertFromEpoch,
