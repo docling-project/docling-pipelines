@@ -27,18 +27,18 @@ Configuration (all optional)::
       file: ./data/audit/docpipe-audit.log   # default: <DOCPIPE_DATA_PATH>/audit/docpipe-audit.log
 """
 
-from collections.abc import Callable
-from datetime import UTC, datetime
-from enum import StrEnum
 import functools
 import inspect
 import json
 import logging
-from logging.handlers import TimedRotatingFileHandler
-from pathlib import Path
 import re
 import sys
 import threading
+from collections.abc import Callable
+from datetime import UTC, datetime
+from enum import StrEnum
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 from typing import Any, TypeVar
 
 from docpipe.core.models.actor_context import ActorContext
@@ -94,6 +94,7 @@ class _AuditFileHandler(_UnfilterableMixin, TimedRotatingFileHandler):
 
 
 def _is_audit_handler(handler: logging.Handler) -> bool:
+    """Return whether ``handler`` is an audit handler managed by this module."""
     return isinstance(handler, _UnfilterableMixin)
 
 
@@ -343,10 +344,12 @@ def audited(
     """
 
     def decorator(func: F) -> F:
+        """Wrap ``func`` so calls emit an audit event."""
         signature = inspect.signature(func)
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Execute ``func`` and record success, denial, or error audit outcome."""
             bound = signature.bind(*args, **kwargs)
             actor: ActorContext | None = bound.arguments.get("actor")
             username = actor.username if actor is not None and not actor.is_system else None
