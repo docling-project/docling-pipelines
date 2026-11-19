@@ -24,7 +24,7 @@ import {
   ArrowLeft,
 } from '@carbon/icons-react';
 import { InlineLoading } from '@carbon/react';
-import { ElyraCanvas } from '@/components/ElyraCanvas/ElyraCanvas';
+import { ElyraCanvas } from '@/components/ElyraCanvas';
 import { RunStatusTopPanel } from './RunStatusTopPanel';
 import { RunSidePanel } from './RunSidePanel';
 import { createJobRun } from '@/services/api/actions/job-run-actions';

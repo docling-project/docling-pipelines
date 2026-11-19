@@ -5,9 +5,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from 'react';
-import BottomNotificationPanel from './BottomNotificationPanel/BottomNotificationPanel';
-import type { NotificationItem } from './BottomNotificationPanel/BottomNotificationPanel';
-import TopNotificationBar from './TopNotificationBar/TopNotificationBar';
+import BottomNotificationPanel, { type NotificationItem } from './BottomNotificationPanel';
+import TopNotificationBar from './TopNotificationBar';
 import { VALIDATION_STATUS, HIGHLIGHT_MESSAGE_CODES } from '@/constants/notificationPanel';
 import type { FlowValidationResponse, ValidationActionType } from '@/services/api';
 
