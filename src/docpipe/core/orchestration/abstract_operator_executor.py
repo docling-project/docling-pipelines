@@ -98,7 +98,7 @@ class AbstractOperatorExecutor:
         try:
             out_tables, metadata = self._execute_impl(tables=input_tables)
         except Exception as exc:
-            self._record_node_failure(exc=exc)
+            self._record_failure_for_all_docs(exc=exc)
             raise
         if deleted_rows_list is not None:
             deleted_rows = update_deleted_rows(
@@ -457,7 +457,7 @@ class AbstractOperatorExecutor:
                 exhausted.append(record)
         self._persist_exhausted(records=exhausted)
 
-    def _record_node_failure(self, *, exc: Exception) -> None:
+    def _record_failure_for_all_docs(self, *, exc: Exception) -> None:
         """A node raised: every document of its input failed at this node."""
         if self._resumption_input is None:
             return

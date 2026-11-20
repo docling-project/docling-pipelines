@@ -368,7 +368,7 @@ class TestFailureCapture:
     def test_node_exception_records_every_input_document(self, store):
         executor = self._executor_with_input(store, "d1", "d2")
 
-        executor._record_node_failure(exc=RuntimeError("node down"))
+        executor._record_failure_for_all_docs(exc=RuntimeError("node down"))
 
         node = _existing(store, "d1").failed_node(node_id=NODE_ID)
         assert node.error_message.startswith("RuntimeError")
@@ -393,4 +393,4 @@ class TestFailureCapture:
         executor._resumption_input = _table("d1")
 
         executor._record_failures_from_metadata(metadata={Metrics.External.FAILED_DOCS: [{"id": "d1"}]})
-        executor._record_node_failure(exc=RuntimeError("x"))
+        executor._record_failure_for_all_docs(exc=RuntimeError("x"))

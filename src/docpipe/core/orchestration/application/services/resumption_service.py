@@ -158,6 +158,9 @@ class ResumptionService:
         if record is None:
             return ResumptionDecision.FRESH, None
 
+        if modified_time is None:
+            return ResumptionDecision.FRESH, None
+
         if record.modified_time is not None and modified_time is not None and modified_time > record.modified_time:
             logger.info("Source of document %s changed since its failure; saved failure state invalidated", doc_id)
             self.discard(job_id=job_id, record=record)
