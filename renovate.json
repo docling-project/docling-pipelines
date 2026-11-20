@@ -1,0 +1,91 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "security:openssf-scorecard"
+  ],
+  "timezone": "UTC",
+  "schedule": ["every weekend"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "enabledManagers": [
+    "pep621",
+    "npm",
+    "dockerfile",
+    "docker-compose",
+    "github-actions",
+    "nvm"
+  ],
+  "ignorePaths": [
+    "requirements.txt"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["every weekend"]
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "labels": ["security"]
+  },
+  "packageRules": [
+    {
+      "description": "Group minor + patch Python dependency updates across pyproject.toml and slim/pyproject.toml into one PR to keep both files in sync",
+      "matchManagers": ["pep621"],
+      "matchFileNames": ["pyproject.toml", "slim/pyproject.toml"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Python dependencies (minor + patch)",
+      "automerge": false,
+      "labels": ["dependencies"]
+    },
+    {
+      "description": "Separate PR per major Python dependency bump — requires explicit maintainer review",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-bump"]
+    },
+    {
+      "description": "Group all frontend (npm) minor + patch updates into one PR",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Frontend dependencies (minor + patch)",
+      "automerge": false,
+      "labels": ["dependencies"]
+    },
+    {
+      "description": "Separate PR per major npm dependency bump",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-bump"]
+    },
+    {
+      "description": "Group all GitHub Actions updates into one PR for manual review — no automerge due to supply-chain risk",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions updates",
+      "automerge": false,
+      "labels": ["ci"]
+    },
+    {
+      "description": "Group all Docker image updates into one PR",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "groupName": "Docker image updates",
+      "automerge": false,
+      "labels": ["docker"]
+    },
+    {
+      "description": "Security-sensitive packages in the auth/crypto path — always label for explicit maintainer attention regardless of bump type",
+      "matchPackageNames": [
+        "cryptography",
+        "pyjwt",
+        "python-jose",
+        "pyopenssl",
+        "passlib",
+        "mako"
+      ],
+      "automerge": false,
+      "labels": ["security", "dependencies"]
+    }
+  ]
+}
