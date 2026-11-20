@@ -4465,7 +4465,7 @@ Hexagonal architecture implementation for flow management:
 - Generic asset repositories created by `AssetRepositoryFactory.create_repository(asset_type=Flow)`:
   - **LocalAssetRepository[Flow]**: JSON files on the local filesystem (default)
   - **DuckDBAssetRepository[Flow]**: DuckDB `flows` collection via `KeyValueStoragePort`
-  - **PostgresAssetRepository[Flow]**: PostgreSQL `flows` table
+  - **PostgresAssetRepository[Flow]**: PostgreSQL `<schema>.asset_records` table (`collection = 'flows'`)
 
 #### Document Sets (`assets/document_sets/`)
 
