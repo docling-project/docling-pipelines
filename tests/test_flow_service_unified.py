@@ -1,10 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Test FlowService with unified architecture.
 
 Tests the FlowService that extends AssetService[Flow] to ensure
 Flow-specific business logic works correctly.
 """
 
-import os
 import shutil
 import tempfile
 
@@ -20,11 +22,7 @@ from docpipe.exceptions.docpipe_exceptions import AssetInvalidDataException
 def temp_storage():
     """Create temporary storage directory for tests."""
     temp_dir = tempfile.mkdtemp()
-    # Set environment variable for LocalFlowRepository
-    os.environ["LOCAL_FLOWS_DIR"] = temp_dir
     yield temp_dir
-    # Cleanup
-    del os.environ["LOCAL_FLOWS_DIR"]
     shutil.rmtree(temp_dir)
 
 

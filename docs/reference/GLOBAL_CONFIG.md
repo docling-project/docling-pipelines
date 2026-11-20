@@ -52,6 +52,12 @@ Global configuration is specified in the `global_config` section of your flow de
 }
 ```
 
+### Secrets
+
+The platform does not resolve `vault://` references placed in `global_config`. Put a reference in the `config` of the
+operator node that declares the field. Each node resolves only its own references. See the
+[Secrets Guide](../guides/SECRETS_GUIDE.md).
+
 ---
 
 ## Execution Control
@@ -539,7 +545,7 @@ Required when using work pool strategies (`work-pool-*`).
     "PREFECT_URL": "https://api.prefect.cloud",
     "DOCPIPE_STORAGE_BACKEND": "postgresql",
     "PYTHONPATH": "/app/src",
-    "LOCAL_FLOWS_DIR": "/app/flows",
+    "FLOW_REPOSITORY_BASE_DIR": "/app/flows",
     "DOCPIPE_DATA_PATH": "/data/docpipe"
   }
 }

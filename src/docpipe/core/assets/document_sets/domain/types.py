@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Type definitions for document set domain.
 
 This module defines TypedDict classes for type-safe configuration and responses
@@ -19,24 +22,6 @@ class HealthCheckResult(TypedDict):
     healthy: bool
     message: str
     details: dict[str, Any] | None
-
-
-class RepositoryConfig(TypedDict, total=False):
-    """Configuration for metadata repository adapters.
-
-    Attributes:
-        database_path: Path to the database file (for file-based repositories)
-        connection_string: Connection string for remote databases
-        timeout: Connection timeout in seconds
-        pool_size: Connection pool size for database connections
-        additional_params: Additional adapter-specific parameters
-    """
-
-    database_path: str
-    connection_string: str
-    timeout: int
-    pool_size: int
-    additional_params: dict[str, Any]
 
 
 class DataStoreConfig(TypedDict, total=False):

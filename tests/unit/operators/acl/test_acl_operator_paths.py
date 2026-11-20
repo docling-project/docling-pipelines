@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """ACLOperator tests for metadata parsing, adapter setup and per-document failure handling.
 
 A small fake adapter stands in for the provider; it returns prepared ACLResponse objects
@@ -21,8 +24,8 @@ from docpipe.exceptions.docpipe_exceptions import (
 )
 
 _FACTORY = "docpipe.core.operators.acl.acl_operator.ACLAdapterFactory.create_adapter"
-_INGEST_METADATA = {
-    "provider": "sharepoint",
+_INGEST_METADATA = {"provider": "sharepoint"}
+_CREDENTIALS = {
     "client_id": "client-1",
     "client_secret": "<test-secret>",  # pragma: allowlist secret
     "tenant_id": "tenant-1",
@@ -76,8 +79,14 @@ class LazyResponse:
         raise DocpipeException("group expansion failed for group-1", status_code=502)
 
 
-def _operator(*, fail_on_error: bool) -> ACLOperator:
-    return ACLOperator({"provider_config": {}, "fail_on_error": fail_on_error})
+def _operator(*, fail_on_error: bool, credentials: Any = None) -> ACLOperator:
+    return ACLOperator(
+        {
+            "credentials": _CREDENTIALS if credentials is None else credentials,
+            "provider_config": {},
+            "fail_on_error": fail_on_error,
+        }
+    )
 
 
 def _run(operator: ACLOperator, table: pa.Table, adapter: FakeAdapter) -> tuple[pa.Table, dict]:
@@ -87,7 +96,7 @@ def _run(operator: ACLOperator, table: pa.Table, adapter: FakeAdapter) -> tuple[
 
 
 class TestIngestMetadata:
-    """Provider and credentials come from the first row's metadata."""
+    """The provider comes from the first row's metadata; credentials come from operator config."""
 
     def test_metadata_as_dict_is_accepted(self) -> None:
         table = _table(ids=["a"], metadata=[_INGEST_METADATA])
@@ -95,19 +104,85 @@ class TestIngestMetadata:
         provider, credentials, params = _operator(fail_on_error=True)._extract_ingest_metadata(table)
 
         assert provider == "sharepoint"
-        assert credentials == {k: v for k, v in _INGEST_METADATA.items() if k != "provider"}
+        assert credentials == _CREDENTIALS
         assert params == {}
 
+    def test_provider_missing_is_rejected(self) -> None:
+        table = _table(ids=["a"], metadata=[json.dumps({"provider": ""})])
+
+        with pytest.raises(FlowExecutionFailedException, match="Provider not found in metadata"):
+            _operator(fail_on_error=True).transform(table)
+
+    def test_credentials_in_metadata_are_ignored(self) -> None:
+        """Legacy metadata carrying credentials must not satisfy the operator's own credentials."""
+        legacy = {**_INGEST_METADATA, **_CREDENTIALS}
+        table = _table(ids=["a"], metadata=[json.dumps(legacy)])
+        operator = ACLOperator({"provider_config": {}, "fail_on_error": True})
+
+        with pytest.raises(FlowExecutionFailedException, match="missing required key"):
+            operator.transform(table)
+
     @pytest.mark.parametrize(
-        ("metadata", "message"),
+        ("credentials", "missing"),
         [
-            ({**_INGEST_METADATA, "provider": ""}, "Provider not found in metadata"),
-            ({"provider": "sharepoint", "client_id": "client-1"}, "Credentials not found in metadata"),
+            (None, ["client_id", "client_secret", "tenant_id"]),
+            ({}, ["client_id", "client_secret", "tenant_id"]),
+            ({"client_id": "client-1"}, ["client_secret", "tenant_id"]),
+            ({"client_id": "client-1", "tenant_id": "tenant-1", "client_secret": ""}, ["client_secret"]),
+            ("not-a-dict", ["client_id", "client_secret", "tenant_id"]),
         ],
     )
-    def test_incomplete_metadata_is_rejected(self, metadata: dict, message: str) -> None:
-        with pytest.raises(FlowExecutionFailedException, match=message):
-            _operator(fail_on_error=True).transform(_table(ids=["a"], metadata=[json.dumps(metadata)]))
+    def test_missing_credentials_name_the_missing_keys(self, credentials: Any, missing: list[str]) -> None:
+        config: dict[str, Any] = {"provider_config": {}, "fail_on_error": True}
+        if credentials is not None:
+            config["credentials"] = credentials
+        operator = ACLOperator(config)
+
+        with pytest.raises(FlowExecutionFailedException) as exc_info:
+            operator.transform(_table(ids=["a"]))
+
+        message = str(exc_info.value)
+        for key in missing:
+            assert key in message
+        for key in {"client_id", "client_secret", "tenant_id"} - set(missing):
+            assert key not in message
+
+    def test_missing_credentials_message_has_no_values(self) -> None:
+        operator = _operator(fail_on_error=True, credentials={"client_id": "canary-id-111"})
+
+        with pytest.raises(FlowExecutionFailedException) as exc_info:
+            operator.transform(_table(ids=["a"]))
+
+        assert "canary-id-111" not in str(exc_info.value)
+
+    def test_environment_references_are_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ACL_TEST_CLIENT_SECRET", "env-secret-value")  # pragma: allowlist secret
+        credentials = {**_CREDENTIALS, "client_secret": "${ACL_TEST_CLIENT_SECRET}"}  # pragma: allowlist secret
+
+        _, resolved, _ = _operator(fail_on_error=True, credentials=credentials)._extract_ingest_metadata(
+            _table(ids=["a"])
+        )
+
+        assert resolved["client_secret"] == "env-secret-value"  # pragma: allowlist secret
+
+    def test_unset_environment_reference_does_not_leak_the_reference(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ACL_TEST_UNSET_SECRET", raising=False)
+        credentials = {**_CREDENTIALS, "client_secret": "${ACL_TEST_UNSET_SECRET}"}  # pragma: allowlist secret
+
+        with pytest.raises(FlowExecutionFailedException, match="client_secret") as exc_info:
+            _operator(fail_on_error=True, credentials=credentials)._extract_ingest_metadata(_table(ids=["a"]))
+
+        assert "ACL_TEST_UNSET_SECRET" not in str(exc_info.value)
+
+    def test_credentials_are_passed_to_the_adapter_and_not_to_requests_metadata(self) -> None:
+        adapter = FakeAdapter(responses=[_response(users={"x@contoso.com"})])
+
+        with patch(_FACTORY, return_value=adapter) as factory:
+            _operator(fail_on_error=True).transform(_table(ids=["a"]))
+
+        assert factory.call_args.kwargs["credentials"] == _CREDENTIALS
+        assert adapter.requests[0].credentials == _CREDENTIALS
+        assert not set(_CREDENTIALS) & set(adapter.requests[0].provider_metadata)
 
     def test_invalid_json_is_rejected(self) -> None:
         with pytest.raises(FlowExecutionFailedException, match="Failed to parse metadata JSON"):

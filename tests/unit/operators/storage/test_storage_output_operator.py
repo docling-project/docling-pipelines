@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for StorageOutputOperator — processed_content mode."""
 
 import json as _json
@@ -834,3 +837,34 @@ class TestStorageOutputOperatorMetadata:
         assert "path_template" in props
         assert "overwrite_existing" in props
         assert props["overwrite_existing"][OperatorConstants.Config.DEFAULT] is True
+
+
+class TestStorageOutputOperatorWriteErrorColumn:
+    """The ``write_error`` column is persisted with the table, so registered secret values never reach it."""
+
+    def teardown_method(self):
+        from docpipe.integrations.secrets.registry import get_registry
+
+        get_registry().clear_all()
+
+    def test_write_error_column_is_scrubbed(self):
+        from docpipe.integrations.secrets.registry import register_secret
+
+        marker = "credentials-path-marker-7f3a/token.json"  # pragma: allowlist secret
+        register_secret(value=marker)
+        results = [
+            WriteResult(
+                doc_id="a",
+                doc_name="a.txt",
+                success=False,
+                error_message=f"Failed to load OAuth credentials: Credentials file not found: {marker}",
+            ),
+            WriteResult(doc_id="b", doc_name="b.txt", success=True),
+        ]
+
+        out = StorageOutputOperator._build_output_table(_make_table([_FULL_ROW, _FULL_ROW]), results)
+
+        errors = out["write_error"].to_pylist()
+        assert marker not in (errors[0] or "")
+        assert "Credentials file not found" in errors[0]
+        assert errors[1] is None

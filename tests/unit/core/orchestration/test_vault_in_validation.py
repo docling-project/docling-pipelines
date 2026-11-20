@@ -1,7 +1,11 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for vault reference handling during flow validation."""
 
 import pytest
 
+from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.flow_validator import FlowValidator, ValidateStepResults
 from docpipe.integrations.secrets.secret_provider import (
@@ -47,7 +51,7 @@ def test_parse_vault_reference_invalid() -> None:
 
 
 def test_sanitize_vault_refs_for_validation() -> None:
-    """Test dry-run sanitization of vault references."""
+    """Every reference becomes the one validation sentinel, whatever the key; other values are kept."""
     config = {
         "api_key": "vault://hashicorp/llm/openai#key",  # pragma: allowlist secret
         "credentials": "vault://hashicorp/s3/creds#json",
@@ -57,12 +61,16 @@ def test_sanitize_vault_refs_for_validation() -> None:
         },
         "list_val": ["vault://hashicorp/item1#k", "plain"],
     }
+    sentinel = DocpipeConstants.VALIDATION_SECRET_SENTINEL
+
     sanitized = FlowValidator._sanitize_vault_refs_for_validation(config)
-    assert sanitized["api_key"] == "__vault_placeholder__"  # pragma: allowlist secret
-    assert sanitized["credentials"] == {"__vault_mock__": True}
-    assert sanitized["nested"]["token"] == "__vault_placeholder__"
-    assert sanitized["nested"]["normal_val"] == "hello"
-    assert sanitized["list_val"] == ["__vault_placeholder__", "plain"]
+
+    assert sanitized["api_key"] == sentinel  # type: ignore[index]
+    assert sanitized["credentials"] == sentinel  # type: ignore[index]
+    assert sanitized["nested"]["token"] == sentinel  # type: ignore[index]
+    assert sanitized["nested"]["normal_val"] == "hello"  # type: ignore[index]
+    assert sanitized["list_val"] == [sentinel, "plain"]  # type: ignore[index]
+    assert str(config["api_key"]).startswith("vault://")
 
 
 def test_validate_vault_references_alert() -> None:
@@ -128,3 +136,69 @@ def test_validate_single_vault_ref_malformed() -> None:
     assert len(validate_results.errors) == 1
     assert "malformed vault URI" in validate_results.errors[0].message
     assert len(validate_results.warnings) == 0
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "vault://",
+        "vault://hashicorp",
+        "Bearer vault://hashicorp/api#token",
+        "vault://hashicorp/team-a/../team-b/db#password",
+        "vault://hashicorp/db creds#password",
+    ],
+)
+def test_validate_single_vault_ref_malformed_does_not_echo_value(ref: str) -> None:
+    """Malformed and embedded references are errors that name the config key only."""
+    canary_ref = f"{ref}-CANARY-typo-3c9f"  # pragma: allowlist secret
+    validate_results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+
+    FlowValidator._validate_single_vault_ref(
+        path="provider_config.secret_key",
+        ref=canary_ref,
+        op_def={OperatorConstants.Columns.NAME: "node_1"},
+        validate_results=validate_results,
+    )
+
+    assert len(validate_results.errors) == 1
+    assert len(validate_results.warnings) == 0
+    message = validate_results.errors[0].message
+    assert "provider_config.secret_key" in message
+    assert "CANARY-typo-3c9f" not in message
+    assert "hashicorp" not in message
+    assert validate_results.errors[0].message_code == "VAULT_URI_MALFORMED"
+
+
+def test_validate_vault_references_flags_embedded_reference_in_dag() -> None:
+    """An embedded reference (not at the start of the value) is reported, not skipped."""
+    clear_providers()
+    validator = FlowValidator.__new__(FlowValidator)
+    validate_results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+    dag = [
+        {
+            OperatorConstants.Columns.NAME: "ingest",
+            OperatorConstants.Misc.OPERATOR: "ingest_source",
+            OperatorConstants.Config.CONFIG: {"endpoint_url": "https://host/?k=vault://hashicorp/api#token"},
+        }
+    ]
+
+    validator._validate_vault_references(dag=dag, validate_results=validate_results)
+
+    assert len(validate_results.errors) == 1
+    assert "endpoint_url" in validate_results.errors[0].message
+    assert "hashicorp" not in validate_results.errors[0].message
+
+
+def test_validate_single_vault_ref_valid_and_unregistered_warns_without_error() -> None:
+    clear_providers()
+    validate_results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+
+    FlowValidator._validate_single_vault_ref(
+        path="api_key",
+        ref="vault://unknown-prov/path#key",
+        op_def={OperatorConstants.Columns.NAME: "node_1"},
+        validate_results=validate_results,
+    )
+
+    assert validate_results.errors == []
+    assert len(validate_results.warnings) == 1

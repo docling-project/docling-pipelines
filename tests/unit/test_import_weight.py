@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Import-weight guards for lightweight CLI paths such as ``--list-operators``.
 
 These run in a fresh interpreter so previously imported modules in the pytest process
@@ -52,3 +55,39 @@ class TestLightweightImports:
             "assert {'filesystem', 's3', 'sharepoint', 'onedrive', 'web'} <= names, names"
         )
         assert _loaded_heavy_modules(body=body) == []
+
+
+class TestOperatorBaseImportWeight:
+    """``AbstractOperator`` is the import every isolated custom operator worker pays for (task D.3)."""
+
+    def test_operator_base_does_not_load_the_flow_engine(self):
+        body = "import docpipe.core.operators.abstract_operator"
+        probe = (
+            "import json, sys\n"
+            f"{body}\n"
+            "heavy = ['docling_core', 'pandas', 'docpipe.lib.docpipe_flow_manager', 'docpipe.core.job_management', "
+            "'docpipe.core.orchestration.flow_executor']\n"
+            "print(json.dumps(sorted(m for m in heavy if m in sys.modules)))"
+        )
+        result = subprocess.run(  # nosec B603 - fixed args, no user input
+            [sys.executable, "-c", probe], capture_output=True, text=True, timeout=240, check=False
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        assert json.loads(result.stdout.strip().splitlines()[-1]) == []
+
+    def test_public_flow_manager_import_still_works(self):
+        probe = (
+            "from docpipe import DocpipeFlowManager\n"
+            "import docpipe\n"
+            "assert docpipe.DocpipeFlowManager is DocpipeFlowManager\n"
+            "assert DocpipeFlowManager.__name__ == 'DocpipeFlowManager'\n"
+            "try:\n"
+            "    docpipe.not_a_name\n"
+            "except AttributeError:\n"
+            "    print('ok')\n"
+        )
+        result = subprocess.run(  # nosec B603 - fixed args, no user input
+            [sys.executable, "-c", probe], capture_output=True, text=True, timeout=240, check=False
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        assert result.stdout.strip().splitlines()[-1] == "ok"
