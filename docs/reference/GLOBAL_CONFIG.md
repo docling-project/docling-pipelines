@@ -307,6 +307,23 @@ docling-pipelines --flow-file my_flow.json
 
 `global_storage.config` and `global_storage.postgres` are not merged into a service block. See [Breaking Changes from the Central Config Loader](../guides/ADVANCED_CONFIGURATION.md#breaking-changes-from-the-central-config-loader).
 
+#### PostgreSQL Backend Name and Connection Settings :
+
+`postgres` is the canonical PostgreSQL backend name. `postgresql` is accepted as an alias by the job management, incremental metadata, asset repository, ededup and entity store backends.
+
+PostgreSQL connection settings (`host`, `port`, `database`, `user`, `password`, `schema`, `pool_size`, `max_overflow`, `pool_timeout`) can be written flat, directly under `config`, or nested under a `postgres` key. When both forms are present, the nested value wins for every key it defines and the root keys fill the rest. `DOCPIPE_POSTGRES_*` environment variables are used only for keys absent from both forms.
+
+```yaml
+job_management:
+  storage:
+    type: postgres
+    config:
+      host: db.internal           # root key, used because the nested block does not set host
+      postgres:
+        database: docpipe         # nested keys win over root keys
+        user: docpipe_user
+```
+
 #### Configuration Precedence :
 
 Configuration is resolved in the following order (highest to lowest priority):

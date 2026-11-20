@@ -19,7 +19,17 @@
 # a service block that exists. DOCPIPE_STORAGE_BACKEND and DOCPIPE_FRAMEWORK_TYPE no
 # longer override this file. See docs/guides/ADVANCED_CONFIGURATION.md, "Breaking Changes".
 #
-# Supported storage types: filesystem, postgresql, duckdb, inmemory
+# Supported storage types: filesystem, postgres, duckdb, inmemory
+# "postgres" is the canonical name; "postgresql" is accepted as an alias.
+#
+# PostgreSQL connection settings may be flat (host, port, ... directly under "config") or
+# nested under a "postgres:" key. When both are present, the nested value wins for every
+# key it defines and root keys fill the rest. Environment variables (DOCPIPE_POSTGRES_*)
+# are used only for keys absent from both forms.
+#
+# Filesystem job stats: when job_management.storage.config.base_dir is set, run
+# directories are written to <base_dir>/job_stats/<job_run_id>/ ("job_stats" is
+# appended unless base_dir already ends with it).
 global_storage:
   type: "filesystem"  # Default storage type for all services
 
