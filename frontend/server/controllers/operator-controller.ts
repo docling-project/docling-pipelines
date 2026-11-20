@@ -25,7 +25,8 @@ const fetchOperatorMetadata = async (req: Request, res: Response): Promise<void>
  */
 const enrichFlowFeatures = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'POST',
       path: ['api', 'v1', 'validation', 'enrich_flow_features'],
       body: req.body,
@@ -56,7 +57,8 @@ const fetchProviderModels = async (req: Request, res: Response): Promise<void> =
   }
 
   try {
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'providers', provider, 'models'],
       query: { api_base: apiBase },

@@ -20,6 +20,8 @@ export interface UseAuthReturn {
   isAuthenticated: boolean;
   /** `true` while the auth state is `idle` or `loading`. */
   isLoading: boolean;
+  /** `true` when bootstrapping auth failed with a server or network error. */
+  isError: boolean;
   /** `true` for `editor` or `admin`. */
   canEdit: boolean;
   /** `true` for `admin`. */
@@ -59,6 +61,7 @@ export function useAuth(): UseAuthReturn {
     authEnabled,
     isAuthenticated: status === 'authenticated',
     isLoading: status === 'idle' || status === 'loading',
+    isError: status === 'error',
     canEdit,
     canAdmin,
     canModifyAsset,

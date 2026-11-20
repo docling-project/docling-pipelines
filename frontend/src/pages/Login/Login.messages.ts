@@ -65,9 +65,29 @@ export const messages = defineMessages({
     id: 'src.pages.Login.errorRetryLater',
     defaultMessage: 'Too many failed attempts. Please retry later.',
   },
+  errorRetryAfter: {
+    id: 'src.pages.Login.errorRetryAfter',
+    defaultMessage: 'Too many failed attempts. Please retry in {seconds} seconds.',
+  },
   errorNoLoginMethod: {
     id: 'src.pages.Login.errorNoLoginMethod',
     defaultMessage: 'No login method is currently configured.',
+  },
+  loadingSignInOptions: {
+    id: 'src.pages.Login.loadingSignInOptions',
+    defaultMessage: 'Loading sign-in options...',
+  },
+  loadOptionsErrorTitle: {
+    id: 'src.pages.Login.loadOptionsErrorTitle',
+    defaultMessage: 'Could not load sign-in options',
+  },
+  loadOptionsErrorSubtitle: {
+    id: 'src.pages.Login.loadOptionsErrorSubtitle',
+    defaultMessage: 'The authentication service could not be reached. Please try again.',
+  },
+  retryButton: {
+    id: 'src.pages.Login.retryButton',
+    defaultMessage: 'Retry',
   },
   providerButton: {
     id: 'src.pages.Login.providerButton',

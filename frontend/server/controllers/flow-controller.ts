@@ -43,7 +43,8 @@ const getFlows = async (req: Request, res: Response): Promise<void> => {
   try {
     const { limit, offset, name, tags, is_hidden } = req.query;
 
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'flows'],
       query: {
@@ -158,7 +159,8 @@ const bulkDeleteFlows = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'DELETE',
       path: ['api', 'v1', 'flows'],
       query: { flow_ids: flowIds },
@@ -179,7 +181,8 @@ const getFlowsByProject = async (req: Request, res: Response): Promise<void> => 
     const projectId = routeParam(req.params.projectId);
     const { limit, offset, name, tags } = req.query;
 
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'projects', projectId, 'flows'],
       query: {

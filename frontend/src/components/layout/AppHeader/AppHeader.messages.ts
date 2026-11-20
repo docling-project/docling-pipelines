@@ -37,6 +37,14 @@ export const messages = defineMessages({
     id: 'src.components.layout.AppHeader.signOut',
     defaultMessage: 'Sign out',
   },
+  signOutFailedTitle: {
+    id: 'src.components.layout.AppHeader.signOutFailedTitle',
+    defaultMessage: 'Sign-out incomplete',
+  },
+  signOutFailedSubtitle: {
+    id: 'src.components.layout.AppHeader.signOutFailedSubtitle',
+    defaultMessage: 'Could not reach the server to end your session. Your server session may still be active.',
+  },
   rolesLabel: {
     id: 'src.components.layout.AppHeader.rolesLabel',
     defaultMessage: 'Roles',

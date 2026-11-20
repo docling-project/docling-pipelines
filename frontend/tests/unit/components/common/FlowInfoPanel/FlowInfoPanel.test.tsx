@@ -121,9 +121,8 @@ describe('FlowInfoPanel permission gating', () => {
     expect(screen.getByText('Only the owner or an administrator can change this', { selector: '[role="tooltip"] *' })).toBeInTheDocument();
   });
 
-  // Canvas does not pass created_by: the owner is resolved from the store (default fixture: "test-user").
-  describe('without created_by (Canvas usage)', () => {
-    function renderCanvasStyle(username: string, role: 'viewer' | 'editor' | 'admin') {
+  describe('without created_by (unowned flow, no Redux store fallback)', () => {
+    function renderWithoutOwner(username: string, role: 'viewer' | 'editor' | 'admin') {
       renderWithProviders(
         <FlowInfoPanel flow={SAMPLE_FLOW} onClose={vi.fn()} onViewFlow={vi.fn()} onViewProject={vi.fn()} onEdit={vi.fn()} />,
         { preloadedState: { auth: authStateFixture({ role, username }) } }
@@ -131,20 +130,16 @@ describe('FlowInfoPanel permission gating', () => {
       return screen.getByRole('button', { name: 'Edit flow details' });
     }
 
-    it('enables edit for the owning editor', () => {
-      expect(renderCanvasStyle('test-user', 'editor').hasAttribute('disabled')).toBe(false);
-    });
-
-    it('disables edit for a non-owner editor', () => {
-      expect(renderCanvasStyle('someone-else', 'editor').hasAttribute('disabled')).toBe(true);
+    it('enables edit for an editor regardless of Redux flow owner when created_by is omitted', () => {
+      expect(renderWithoutOwner('someone-else', 'editor').hasAttribute('disabled')).toBe(false);
     });
 
     it('enables edit for an admin', () => {
-      expect(renderCanvasStyle('someone-else', 'admin').hasAttribute('disabled')).toBe(false);
+      expect(renderWithoutOwner('someone-else', 'admin').hasAttribute('disabled')).toBe(false);
     });
 
     it('disables edit for a viewer', () => {
-      expect(renderCanvasStyle('test-user', 'viewer').hasAttribute('disabled')).toBe(true);
+      expect(renderWithoutOwner('test-user', 'viewer').hasAttribute('disabled')).toBe(true);
     });
   });
 });

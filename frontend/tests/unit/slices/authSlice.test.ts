@@ -87,21 +87,23 @@ describe('authSlice', () => {
       expect(auth.user?.roles).toContain('admin');
     });
 
-    it('stores an error when /auth/config fails', async () => {
+    it('sets status to error and stores error when /auth/config fails', async () => {
       mocked.getAuthConfig.mockRejectedValue(httpError(500, 'Server down'));
       const store = makeStore();
       await store.dispatch(bootstrapAuth());
       const { auth } = store.getState();
-      expect(auth.status).toBe('unauthenticated');
+      expect(auth.status).toBe('error');
+      expect(auth.user).toBeNull();
       expect(auth.error).toBe('Server down');
     });
 
-    it('stores an error when /auth/me fails with a non-401', async () => {
+    it('sets status to error and stores error when /auth/me fails with a non-401', async () => {
       mocked.getAuthConfig.mockResolvedValue(ok(enabledConfig));
       mocked.getMe.mockRejectedValue(httpError(500, 'Oops'));
       const store = makeStore();
       await store.dispatch(bootstrapAuth());
-      expect(store.getState().auth.status).toBe('unauthenticated');
+      expect(store.getState().auth.status).toBe('error');
+      expect(store.getState().auth.user).toBeNull();
       expect(store.getState().auth.error).toBe('Oops');
     });
   });

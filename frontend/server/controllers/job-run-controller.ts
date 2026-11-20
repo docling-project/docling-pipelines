@@ -27,7 +27,8 @@ const getJobRuns = async (req: Request, res: Response): Promise<void> => {
   try {
     const { job_id, status, limit } = req.query;
 
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'job_runs'],
       query: {
@@ -50,7 +51,8 @@ const getJobRuns = async (req: Request, res: Response): Promise<void> => {
 const getJobRun = async (req: Request, res: Response): Promise<void> => {
   try {
     const jobRunId = routeParam(req.params.jobRunId);
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'job_runs', jobRunId],
       query: { include_logs: queryString(req.query.include_logs) ?? 'false' },
@@ -102,7 +104,8 @@ const downloadJobRunReport = async (req: Request, res: Response): Promise<void> 
   try {
     const jobRunId = routeParam(req.params.jobRunId);
 
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'job_runs', jobRunId, 'report'],
       accept: 'text/csv',

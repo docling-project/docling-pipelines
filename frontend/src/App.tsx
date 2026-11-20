@@ -103,45 +103,47 @@ function App(): React.JSX.Element {
     <ErrorBoundary>
       <BrowserRouter basename="/ui">
         <Theme theme={theme}>
-          <ThemeElementContext.Provider value={themeElement}>
-          <BreadcrumbActionsContext.Provider value={breadcrumbContextValue}>
-            <Routes>
-              {/* Public pages outside the shell */}
-              <Route path="/login" element={loginPage} />
-              <Route path="/error" element={errorPage} />
+          <div ref={themeRefCallback}>
+            <ThemeElementContext.Provider value={themeElement}>
+            <BreadcrumbActionsContext.Provider value={breadcrumbContextValue}>
+              <Routes>
+                {/* Public pages outside the shell */}
+                <Route path="/login" element={loginPage} />
+                <Route path="/error" element={errorPage} />
 
-              {/* Root redirect */}
-              <Route path="/" element={<Navigate to={ROUTES.HOME} replace />} />
+                {/* Root redirect */}
+                <Route path="/" element={<Navigate to={ROUTES.HOME} replace />} />
 
-              {/* Protected shell routes */}
-              <Route
-                element={
-                  <ProtectedRoute>
-                    <div ref={themeRefCallback} className={styles.appContainer}>
-                      <AppHeader />
-                      {/* Breadcrumb sits in normal flow, offset below the fixed header */}
-                      <div className={styles.breadcrumbRow}>
-                        <Breadcrumb />
+                {/* Protected shell routes */}
+                <Route
+                  element={
+                    <ProtectedRoute>
+                      <div className={styles.appContainer}>
+                        <AppHeader />
+                        {/* Breadcrumb sits in normal flow, offset below the fixed header */}
+                        <div className={styles.breadcrumbRow}>
+                          <Breadcrumb />
+                        </div>
+                        {/* Only this div scrolls — height fills remaining space */}
+                        <div className={styles.pageContent}>
+                          <Outlet />
+                        </div>
                       </div>
-                      {/* Only this div scrolls — height fills remaining space */}
-                      <div className={styles.pageContent}>
-                        <Outlet />
-                      </div>
-                    </div>
-                  </ProtectedRoute>
-                }
-              >
-                {/* Data-driven shell routes */}
-                {appShellRoutes}
+                    </ProtectedRoute>
+                  }
+                >
+                  {/* Data-driven shell routes */}
+                  {appShellRoutes}
 
-                {/* 404 catch-all inside shell */}
-                <Route path="*" element={notFoundPage} />
-              </Route>
-            </Routes>
-          </BreadcrumbActionsContext.Provider>
-          </ThemeElementContext.Provider>
-          {/* Global toast container — mounted once, reads from Redux notifications slice */}
-          <ToastContainer />
+                  {/* 404 catch-all inside shell */}
+                  <Route path="*" element={notFoundPage} />
+                </Route>
+              </Routes>
+            </BreadcrumbActionsContext.Provider>
+            </ThemeElementContext.Provider>
+            {/* Global toast container — mounted once, reads from Redux notifications slice */}
+            <ToastContainer />
+          </div>
         </Theme>
       </BrowserRouter>
     </ErrorBoundary>

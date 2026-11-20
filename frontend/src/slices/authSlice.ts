@@ -120,12 +120,21 @@ export const logoutUser = createAsyncThunk<void, void>(
 const authSlice = createSlice({
   name: 'auth',
   initialState,
-  reducers: {},
+  reducers: {
+    clearSession(state) {
+      state.user = null;
+      state.status = 'unauthenticated';
+      state.error = null;
+      state.errorStatus = null;
+      state.retryAfter = null;
+    },
+  },
   extraReducers: (builder) => {
     builder
       .addCase(bootstrapAuth.pending, (state) => {
         state.status = 'loading';
         state.error = null;
+        state.errorStatus = null;
       })
       .addCase(bootstrapAuth.fulfilled, (state, action) => {
         const { config, user } = action.payload;
@@ -135,11 +144,13 @@ const authSlice = createSlice({
         state.user = user;
         state.status = user ? 'authenticated' : 'unauthenticated';
         state.error = null;
+        state.errorStatus = null;
       })
       .addCase(bootstrapAuth.rejected, (state, action) => {
         state.user = null;
-        state.status = 'unauthenticated';
+        state.status = 'error';
         state.error = action.payload?.message ?? action.error.message ?? null;
+        state.errorStatus = action.payload?.status ?? null;
       })
       .addCase(loginUser.pending, (state) => {
         state.error = null;
@@ -172,5 +183,7 @@ const authSlice = createSlice({
       );
   },
 });
+
+export const { clearSession } = authSlice.actions;
 
 export default authSlice.reducer;

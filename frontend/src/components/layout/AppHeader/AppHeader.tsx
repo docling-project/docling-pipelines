@@ -16,7 +16,7 @@ import { Asleep, Light, Notification, UserAvatar } from '@carbon/icons-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useIntl } from 'react-intl';
 import { go } from '@/utils';
-import { useTheme, useAppDispatch } from '@/hooks';
+import { useTheme, useAppDispatch, useNotify } from '@/hooks';
 import { useAuth } from '@/hooks/useAuth';
 import { logoutUser } from '@/slices/authSlice';
 import { useAppSelector } from '@/hooks/useAppSelector';
@@ -48,6 +48,7 @@ export function AppHeader(): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useAppDispatch();
+  const notify = useNotify();
   const { user, authEnabled } = useAuth();
 
   const unreadCount = useAppSelector(selectNotificationUnreadCount);
@@ -81,10 +82,15 @@ export function AppHeader(): React.JSX.Element {
   const handleSignOut = useCallback((): void => {
     setProfileOpen(false);
     void (async () => {
-      await dispatch(logoutUser());
+      const result = await dispatch(logoutUser());
+      if (logoutUser.rejected.match(result)) {
+        notify.warning(intl.formatMessage(messages.signOutFailedTitle), {
+          subtitle: intl.formatMessage(messages.signOutFailedSubtitle),
+        });
+      }
       void navigate(ROUTES.LOGIN);
     })();
-  }, [dispatch, navigate]);
+  }, [dispatch, intl, navigate, notify]);
 
   return (
     <>

@@ -23,8 +23,9 @@ import {
   selectAuthState,
   selectAuthStatus,
   selectCredentialLogin,
+  selectRetryAfterSeconds,
 } from '@/selectors';
-import { loginUser } from '@/slices/authSlice';
+import { bootstrapAuth, loginUser } from '@/slices/authSlice';
 import { sanitizeReturnTo } from '@/utils/return-to';
 import { LoginHeader } from './LoginHeader';
 import { messages } from './Login.messages';
@@ -53,6 +54,7 @@ export function Login(): React.JSX.Element {
   const status = useAppSelector(selectAuthStatus);
   const error = useAppSelector(selectAuthError);
   const { errorStatus } = useAppSelector(selectAuthState);
+  const retryAfter = useAppSelector(selectRetryAfterSeconds);
   const credentialLogin = useAppSelector(selectCredentialLogin);
   const providers = useAppSelector(selectAuthProviders);
 
@@ -127,7 +129,9 @@ export function Login(): React.JSX.Element {
 
     let displayMessage = error;
     if (errorStatus === 429) {
-      displayMessage = intl.formatMessage(messages.errorRetryLater);
+      displayMessage = retryAfter !== null
+        ? intl.formatMessage(messages.errorRetryAfter, { seconds: retryAfter })
+        : intl.formatMessage(messages.errorRetryLater);
     }
 
     return (
@@ -153,6 +157,8 @@ export function Login(): React.JSX.Element {
     return `${authorizeUrl}${separator}return_to=${encodeURIComponent(returnTo)}`;
   };
 
+  const isBootstrapping = status === 'idle' || status === 'loading';
+  const isBootstrapError = status === 'error';
   const hasCredentialLogin = credentialLogin;
   const hasProviders = providers && providers.length > 0;
 
@@ -183,102 +189,128 @@ export function Login(): React.JSX.Element {
                 <p className={styles.helper}>{intl.formatMessage(messages.formHelper)}</p>
               </div>
 
-              {!hasCredentialLogin && !hasProviders && (
-                <InlineNotification
-                  kind="error"
-                  title={intl.formatMessage(messages.title)}
-                  subtitle={intl.formatMessage(messages.errorNoLoginMethod)}
-                  hideCloseButton
-                  lowContrast
-                  role="alert"
-                  className={styles.notification}
-                />
-              )}
-
-              {renderNotification()}
-
-              {hasCredentialLogin && (
-                <Form onSubmit={handleSubmit}>
-                  <Stack gap={6}>
-                    <TextInput
-                      ref={usernameInputRef}
-                      id="username"
-                      labelText={intl.formatMessage(messages.usernameLabel)}
-                      placeholder={intl.formatMessage(messages.usernamePlaceholder)}
-                      autoComplete="username"
-                      autoFocus
-                      value={username}
-                      onChange={(e) => {
-                        setUsername(e.target.value);
-                        if (usernameError) {
-                          setUsernameError('');
-                        }
-                      }}
-                      onBlur={handleUsernameBlur}
-                      invalid={Boolean(usernameError)}
-                      invalidText={usernameError}
-                      disabled={isSubmitting}
-                    />
-                    <PasswordInput
-                      id="password"
-                      labelText={intl.formatMessage(messages.passwordLabel)}
-                      placeholder={intl.formatMessage(messages.passwordPlaceholder)}
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
-                        if (passwordError) {
-                          setPasswordError('');
-                        }
-                      }}
-                      onBlur={handlePasswordBlur}
-                      invalid={Boolean(passwordError)}
-                      invalidText={passwordError}
-                      disabled={isSubmitting}
-                    />
-                    <Button
-                      type="submit"
-                      size="lg"
-                      renderIcon={isSubmitting ? undefined : ArrowRight}
-                      className={styles.fullWidthBtn}
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? (
-                        <InlineLoading description={intl.formatMessage(messages.logInLoading)} />
-                      ) : (
-                        intl.formatMessage(messages.logInButton)
-                      )}
-                    </Button>
-                  </Stack>
-                </Form>
-              )}
-
-              {hasCredentialLogin && hasProviders && (
-                <div className={styles.divider}>
-                  {intl.formatMessage(messages.dividerOr)}
-                </div>
-              )}
-
-              {hasProviders && (
+              {isBootstrapping ? (
+                <InlineLoading description={intl.formatMessage(messages.loadingSignInOptions)} />
+              ) : isBootstrapError ? (
                 <Stack gap={4}>
-                  {providers.map((provider) => (
-                    <Button
-                      key={provider.name}
-                      kind="tertiary"
-                      size="lg"
-                      renderIcon={LoginIcon}
-                      className={styles.fullWidthBtn}
-                      onClick={() => {
-                        const targetUrl = getProviderUrl(provider.authorize_url);
-                        if (targetUrl !== '#') {
-                          window.location.assign(targetUrl);
-                        }
-                      }}
-                    >
-                      {intl.formatMessage(messages.providerButton, { provider: provider.display_name })}
-                    </Button>
-                  ))}
+                  <InlineNotification
+                    kind="error"
+                    title={intl.formatMessage(messages.loadOptionsErrorTitle)}
+                    subtitle={intl.formatMessage(messages.loadOptionsErrorSubtitle)}
+                    hideCloseButton
+                    lowContrast
+                    role="alert"
+                    className={styles.notification}
+                  />
+                  <Button
+                    kind="primary"
+                    size="lg"
+                    className={styles.fullWidthBtn}
+                    onClick={() => { void dispatch(bootstrapAuth()); }}
+                  >
+                    {intl.formatMessage(messages.retryButton)}
+                  </Button>
                 </Stack>
+              ) : (
+                <>
+                  {!hasCredentialLogin && !hasProviders && (
+                    <InlineNotification
+                      kind="error"
+                      title={intl.formatMessage(messages.title)}
+                      subtitle={intl.formatMessage(messages.errorNoLoginMethod)}
+                      hideCloseButton
+                      lowContrast
+                      role="alert"
+                      className={styles.notification}
+                    />
+                  )}
+
+                  {renderNotification()}
+
+                  {hasCredentialLogin && (
+                    <Form onSubmit={handleSubmit}>
+                      <Stack gap={6}>
+                        <TextInput
+                          ref={usernameInputRef}
+                          id="username"
+                          labelText={intl.formatMessage(messages.usernameLabel)}
+                          placeholder={intl.formatMessage(messages.usernamePlaceholder)}
+                          autoComplete="username"
+                          autoFocus
+                          value={username}
+                          onChange={(e) => {
+                            setUsername(e.target.value);
+                            if (usernameError) {
+                              setUsernameError('');
+                            }
+                          }}
+                          onBlur={handleUsernameBlur}
+                          invalid={Boolean(usernameError)}
+                          invalidText={usernameError}
+                          disabled={isSubmitting}
+                        />
+                        <PasswordInput
+                          id="password"
+                          labelText={intl.formatMessage(messages.passwordLabel)}
+                          placeholder={intl.formatMessage(messages.passwordPlaceholder)}
+                          autoComplete="current-password"
+                          value={password}
+                          onChange={(e) => {
+                            setPassword(e.target.value);
+                            if (passwordError) {
+                              setPasswordError('');
+                            }
+                          }}
+                          onBlur={handlePasswordBlur}
+                          invalid={Boolean(passwordError)}
+                          invalidText={passwordError}
+                          disabled={isSubmitting}
+                        />
+                        <Button
+                          type="submit"
+                          size="lg"
+                          renderIcon={isSubmitting ? undefined : ArrowRight}
+                          className={styles.fullWidthBtn}
+                          disabled={isSubmitting}
+                        >
+                          {isSubmitting ? (
+                            <InlineLoading description={intl.formatMessage(messages.logInLoading)} />
+                          ) : (
+                            intl.formatMessage(messages.logInButton)
+                          )}
+                        </Button>
+                      </Stack>
+                    </Form>
+                  )}
+
+                  {hasCredentialLogin && hasProviders && (
+                    <div className={styles.divider}>
+                      {intl.formatMessage(messages.dividerOr)}
+                    </div>
+                  )}
+
+                  {hasProviders && (
+                    <Stack gap={4}>
+                      {providers.map((provider) => (
+                        <Button
+                          key={provider.name}
+                          kind="tertiary"
+                          size="lg"
+                          renderIcon={LoginIcon}
+                          className={styles.fullWidthBtn}
+                          onClick={() => {
+                            const targetUrl = getProviderUrl(provider.authorize_url);
+                            if (targetUrl !== '#') {
+                              window.location.assign(targetUrl);
+                            }
+                          }}
+                        >
+                          {intl.formatMessage(messages.providerButton, { provider: provider.display_name })}
+                        </Button>
+                      ))}
+                    </Stack>
+                  )}
+                </>
               )}
             </Stack>
 

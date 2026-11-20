@@ -7,16 +7,99 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios';
-import { createIntl, createIntlCache } from 'react-intl';
+import { createIntl, createIntlCache, type IntlShape } from 'react-intl';
 import { log4js, logUtil } from '@/utils/logger';
 import { DEFAULT_LOCALE } from '@/i18n';
+import { addNotification } from '@/slices/notificationsSlice';
 import { messages } from './client.messages';
 
 const logger = log4js.getLogger('api.client');
 
-// The client runs outside React, so it cannot use useIntl. Only the default locale is
-// supported today; the message ids still live in messages_en.json for translation.
-const intl = createIntl({ locale: DEFAULT_LOCALE, defaultLocale: DEFAULT_LOCALE }, createIntlCache());
+/** Minimal store interface needed by the HTTP client interceptors. */
+export interface ApiClientStore {
+  getState: () => { auth: { status: string } };
+  dispatch: (action: unknown) => unknown;
+}
+
+/** Configuration injected at app startup via {@link configureApiClient}. */
+export interface ApiClientConfig {
+  store?: ApiClientStore;
+  intl?: IntlShape;
+}
+
+let configuredStore: ApiClientStore | null = null;
+let configuredIntl: IntlShape | null = null;
+let fallbackIntl: IntlShape | null = null;
+let isRedirecting = false;
+
+/**
+ * Configures the API client with the application Redux store and react-intl instance.
+ * Called once during startup in `main.tsx` to avoid circular module imports and
+ * to keep interceptor notifications aligned with the active locale.
+ */
+export function configureApiClient(config: ApiClientConfig): void {
+  if (config.store !== undefined) {
+    configuredStore = config.store;
+  }
+  if (config.intl !== undefined) {
+    configuredIntl = config.intl;
+  }
+  isRedirecting = false;
+}
+
+/** Resets the 401 redirect latch (e.g. on bfcache restore or between tests). */
+export function resetAuthRedirectLatch(): void {
+  isRedirecting = false;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', () => {
+    isRedirecting = false;
+  });
+}
+
+function getIntl(): IntlShape {
+  if (configuredIntl) {
+    return configuredIntl;
+  }
+  fallbackIntl ??= createIntl(
+    { locale: DEFAULT_LOCALE, defaultLocale: DEFAULT_LOCALE },
+    createIntlCache()
+  );
+  return fallbackIntl;
+}
+
+async function getStore(): Promise<ApiClientStore> {
+  if (configuredStore) {
+    return configuredStore;
+  }
+  // Safe fallback for isolated unit tests that import apiClient without calling configureApiClient.
+  const { store } = await import('@/store');
+  return store;
+}
+
+/**
+ * Strips the `/ui` router basename from a pathname without touching paths
+ * that merely share the prefix (such as `/uix/foo`).
+ */
+export function stripUiBasename(pathname: string): string {
+  if (pathname === '/ui') {
+    return '/';
+  }
+  if (pathname.startsWith('/ui/')) {
+    return pathname.slice(3);
+  }
+  return pathname.startsWith('/') ? pathname : `/${pathname}`;
+}
+
+function stripQueryAndHash(url: string): string {
+  return url.split(/[?#]/)[0] ?? '';
+}
+
+function isOnLoginRoute(pathname: string): boolean {
+  const normalized = stripUiBasename(pathname);
+  return normalized === '/login' || normalized.startsWith('/login/');
+}
 
 /**
  * Create configured axios instance.
@@ -65,8 +148,6 @@ apiClient.interceptors.request.use(
   }
 );
 
-let isRedirecting = false;
-
 /**
  * Response Interceptor - Logs responses and handles errors
  */
@@ -79,8 +160,8 @@ apiClient.interceptors.response.use(
     });
 
     // Reset redirect latch on successful auth/login/me calls
-    const url = response.config.url ?? '';
-    if (url.endsWith('/auth/login') || url.endsWith('/auth/me')) {
+    const cleanUrl = stripQueryAndHash(response.config.url ?? '');
+    if (cleanUrl.endsWith('/auth/login') || cleanUrl.endsWith('/auth/me')) {
       isRedirecting = false;
     }
 
@@ -93,36 +174,39 @@ apiClient.interceptors.response.use(
     }
 
     const status = error.response?.status;
-    const url = error.config?.url ?? '';
+    const cleanUrl = stripQueryAndHash(error.config?.url ?? '');
 
     if (status === 401) {
-      const isLogin = url.endsWith('/auth/login');
+      const isExemptEndpoint =
+        cleanUrl.endsWith('/auth/login') ||
+        cleanUrl.endsWith('/auth/logout') ||
+        cleanUrl.endsWith('/auth/config');
 
-      // Resolve dependencies dynamically to avoid circular references during store creation
-      const { store } = await import('@/store');
-      const { logoutUser } = await import('@/slices/authSlice');
+      if (!isExemptEndpoint && !isOnLoginRoute(window.location.pathname)) {
+        const store = await getStore();
+        const authStatus = store.getState().auth.status;
+        const isInitialMe =
+          cleanUrl.endsWith('/auth/me') && (authStatus === 'loading' || authStatus === 'idle');
 
-      const authState = store.getState().auth;
-      const isInitialMe = url.endsWith('/auth/me') && (authState.status === 'loading' || authState.status === 'idle');
-
-      if (!isLogin && !isInitialMe) {
-        if (!isRedirecting) {
+        if (!isInitialMe && !isRedirecting) {
           isRedirecting = true;
 
-          // Clear auth state
-          void store.dispatch(logoutUser());
+          // Synchronously clear local auth & cached domain state before navigating so
+          // cleanup cannot race with window.location.assign or trigger a failing /auth/logout.
+          store.dispatch({ type: 'auth/clearSession' });
 
-          // Navigate to login page outside of React
-          const currentPath = window.location.pathname;
-          const strippedPath = currentPath.startsWith('/ui') ? currentPath.slice(3) : currentPath;
-          const pathWithoutBasename = strippedPath.startsWith('/') ? strippedPath : `/${strippedPath}`;
+          const pathWithoutBasename = stripUiBasename(window.location.pathname);
           const returnTo = encodeURIComponent(pathWithoutBasename + window.location.search);
-          window.location.assign(`/ui/login?return_to=${returnTo}`);
+          try {
+            window.location.assign(`/ui/login?return_to=${returnTo}`);
+          } catch {
+            isRedirecting = false;
+          }
         }
       }
     } else if (status === 403) {
-      const { store } = await import('@/store');
-      const { addNotification } = await import('@/slices/notificationsSlice');
+      const store = await getStore();
+      const intl = getIntl();
 
       store.dispatch(
         addNotification({
