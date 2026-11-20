@@ -15,7 +15,8 @@ import {
 } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import type { FlowRow, FlowRunStatus } from '@/types';
-import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip, usePermissionReason } from '@/components/common';
+import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip } from '@/components/common';
+import { usePermissionReason } from '@/hooks';
 import { messages } from './FlowsTable.messages';
 import styles from './FlowsTable.module.scss';
 

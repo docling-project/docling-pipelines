@@ -14,8 +14,7 @@ import {
   type AriaLabels,
 } from '@carbon-labs/react-animated-header';
 import { ROUTES, generateRoute } from '@/config';
-import { useTheme } from '@/hooks';
-import { usePermissionReason } from '@/components/common/PermissionTooltip';
+import { useTheme, usePermissionReason } from '@/hooks';
 import { useAppSelector } from '@/hooks/useAppSelector';
 import { useRecentlyVisited, type RecentItemType } from '@/hooks/useRecentlyVisited';
 import { selectProjectsArray } from '@/selectors/projectsSelectors';

@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useIntl } from 'react-intl';
 import { useAuth } from '@/hooks/useAuth';
-import { messages } from './PermissionTooltip.messages';
+import { messages } from './usePermissionReason.messages';
 
 /** Return shape of {@link usePermissionReason}. */
 export interface UsePermissionReasonReturn {

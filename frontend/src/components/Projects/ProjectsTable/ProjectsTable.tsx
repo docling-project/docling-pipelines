@@ -3,7 +3,8 @@ import type { ProjectRow } from '@/types';
 import { Button, OverflowMenu, OverflowMenuItem, Tag } from '@carbon/react';
 import { Add, Renew } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
-import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip, usePermissionReason } from '@/components/common';
+import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip } from '@/components/common';
+import { usePermissionReason } from '@/hooks';
 import { messages } from './ProjectsTable.messages';
 import styles from './ProjectsTable.module.scss';
 

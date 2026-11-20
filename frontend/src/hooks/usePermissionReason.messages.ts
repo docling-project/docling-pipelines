@@ -2,11 +2,11 @@ import { defineMessages } from 'react-intl';
 
 export const messages = defineMessages({
   needEditor: {
-    id: 'src.components.common.PermissionTooltip.needEditor',
+    id: 'src.hooks.usePermissionReason.needEditor',
     defaultMessage: 'You need the editor role to do this',
   },
   needOwner: {
-    id: 'src.components.common.PermissionTooltip.needOwner',
+    id: 'src.hooks.usePermissionReason.needOwner',
     defaultMessage: 'Only the owner or an administrator can change this',
   },
 });
