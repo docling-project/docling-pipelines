@@ -99,13 +99,52 @@ def _exception_chain(*, exc: BaseException) -> list[BaseException]:
     return chain
 
 
+def _format_location(*, loc: tuple[int | str, ...]) -> str:
+    """Render a Pydantic location with dots for keys and brackets for list indices."""
+    text = ""
+    for item in loc:
+        if isinstance(item, int):
+            text += f"[{item}]"
+        else:
+            text = f"{text}.{item}" if text else item
+    return text
+
+
+def format_pydantic_errors(*, exc: ValidationError, prefix: str = "") -> list[str]:
+    """Render each Pydantic error as a message that names its field and never includes input values.
+
+    A missing field becomes ``<path> is not provided``. Any other error with a path becomes ``<path>: <message>``,
+    and a model-level error without a path keeps only its message. ``prefix`` is joined to the field path with a
+    dot, so a model-level error with a prefix becomes ``<prefix>: <message>``. A leading ``Value error, `` on a
+    ``value_error`` becomes ``Value error: ``. Input, context and URLs are never extracted, and ``ctx["error"]``
+    is not read.
+
+    Args:
+        exc: The Pydantic validation error to render.
+        prefix: Optional leading path, such as a config key, prepended to every message.
+
+    Returns:
+        One message per error, in the order Pydantic reports them.
+    """
+    messages: list[str] = []
+    for error in exc.errors(include_input=False, include_context=False, include_url=False):
+        loc = _format_location(loc=error["loc"])
+        path = ".".join(part for part in (prefix, loc) if part)
+        message = error["msg"]
+        if error["type"] == "value_error" and message.startswith("Value error, "):
+            message = "Value error: " + message.removeprefix("Value error, ")
+        if error["type"] == "missing":
+            messages.append(f"{path} is not provided")
+        elif path:
+            messages.append(f"{path}: {message}")
+        else:
+            messages.append(message)
+    return messages
+
+
 def _validation_detail(*, exc: ValidationError, config_key: str) -> str:
     """Render a Pydantic error as category, key paths and constraints, without input values or URLs."""
-    parts: list[str] = []
-    for error in exc.errors(include_input=False, include_url=False, include_context=False):
-        loc = ".".join(str(item) for item in error["loc"])
-        key_path = f"{config_key}.{loc}" if loc else config_key
-        parts.append(f"{key_path}: {error['msg']}")
+    parts = format_pydantic_errors(exc=exc, prefix=config_key)
     return f"{CATEGORY_VALIDATION} ({'; '.join(parts)})"
 
 

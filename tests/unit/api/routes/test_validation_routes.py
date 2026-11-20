@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Validation API routes."""
 
 from typing import Any
@@ -723,3 +726,34 @@ class TestEnrichFlowFeaturesErrorHandling:
 
         assert response.status_code == 400
         assert response.json()["errors"][0]["more_info"] == f"{TROUBLESHOOTING_DOCS_URL}#issue-flow-validation-failed"
+
+
+class TestValidateFlowRejectedConfigBoundary:
+    """Rejected operator configuration must not be echoed by the validate_flow boundary."""
+
+    SENTINEL = "SENTINEL_ROUTE_CONFIG_7a2f"
+
+    def test_rejected_input_event_value_is_omitted(self, client, sample_flow_data, fixtures_customer_support_dir):
+        """Use the real validation service so the alert exercises operator configuration rendering."""
+        ingest_config = sample_flow_data["flow"][0]["config"]
+        ingest_config["connection_params"]["paths"] = [str(fixtures_customer_support_dir)]
+        ingest_config["input_event"] = {
+            "event_id": "6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c",
+            "event_timestamp": "2024-05-01T12:00:00Z",
+            "routing_key": "invoices_created",
+            "operation": self.SENTINEL,
+            "file_reference": "invoices/2024/invoice-001.pdf",
+        }
+        sample_flow_data["flow"][1]["type"] = "noop"
+
+        response = client.post("/validation/validate_flow", json=sample_flow_data)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "FAILED"
+        assert any(
+            error["message_code"] == "OPERATOR_VALIDATION_FAILED" and "operation" in error["message"]
+            for error in result["errors"]
+        )
+        assert self.SENTINEL not in response.text
+        assert "input_value" not in response.text

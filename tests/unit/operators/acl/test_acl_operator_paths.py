@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from docpipe.core.constants.constants import DocpipeConstants, Metrics
 from docpipe.core.operators.acl.acl_operator import ACLOperator
@@ -30,6 +31,12 @@ _CREDENTIALS = {
     "client_secret": "<test-secret>",  # pragma: allowlist secret
     "tenant_id": "tenant-1",
 }
+
+
+class _ProviderSettings(BaseModel):
+    """Strict settings model that rejects a non-integer tenant id."""
+
+    tenant_id: int
 
 
 class FakeAdapter:
@@ -224,6 +231,36 @@ class TestAdapterInitialisation:
         with patch(_FACTORY, side_effect=RuntimeError("plugin import failed")):
             with pytest.raises(FlowExecutionFailedException, match=r"Failed to initialize ACL adapter.*plugin import"):
                 _operator(fail_on_error=True).transform(_table(ids=["a"]))
+
+    def test_validation_error_with_rejected_input_omits_the_sentinel(self) -> None:
+        sentinel = "SENTINEL_ACL_INIT_VALUE_3f7a"
+        with pytest.raises(ValidationError) as caught:
+            _ProviderSettings(tenant_id=sentinel)
+        original = caught.value
+
+        with patch(_FACTORY, side_effect=original):
+            with pytest.raises(FlowExecutionFailedException) as exc_info:
+                _operator(fail_on_error=True).transform(_table(ids=["a"]))
+
+        assert sentinel not in str(exc_info.value)
+        assert exc_info.value.__cause__ is original
+
+    def test_network_error_with_rejected_input_omits_the_sentinel_from_every_record(self, caplog) -> None:
+        sentinel = "SENTINEL_ACL_INIT_GENERIC_9b2e"
+        original = ConnectionError(f"could not reach https://login.example/{sentinel}")
+
+        with caplog.at_level("ERROR"):
+            with patch(_FACTORY, side_effect=original):
+                with pytest.raises(FlowExecutionFailedException) as exc_info:
+                    _operator(fail_on_error=True).transform(_table(ids=["a"]))
+
+        assert sentinel not in str(exc_info.value)
+        assert exc_info.value.__cause__ is original
+        assert caplog.records
+        for record in caplog.records:
+            assert sentinel not in record.getMessage()
+            assert sentinel not in (record.exc_text or "")
+            assert record.exc_info is None
 
 
 class TestPerDocumentHandling:

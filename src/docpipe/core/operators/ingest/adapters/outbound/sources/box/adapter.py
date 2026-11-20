@@ -17,6 +17,7 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -380,7 +381,7 @@ class BoxSourceAdapter(DocumentSourcePort):
             logger.error("Box credentials file not found: %s", e)
             return None
         except ValueError as e:
-            logger.error("Box authentication error: %s", e)
+            logger.error("Box authentication error: %s", sanitize_exception(exc=e, config_key="box"))
             return None
         except Exception:
             logger.exception("Unexpected error fetching binary content from Box %s", source_id)

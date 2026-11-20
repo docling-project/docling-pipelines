@@ -6,12 +6,14 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic import BaseModel
 
-from docpipe.core.constants.constants import DocpipeConstants
+from docpipe.core.constants.constants import DocpipeConstants, OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
-from docpipe.core.operators.abstract_operator import OperatorCategory
+from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.orchestration.feature_propagation.models import FeatureMetadata, FeaturePropagationResult
 from docpipe.core.orchestration.flow_validator import FlowValidator, ValidateStepResults
+from docpipe.core.orchestration.operator_factory import OperatorFactoryProvider
 from docpipe.exceptions.docpipe_exceptions import (
     FlowValidationException,
 )
@@ -1796,6 +1798,71 @@ class TestFlowValidatorStaticMethods:
         assert len(components) == 2
         assert {"a", "b"} in components
         assert {"c"} in components
+
+
+class _ChunkSizeConfig(BaseModel):
+    """Strict config model whose constructor rejects a non-integer chunk size."""
+
+    chunk_size: int
+
+
+class _ConstructorValidatedOperator(AbstractOperator):
+    """Operator whose constructor validates its config and raises ValidationError on bad input."""
+
+    short_name = "test_constructor_validated_operator"
+    category = OperatorCategory.Functional
+
+    def __init__(self, config: dict) -> None:
+        super().__init__(config)
+        _ChunkSizeConfig(chunk_size=config["chunk_size"])
+
+    def transform(self, table):
+        return [table], {}
+
+
+class TestOperatorConstructorValidationAlert:
+    """A constructor ValidationError must not reach the operator validation alert as raw input."""
+
+    SENTINEL = "SENTINEL_FLOW_VALIDATOR_4c1e"
+
+    def test_constructor_validation_error_alert_omits_rejected_input(self, monkeypatch):
+        """The alert names the failing field and operator but never carries the rejected value."""
+        mock_orchestrator = Mock()
+        mock_orchestrator.common_log_arguments = {}
+        mock_orchestrator.custom_operator_packages = []
+        mock_orchestrator.enable_custom_operators = False
+        validator = FlowValidator(orchestrator=mock_orchestrator)
+
+        operator_factory = OperatorFactoryProvider.get_operator_factory(
+            orchestrator=OrchestratorType.PYTHON,
+            package_names=[],
+            enable_custom_operators=False,
+        )
+        monkeypatch.setitem(
+            operator_factory.operators, _ConstructorValidatedOperator.short_name, _ConstructorValidatedOperator
+        )
+
+        op_def = {
+            OperatorConstants.Misc.ID: "node-ctor",
+            OperatorConstants.Misc.NAME: "ctor_node",
+            OperatorConstants.Misc.OPERATOR: _ConstructorValidatedOperator.short_name,
+            OperatorConstants.Config.CONFIG: {"chunk_size": self.SENTINEL},
+        }
+        validate_results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+
+        validator._validate_node(
+            op_def=op_def,
+            prev_result=FeaturePropagationResult(),
+            global_config={},
+            validate_results=validate_results,
+            session_info=None,
+        )
+
+        assert len(validate_results.errors) == 1
+        alert = validate_results.errors[0]
+        assert alert.message_code == "OPERATOR_VALIDATION_FAILED"
+        assert "chunk_size" in alert.message
+        assert self.SENTINEL not in alert.message
 
 
 if __name__ == "__main__":

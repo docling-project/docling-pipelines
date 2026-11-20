@@ -30,6 +30,7 @@ from docpipe.core.operators.quality.pii_and_hap.domain.models import (
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.hap_detection_port import HAPDetectionPort
 from docpipe.core.ports.text_detection_port import TextDetectionPort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -150,9 +151,7 @@ class HuggingFaceHAPAdapter(HAPDetectionPort):
 
     @staticmethod
     def _value_errors(*, error: ValidationError) -> list[str]:
-        """Return ``<field>: <message>`` for every error other than an unknown key."""
-        return [
-            f"{'.'.join(str(part) for part in item['loc']) or 'config'}: {item['msg']}"
-            for item in error.errors()
-            if item["type"] != _EXTRA_FORBIDDEN
-        ]
+        """Return the shared rendering of every error other than an unknown key."""
+        rendered = format_pydantic_errors(exc=error)
+        errors = error.errors(include_input=False, include_context=False, include_url=False)
+        return [message for item, message in zip(errors, rendered, strict=True) if item["type"] != _EXTRA_FORBIDDEN]

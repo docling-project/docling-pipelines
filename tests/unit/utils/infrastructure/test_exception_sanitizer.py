@@ -5,11 +5,13 @@
 
 import socket
 import ssl
+from typing import Self
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from docpipe.core.operators.ingest.adapters.outbound.sources.s3.config import S3SourceConfig
 from docpipe.core.operators.ingest.ingest_source import IngestSourceOperator
@@ -21,6 +23,7 @@ from docpipe.utils.infrastructure.exception_sanitizer import (
     CATEGORY_TIMEOUT,
     CATEGORY_TLS,
     CATEGORY_VALIDATION,
+    format_pydantic_errors,
     sanitize_exception,
 )
 
@@ -31,6 +34,40 @@ KEY = "ingest_source.provider_config"
 class _Model(BaseModel):
     password: str
     port: int
+
+
+class _Item(BaseModel):
+    val: int
+
+
+class _Nested(BaseModel):
+    items: list[_Item]
+
+
+class _Bounded(BaseModel):
+    count: int = Field(gt=0)
+
+
+class _Named(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def check_name(cls, value: str) -> str:
+        if not value.startswith("ok"):
+            raise ValueError("name must start with ok")
+        return value
+
+
+class _Paired(BaseModel):
+    low: int
+    high: int
+
+    @model_validator(mode="after")
+    def check_order(self) -> Self:
+        if self.low > self.high:
+            raise ValueError("low must not exceed high")
+        return self
 
 
 def _validation_error(*, value: object) -> ValidationError:
@@ -78,6 +115,101 @@ class TestValidationError:
         assert CANARY not in text
         assert CATEGORY_VALIDATION in text
         assert text.count(KEY + ": ") == 1
+
+
+class TestFormatPydanticErrors:
+    @staticmethod
+    def _rejected(*, model: type[BaseModel], data: dict[str, object]) -> ValidationError:
+        with pytest.raises(ValidationError) as info:
+            model.model_validate(data)
+        return info.value
+
+    def test_missing_field_is_not_provided(self):
+        exc = self._rejected(model=_Model, data={"port": 1})
+
+        assert format_pydantic_errors(exc=exc) == ["password is not provided"]
+        assert format_pydantic_errors(exc=exc, prefix=KEY) == [f"{KEY}.password is not provided"]
+
+    def test_nested_field_and_list_index(self):
+        missing = self._rejected(model=_Nested, data={"items": [{"val": 1}, {}]})
+        mistyped = self._rejected(model=_Nested, data={"items": [{"val": "x"}]})
+
+        assert format_pydantic_errors(exc=missing, prefix=KEY) == [f"{KEY}.items[1].val is not provided"]
+        assert format_pydantic_errors(exc=mistyped) == [
+            "items[0].val: Input should be a valid integer, unable to parse string as an integer"
+        ]
+
+    def test_built_in_constraint_and_type_errors(self):
+        constraint = self._rejected(model=_Bounded, data={"count": 0})
+        wrong_type = self._rejected(model=_Model, data={"password": 1, "port": 1})
+
+        assert format_pydantic_errors(exc=constraint) == ["count: Input should be greater than 0"]
+        assert format_pydantic_errors(exc=wrong_type) == ["password: Input should be a valid string"]
+
+    def test_field_level_value_error_is_normalized(self):
+        exc = self._rejected(model=_Named, data={"name": "bad"})
+
+        assert format_pydantic_errors(exc=exc, prefix=KEY) == [f"{KEY}.name: Value error: name must start with ok"]
+
+    def test_model_level_value_error_has_no_path(self):
+        exc = self._rejected(model=_Paired, data={"low": 2, "high": 1})
+
+        assert format_pydantic_errors(exc=exc) == ["Value error: low must not exceed high"]
+        assert format_pydantic_errors(exc=exc, prefix=KEY) == [f"{KEY}: Value error: low must not exceed high"]
+
+    def test_value_error_prefix_is_normalized_only_for_value_error_type(self):
+        exc = ValidationError.from_exception_data(
+            title="_Model",
+            line_errors=[
+                {"type": PydanticCustomError("value_error", "Value error, boom"), "loc": ("port",), "input": 0},
+                {"type": PydanticCustomError("value_error", "boom"), "loc": ("password",), "input": 0},
+                {"type": PydanticCustomError("custom_code", "Value error, boom"), "loc": ("name",), "input": 0},
+            ],
+        )
+
+        assert format_pydantic_errors(exc=exc) == [
+            "port: Value error: boom",
+            "password: boom",
+            "name: Value error, boom",
+        ]
+
+    def test_message_that_repeats_the_field_name_is_not_deduplicated(self):
+        exc = ValidationError.from_exception_data(
+            title="_Model",
+            line_errors=[
+                {"type": PydanticCustomError("custom_code", "port must be positive"), "loc": ("port",), "input": -1},
+            ],
+        )
+
+        assert format_pydantic_errors(exc=exc) == ["port: port must be positive"]
+
+    def test_rejected_input_and_context_never_appear(self):
+        custom = ValidationError.from_exception_data(
+            title="_Model",
+            line_errors=[
+                {
+                    "type": PydanticCustomError("custom_code", "static message", {"secret": CANARY, "error": CANARY}),
+                    "loc": ("password",),
+                    "input": CANARY,
+                },
+            ],
+        )
+        native = _validation_error(value=CANARY)
+
+        messages = format_pydantic_errors(exc=custom, prefix=KEY) + format_pydantic_errors(exc=native, prefix=KEY)
+
+        assert messages == [
+            f"{KEY}.password: static message",
+            f"{KEY}.port: Input should be a valid integer, unable to parse string as an integer",
+        ]
+        assert CANARY not in "\n".join(messages)
+
+    def test_sanitizer_envelope_uses_the_formatter_wording(self):
+        exc = self._rejected(model=_Model, data={"port": 1})
+
+        assert sanitize_exception(exc=exc, config_key=KEY) == (
+            f"{KEY}: {CATEGORY_VALIDATION} ({KEY}.password is not provided)"
+        )
 
 
 class TestWrapperMessageIsKept:

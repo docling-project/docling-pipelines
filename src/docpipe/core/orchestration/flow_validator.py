@@ -30,6 +30,7 @@ from docpipe.exceptions.docpipe_exceptions import (
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.secrets.resolver import FindingKind, inspect_node_references
 from docpipe.types import FlowConfig
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.flow_utils import add_validation_alert
 
@@ -717,7 +718,10 @@ class FlowValidator:
             except Exception as exc:
                 add_validation_alert(
                     message=ValidationMessage(
-                        message=f"Validation failed for operator '{operator_name}': {exc!s}",
+                        message=(
+                            f"Validation failed for operator '{operator_name}': "
+                            f"{sanitize_exception(exc=exc, config_key=operator_name)}"
+                        ),
                         message_code="OPERATOR_VALIDATION_FAILED",
                     ),
                     op_def=op_def,

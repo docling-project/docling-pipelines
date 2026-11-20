@@ -252,3 +252,25 @@ def test_validate_requires_flow_definition(fixtures_customer_support_dir):
         manager.validate()
 
     assert exc_info.value.status_code == 500
+
+
+def test_validate_never_echoes_rejected_input_event_value(fixtures_customer_support_dir):
+    """A rejected input_event field fails in the ingest constructor; the alert names the field, never the value."""
+    sentinel = "SENTINEL_MANAGER_INPUT_EVENT_8e3f"
+    flow = _ingest_then(operator_type="noop", docs_dir=fixtures_customer_support_dir)
+    flow["flow"][0]["config"]["input_event"] = {
+        "event_id": "6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c",
+        "event_timestamp": "2024-05-01T12:00:00Z",
+        "routing_key": "invoices_created",
+        "operation": sentinel,
+        "file_reference": "invoices/2024/invoice-001.pdf",
+    }
+    manager = DocpipeFlowManager(flow_def=flow, configure_logging=False, enable_execution_reporter=False)
+
+    result = manager.validate()
+
+    assert result["valid"] is False
+    assert any("OPERATOR_VALIDATION_FAILED" in error and "operation" in error for error in result["errors"])
+    rendered = repr(result)
+    assert sentinel not in rendered
+    assert "input_value" not in rendered
