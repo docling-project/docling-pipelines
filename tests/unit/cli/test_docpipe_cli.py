@@ -14,6 +14,7 @@ Uses real components where possible to minimize mocking.
 """
 
 import json
+import logging
 from unittest.mock import Mock, patch
 
 import pytest
@@ -25,7 +26,7 @@ from docpipe.cli.docpipe_cli import (
     main,
     validate_flow_definition,
 )
-from docpipe.core.constants.constants import EnvironmentVariables
+from docpipe.core.constants.constants import DocpipeConstants, EnvironmentVariables
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.global_config_metadata import EXECUTION_CONTROL
 
@@ -529,6 +530,52 @@ class TestValidateFlowDefinitionRealValidator:
 
         # Real invoice flow should validate successfully
         assert result is True
+
+    def test_validate_rejected_input_event_never_logs_the_value(self, tmp_path, fixtures_customer_support_dir, caplog):
+        """A rejected input_event field is reported by field name; the rejected value never reaches the logs."""
+        sentinel = "SENTINEL_CLI_INPUT_EVENT_a91d"
+        flow = {
+            "flow_name": "input_event_probe",
+            "flow": [
+                {
+                    "type": "ingest_source",
+                    "name": "ingest",
+                    "depends_on": [],
+                    "config": {
+                        "provider": "filesystem",
+                        "provider_config": {"paths": [str(fixtures_customer_support_dir)]},
+                        "include_filter": "txt",
+                        "input_event": {
+                            "event_id": "6f1d2c3b-4a5e-4f60-8b7c-9d0e1f2a3b4c",
+                            "event_timestamp": "2024-05-01T12:00:00Z",
+                            "routing_key": "invoices_created",
+                            "operation": sentinel,
+                            "file_reference": "invoices/2024/invoice-001.pdf",
+                        },
+                    },
+                },
+                {"type": "noop", "name": "step", "depends_on": ["ingest"], "config": {}},
+            ],
+            "global_config": {},
+        }
+        flow_file = tmp_path / "input_event_probe.json"
+        flow_file.write_text(json.dumps(flow))
+
+        # The CLI logger may not propagate to the root logger, so attach caplog's handler to it.
+        cli_logger = logging.getLogger(DocpipeConstants.LOGGER_NAME)
+        cli_logger.addHandler(caplog.handler)
+        try:
+            result = validate_flow_definition(flow_file=str(flow_file))
+        finally:
+            cli_logger.removeHandler(caplog.handler)
+
+        assert result is False
+        logged = "\n".join(record.getMessage() for record in caplog.records)
+        assert "OPERATOR_VALIDATION_FAILED" in logged
+        assert "operation" in logged
+        assert sentinel not in logged
+        assert "input_value" not in logged
+        assert all(sentinel not in (record.exc_text or "") for record in caplog.records)
 
 
 class TestVaultInitializerWiring:

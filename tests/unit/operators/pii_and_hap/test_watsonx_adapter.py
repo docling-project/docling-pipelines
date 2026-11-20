@@ -314,6 +314,20 @@ def test_validate_provider_config_reports_schema_violation_for_invalid_values(
     assert "provider_config is invalid for provider 'watsonx'" in errors[0]
 
 
+def test_validate_provider_config_never_renders_rejected_input() -> None:
+    sentinel = "DOCPIPE_SENTINEL_WATSONX_CONTAINER_KIND"
+    errors = WatsonxPIIAndHAPAdapter.validate_provider_config(
+        provider_config={"model_id": _MODEL_ID, **_FULL_CONFIG, "container_kind": sentinel},
+        config_key="provider_config",
+    )
+
+    assert len(errors) == 1
+    assert errors[0].startswith("provider_config is invalid for provider 'watsonx': container_kind: ")
+    assert sentinel not in errors[0]
+    assert "input_value" not in errors[0]
+    assert "errors.pydantic.dev" not in errors[0]
+
+
 # ---------------------------------------------------------------------------
 # Config defaults: the schema is authoritative for what runs use
 # ---------------------------------------------------------------------------

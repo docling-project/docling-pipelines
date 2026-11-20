@@ -49,6 +49,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     FlowValidationException,
 )
 from docpipe.utils.data.transform import TransformUtils
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -290,16 +291,19 @@ class ACLOperator(AbstractOperator):
         except ValueError as e:
             # Re-raise configuration errors as FlowExecutionFailedException
             raise FlowExecutionFailedException(
-                f"Failed to initialize ACL adapter for provider '{provider}': {e!s}", status_code=400
+                f"Failed to initialize ACL adapter for provider '{provider}': "
+                f"{sanitize_exception(exc=e, config_key=provider)}",
+                status_code=400,
             ) from e
         except (ConfigurationError, FlowValidationException, FlowExecutionFailedException, DocpipeException):
             # Re-raise Docpipe exceptions as-is
             raise
         except Exception as e:
-            # Wrap unknown exceptions
-            logger.exception("Unexpected error initializing ACL adapter: %s", e, extra=self.common_log_arguments)
+            # Wrap unknown exceptions; the log carries the sanitized text and no traceback
+            sanitized = sanitize_exception(exc=e, config_key=provider)
+            logger.error("Unexpected error initializing ACL adapter: %s", sanitized, extra=self.common_log_arguments)
             raise FlowExecutionFailedException(
-                f"Failed to initialize ACL adapter for provider '{provider}': {e!s}"
+                f"Failed to initialize ACL adapter for provider '{provider}': {sanitized}"
             ) from e
 
     @staticmethod

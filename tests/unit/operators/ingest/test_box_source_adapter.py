@@ -681,6 +681,24 @@ class TestBoxFetchBinaryContent:
             )
         assert result is None
 
+    def test_rejected_config_logs_no_sentinel_or_traceback(self, caplog):
+        sentinel = "SENTINEL_BOX_CREDENTIALS_5e1c"
+        adapter = BoxSourceAdapter()
+
+        with caplog.at_level("ERROR"):
+            result = adapter.fetch_binary_content(
+                source_id="123",
+                provider_config={"credentials_json": 12345, "credentials_path": [sentinel]},
+            )
+
+        assert result is None
+        assert caplog.records
+        for record in caplog.records:
+            assert sentinel not in record.getMessage()
+            assert "input_value" not in record.getMessage()
+            assert sentinel not in (record.exc_text or "")
+            assert record.exc_info is None
+
     def test_returns_none_on_unexpected_error(self):
         adapter = BoxSourceAdapter()
         with patch.object(adapter, "_get_box_client", side_effect=RuntimeError("unexpected")):

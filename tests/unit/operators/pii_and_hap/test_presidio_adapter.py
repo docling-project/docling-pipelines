@@ -146,6 +146,29 @@ def test_validate_provider_config_static_checks():
     assert errors[0].startswith("pii_provider_config: ")
 
 
+def test_validate_provider_config_never_renders_rejected_input():
+    sentinel = "DOCPIPE_SENTINEL_PRESIDIO_ENTITY_MAPPING"
+    errors = PresidioPIIAdapter.validate_provider_config(
+        provider_config={"entity_mapping": sentinel}, config_key="pii_provider_config"
+    )
+    assert len(errors) == 1
+    assert errors[0].startswith("pii_provider_config is invalid for provider 'presidio': entity_mapping: ")
+    assert sentinel not in errors[0]
+    assert "input_value" not in errors[0]
+    assert "errors.pydantic.dev" not in errors[0]
+
+
+def test_init_never_renders_rejected_input():
+    sentinel = "DOCPIPE_SENTINEL_PRESIDIO_ENTITY_MAPPING"
+    inst = PresidioPIIAdapter(model_id="", provider_config={"entity_mapping": sentinel})
+    result = inst.validate()
+    assert result["valid"] is False
+    assert "Invalid Presidio provider_config: entity_mapping: " in result["errors"][0]
+    assert sentinel not in result["errors"][0]
+    assert "input_value" not in result["errors"][0]
+    assert "errors.pydantic.dev" not in result["errors"][0]
+
+
 # ---------------------------------------------------------------------------
 # detect_pii()
 # ---------------------------------------------------------------------------

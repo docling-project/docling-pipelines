@@ -17,6 +17,7 @@ from docpipe.core.operators.ingest.adapters.outbound.sources.web.config import (
 )
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, ExternalServiceError
 from docpipe.utils.core.docpipe_utils import generate_hex_digest
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors, sanitize_exception
 
 
 async def collect_async(async_gen):
@@ -56,6 +57,21 @@ class TestWebPageSourceConfig:
         """Test that URLs must start with http:// or https://."""
         with pytest.raises(ValueError, match="URL must start with http:// or https://"):
             WebPageSourceConfig(urls=["example.com"])
+
+    def test_rejected_url_credentials_never_reach_rendered_output(self):
+        """Credentials in a rejected URL stay out of the validator message, the formatter and the sanitizer."""
+        secret = "CANARY-web-s3cret"  # pragma: allowlist secret
+        url = f"ftp://u:{secret}@h"
+
+        with pytest.raises(ValidationError) as info:
+            WebPageSourceConfig(urls=[url])
+
+        assert secret in str(info.value)  # Positive control: Pydantic keeps the rejected input in its own text.
+        messages = [item["msg"] for item in info.value.errors()]
+        assert messages == ["Value error, URL must start with http:// or https:// (urls[0])"]
+        assert secret not in " ".join(messages)
+        assert secret not in "\n".join(format_pydantic_errors(exc=info.value))
+        assert secret not in sanitize_exception(exc=info.value, config_key="web.provider_config")
 
     def test_url_validation_rejects_empty_strings(self):
         """Test that empty URL strings are rejected."""

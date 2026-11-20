@@ -37,15 +37,23 @@ Pydantic configuration validation errors SHALL be rendered by one shared formatt
 - **THEN** the sentinel does not appear in the sanitized text and the text names the configuration key
 
 ### Requirement: Validators do not reflect credential-bearing input
-Provider configuration validators SHALL NOT interpolate rejected input that can carry a credential into error messages. The only permitted reflected value is the local filesystem path in the filesystem source's `Root path does not exist` error.
+Provider configuration validators SHALL NOT interpolate rejected input that can carry a credential into error messages. The only permitted reflected values are the local filesystem path in the filesystem source's `Root path does not exist` error and the Hugging Face HAP `model_id` in its missing-`toxic_labels` error.
 
 #### Scenario: Credentials in a web source URL
 - **WHEN** a web source configuration contains a URL with embedded credentials and an unsupported scheme
 - **THEN** the validator-authored message, the `format_pydantic_errors` output and the `sanitize_exception` output do not contain those credentials, while the raw `str(ValidationError)` may still contain them in Pydantic's own input diagnostics
 
+#### Scenario: Environment reference in a vector store credential
+- **WHEN** a Weaviate configuration uses an environment reference for `api_key`, `bearer_token`, `username` or `password` whose variable is not set
+- **THEN** the validator-authored message names the failing field and does not contain the reference name, and the `format_pydantic_errors` and `sanitize_exception` output do not contain it either
+
 #### Scenario: Permitted filesystem path diagnostic
 - **WHEN** a filesystem source configuration names a root path that does not exist
-- **THEN** the message may include that path, and this is the only provider validator message that reflects its input
+- **THEN** the message may include that path as a permitted non-sensitive diagnostic
+
+#### Scenario: Permitted Hugging Face model identifier diagnostic
+- **WHEN** a Hugging Face HAP configuration uses a non-default `model_id` without `toxic_labels`
+- **THEN** the message may include that model identifier, and both `format_pydantic_errors` and `sanitize_exception` preserve it as a permitted non-sensitive diagnostic
 
 ### Requirement: Handlers render configuration failures without raw text
 Adapters, validation boundaries and local log handlers that handle a constructor or configuration failure SHALL render it through the shared formatter or `sanitize_exception` rather than `str(exc)`, and SHALL NOT emit a raw traceback or chained exception text.

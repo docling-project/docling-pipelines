@@ -19,7 +19,6 @@ from docpipe.core.operators.vectordb.adapters.outbound.weaviate.client import We
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import (
     ADAPTER_NAME,
     WeaviateConfig,
-    format_config_errors,
 )
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager import (
     WeaviateIndexManager,
@@ -30,6 +29,7 @@ from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorSt
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -87,7 +87,7 @@ class WeaviateAdapter(VectorStorePort):
                 return
             # from None: the pydantic error text carries the offending input values (possibly credentials).
             raise DocpipeException(
-                message="; ".join(format_config_errors(exc)),
+                message="; ".join(format_pydantic_errors(exc=exc)),
                 status_code=400,
                 error_code=ErrorCode.OPERATOR_CONFIGURATION_INVALID,
             ) from None

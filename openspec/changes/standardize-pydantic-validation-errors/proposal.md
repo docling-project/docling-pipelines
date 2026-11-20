@@ -19,6 +19,7 @@
 - Replace the private copies in `VectorDBOperator.validate()`, `WeaviateConfig.format_config_errors()` and `HuggingFaceHAPAdapter._value_errors()` with the shared formatter. Adapter-owned selection policy (for example Hugging Face suppressing `extra_forbidden` during flow validation) stays in the adapter.
 - Fix leaks at the source:
   - `WebPageSourceConfig.validate_urls` stops interpolating the input.
+  - `WeaviateConfig._validate_cross_field` stops reflecting the environment-reference name from `resolve_env_var` (the shared helper message is unchanged).
   - Presidio and Watsonx adapters render through the shared formatter.
   - `FlowValidator` and `AclOperator._initialize_acl_adapter` render through `sanitize_exception` in their existing handlers.
 - Render the three swallowing sinks above through `sanitize_exception` and stop emitting raw tracebacks there. The ACL generic handler gets the same treatment (message and `exc_info`), with exception chaining preserved for propagation.

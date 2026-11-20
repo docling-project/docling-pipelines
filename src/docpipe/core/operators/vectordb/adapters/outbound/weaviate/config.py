@@ -6,7 +6,7 @@
 import re
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from docpipe.core.constants import OperatorConstants
 from docpipe.core.operators.operator_utils import resolve_env_var
@@ -164,27 +164,26 @@ class WeaviateConfig(BaseModel):
         if self.auth_type == "api_key":
             if not self.api_key:
                 raise ValueError("api_key is required when auth_type is 'api_key'")
-            resolve_env_var(self.api_key)
+            self._check_env_reference(field_name="api_key", value=self.api_key)
         elif self.auth_type == "bearer_token":
             if not self.bearer_token:
                 raise ValueError("bearer_token is required when auth_type is 'bearer_token'")
-            resolve_env_var(self.bearer_token)
+            self._check_env_reference(field_name="bearer_token", value=self.bearer_token)
         elif self.auth_type == "client_password":
             if not self.username or not self.password:
                 raise ValueError("username and password are required when auth_type is 'client_password'")
-            resolve_env_var(self.username)
-            resolve_env_var(self.password)
+            self._check_env_reference(field_name="username", value=self.username)
+            self._check_env_reference(field_name="password", value=self.password)
 
         return self
 
+    @staticmethod
+    def _check_env_reference(*, field_name: str, value: str) -> None:
+        """Fail when an environment reference is unset, naming the field and not the variable.
 
-def format_config_errors(exc: ValidationError) -> list[str]:
-    """Format Pydantic ValidationError into user-facing error messages without disclosing input values."""
-    errors: list[str] = []
-    for error in exc.errors():
-        field_name = ".".join(str(loc) for loc in error["loc"])
-        if error["type"] == "missing":
-            errors.append(f"{field_name} is not provided")
-        else:
-            errors.append(error["msg"])
-    return errors
+        resolve_env_var's message carries the reference name, which would otherwise reach every rendered error.
+        """
+        try:
+            resolve_env_var(value)
+        except ValueError:
+            raise ValueError(f"{field_name} references an environment variable that is not set") from None
