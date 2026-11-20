@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { HomeCard } from '@/components/HomeCard/HomeCard';
 import { Add } from '@carbon/icons-react';
@@ -48,5 +48,46 @@ describe('HomeCard', () => {
     const { container } = renderWithProviders(<HomeCard {...defaultProps} wide />);
     // wide cards get a different class — just check container renders without error
     expect(container.firstChild).toBeTruthy();
+  });
+});
+
+describe('HomeCard disabled actions', () => {
+  const baseProps = {
+    title: 'Things',
+    headerIcon: Add,
+    headerIconDescription: 'Create thing',
+    emptyTitle: 'Nothing',
+    emptySubtitle: 'Nothing yet',
+  };
+
+  it('disables the header button and shows the reason', () => {
+    const onHeaderAction = vi.fn();
+    renderWithProviders(
+      <HomeCard {...baseProps} onHeaderAction={onHeaderAction} headerActionDisabled headerActionDisabledReason="Not allowed" />
+    );
+    const button = document.querySelector('.cds--btn--icon-only') as HTMLElement;
+    expect(button).toBeDisabled();
+    expect(screen.getByText('Not allowed', { selector: '[role="tooltip"] *' })).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(onHeaderAction).not.toHaveBeenCalled();
+  });
+
+  it('disables the empty-state CTA and shows the reason', () => {
+    const onClick = vi.fn();
+    renderWithProviders(
+      <HomeCard {...baseProps} emptyAction={{ text: 'Make one', onClick, disabled: true, disabledReason: 'Not allowed' }} />
+    );
+    const button = screen.getByRole('button', { name: 'Make one' });
+    expect(button).toBeDisabled();
+    expect(screen.getByText('Not allowed', { selector: '[role="tooltip"] *' })).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('keeps the empty-state CTA enabled by default', () => {
+    const onClick = vi.fn();
+    renderWithProviders(<HomeCard {...baseProps} emptyAction={{ text: 'Make one', onClick }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Make one' }));
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });
