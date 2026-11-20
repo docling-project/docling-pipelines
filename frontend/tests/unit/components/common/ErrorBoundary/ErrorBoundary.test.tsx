@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import React, { useState } from 'react';
-import { ErrorBoundary } from '@/components/common/ErrorBoundary/ErrorBoundary';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { ThemeProvider } from '@/contexts';
 
 // Component that throws on render

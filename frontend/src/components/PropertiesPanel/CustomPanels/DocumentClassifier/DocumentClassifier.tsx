@@ -24,9 +24,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
-import { RequiredParamTooltip } from '@/components/common';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
-import { ProviderFieldsForm } from '../shared/ProviderFieldsForm';
+import { JsonTextArea, RequiredParamTooltip } from '@/components/common';
+import { ProviderFieldsForm } from '../shared';
 import {
   Accordion,
   AccordionItem,

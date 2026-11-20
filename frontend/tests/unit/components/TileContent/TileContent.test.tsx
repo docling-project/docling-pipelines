@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { TileContent } from '@/components/TileContent/TileContent';
+import { TileContent } from '@/components/TileContent';
 
 describe('TileContent', () => {
   it('renders the label', () => {

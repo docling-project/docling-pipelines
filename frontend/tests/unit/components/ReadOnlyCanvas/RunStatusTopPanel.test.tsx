@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { RunStatusTopPanel } from '@/components/ReadOnlyCanvas/RunStatusTopPanel/RunStatusTopPanel';
+import { RunStatusTopPanel } from '@/components/ReadOnlyCanvas/RunStatusTopPanel';
 import type { JobStats } from '@/types';
 import { JOB_RUN_STATUS } from '@/constants/jobRunStatus';
 import { createMockJobStats, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';

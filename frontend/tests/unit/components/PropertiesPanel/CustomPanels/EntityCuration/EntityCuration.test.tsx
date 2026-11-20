@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen, fireEvent } from '@testing-library/react';
-import { EntityCurationPanelBody } from '@/components/PropertiesPanel/CustomPanels/EntityCuration/EntityCuration';
+import { EntityCurationPanelBody } from '@/components/PropertiesPanel/CustomPanels/EntityCuration';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

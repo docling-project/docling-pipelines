@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildVectorDBEnrichmentFlow, extractVectorDBNodeResult } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-enrichment';
+import { buildVectorDBEnrichmentFlow, extractVectorDBNodeResult } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 describe('vectordb-enrichment', () => {
   describe('buildVectorDBEnrichmentFlow', () => {

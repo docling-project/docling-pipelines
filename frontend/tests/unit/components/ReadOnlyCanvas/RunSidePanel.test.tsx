@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { RunSidePanel } from '@/components/ReadOnlyCanvas/RunSidePanel/RunSidePanel';
+import { RunSidePanel } from '@/components/ReadOnlyCanvas/RunSidePanel';
 import type { JobRunStatusResponse } from '@/types';
 
 const GUID_1 = '11111111-1111-1111-8111-111111111111';

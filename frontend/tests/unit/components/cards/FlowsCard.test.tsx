@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, act, waitFor, fireEvent } from '@testing-library/react';
-import { FlowsCard } from '@/components/cards/FlowsCard';
+import { FlowsCard } from '@/components/cards';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { server } from '../../../mocks/server';
 import { http, HttpResponse } from 'msw';

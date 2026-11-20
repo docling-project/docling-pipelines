@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import { TagInput } from '@/components/common/TagInput/TagInput';
+import { TagInput } from '@/components/common/TagInput';
 
 function renderTagInput(props: Partial<Parameters<typeof TagInput>[0]> = {}) {
   const defaultProps = {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
+import { JsonTextArea } from '@/components/common/JsonTextArea';
 
 describe('JsonTextArea', () => {
   it('renders a textarea with the given id', () => {

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { ConditionBuilderTearsheet } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/ConditionBuilderTearsheet';
-import type { Condition } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
+import { ConditionBuilderTearsheet } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
+import type { Condition } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import { NotificationHistory } from '@/components/common/NotificationHistory/NotificationHistory';
+import { NotificationHistory } from '@/components/common/NotificationHistory';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 
 const emptyState = {

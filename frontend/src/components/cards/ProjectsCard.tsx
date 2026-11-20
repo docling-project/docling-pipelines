@@ -15,7 +15,7 @@ import { setProjects, setProject, setLoading, setError } from '@/slices/projects
 import { setFlow } from '@/slices/flowSlice';
 import { selectProjectsArray, selectProjectsLoading, selectProjectsError } from '@/selectors';
 import { formatRelativeTime } from '@/utils/formatRelativeTime';
-import { CreateProjectTearsheet } from '../common/CreateProjectTearsheet';
+import { CreateProjectTearsheet } from '../common';
 import { HomeCard } from '../HomeCard';
 import { messages } from './ProjectsCard.messages';
 import cardStyles from '../HomeCard/HomeCard.module.scss';

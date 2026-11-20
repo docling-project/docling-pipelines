@@ -6,7 +6,7 @@ import { screen } from '@testing-library/react';
 vi.setConfig({ testTimeout: 15000 });
 
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { InputFeaturesTab } from '@/components/PropertiesPanel/FeatureTabs/InputFeaturesTab';
+import { InputFeaturesTab } from '@/components/PropertiesPanel/FeatureTabs';
 import type { FeatureAttributes } from '@/types';
 
 const SAMPLE_FEATURES: Record<string, FeatureAttributes> = {

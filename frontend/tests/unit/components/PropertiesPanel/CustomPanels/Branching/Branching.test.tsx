@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen } from '@testing-library/react';
-import { BranchingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Branching/Branching';
+import { BranchingPanelBody } from '@/components/PropertiesPanel/CustomPanels/Branching';
 import type { ElyraController } from '@/types';
 
 function makeController(appDataOverrides: Record<string, unknown> = {}): ElyraController {

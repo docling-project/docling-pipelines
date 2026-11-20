@@ -45,7 +45,7 @@ import {
   type NotificationPanelState,
   type NotificationItem,
 } from '@/components/Canvas';
-import { CommonPropertiesWrapper } from '@/components/PropertiesPanel';
+import { CommonPropertiesWrapper, type CriteriaJson } from '@/components/PropertiesPanel';
 import { getParameterDef } from '@/services/parameterDefs';
 import { CANVAS_ACTIONS, JOB_ASSET_REF_TYPE } from '@/constants/canvasActions';
 import { NodeOperator, BRANCHING_OUTPORT_ID, MERGING_INPORT_ID } from '@/constants/operators';
@@ -71,9 +71,7 @@ import { selectCurrentFlow, selectFlowError, selectFlowRunProperties } from '@/s
 import { selectCurrentJobRunId, selectCurrentJobId, selectIsRunning } from '@/selectors/jobRunSelectors';
 import { createJobRun, cancelJobRun } from '@/services/api/actions/job-run-actions';
 import { setCurrentRun, setRunning, setExecutionLogs } from '@/slices/jobRunSlice';
-import { LinkConditionTearsheet } from '@/components/ElyraCanvas/LinkConditionTearsheet';
-import type { LinkConditionValues } from '@/components/ElyraCanvas/LinkConditionTearsheet';
-import type { CriteriaJson } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
+import { LinkConditionTearsheet, type LinkConditionValues } from '@/components/ElyraCanvas';
 import type { FeatureAttributes } from '@/types';
 import { messages } from './Canvas.messages';
 import styles from './Canvas.module.scss';

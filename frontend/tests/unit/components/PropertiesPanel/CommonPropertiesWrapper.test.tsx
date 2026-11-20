@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { CommonProperties, CanvasController } from '@elyra/canvas';
-import { CommonPropertiesWrapper } from '@/components/PropertiesPanel/CommonPropertiesWrapper';
+import { CommonPropertiesWrapper } from '@/components/PropertiesPanel';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import type { OperatorMetadata } from '@/types';
 

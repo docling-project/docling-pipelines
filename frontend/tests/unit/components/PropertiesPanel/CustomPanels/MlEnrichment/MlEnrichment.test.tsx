@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
 import { screen, fireEvent } from '@testing-library/react';
-import { MlEnrichmentPanelBody } from '@/components/PropertiesPanel/CustomPanels/MlEnrichment/MlEnrichment';
+import { MlEnrichmentPanelBody } from '@/components/PropertiesPanel/CustomPanels/MlEnrichment';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

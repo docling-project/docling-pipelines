@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react';
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { ProtectedRoute } from '@/components/common/ProtectedRoute/ProtectedRoute';
+import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { Loading } from '@/components/common/Loading';
 
 describe('ProtectedRoute', () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { ProjectsTable } from '@/components/Projects/ProjectsTable/ProjectsTable';
+import { ProjectsTable } from '@/components/Projects/ProjectsTable';
 import type { ProjectRow } from '@/types';
 
 const SAMPLE_ROWS: ProjectRow[] = [

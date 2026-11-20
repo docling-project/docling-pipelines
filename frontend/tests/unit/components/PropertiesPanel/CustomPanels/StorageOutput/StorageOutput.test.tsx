@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { StorageOutputPanelBody } from '@/components/PropertiesPanel/CustomPanels/StorageOutput/StorageOutput';
+import { StorageOutputPanelBody } from '@/components/PropertiesPanel/CustomPanels/StorageOutput';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

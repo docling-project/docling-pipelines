@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeProviderConfig, clearProviderConfigResource } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-save';
+import { mergeProviderConfig, clearProviderConfigResource } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 describe('vectordb-save', () => {
   describe('mergeProviderConfig', () => {

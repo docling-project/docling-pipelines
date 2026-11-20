@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { DocumentSetPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocumentSet/DocumentSet';
+import { DocumentSetPanelBody } from '@/components/PropertiesPanel/CustomPanels/DocumentSet';
 
 function makeController(values: Record<string, unknown> = {}, metadata: Record<string, unknown> = {}) {
   return {

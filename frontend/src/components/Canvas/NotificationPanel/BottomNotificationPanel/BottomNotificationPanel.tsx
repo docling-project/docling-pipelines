@@ -7,8 +7,7 @@ import React, { useState } from 'react';
 import { Button, CopyButton } from '@carbon/react';
 import { Close, WarningAlt, ErrorFilled, ChevronRight, ChevronDown } from '@carbon/react/icons';
 import { useIntl } from 'react-intl';
-import { SharedDataTable } from '@/components/common/SharedDataTable';
-import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
+import { SharedDataTable, type SharedDataTableHeader, type SharedDataTableRow } from '@/components/common';
 import { messages } from './BottomNotificationPanel.messages';
 import styles from './BottomNotificationPanel.module.scss';
 import {

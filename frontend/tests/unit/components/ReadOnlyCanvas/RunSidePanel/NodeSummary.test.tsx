@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { NodeSummary } from '@/components/ReadOnlyCanvas/RunSidePanel/NodeSummary/NodeSummary';
+import { NodeSummary } from '@/components/ReadOnlyCanvas/RunSidePanel/NodeSummary';
 import type { NodeMetadataItem, JobStats } from '@/types';
 
 const makeJobStats = (overrides: Partial<JobStats> = {}): JobStats => ({

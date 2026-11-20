@@ -28,17 +28,12 @@
 import { useEffect } from 'react';
 import type { OperatorFeature } from '@/types';
 import { NodeOperator } from '@/constants/operators';
-import { STORAGE_OUTPUT_ATTRIBUTE } from '@/components/PropertiesPanel/CustomPanels/StorageOutput/constants';
-import { EXTRACT_ATTRIBUTE, EXTRACTION_KEY } from '@/components/PropertiesPanel/CustomPanels/Extract/constants';
-import { CHUNKER_ATTRIBUTE } from '@/components/PropertiesPanel/CustomPanels/Chunker/constants';
-
-// ── Param key constants ───────────────────────────────────────────────────────
-const PROVIDER = EXTRACTION_KEY.PROVIDER;
-const PROVIDER_CONFIG = EXTRACTION_KEY.PROVIDER_CONFIG;
-const DESTINATION_CONFIG = STORAGE_OUTPUT_ATTRIBUTE.DESTINATION_CONFIG;
-const TEXT_EXTRACTION = EXTRACT_ATTRIBUTE.TEXT_EXTRACTION;
-const ENTITY_EXTRACTION = EXTRACT_ATTRIBUTE.ENTITY_EXTRACTION;
-const SUMMARIZATION = CHUNKER_ATTRIBUTE.SUMMARIZATION;
+import {
+  CHUNKER_ATTRIBUTE,
+  EXTRACT_ATTRIBUTE,
+  EXTRACTION_KEY,
+  STORAGE_OUTPUT_ATTRIBUTE,
+} from '@/components/PropertiesPanel';
 
 /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 
@@ -52,6 +47,12 @@ export function useProviderConfigDefaults(
   controller: any,
   nodeAttributes: Record<string, OperatorFeature>
 ): void {
+  // Read lazily inside the hook to avoid top-level evaluation before the
+  // PropertiesPanel barrel finishes initializing its re-exports.
+  const { PROVIDER, PROVIDER_CONFIG } = EXTRACTION_KEY;
+  const { DESTINATION_CONFIG } = STORAGE_OUTPUT_ATTRIBUTE;
+  const { TEXT_EXTRACTION, ENTITY_EXTRACTION } = EXTRACT_ATTRIBUTE;
+  const { SUMMARIZATION } = CHUNKER_ATTRIBUTE;
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const currentNodeId: string = controller?.getAppData?.()?.nodeId ?? '';
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PageLayout } from '@/components/layout/PageLayout/PageLayout';
+import { PageLayout } from '@/components/layout/PageLayout';
 
 describe('PageLayout', () => {
   it('renders children in a container div by default', () => {

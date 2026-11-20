@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { CommonPropertiesPanel } from '@/components/PropertiesPanel/CommonPropertiesPanel';
+import { CommonPropertiesPanel } from '@/components/PropertiesPanel';
 
 function makeController(overrides: Record<string, unknown> = {}) {
   return {

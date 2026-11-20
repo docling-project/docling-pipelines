@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { CreateProjectTearsheet } from '@/components/common/CreateProjectTearsheet/CreateProjectTearsheet';
+import { CreateProjectTearsheet } from '@/components/common/CreateProjectTearsheet';
 
 function renderTearsheet(
   props: Partial<Parameters<typeof CreateProjectTearsheet>[0]> & { preloadedState?: object } = {}
