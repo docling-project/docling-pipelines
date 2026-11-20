@@ -1297,6 +1297,142 @@ class TestAutoDetectDevice:
         assert result[OperatorConstants.Extraction.DEVICE] == "mps"
 
 
+# ---------------------------------------------------------------------------
+# Accelerated converter preserves OCR configuration (#119)
+# ---------------------------------------------------------------------------
+
+
+def _adapter_with_ocr(ocr: dict | None, device: str = "cuda") -> DoclingAdapter:
+    extra = {OperatorConstants.Extraction.DEVICE: device}
+    if ocr is not None:
+        extra[OperatorConstants.Config.OCR_BLOCK] = ocr
+    return _make_adapter(extra)
+
+
+class TestAcceleratedOcrSettings:
+    """OCR settings must be applied to the cached GPU pipeline options. No GPU required."""
+
+    def test_default_ocr_is_left_to_docling_defaults(self):
+        adapter = _adapter_with_ocr(None)
+        options = MagicMock()
+        adapter._apply_standard_ocr_settings(options, strict=True)
+        assert "do_ocr" not in options.__dict__
+        assert "ocr_options" not in options.__dict__
+
+    def test_disabled_ocr_is_honored(self):
+        adapter = _adapter_with_ocr({"enabled": False})
+        options = MagicMock()
+        adapter._apply_standard_ocr_settings(options, strict=True)
+        assert options.do_ocr is False
+
+    def test_non_default_engine_mode_and_languages(self):
+        adapter = _adapter_with_ocr(
+            {
+                "enabled": True,
+                "engine": "tesseract",
+                "mode": "full_page",
+                "engine_options": {"lang": ["eng", "fra"]},
+            }
+        )
+        options = MagicMock()
+        fake_ocr = MagicMock()
+        with (
+            patch.object(adapter, "_build_ocr_options", return_value=fake_ocr) as mock_build,
+            patch("docling.datamodel.pipeline_options.OcrMode", side_effect=lambda value: f"mode:{value}"),
+        ):
+            adapter._apply_standard_ocr_settings(options, strict=True)
+        mock_build.assert_called_once()
+        assert options.do_ocr is True
+        assert options.ocr_options is fake_ocr
+        assert fake_ocr.mode == "mode:full_page"
+        assert adapter._ocr_engine_options == {"lang": ["eng", "fra"]}
+
+    def test_strict_accelerated_path_raises_when_engine_cannot_be_built(self):
+        adapter = _adapter_with_ocr({"enabled": True, "engine": "tesseract", "mode": "default"})
+        with (
+            patch.object(adapter, "_build_ocr_options", return_value=None),
+            pytest.raises(ValueError, match="cannot apply OCR engine"),
+        ):
+            adapter._apply_standard_ocr_settings(MagicMock(), strict=True)
+
+    def test_cpu_path_does_not_raise_when_engine_cannot_be_built(self):
+        adapter = _adapter_with_ocr({"enabled": True, "engine": "tesseract"})
+        options = MagicMock()
+        with patch.object(adapter, "_build_ocr_options", return_value=None):
+            adapter._apply_standard_ocr_settings(options, strict=False)
+        assert options.do_ocr is True
+        assert options.ocr_options != "applied"
+
+    def test_gpu_converter_shares_ocr_configured_options(self):
+        """PDF and image format options receive the same OCR-configured pipeline options."""
+        adapter = _adapter_with_ocr(
+            {"enabled": True, "engine": "tesseract", "mode": "full_page", "engine_options": {"lang": ["eng"]}}
+        )
+        captured: dict = {}
+
+        class FakeAcceleratorOptions:
+            def __init__(self, num_threads, device):
+                self.num_threads = num_threads
+                self.device = device
+
+        class FakeThreaded:
+            def __init__(self, accelerator_options=None):
+                self.accelerator_options = accelerator_options
+                self.do_ocr = True
+                self.ocr_options = None
+
+        class FakeFormatOption:
+            def __init__(self, pipeline_options=None, pipeline_cls=None):
+                self.pipeline_options = pipeline_options
+
+        class FakeConverter:
+            def __init__(self, format_options=None):
+                captured["format_options"] = format_options
+
+        class FakeDevice:
+            CUDA = "cuda"
+            MPS = "mps"
+            XPU = "xpu"
+
+        class FakeInputFormat:
+            PDF = "pdf"
+            IMAGE = "image"
+            AUDIO = "audio"
+
+        fake_ocr = MagicMock()
+        pipeline_mod = MagicMock()
+        pipeline_mod.AcceleratorDevice = FakeDevice
+        pipeline_mod.AcceleratorOptions = FakeAcceleratorOptions
+        pipeline_mod.ThreadedPdfPipelineOptions = FakeThreaded
+        pipeline_mod.OcrMode = lambda value: f"mode:{value}"
+        converter_mod = MagicMock()
+        converter_mod.DocumentConverter = FakeConverter
+        converter_mod.ImageFormatOption = FakeFormatOption
+        converter_mod.PdfFormatOption = FakeFormatOption
+        base_mod = MagicMock()
+        base_mod.InputFormat = FakeInputFormat
+
+        with (
+            patch.object(adapter, "_build_ocr_options", return_value=fake_ocr),
+            patch.dict(
+                "sys.modules",
+                {
+                    "docling.datamodel.base_models": base_mod,
+                    "docling.datamodel.pipeline_options": pipeline_mod,
+                    "docling.document_converter": converter_mod,
+                },
+            ),
+        ):
+            converter = adapter._build_gpu_converter()
+
+        assert converter is not None
+        pdf_opts = captured["format_options"][FakeInputFormat.PDF].pipeline_options
+        image_opts = captured["format_options"][FakeInputFormat.IMAGE].pipeline_options
+        assert pdf_opts is image_opts
+        assert pdf_opts.do_ocr is True
+        assert pdf_opts.ocr_options is fake_ocr
+        assert fake_ocr.mode == "mode:full_page"
+        assert pdf_opts.accelerator_options.device == "cuda"
 @pytest.mark.parametrize("model", ["whisper_turbo", "", None])
 def test_video_options_use_selected_model_or_docling_default(model):
     from docling.datamodel.base_models import InputFormat

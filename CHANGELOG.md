@@ -44,6 +44,8 @@ Versioning follows [Semantic Versioning 2.0.0](https://semver.org/).
 
 ### Fixed
 
+- Accelerated Docling extraction preserves OCR configuration — The cached GPU `DocumentConverter` now applies the same standard-pipeline OCR settings as the CPU path (`ocr.enabled`, engine, mode, languages, and engine-specific options) onto `ThreadedPdfPipelineOptions`. Non-default OCR that cannot be constructed fails at adapter init instead of being silently ignored. Fixes #119.
+- Execution-granularity benchmark flow size — S3 benchmark flows now use the configured prefix and `max_files` limit without embedding a corpus-wide exclusion list, avoiding Prefect validation payload-size failures.
 - Report missing `provider` in `IngestSourceOperator` during flow validation (#364)
 - Retry `watsonx` embedding requests up to 3 times with jittered backoff (#350)
 - Custom operator loader now properly loads discovered package operators (#327)

@@ -223,9 +223,12 @@ class DoclingAdapter(TextExtractionPort):
                 num_threads=self.gpu_num_threads if self.gpu_num_threads is not None else 4,
                 device=accelerator_device,
             )
-            # Docling 2105 mapping: ThreadedPdfPipelineOptions carries AcceleratorOptions;
-            # both PDF and IMAGE format options share the same pipeline options instance.
+            # Acceleration changes where the pipeline runs; it must not drop the rest of
+            # the standard-pipeline configuration (OCR engine, mode, languages, enabled).
+            # PDF and IMAGE format options share this instance so the cached converter
+            # keeps one consistent configuration.
             threaded_options = ThreadedPdfPipelineOptions(accelerator_options=accelerator_options)
+            self._apply_standard_ocr_settings(threaded_options, strict=True)
 
             format_options: dict[Any, Any] = {
                 InputFormat.PDF: PdfFormatOption(pipeline_options=threaded_options),
@@ -258,6 +261,49 @@ class DoclingAdapter(TextExtractionPort):
         except ImportError as exc:
             logger.warning("Docling GPU acceleration unavailable (%s). Falling back to standard converter.", exc)
             return None
+
+
+    def _ocr_settings_differ_from_docling_defaults(self) -> bool:
+        """Return True when OCR config is not Docling's enabled/rapidocr/default mode."""
+        return not self._ocr_enabled or self._ocr_engine != "rapidocr" or self._ocr_mode != "default"
+
+    def _apply_standard_ocr_settings(self, pipeline_options: Any, *, strict: bool) -> None:
+        """Copy adapter OCR settings onto Docling standard-pipeline options.
+
+        Default rapidocr settings are left untouched so Docling's own defaults apply.
+        When ``strict`` is True (accelerated converter), a requested non-default engine
+        that cannot be constructed raises instead of silently falling back to defaults.
+
+        Args:
+            pipeline_options: PdfPipelineOptions or ThreadedPdfPipelineOptions instance.
+            strict: Raise ValueError if a non-default OCR configuration cannot be applied.
+
+        Raises:
+            ValueError: If strict and the configured OCR engine options cannot be built.
+        """
+        if self.use_vlm_pipeline or not self._ocr_settings_differ_from_docling_defaults():
+            return
+
+        from docling.datamodel.pipeline_options import OcrMode
+
+        pipeline_options.do_ocr = self._ocr_enabled
+        if not self._ocr_enabled:
+            return
+
+        ocr_options = self._build_ocr_options()
+        if ocr_options is None:
+            if strict:
+                msg = (
+                    f"Accelerated extraction cannot apply OCR engine '{self._ocr_engine}'. "
+                    "Install the engine dependency or choose a supported engine; "
+                    "OCR settings are not silently dropped in accelerated mode."
+                )
+                raise ValueError(msg)
+            return
+
+        pipeline_options.ocr_options = ocr_options
+        if self._ocr_mode != "default":
+            pipeline_options.ocr_options.mode = OcrMode(self._ocr_mode)
 
     def _build_ocr_options(self) -> Any:
         """Build a Docling OcrOptions instance from adapter OCR config.
@@ -481,20 +527,13 @@ class DoclingAdapter(TextExtractionPort):
                 )
                 self._add_video_format_option(format_options=format_options)
 
-            # Apply OCR configuration for standard (non-VLM) pipeline
-            if not self.use_vlm_pipeline and (
-                not self._ocr_enabled or self._ocr_engine != "rapidocr" or self._ocr_mode != "default"
-            ):
-                from docling.datamodel.pipeline_options import OcrMode, PdfPipelineOptions
+            # Apply OCR configuration for standard (non-VLM) pipeline. Same helper as the
+            # accelerated path so CPU and GPU options stay equivalent apart from accelerator fields.
+            if not self.use_vlm_pipeline and self._ocr_settings_differ_from_docling_defaults():
+                from docling.datamodel.pipeline_options import PdfPipelineOptions
 
                 pdf_pipeline_opts = PdfPipelineOptions()
-                pdf_pipeline_opts.do_ocr = self._ocr_enabled
-                if self._ocr_enabled:
-                    ocr_options = self._build_ocr_options()
-                    if ocr_options is not None:
-                        pdf_pipeline_opts.ocr_options = ocr_options
-                    if self._ocr_mode != "default" and pdf_pipeline_opts.ocr_options is not None:
-                        pdf_pipeline_opts.ocr_options.mode = OcrMode(self._ocr_mode)
+                self._apply_standard_ocr_settings(pdf_pipeline_opts, strict=False)
 
                 format_options[InputFormat.PDF] = PdfFormatOption(pipeline_options=pdf_pipeline_opts)
                 format_options[InputFormat.IMAGE] = ImageFormatOption(pipeline_options=pdf_pipeline_opts)
