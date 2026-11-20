@@ -106,8 +106,20 @@ The service SHALL discard async job results after 900 seconds, hold at most 2 04
 - **THEN** a new `POST /v2/retrieval/advanced/search` returns `503 Service Unavailable`
 
 ### Requirement: Authentication and ACL propagation
-All v1 and v2 search and result-polling routes SHALL integrate with Docling Pipelines' authentication dependency (`get_current_user`) and pass the authenticated user identity to the retrieval ACL adapter for store-level filtering (such as OpenSearch `allowed_users`).
+All v1 and v2 search and result-polling routes SHALL require `get_current_user` and pass the authenticated identity to the retrieval ACL adapter. Only `/v2/retrieval/healthz` and `/v2/retrieval/readyz` are unauthenticated. The service does NOT provide per-library or per-document-set authorization; per-document protection is limited to the fail-closed handling defined in `backend/retrieval-engine`.
+
+#### Scenario: Any authenticated user may query any library
+- **WHEN** an authenticated user queries a `DocumentLibrary` created by a different user and retrieval is enabled
+- **THEN** the request is processed, because no library-level authorization exists
 
 #### Scenario: Authenticated user identity propagated to ACL
 - **WHEN** an authenticated user invokes `POST /v1/retrieval/advanced/search`
 - **THEN** the authenticated user identity is passed to `RetrievalACLPort`
+
+#### Scenario: Unauthenticated search is rejected
+- **WHEN** a client calls any v1 or v2 search or result-polling route without a valid bearer token
+- **THEN** the service returns `401 Unauthorized` and no store is queried
+
+#### Scenario: Probes remain unauthenticated
+- **WHEN** a client calls `GET /v2/retrieval/healthz` or `GET /v2/retrieval/readyz` without credentials
+- **THEN** the service responds without requiring authentication

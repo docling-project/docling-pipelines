@@ -14,13 +14,13 @@ Single-pass hybrid search (Phase 1) works well for direct questions, but multi-h
 - **Opt-in agentic retrieval engine (`src/docpipe/core/retrieval/agent/`)**:
   - **Modes (`auto` | `tool` | `plan`, default `auto`)**: Selects `tool` mode only when the active model is confirmed tool-capable (via configured allowlist); otherwise falls back to `plan` mode.
   - **Plan mode**: Intent-based routing → DAG decomposition with safe upstream SQL value substitution (max 20 distinct values, 64 chars each, escaped, never vector text) → evidence sufficiency evaluation → bounded non-repeating refinement → grounded synthesis.
-  - **Tool mode**: Exposes strictly read-only, library-scoped tools (`describe_library`, `query_table` accepting question OR authorized direct DuckDB SQL, `column_values`, `search_passages` with optional SQL-derived `document_ids` narrowing, `list_documents`, `find_documents`, `read_document`) powered by Phase 1 & Phase 2 adapters.
+  - **Tool mode**: Exposes strictly read-only, library-scoped tools (`describe_library`, `query_table` accepting question OR direct DuckDB SQL validated by the Phase 1 allowlist validator, `column_values`, `search_passages` with optional SQL-derived `document_ids` narrowing, `list_documents`, `find_documents`, `read_document`) powered by Phase 1 & Phase 2 adapters. The agent inherits the Phase 1 authorization model: authentication is required, DuckDB-backed tools are unavailable for ACL-protected document sets and when `retrieval.sql.enabled` is false, and tool results are capped in rows and characters.
   - **Optional tool thinking (`tool_thinking: off | on`, default `off`)**: Adds one short strategy turn, batch result review, and structured coverage check within the existing call/time budget and synthesis reserve.
   - **Budgets & concurrency**: Enforces `max_iterations` (0–10, default 2), `max_llm_calls` (3–50, default 10, with 1 call always reserved for synthesis), soft `deadline_seconds` (default 120s), and `max_concurrency` (default 2, returning `503` when full). Request overrides may only lower configured limits.
   - **Safe traces & citations**: Populates `additional_info.agent_trace` and `additional_info.agent_budget` with safe step metadata (never leaking tool arguments, SQL text, retrieved evidence, or credentials); synthesis cites only retrieved `document_id`s and caps evidence at 30,000 characters.
 - **REST API endpoints**:
-  - `POST /v2/retrieval/agent/search` → `202 Accepted` `{query_id, status: "pending"}`, `501` when `retrieval.agent.enabled` is false or no LLM is configured, `503` when concurrency queue is full.
-  - `GET /v2/retrieval/agent/search/result/{query_id}` → `202` pending / `200` `QueryResponse` / `404` unknown or expired / `500` generic error.
+  - `POST /v2/retrieval/agent/search` → `202 Accepted` `{query_id, status: "pending"}`, `401` unauthenticated, `501` when `retrieval.agent.enabled` is false or no LLM is configured, `503` when concurrency queue is full.
+  - `GET /v2/retrieval/agent/search/result/{query_id}` → `202` pending / `200` `QueryResponse` / `404` unknown, expired, or owned by another user / `500` generic error.
   - Agent responses are never cached (`disable_cache`, `evaluate`, `search_config` accepted and ignored).
 
 ## Capabilities
@@ -40,5 +40,5 @@ Single-pass hybrid search (Phase 1) works well for direct questions, but multi-h
 - **Ports & LLM adapters**: Adds `src/docpipe/core/ports/tool_calling_llm_port.py` and implements `chat_tools` in `InferenceBridge` (Ollama, LiteLLM/OpenAI-compatible, Watsonx).
 - **Core modules**: Adds `src/docpipe/core/retrieval/agent/` (`runner.py`, `steps.py`, `tool_loop.py`, `tools.py`, `tool_retrieval.py`, `tool_documents.py`, `tool_thinking.py`, `budget.py`, `state.py`, `trace.py`, `substitution.py`, `llm_json.py`, `prompts.py`).
 - **REST routes & DTOs**: Adds `AgentQueryRequest`, `AgentTraceEntry`, `AgentBudgetUsage` in `retrieval_dto.py` and `/v2/retrieval/agent/search` + `/result/{query_id}` in `routes/retrieval.py`.
-- **Observability (if Phase 3 installed)**: Emits `agent_runs_total`, `agent_run_duration_seconds`, `agent_iterations`, `agent_llm_calls`, `agent_budget_exhausted_total`.
+- **Observability (if Phase 3 installed)**: Emits `docpipe_retrieval_agent_runs_total`, `docpipe_retrieval_agent_run_duration_seconds`, `docpipe_retrieval_agent_iterations`, `docpipe_retrieval_agent_llm_calls`, `docpipe_retrieval_agent_budget_exhausted_total`.
 - **Tests**: Unit and API tests under `tests/unit/core/retrieval/agent/` and `tests/unit/api/routes/test_retrieval_agent.py`.

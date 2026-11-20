@@ -10,12 +10,12 @@ This change adds the `retrieval-v2`-compatible observability and optional RAGAS 
 
 ## What Changes
 
-- **Prometheus metrics (`/v2/retrieval/metrics`, unauthenticated)**: Exposes `http_requests_total`, `http_request_duration_seconds`, `llm_inference_requests_total`, `llm_inference_duration_seconds`, `sql_query_requests_total`, `sql_query_duration_seconds`, and `vector_query_requests_total`.
-- **Per-request event store**: Bounded in-memory event store (`max_event_store_size`, default 50 requests) recording timestamped lifecycle events (`START`, `FETCH_DOCUMENT_LIBRARY`, `ACL_CHECK`, `SQL_SEARCH`, `VECTOR_SEARCH`, `SYNTHESIZE`, `COMPLETE`), exposed via:
+- **Prometheus metrics (`/v2/retrieval/metrics`, authenticated by default; `retrieval.observability.metrics_public: true` opts in to unauthenticated scraping)**: Served from a dedicated `CollectorRegistry`, with a `docpipe_retrieval_` name prefix and low-cardinality, identifier-free labels. The prefix intentionally departs from the unprefixed `retrieval-v2` metric names to avoid collisions with other collectors; existing `retrieval-v2` dashboards need a metric rename or relabel rule. Exposes `docpipe_retrieval_http_requests_total`, `docpipe_retrieval_http_request_duration_seconds`, `docpipe_retrieval_llm_inference_requests_total`, `docpipe_retrieval_llm_inference_duration_seconds`, `docpipe_retrieval_sql_query_requests_total`, `docpipe_retrieval_sql_query_duration_seconds`, and `docpipe_retrieval_vector_query_requests_total`.
+- **Per-request event store**: Bounded in-memory, owner-scoped event store (`max_event_store_size`, default 50 requests; endpoints require authentication and return `404` for another user's `request_id`) recording timestamped lifecycle events (`START`, `FETCH_DOCUMENT_LIBRARY`, `ACL_CHECK`, `SQL_SEARCH`, `VECTOR_SEARCH`, `SYNTHESIZE`, `COMPLETE`), exposed via:
   - `GET /v2/retrieval/events/{request_id}`
   - `GET /v2/retrieval/metrics/{request_id}`
-- **Cache statistics**: `GET /v2/retrieval/metrics/cachestats` returning hit count, miss count, and current cache size.
-- **OpenTelemetry tracing**: Reuses `docling-pipelines`'s existing `[telemetry]` extra; when `OTLP_ENDPOINT` is set, emits spans for retrieval requests and store calls.
+- **Cache statistics**: authenticated `GET /v2/retrieval/metrics/cachestats` returning hit count, miss count, and current cache size.
+- **OpenTelemetry tracing**: Reuses the existing `TelemetryService` (`get_telemetry_service()`), the `[telemetry]` extra, and the existing `TELEMETRY_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` variables. No new OTLP endpoint variable is introduced; retrieval spans and store-call spans go through `TelemetryService.span(...)`.
 - **Optional RAGAS evaluation**:
   - `POST /v2/retrieval/evaluate/offline` for offline evaluation of `(query, contexts, answer)` triples (returns `501 Not Implemented` when the optional `retrieval-eval` extra is not installed).
   - Enables `evaluate: true` on `QueryRequest` to populate `additional_info.eval` when `ragas` is installed.

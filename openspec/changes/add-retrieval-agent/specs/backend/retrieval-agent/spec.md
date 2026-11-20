@@ -7,7 +7,7 @@ Defines the opt-in bounded agentic retrieval capability for Docling Pipelines: a
 ## ADDED Requirements
 
 ### Requirement: Opt-in agentic search endpoints
-The service SHALL expose `POST /v2/retrieval/agent/search` (returning `202 Accepted` with `query_id` and `status: "pending"`) and `GET /v2/retrieval/agent/search/result/{query_id}` (`202` pending, `200` `QueryResponse`, `404` unknown/expired, `500` generic error). Both endpoints SHALL return `501 Not Implemented` when `retrieval.agent.enabled` is false or no LLM is configured, and `POST` SHALL return `503 Service Unavailable` when `max_concurrency` is saturated.
+The service SHALL expose `POST /v2/retrieval/agent/search` (`202 Accepted` with `query_id`) and `GET /v2/retrieval/agent/search/result/{query_id}` (`202`, `200`, `404`, `500`). Both endpoints SHALL require an authenticated user, SHALL return `501` when the agent is disabled or no LLM is configured, and `POST` SHALL return `503` when `max_concurrency` is saturated.
 
 #### Scenario: Agent disabled returns 501
 - **WHEN** `retrieval.agent.enabled` is false and a client calls `POST /v2/retrieval/agent/search`
@@ -20,6 +20,10 @@ The service SHALL expose `POST /v2/retrieval/agent/search` (returning `202 Accep
 #### Scenario: Blank query or missing document_library_id returns 400
 - **WHEN** a client submits an agent request with a blank `query` or missing `document_library_id`
 - **THEN** the service returns `400 Bad Request` (via Docling Pipelines' global validation error handler)
+
+#### Scenario: Unauthenticated agent request returns 401
+- **WHEN** a client calls either agent endpoint without a valid bearer token
+- **THEN** the service returns `401 Unauthorized` and no agent run is started
 
 #### Scenario: Poll returns 404 when owned by another user
 - **WHEN** an authenticated user polls an agent `query_id` submitted by a different user
@@ -37,11 +41,31 @@ The agent SHALL support `auto`, `tool`, and `plan` modes (default `auto`). `auto
 - **THEN** the agent runs the plan loop and records `plan` mode in `additional_info.agent_trace`
 
 ### Requirement: Authorized read-only retrieval tools
-In `tool` mode, the agent SHALL expose only read-only tools scoped to the authorized `DocumentLibrary` (`describe_library`, `query_table`, `column_values`, `search_passages`, `list_documents`, `find_documents`, `read_document`). `query_table` SHALL accept exactly one of a plain-language question or authorized read-only DuckDB SQL.
+In `tool` mode, the agent SHALL expose only read-only tools scoped to the authorized `DocumentLibrary` (`describe_library`, `query_table`, `column_values`, `search_passages`, `list_documents`, `find_documents`, `read_document`). SQL SHALL pass the Phase 1 allowlist validator and run through the Phase 1 `DuckDBConnectionManager` path. The agent SHALL NOT reach any store or document set that the Phase 1 engine would skip for the same caller.
+
+#### Scenario: query_table accepts exactly one input form
+- **WHEN** the model calls `query_table`
+- **THEN** it must supply exactly one of a plain-language question or read-only DuckDB SQL, otherwise the tool returns a validation error
 
 #### Scenario: Tool referencing an unauthorized document set fails closed
 - **WHEN** the model calls any tool with a `document_set_id` outside the target `DocumentLibrary`
 - **THEN** the tool returns a generic unavailable error without querying any store
+
+#### Scenario: DuckDB-backed tools are unavailable for ACL-protected document sets
+- **WHEN** the model calls `query_table`, `column_values`, `find_documents`, `list_documents`, or `read_document` for a document set that is ACL-protected
+- **THEN** the tool returns the same generic unavailable error as for an unauthorized set, no DuckDB connection is opened, and the run status is `"partial"`
+
+#### Scenario: Passage search on ACL-protected sets is OpenSearch-only and filtered
+- **WHEN** `search_passages` targets an ACL-protected document set
+- **THEN** only OpenSearch targets are queried, with the `allowed_users` filter for the authenticated user, and Milvus and Weaviate targets are skipped with an `acl_protected_store_skipped` note
+
+#### Scenario: SQL kill-switch disables DuckDB-backed agent tools
+- **WHEN** `retrieval.sql.enabled` is false
+- **THEN** every DuckDB-backed agent tool and plan-mode SQL step is unavailable, while `search_passages` continues to work
+
+#### Scenario: Oversized tool result is truncated
+- **WHEN** a tool result exceeds `retrieval.sql.max_rows` rows or `retrieval.agent.max_tool_result_chars` characters
+- **THEN** the result returned to the model is truncated to the cap, truncation is traced as a boolean, and the run status is `"partial"`
 
 #### Scenario: Passage search narrows to SQL-derived document IDs
 - **WHEN** `search_passages` is called with `document_ids` from a prior SQL query

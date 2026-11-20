@@ -43,6 +43,17 @@ The engine SHALL provide a read-only `column_values` helper returning distinct s
 - **WHEN** `column_values` is called with a table or column not in the authorized `DocumentSet` schema
 - **THEN** it raises a validation error without executing any DuckDB query
 
+### Requirement: Helpers and probes honor the Phase 1 access and authorization boundary
+Literal-spelling probes, `column_values`, and `find_documents` SHALL run only through the Phase 1 `DuckDBSqlEngine` (same `DuckDBConnectionManager` access mode, `enable_external_access = false`, `lock_configuration = true`, memory/thread limits, timeout, and `max_rows` cap) and SHALL NOT be available for ACL-protected document sets (`DataCard.propagate_source_acls` or `acl_protected` override), because DuckDB tables cannot enforce per-document ACLs.
+
+#### Scenario: Helpers and probes unavailable for ACL-protected document sets
+- **WHEN** `column_values`, `find_documents`, or a literal-spelling probe targets an ACL-protected document set
+- **THEN** the helper refuses with a generic unavailable error (or the probe is skipped), no DuckDB query is executed, and no stored values or snippets are returned
+
+#### Scenario: Helper results respect the row cap and lock budget
+- **WHEN** `column_values` or `find_documents` is called in `locked` access mode and the per-file lock is not acquired within `retrieval.sql.lock_timeout_seconds`
+- **THEN** the helper fails with a sanitized `unavailable` error and does not block ingestion
+
 ### Requirement: Keyset-paged literal document text search
 The engine SHALL provide a read-only `find_documents` helper that searches stored document text in an authorized DuckDB table for a literal substring (case-insensitive by default), treating `%`, `_`, and quotes literally and paging by `after_document_id` with no `OFFSET` clause.
 

@@ -26,18 +26,30 @@ The engine SHALL resolve SQL tables from `DocumentSet` storage attachments and v
 - **THEN** no retriever is dispatched, `results` is empty, and `status` is `"partial"`
 
 ### Requirement: Safe DuckDB Text-to-SQL retrieval
-The SQL retriever SHALL synthesize a schema description from DuckDB `DESCRIBE` metadata enriched with `src/docpipe/core/document_classes/<document_class_id>.json` (when configured), generate SQL via `LLMInferencePort`, validate and authorize the SQL with `sqlglot` (`duckdb` dialect), execute it against a read-only DuckDB connection with external access disabled and a query timeout, and self-correct up to `max_retries` times on validation or execution failure.
+The SQL retriever SHALL generate SQL via `LLMInferencePort` from a schema description (DuckDB `DESCRIBE` metadata enriched with the configured document class), validate it with an allowlist-based `sqlglot` validator (`duckdb` dialect), execute only the validator's re-serialized SQL through `DuckDBConnectionManager` on a hardened read-only connection, and self-correct up to `max_retries` times on repairable failures.
+
+#### Scenario: Connection is hardened before SQL runs
+- **WHEN** the SQL engine opens a DuckDB connection for a generated query
+- **THEN** it applies `enable_external_access = false`, then `lock_configuration = true`, plus `max_memory`, `threads`, a hard result row cap, and a query timeout, before executing any generated SQL
 
 #### Scenario: Valid SELECT query executes against read-only DuckDB
-- **WHEN** the generated SQL is a single `SELECT` statement referencing only allowlisted table(s) for the target `DocumentSet`
-- **THEN** it executes on a `read_only=True` DuckDB connection with `enable_external_access = false` and returns a single `ResultItem` with `source: "sql"`, `data`, and `metadata.sql`
+- **WHEN** the generated SQL is a single `SELECT` statement referencing only allowlisted, unqualified table(s) for the target `DocumentSet` and only allowlisted functions
+- **THEN** the validator's re-serialized SQL executes on a read-only DuckDB connection obtained via `DuckDBConnectionManager` with `enable_external_access = false` and `lock_configuration = true`, and returns a single `ResultItem` with `source: "sql"`, `data`, and `metadata.sql`
 
-#### Scenario: Disallowed SQL statement, table function, or CTE shadowing is rejected without retry
-- **WHEN** the generated SQL contains DDL/DML (`DROP`, `INSERT`, `COPY`, `ATTACH`, `PRAGMA`), multiple statements, DuckDB file/external table functions (`read_csv`, `read_parquet`, `read_text`, `glob`), CTEs shadowing allowlisted tables, or references a table outside the target `DocumentSet` allowlist
+#### Scenario: Disallowed SQL statement, table function, qualified name, or CTE shadowing is rejected without retry
+- **WHEN** the generated SQL contains DDL/DML (`DROP`, `INSERT`, `COPY`, `ATTACH`, `PRAGMA`, `SET`), multiple statements, any table-valued function (for example `read_csv`, `read_parquet`, `read_text`, `glob`, `query`, `query_table`, `duckdb_databases`, `duckdb_settings`, `pragma_table_info`), a function or AST node type outside the validator allowlist, a catalog- or schema-qualified table name (for example `information_schema.tables`, `other_db.main.t`), CTEs shadowing allowlisted tables, or references a table outside the target `DocumentSet` allowlist
 - **THEN** the SQL is NOT executed and the authorization failure fails fast without invoking the self-correction LLM
 
+#### Scenario: Generated SQL cannot re-enable external access
+- **WHEN** a statement attempts `SET enable_external_access = true` or `SET lock_configuration = false`
+- **THEN** the validator rejects it, and even if it reached DuckDB the locked configuration would refuse it
+
+#### Scenario: Result row cap truncates and degrades status
+- **WHEN** a generated query would return more than `retrieval.sql.max_rows` rows
+- **THEN** at most `max_rows` rows are returned, a truncation note is recorded in `additional_info`, and `status` is `"partial"`
+
 #### Scenario: Self-correction retry loop skips non-repairable failures and stops after max_retries
-- **WHEN** SQL fails with a repairable syntax or binder error up to `max_retries + 1` total attempts, or fails with a non-repairable error (authorization, timeout, cancellation, connection error)
+- **WHEN** SQL fails with a repairable syntax or binder error up to `max_retries + 1` total attempts, or fails with a non-repairable error (authorization, timeout, cancellation, lock-acquire timeout, connection error)
 - **THEN** non-repairable errors fail fast with no correction call, no correction call is made after the final attempt, the SQL store is marked failed, and any succeeding vector results are still returned with `status: "partial"`
 
 #### Scenario: SQL retrieval skipped when retrieval.sql.enabled is false
@@ -46,7 +58,41 @@ The SQL retriever SHALL synthesize a schema description from DuckDB `DESCRIBE` m
 
 #### Scenario: Query timeout triggers DuckDB interruption
 - **WHEN** a DuckDB query exceeds `sql.timeout_seconds`
-- **THEN** the engine invokes `conn.interrupt()` via `CancelHandle` and aborts the query cleanly
+- **THEN** the engine invokes `conn.interrupt()` via `CancelHandle`, aborts the query cleanly, and releases the file lock
+
+### Requirement: DuckDB access mode and file-lock handling
+The SQL engine SHALL access document-set DuckDB files only through `DuckDBConnectionManager` and SHALL support `retrieval.sql.access_mode` values `locked` (default) and `snapshot`. In `locked` mode it SHALL acquire the per-file lock within `retrieval.sql.lock_timeout_seconds`. In `snapshot` mode it SHALL query a read-only snapshot copy that is refreshed no more often than `retrieval.sql.snapshot_ttl_seconds` and SHALL NOT take the source file lock when reading.
+
+#### Scenario: Locked mode serializes with ingestion and times out when the lock is busy
+- **WHEN** `access_mode` is `locked` and the per-file lock is not acquired within `lock_timeout_seconds`
+- **THEN** the SQL store is marked `unavailable` without invoking the self-correction LLM, ingestion writes are not blocked beyond the single running query, and the response `status` is `"partial"` (or `"error"` when no other store succeeded)
+
+#### Scenario: Cross-process writer makes the file unavailable
+- **WHEN** a writer in another process holds the DuckDB file and DuckDB raises an `IOException` on open
+- **THEN** the SQL store is marked `unavailable` with a sanitized diagnostic containing no filesystem path
+
+#### Scenario: Snapshot mode reads without taking the source lock
+- **WHEN** `access_mode` is `snapshot` and a snapshot younger than `snapshot_ttl_seconds` exists
+- **THEN** the query runs read-only against the snapshot without acquiring the source file lock, and ingestion is not blocked
+
+#### Scenario: Stale snapshot served when refresh cannot lock the source
+- **WHEN** `access_mode` is `snapshot`, the snapshot is older than the TTL, and the refresh cannot acquire the source lock within `lock_timeout_seconds`
+- **THEN** the previous snapshot is served and `additional_info` notes that the data may be stale
+
+### Requirement: Fail-closed handling of ACL-protected document sets
+The engine SHALL treat a `DocumentSet` as ACL-protected when `DataCard.propagate_source_acls` is true or `DocumentSet.metadata["retrieval_derivatives"]["acl_protected"]` is true. For an ACL-protected set the engine SHALL skip DuckDB SQL retrieval and all DuckDB-backed helpers, SHALL query OpenSearch targets only with the mandatory `allowed_users` filter for the authenticated user, and SHALL skip Milvus and Weaviate targets.
+
+#### Scenario: ACL-protected set skips SQL regardless of retrieval.sql.enabled
+- **WHEN** a `DocumentSet` is ACL-protected, has a DuckDB table, and `retrieval.sql.enabled` is true
+- **THEN** the SQL retriever is not dispatched, `additional_info` records a generic `acl_protected_store_skipped` note, and `status` is `"partial"` unless another store returned results for the set
+
+#### Scenario: ACL-protected OpenSearch target is always filtered
+- **WHEN** an ACL-protected set has an OpenSearch vector target
+- **THEN** the query includes the `allowed_users` filter for the authenticated user, and a request without a resolvable user identity returns no hits for that target
+
+#### Scenario: ACL-protected Milvus or Weaviate target is skipped
+- **WHEN** an ACL-protected set has a Milvus or Weaviate vector target
+- **THEN** the target is not queried and a generic `acl_protected_store_skipped` note is recorded without store names or paths
 
 ### Requirement: Concurrent multi-backend vector retrieval
 The vector retriever SHALL support **Milvus**, **OpenSearch**, and **Weaviate** vector store targets, searching all configured targets for a `DocumentSet` concurrently and producing one `ResultItem` (`source: "vector"`) per non-empty target.
@@ -57,7 +103,7 @@ The vector retriever SHALL support **Milvus**, **OpenSearch**, and **Weaviate** 
 
 #### Scenario: OpenSearch vector search with ACL filtering
 - **WHEN** a vector target has `provider: "opensearch"` and the request includes an authenticated user
-- **THEN** the adapter applies the `allowed_users` ACL filter alongside k-NN / hybrid search
+- **THEN** the adapter applies the `allowed_users` ACL filter alongside k-NN / hybrid search (mandatory for ACL-protected sets)
 
 #### Scenario: Weaviate named-vector and BM25 hybrid search
 - **WHEN** a vector target has `provider: "weaviate"`

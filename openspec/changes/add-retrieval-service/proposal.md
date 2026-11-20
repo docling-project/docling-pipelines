@@ -27,16 +27,16 @@ In addition, PR #639 (`add-document-set-data-card`) introduces a structured `Dat
 - **Application (`application/`)**:
   - `SearchOrchestrator`: cache lookup → catalog resolution → ACL check → derivative-driven concurrent dispatch (`SqlRetriever` + `VectorRetriever`) → hybrid correlation & LLM synthesis → cache write.
   - `MultiDocSetOrchestrator` + `OuterQueryPlanner` + `DAGExecutor`: fast-paths single-set libraries directly to `SearchOrchestrator`; for multi-set libraries, decomposes complex questions into a wave-parallel DAG of per-set sub-questions.
-  - `SqlRetriever`: builds schema + `document_classes/` context → generates SQL via `LLMInferencePort` → validates and authorizes SQL via `sqlglot` (`duckdb` dialect, read-only SELECT-only, table allowlist) → executes with deadline/cancellation → self-corrects up to `max_retries`.
+  - `SqlRetriever`: builds schema + `document_classes/` context → generates SQL via `LLMInferencePort` → validates and authorizes SQL via an allowlist-based `sqlglot` validator (`duckdb` dialect, single `SELECT`, plain allowlisted tables, no table-valued functions, fixed function allowlist) → executes the re-serialized SQL with deadline/cancellation, row cap, and memory limits → self-corrects up to `max_retries`.
   - `VectorRetriever`: concurrently searches all vector targets in a set → supports hybrid dense+sparse/BM25 with dense-only fallback → applies optional reranking over a configurable candidate pool (`max(limit, rerank_candidates)`).
   - `SearchJobQueue`: bounded in-process async submit/poll queue (max depth 100 → `503`, result TTL 900s, max 2,048 retained results).
 - **Adapters (`adapters/`)**:
   - **Catalog**: `LocalDocumentLibraryCatalogAdapter` (reads `DocumentLibraryService`, `DocumentSetService`, `DataCardService`, and `src/docpipe/core/document_classes/`).
-  - **SQL**: `DuckDBSqlEngine` (read-only connection, `SET enable_external_access = false`, `sqlglot` DuckDB dialect, query timeout and `conn.interrupt()` cancellation).
+  - **SQL**: `DuckDBSqlEngine` (access through the existing `DuckDBConnectionManager` in `locked` (default) or opt-in `snapshot` mode via `retrieval.sql.access_mode`, `SET enable_external_access = false` + `SET lock_configuration = true`, memory/thread/row limits, query timeout and `conn.interrupt()` cancellation).
   - **Vector**: `MilvusVectorQueryAdapter` (dense + BM25 hybrid with RRF, dense fallback), `OpenSearchVectorQueryAdapter` (k-NN + BM25 hybrid + `allowed_users` ACL filter), `WeaviateVectorQueryAdapter` (named-vector `near_vector` + BM25 `hybrid` using `weaviate-client` v4).
   - **LLM / Embeddings / Reranker**: thin async bridges over `docpipe`'s `LLMInferencePort` and `LLMEmbeddingPort` (Ollama, Watsonx, LiteLLM/OpenAI-compatible, HuggingFace) plus optional rerankers (`ollama`, `watsonx`, `cross_encoder`).
   - **Cache**: `MemoryRetrievalCache` (`cachetools.TTLCache`, default) and optional `RedisRetrievalCache`.
-  - **ACL**: `DocpipeACLAdapter` integrating with `docpipe.api.auth.models.User` (enforces `allowed_users` filter on OpenSearch when `propagate_source_acls` or auth is active).
+  - **ACL**: `DocpipeACLAdapter` integrating with `docpipe.api.auth.models.User` (enforces `allowed_users` on OpenSearch; for ACL-protected document sets (`propagate_source_acls`) fails closed by skipping DuckDB SQL, Milvus, and Weaviate, because those stores cannot enforce per-document ACLs). All search/poll routes require `get_current_user`; there is no per-library authorization.
 - **Factories (`factories/`)**: `RetrievalServiceFactory` reading the `retrieval:` block from `docling-pipelines-config.yaml` via `DocpipeConfigLoader`.
 
 ### 3. `retrieval-v2`-Compatible REST API Surface (`src/docpipe/api/routes/retrieval.py`) & Derivatives Read View
@@ -58,7 +58,7 @@ Mounted directly on the FastAPI app in `src/docpipe/api/main.py` to preserve exa
 - Dedicated Pydantic DTOs in `src/docpipe/api/dto/retrieval_dto.py` matching `retrieval-v2`'s `QueryRequest` (including `searchConfig` alias, `container_id`/`container_type`, `document_library_id`, `document_set_id`, `asset_id`, `asset_type`, `search_inference_config`, `disable_cache`, `evaluate`) and `QueryResponse` (`request_id`, `generated_text`, `results`, `additional_info`, `status`, `execution_time`).
 
 ### 4. Configuration & Dependencies
-- Add a `retrieval:` section to `docling-pipelines-config.yaml.example` (disabled by default via `retrieval.enabled: false` returning `503 retrieval_disabled`, with a `retrieval.sql.enabled` toggle for ACL-restricted libraries and default provider connection blocks for `milvus`, `opensearch`, and `weaviate` so `DataCard.derivative_store` names resolve without storing credentials in `DataCard`).
+- Add a `retrieval:` section to `docling-pipelines-config.yaml.example` (disabled by default via `retrieval.enabled: false` returning `503 retrieval_disabled`, with `retrieval.sql.*` controls (`enabled`, `access_mode`, `lock_timeout_seconds`, `max_rows`, `max_memory`, `threads`) and default provider connection blocks for `milvus`, `opensearch`, and `weaviate` so `DataCard.derivative_store` names resolve without storing credentials in `DataCard`).
 - Add pinned `cachetools` to `[project.dependencies]` in `pyproject.toml`, and optional `retrieval-redis` extra (`redis`) under `[project.optional-dependencies]`. Regenerate `uv.lock`.
 
 ## Capabilities
@@ -86,5 +86,6 @@ Mounted directly on the FastAPI app in `src/docpipe/api/main.py` to preserve exa
 - **Core modules**: Adds `src/docpipe/core/retrieval/` (`domain/`, `application/`, `adapters/`, `factories/`).
 - **Operators**: None modified. `DocumentSetOperator` already persists the DuckDB table and (via PR #639) populates `DocumentSet.data_card`.
 - **Storage adapters**: Read-only DuckDB query adapter (`DuckDBSqlEngine`) + query adapters for Milvus, OpenSearch, and Weaviate (reusing installed `duckdb`, `pymilvus`, `opensearch-py`, `weaviate-client`).
+- **Shared utilities**: `src/docpipe/utils/duckdb/connection_manager.py` gains an optional, backward-compatible `lock_timeout_seconds` keyword on `get_connection` (default `None` preserves current behavior).
 - **Config & Dependencies**: Adds `retrieval:` block to `docling-pipelines-config.yaml.example`; adds pinned `cachetools` to `pyproject.toml` and regenerates `uv.lock`.
 - **Tests**: Unit tests under `tests/unit/core/retrieval/` and `tests/unit/api/routes/test_retrieval.py`.

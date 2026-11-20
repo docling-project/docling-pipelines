@@ -27,4 +27,5 @@ src/docpipe/core/retrieval/
 |---|---|
 | Literal probe slows down fast SQL queries | Cap probe count and probe budget; skip on timeout and record in `literal_check_skipped` without failing the SQL result. |
 | Local filesystem paths leaked in DuckDB `IOException` | Classify errors by type and regex-scrub paths in `engine_errors.py` before emitting `sql_error` or logs. |
+| Data enumeration of ACL-protected documents through `column_values`, `find_documents`, or literal probes | These helpers are refused/skipped for ACL-protected document sets (Phase 1 D7) and share the Phase 1 lock budget, hardening, and row cap. |
 | SQL injection via `column_values` or `find_documents` inputs | Validate table/column identifiers strictly against the authorized `DocumentSet` schema allowlist and bind search text as parameters. |
