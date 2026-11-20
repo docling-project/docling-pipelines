@@ -20,7 +20,7 @@ dependencies = [
     "boto3==1.43.1",
     "botocore==1.43.127",
     "box-sdk-gen==1.17.0",
-    "cryptography==50.0.0",
+    "cryptography==50.0.2",
     "data-prep-toolkit-transforms==1.1.8",
     "datatrove==0.10.0",
     "datefinder==1.0.0",
