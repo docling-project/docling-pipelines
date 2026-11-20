@@ -44,7 +44,7 @@ The engine SHALL provide a read-only `column_values` helper returning distinct s
 - **THEN** it raises a validation error without executing any DuckDB query
 
 ### Requirement: Helpers and probes honor the Phase 1 access and authorization boundary
-Literal-spelling probes, `column_values`, and `find_documents` SHALL run only through the Phase 1 `DuckDBSqlEngine` (same `DuckDBConnectionManager` access mode, `enable_external_access = false`, `lock_configuration = true`, memory/thread limits, timeout, and `max_rows` cap) and SHALL NOT be available for ACL-protected document sets (resolver `acl_protected` or the `acl_protected` override), because DuckDB tables cannot enforce per-document ACLs.
+Literal-spelling probes, `column_values`, and `find_documents` SHALL execute under the same DuckDB access mode, connection hardening, resource limits, timeout, and `max_rows` cap as Phase 1 SQL retrieval, and SHALL NOT be available for ACL-protected document sets (`acl_protected` true from the derivative resolver), because DuckDB tables cannot enforce per-document ACLs.
 
 #### Scenario: Helpers and probes unavailable for ACL-protected document sets
 - **WHEN** `column_values`, `find_documents`, or a literal-spelling probe targets an ACL-protected document set

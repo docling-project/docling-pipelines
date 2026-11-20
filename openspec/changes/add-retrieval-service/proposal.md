@@ -33,7 +33,7 @@ For each `DocumentSet`, `DerivativeResolverPort` returns the following (field na
 | `vector_stores[].embedding.model_id`, `.dimension_size` | card `embeddings[]` | none (store is not routable) |
 | `vector_stores[].add_sparse_vector` | card `derivative_store.add_sparse_vector` | live collection schema introspection, then `metadata["retrieval_derivatives"]` override |
 | `vector_stores[].column_mapping` (`document_id`, `text`, `vector`, `sparse`, `allowed_users`, each nullable) | explicit `derivative_store.feature_mappings` items of the `vectordb` entry (`id`, `content`, the embedding feature, `sparse_embeddings`, `allowed_users`) | `vectordb` operator defaults (`document_id`, `text`, `vector_embeddings`, `sparse_embeddings`); `allowed_users` has NO default |
-| `acl_state`, `acl_protected` | card `propagate_source_acls` (true: `protected`, false: `unprotected`, null: `unknown`) | the resolver is already fail-closed: `acl_protected` is true unless the card says false. `metadata["retrieval_derivatives"]["acl_protected"]` may only tighten it |
+| `acl_state`, `acl_protected` | card `propagate_source_acls` (true: `protected`, false: `unprotected`, null: `unknown`) | the resolver is already fail-closed: `acl_protected` is true unless the card says false; security policy is never stored in user-owned `metadata` |
 | `purpose`, `summary`, `language` (planner hints) | card descriptive fields | omitted |
 | `conflicts` (kind and provider only) | resolver merge rule below | empty |
 | `entity_tables` (backend, schema, prefix, `retrievable`) | card `entity_store` entries | not queried here (see Non-goals) |
@@ -42,7 +42,7 @@ The embedding `feature` recorded on the card is the **source table column** and 
 
 **Multi-flow merge rule (owned by the derivatives change, consumed here):** the resolver takes the latest run per flow in `data_card.flows[]`, unions their `vectordb` stores, and returns each `(provider, path)` once, the newest winning. If the same `(provider, path)` appears with a different embedding `model_id` or `dimension_size`, the most recent wins and a `conflicts` entry carrying only the kind and provider is returned.
 
-**ACL consequence:** a document set without a recorded card run resolves to `acl_state` `unknown`, so retrieval treats it as ACL-protected and skips its DuckDB SQL and its Milvus and Weaviate targets. A curator opens such a set by recording `propagate_source_acls` false on its data card (`PATCH`). The `retrieval_derivatives` override cannot lift protection.
+**ACL consequence:** a document set without a recorded card run resolves to `acl_state` `unknown`, so retrieval treats it as ACL-protected and skips its DuckDB SQL and its Milvus and Weaviate targets. A curator opens or protects a set exclusively via `PATCH /api/v1/document-sets/{id}/data-card` (`propagate_source_acls`); user-owned `metadata` cannot set or override ACL protection.
 
 ## What Changes
 
@@ -50,7 +50,7 @@ The embedding `feature` recorded on the card is the **source table column** and 
 - Implement `LocalRetrievalCatalogAdapter` as a **thin wrapper** over `DerivativeResolverPort`. It does not walk the `DataCard` itself. It only adds:
   - **Connection resolution**: host/port/credentials come from `retrieval.vector_stores.<provider>` in `docling-pipelines-config.yaml` (never from the card, per PR #639's no-host rule). This supports **one cluster per provider**; two stores of the same provider on different clusters are a documented limitation.
   - **SQL target**: a `SqlTableTarget` of `kind: document_set_table`, built from the `DocumentSet`'s existing DuckDB storage attachment (`database_path`, `table_name`), with optional `document_class_id` enrichment from `src/docpipe/core/document_classes/*.json`.
-  - **User overrides**: `DocumentSet.metadata["retrieval_derivatives"]` (for example, when a `vectordb` sink ran on a sibling branch that the card does not list, or to set `document_class_id`, `sparse_field`, `column_mapping`) merges with and takes precedence over resolver output, except that an `acl_protected` override can only make a set protected and never lifts protection.
+  - **User overrides**: `DocumentSet.metadata["retrieval_derivatives"]` (for example, when a `vectordb` sink ran on a sibling branch that the card does not list, or to set `document_class_id`, `sparse_field`, `column_mapping`) merges with and takes precedence over resolver output. ACL protection is NOT configurable here (it lives exclusively on `DataCard.propagate_source_acls` so a `PATCH /document-sets/{id}` metadata replacement can never erase security policy).
   - **Fallbacks** for `null` resolver fields as listed in the resolver contract.
 
 ### 2. Core Retrieval Subsystem (`src/docpipe/core/retrieval/`)
