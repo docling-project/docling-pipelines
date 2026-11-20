@@ -75,8 +75,21 @@ class ExampleTest:
     requires_ollama: bool = False
     requires_opensearch: bool = False
     requires_env: list[str] | None = None
+    requires_any_env: list[str] | None = None
     expected_outputs: list[str] | None = None
     timeout: int = 60
+
+
+# These files are support modules or require a dedicated integration harness;
+# they are intentionally not launched as standalone examples.
+EXCLUDED_EXAMPLES = {
+    "examples/custom_operators/example_custom_operator.py": "support example covered by the custom-operator package harness",
+    "examples/custom_operators/hello_operator.py": "support example covered by the custom-operator package harness",
+    "examples/custom_operators/package_example/my_custom_operators/__init__.py": "package module, not a runnable example",
+    "examples/custom_operators/package_example/my_custom_operators/operators/reverse_operator.py": "operator module, not a runnable example",
+    "examples/custom_operators/package_example/my_custom_operators/operators/uppercase_operator.py": "operator module, not a runnable example",
+    "examples/duckdb_job_stats/duckdb_job_store_example.py": "requires the separate DuckDB job-store integration setup",
+}
 
 
 class ExampleTester:
@@ -229,6 +242,13 @@ class ExampleTester:
                 expected_outputs=["Google Drive Adapter Test", "All tests passed"],
                 timeout=60,
             ),
+            ExampleTest(
+                name="Web Adapter",
+                path=self.examples_dir / "connectors" / "test_web_adapter.py",
+                category=TestCategory.CONNECTORS,
+                expected_outputs=["All tests completed successfully"],
+                timeout=120,
+            ),
             # Flow Manager Examples
             ExampleTest(
                 name="Flow Manager Complete",
@@ -245,6 +265,81 @@ class ExampleTester:
                 requires_ollama=True,
                 expected_outputs=["Execute Flow from File", "Execution completed"],
                 timeout=120,
+            ),
+            ExampleTest(
+                name="Flow Manager Execute from Dictionary",
+                path=self.examples_dir / "docpipe_flow_manager" / "02_execute_from_dict.py",
+                category=TestCategory.FLOW_MANAGER,
+                requires_ollama=True,
+                expected_outputs=["Example 2: Execute Flow from Dictionary", "Execution completed successfully"],
+                timeout=180,
+            ),
+            ExampleTest(
+                name="Flow Manager List Operators",
+                path=self.examples_dir / "docpipe_flow_manager" / "03_list_operators.py",
+                category=TestCategory.FLOW_MANAGER,
+                expected_outputs=["Example 3: List Available Operators", "Operator Summary"],
+                timeout=60,
+            ),
+            ExampleTest(
+                name="Flow Manager Custom Configuration",
+                path=self.examples_dir / "docpipe_flow_manager" / "04_custom_configuration.py",
+                category=TestCategory.FLOW_MANAGER,
+                requires_ollama=True,
+                expected_outputs=["Example 4: Custom Configuration", "Execution successful"],
+                timeout=180,
+            ),
+            ExampleTest(
+                name="Flow Manager Notebook Usage",
+                path=self.examples_dir / "docpipe_flow_manager" / "05_notebook_usage.py",
+                category=TestCategory.FLOW_MANAGER,
+                expected_outputs=["Example 5: Jupyter Notebook Usage Pattern"],
+                timeout=180,
+            ),
+            ExampleTest(
+                name="Flow Manager Basic Test",
+                path=self.examples_dir / "docpipe_flow_manager" / "06_basic_test.py",
+                category=TestCategory.FLOW_MANAGER,
+                requires_ollama=True,
+                expected_outputs=["Starting DocpipeFlowManager Test", "Test completed successfully"],
+                timeout=180,
+            ),
+            # Local operator examples
+            ExampleTest(
+                name="Entity Curation",
+                path=self.examples_dir / "entity_curation_example.py",
+                category=TestCategory.OPERATORS,
+                expected_outputs=["Curated Entities for All Documents"],
+                timeout=60,
+            ),
+            ExampleTest(
+                name="Extract Operator",
+                path=self.examples_dir / "extract_operator_example.py",
+                category=TestCategory.OPERATORS,
+                expected_outputs=["EXTRACT OPERATOR"],
+                timeout=180,
+            ),
+            ExampleTest(
+                name="Ingest Local Folder",
+                path=self.examples_dir / "ingest_local_folder_example.py",
+                category=TestCategory.OPERATORS,
+                expected_outputs=["completed the operator", "output table has"],
+                timeout=60,
+            ),
+            ExampleTest(
+                name="Document Set",
+                path=self.examples_dir / "document_set_example.py",
+                category=TestCategory.OPERATORS,
+                expected_outputs=["DOCUMENT SET OPERATOR EXAMPLE", "EXAMPLE COMPLETED SUCCESSFULLY"],
+                timeout=60,
+            ),
+            ExampleTest(
+                name="Milvus Integration",
+                path=self.examples_dir / "milvus_integration_example.py",
+                category=TestCategory.OPERATORS,
+                requires_any_env=["MILVUS_URI", "MILVUS_HOST"],
+                expected_outputs=["Example 1: Basic Document Indexing"],
+                timeout=180,
             ),
         ]
 
@@ -283,6 +378,19 @@ class ExampleTester:
             missing = [env for env in test.requires_env if not os.getenv(env)]
             if missing:
                 return False, f"Missing environment variables: {', '.join(missing)}"
+
+        if test.requires_any_env:
+            import os
+
+            from dotenv import dotenv_values
+
+            configured = {
+                **dotenv_values(self.repo_root / ".env"),
+                **os.environ,
+            }
+            if not any(configured.get(env) for env in test.requires_any_env):
+                choices = ", ".join(test.requires_any_env)
+                return False, f"Missing any of these environment variables: {choices}"
 
         # Check file exists
         if not test.path.exists():
@@ -407,6 +515,8 @@ class ExampleTester:
                 print("  Requires: OpenSearch")
             if test.requires_env:
                 print(f"  Requires: {', '.join(test.requires_env)}")
+            if test.requires_any_env:
+                print(f"  Requires any of: {', '.join(test.requires_any_env)}")
 
             result = self.run_test(test=test)
             self.results.append(result)
