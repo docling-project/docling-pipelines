@@ -1,0 +1,125 @@
+# Proposal
+
+## Why
+
+A document set is the durable output of a pipeline, but nothing records how it was produced. A consumer who finds a
+document set cannot tell which flow, job, and run wrote it, which sources it was built from, how it was chunked or
+embedded, or which vector index holds its derivatives. The domain model already has a `DataCard` field on
+`DocumentSet` and every repository persists it, yet nothing populates it, the REST API does not expose it, and its
+flat shape (one flow, one job, a list of operator names) cannot represent a document set that is refreshed by many
+runs or fed by more than one flow.
+
+The enterprise product already ships a data card for its document sets. OSS needs the same provenance record, with the
+same field names where they apply, so that a card is meaningful on both sides and a later convergence is cheap.
+
+## What Changes
+
+- **Data card model.** Replace the unused flat `DataCard` with a nested provenance model: descriptive fields plus
+  `flows[] -> jobs[] -> runs[] -> operators[]`, with per-operator `sources`, `embeddings`, `chunk_details`, and
+  `derivative_store`. Field names follow the enterprise schema. Consumers of the card (the derivatives view in
+  `add-document-library-derivatives` and, through it, retrieval) need four things the enterprise schema does not
+  carry or this repository did not model, so the card adds them: `embeddings[].provider`,
+  `derivative_store.add_sparse_vector`, `derivative_store.table_prefix` (entity stores only), and it models the
+  enterprise field `derivative_store.feature_mappings`. Loading is lenient, so a card shaped like an enterprise card
+  loads and re-serializes without losing known fields, and the additions load as null.
+- **Automatic population.** The `document_set` operator records the current job run in the target document set's card
+  after it stores rows. The run lists the operators upstream of the node plus the derivative sinks (`vectordb` and
+  `entity_store` nodes) that are upstream or downstream of it, with details for ingest sources, chunker, embeddings,
+  vector database, and entity store nodes, and derives `language` and `propagate_source_acls` from the flow.
+- **Derivative facts, not a derivatives view.** For each `vectordb` node the card records the index or collection,
+  the effective sparse mode, and the node's explicit `feature_mappings` (the index column for each feature, including
+  the vector, id, text, and `allowed_users` columns). For each `entity_store` node it records the backend, where the
+  tables live, and the table prefix. Resolving these into library-level views, merging runs across flows, and
+  exposing them over REST is the job of `add-document-library-derivatives`, not this change.
+- **ACL flag that does not fail open.** `propagate_source_acls` becomes a three-state value. It is true when the flow
+  contains any `acl_operator` node, false when a run was recorded for a flow without one, and null only while no run
+  has been recorded. True is sticky across runs. A consumer can therefore treat null as unknown instead of as
+  unprotected.
+- **Safe accumulation.** Recording is idempotent per job run (micro-batches rewrite the same entry), accumulates runs
+  across jobs and flows, keeps the most recent 50 runs per flow entry, and never overwrites user-managed fields.
+- **No secrets.** The card is built from an allowlist of non-secret fields. Credentials, vault references, query strings,
+  and URL user info are never recorded.
+- **Failure isolation.** A failure while recording the card is logged and reported in node metadata. It never fails
+  the node or the flow.
+- **REST API.** `GET /api/v1/document-sets/{id}/data-card` returns the card (flow names refreshed from the current flow
+  when it still exists). `PATCH /api/v1/document-sets/{id}/data-card` updates the descriptive fields. The `flows`
+  section is system-maintained and read-only over the API. Existing document set responses are unchanged.
+- **Session context.** `SessionInfo` gains `flow_name`, set once by the orchestrator, so operators can read the flow
+  name without parsing the flow definition.
+- **Unresolved flow definition.** The Python executor stops resolving `vault://` references inside the `flow_definition`
+  key of an operator's config. Without this, upstream secrets would reach the card builder already resolved. Every other
+  key is still resolved.
+- **BREAKING (Python API of an unused model).** The flat `DataCard(flow_id=..., operators=[...], lineage_metadata=...)`
+  constructor is removed. Nothing in the repository constructs it outside tests, and no persisted data exists to migrate.
+- **Docs.** A data card guide, REST API reference rows, the `document_set` operator README, and `OPERATORS.md`.
+
+**Layers affected:** backend-only. No frontend, routing under `/ui`, BFF proxy, or Redux slice changes. The new REST
+routes are additive.
+
+**Affected REST routes:** new `GET` and `PATCH /api/v1/document-sets/{document_set_id}/data-card`. No existing route
+changes its request or response shape.
+
+**Affected operators:** `document_set` (records the card). Read-only inspection of the `ingest_source`, `chunker`,
+`embeddings`, `vectordb`, `entity_store`, `lang_detect`, and `acl_operator` node definitions. None of them change.
+
+**Affected storage adapters:** none. DuckDB, Postgres, and local adapters already persist the card through the asset
+serialization. A new application service reads and writes through the existing repository port.
+
+## Capabilities
+
+### New Capabilities
+
+- `backend/document-set-data-card`: The data card structure and its lenient loading, persistence with the document set,
+  recording of job runs by the `document_set` operator, accumulation, retention, upstream operator provenance,
+  operator-specific details, derived fields, secret exclusion, and failure isolation.
+
+### Modified Capabilities
+
+- `backend/document-sets-api`: Adds retrieval and update of a document set's data card.
+- `backend/flow-execution-engine`: Adds the flow name to the session context available to operators, and keeps the
+  flow definition in an operator's config unresolved so upstream secret references stay references.
+
+## Non-goals
+
+- **No enterprise change.** The enterprise repository (`datasift-api`) is not modified and does not import the OSS model.
+  Convergence is a later, optional change. Compatibility is limited to field names and lenient loading.
+- **No CAMS concepts.** No `resource_key` resolution, no container IDs resolved against a catalog, no asset
+  relationships (`is_produced_by`, `has_a_source_of`, `creates_derivative`, `creates_derivatives_through`), no audit events, and
+  no import/export asset-ID remapping. The information those relationships carry lives inside the card
+  (`flow` id, `sources`, `derivative_store`).
+- **Data card only.** This change owns the card: its model, how runs are recorded into it, and its two REST routes.
+  It does not add any document set or document library capability beyond that. Specifically, it adds no derivatives
+  view or endpoint, no `include=derivatives` expansion, no entity-table enumeration or correlation detail, no
+  cross-flow merge of derivative stores, no feeding of `is_derivative_available` on document library responses, and no
+  retrieval. `add-document-library-derivatives` builds those on top of the card, and `add-retrieval-service` builds
+  retrieval on top of that.
+- **No table enumeration for entity stores.** Entity table names are decided by the curated entity keys at run time,
+  so the card records only where they live (backend, path or schema) and their prefix.
+- **No new operator parameter.** There is no switch to turn card recording off, so the operator metadata and the
+  properties panel are unchanged.
+- **No document byte sizes.** `input_size` and `processed_size` stay empty; job statistics do not track them.
+- **No cross-process locking.** Concurrent writers in separate processes are not serialized beyond the idempotent
+  per-run replacement described in the design. Writers in one process are serialized per document set.
+- **No change to `CHANGELOG.md`.**
+
+## Impact
+
+- **Code (new):** `core/assets/document_sets/application/services/data_card_service.py`,
+  `core/assets/document_sets/application/services/document_set_locks.py`,
+  `core/operators/document_sets/data_card_run_builder.py`, `api/dto/data_card_dto.py`, and a data card mapper.
+- **Code (changed):** `core/assets/document_sets/domain/models/data_card.py` (rewritten) and its `__init__.py` exports,
+  `core/assets/document_sets/application/services/document_set_service.py` (takes the per-set lock around its two
+  read-modify-write paths, no behaviour change),
+  `core/operators/document_sets/document_set_operator.py`, `core/models/session_info.py`,
+  `core/orchestration/abstract_orchestrator.py`, `core/orchestration/python/python_operator_executor.py`
+  (leaves `flow_definition` unresolved), `api/routes/document_sets.py`, `api/dependencies.py`, and
+  `core/constants/operator_constants.py` (metadata key).
+- **Tests:** rewrite the flat `DataCard` tests in `tests/unit/core/operators/document_sets/test_document_set_models.py`;
+  add model, service, builder, operator, and route tests plus an enterprise-shaped fixture.
+- **Docs:** new `docs/guides/DOCUMENT_SET_DATA_CARD.md`; updates to `docs/api/REST_API_SERVER.md`,
+  `docs/operators/storage/document_set_readme.md`, and `docs/reference/OPERATORS.md`.
+- **Dependencies:** none added.
+- **Related in-flight change:** `add-secret-management` removes resolved secrets from places they leak today and
+  rewrites `_resolve_operator_params` (its task B.4). This change makes a one-key edit to the same function (leave
+  `flow_definition` unresolved), which that rewrite subsumes. It stays correct if either change lands first, and the
+  second to land rebases over a small edit.

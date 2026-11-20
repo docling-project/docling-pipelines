@@ -1,0 +1,404 @@
+## Context
+
+`DocumentSet` already carries a `data_card` field. It is a flat dataclass (`flow_id`, `flow_name`, `job_id`,
+`job_run_id`, `operators`, `lineage_metadata`), serialized by `DocumentSet.to_dict()` and persisted for free by every
+asset repository (DuckDB, Postgres, local). Nothing writes it and no route returns it.
+
+The `document_set` operator runs at the end of a flow. At that point it holds:
+
+- the operator config, which already contains `job_id`, `job_run_id`, the whole `global_config`, and
+  `flow_definition` (the compiled DAG: nodes with `id`, `name`, `operator`, `config`, `input_edges`);
+- the stored `pa.Table`, which includes `embeddings` and `lang_name` columns when upstream operators produced them;
+- access to `JobStatsService` through `get_default_factory().create_job_stats_service()` (as `document_classifier`
+  already does) for the start time and document counters of the run.
+
+The enterprise product models the same record as `DocumentSetDatacard` with `flows[] -> jobs[] -> runs[] -> operators[]`.
+OSS adopts the field names and drops everything that depends on a catalog (resource keys, container IDs, asset
+relationships).
+
+## Goals / Non-Goals
+
+**Goals**
+
+- Every successful `document_set` write leaves a provenance entry in the card, with no operator parameter and no change
+  to the table contract.
+- The card loads and re-serializes enterprise-shaped JSON without losing documented fields.
+- No secret, host, or credential can reach the card, by construction (allowlist, not denylist).
+- A recording problem never fails a pipeline.
+- Descriptive fields can be curated over REST without being clobbered by later runs.
+
+**Non-Goals**
+
+See the proposal: no enterprise change, no CAMS concepts, no derivatives view, no byte sizes, no cross-process
+locking, no opt-out parameter.
+
+## Decisions
+
+### D1. Nested dataclasses in the domain layer, lenient `from_dict`
+
+`domain/models/data_card.py` is rewritten with plain dataclasses, one per level: `DataCard`, `DataCardCurator`,
+`DataCardFlow`, `DataCardFlowDetails`, `DataCardJob`, `DataCardDocuments`, `DataCardRun`, `DataCardOperator`,
+`DataCardSource`, `DataCardEmbedding`, `DataCardChunkDetails`, `DataCardDerivativeStore`. Each has `to_dict()` and a
+`from_dict(*, data)` classmethod.
+
+- `from_dict` reads only known keys, ignores the rest, and tolerates missing keys and wrong container types (a
+  non-list `flows` becomes an empty list). The former flat keys therefore load as an empty card.
+- `to_dict()` emits only documented keys. Null values are emitted so the stored shape is stable.
+- The domain layer stays free of Pydantic and framework imports, matching `DocumentSet`.
+
+**Alternative rejected: reuse the enterprise Pydantic model.** It lives in a private repository, pulls CAMS-shaped
+fields (`resource_key`, `container_id`) and would make OSS depend on enterprise releases.
+
+### D2. Field naming mirrors enterprise; extra enterprise fields are ignored
+
+Field names follow the enterprise schema (`purpose`, `summary`, `curator`, `language`, `collection_criteria`,
+`propagate_source_acls`, `flows`). Enterprise-only fields such as `resource_key`, `container_id`, `container_type`,
+`source_asset_id`, `vector_params`, `schema_definition`, `entities`, and `link_names` are not modelled.
+A card that carries them loads, and the unmodelled keys are dropped on re-serialization. The "round trip" requirement
+therefore speaks of *documented* fields, and a contract fixture pins exactly which fields those are.
+
+**`feature_mappings` is modelled.** The enterprise `derivative_store` carries `feature_mappings`. OSS models it as a
+list of `{feature_name, mapped_column_name}` items, the same shape as the `vectordb` operator's `feature_mappings`
+parameter. It is the only reliable record of which index column holds the vector, the document id, the text, and the
+`allowed_users` list. The embedding `feature` on an `embeddings` entry is the *source table column*, not the index
+field, so a consumer must never use it as one. Loading is lenient: a non-list value loads as null and items that are
+not objects are dropped.
+
+**Three fields go beyond the enterprise schema.** `embeddings[].provider`, `derivative_store.add_sparse_vector`, and
+`derivative_store.table_prefix` are OSS additions. A consumer that reads the card to run retrieval needs the first two:
+without `provider` it must fall back to a configured default embedding provider, and without `add_sparse_vector` it
+must inspect the live index schema to choose between hybrid and dense-only search. `table_prefix` is the prefix of an
+`entity_store` node's tables, which a consumer needs to find them. All three are non-secret values the operators
+already hold. An enterprise card loads with all three null, and an enterprise reader that ignores unknown keys is
+unaffected. Enterprise convergence can adopt or rename them later. `provider` reads the node's own `provider` key, not
+`provider_config`, which may hold credentials.
+
+`FlowItem.type` for OSS-written entries is `docpipe_flow`. Enterprise values (`ibm_udp_flow`,
+`ibm_unstructured_data_curation`) are preserved when loaded.
+
+### D3. Application service owns the read-modify-write
+
+`DataCardService` lives in `core/assets/document_sets/application/services/data_card_service.py`. It depends on the
+`AssetRepository[DocumentSet]` port only.
+
+```python
+class DataCardService:
+    def __init__(self, *, repository: AssetRepository[DocumentSet]) -> None: ...
+    def get_card(self, *, document_set_id: str) -> DataCard
+    def record_run(self, *, document_set_id: str, run: DataCardRunRecord) -> DataCard
+    def update_descriptive_fields(self, *, document_set_id: str, updates: dict[str, Any]) -> DataCard
+```
+
+`DataCardRunRecord` is a small value object carrying `flow_id`, `flow_name`, `job_id`, the built
+`DataCardRun`, the `DataCardDocuments`, and the derived `language` and `propagate_source_acls`. It is defined in the
+application layer so that the operator layer builds it and the service merges it. The service does not know about
+operators, DAGs, or pyarrow.
+
+`record_run` does the following under the lock for that document set:
+
+1. `find_by_id`, then take `document_set.data_card` or a new empty card.
+2. Find or create the flow by `details.id`, then the job by `id`, then the run by `id`.
+3. Replace the run if present (preserving its `executed_at`), otherwise append.
+4. Apply retention (D6).
+5. Set `language` only if it is null. Merge `propagate_source_acls` as: true replaces null and false, false replaces null,
+   and true is never lowered (D4).
+6. `repository.update(asset=document_set)` and return the card.
+
+`update_descriptive_fields` applies only the six allowed keys and ignores null values.
+
+**Why the service reuses `repository.update`:** it already validates, checks name conflicts, bumps `updated_at`, and
+works for all three adapters. No new port method and no schema change.
+
+**Concern: `updated_at` moves on every recorded run.** That is acceptable and arguably correct, because the card is part
+of the asset. The `document_set` operator already updates the set on every store.
+
+### D4. Operator layer: `DataCardRunBuilder`
+
+A pure module `core/operators/document_sets/data_card_run_builder.py`, with static methods, no I/O, and no repository
+access. Input: the operator config, the stored table, and a small stats value. Output: a `DataCardRunRecord`.
+
+**The builder must see an unresolved flow definition (D12).** The operator config holds `flow_definition`, but
+`PythonOperatorExecutor._resolve_operator_params` runs `resolve_value` over the whole merged config before the operator
+is built, and `resolve_value` walks nested dicts and lists. Left alone, every `vault://` value in an upstream node would
+reach the builder already replaced by the real secret, and `is_vault_reference()` could not recognise it. D12 changes
+the executor so `flow_definition` is not resolved.
+
+**DAG walk.** From the `document_set` node (found by `config["id"]`, falling back to `node_id`), walk `input_edges`
+(`node_id_ref`) breadth-first, collecting every ancestor. Visited set, so a diamond is listed once. Branches that feed a
+`merge` are naturally included because `merge` has several input edges.
+
+**Derivative sinks downstream of the node.** A walk in the opposite direction (over the reverse of `input_edges`)
+collects the descendants of the `document_set` node, and of those only nodes whose operator is `vectordb` or
+`entity_store` are kept. This covers flows such as `sample_flows/advanced/branching_dual_embeddings.json`, where the
+vector index is written after the document set (`document_set -> vectordb`). Other descendants are not listed. The
+card describes the flow as declared, so a downstream sink is listed even if it has not run yet when the card is
+recorded. A node that is neither an ancestor nor a kept descendant, such as a `vectordb` on a sibling branch, is
+excluded; recording it is a known gap that consumers cover with an explicit override.
+
+The kept nodes (ancestors, then kept descendants) are sorted topologically over the whole definition (Kahn) so output
+is upstream to downstream and deterministic; ties are broken by the order nodes appear in the definition. Every
+`embeddings` entry that feeds a `vectordb` entry therefore appears before it, which is what a consumer relies on to pair
+the two.
+
+If `flow_definition` is missing, not a dict, has no `dag`, or the node is not found, the builder returns an empty
+`operators` list. This is the "missing flow definition" requirement, and it is also what a direct operator unit test
+sees.
+
+**Per-operator details (allowlist).** A dispatch table keyed by operator short name; unknown operators yield only
+`type`, `node_id`, `name`.
+
+| Operator | Recorded | Source of values |
+|---|---|---|
+| `ingest_source` | `sources[0]` = `{input: provider, name, paths}` | provider-specific location keys only (see D5) |
+| `chunker` | `chunk_details = {type, size}` | `chunk_type`, `chunk_size` in node config |
+| `embeddings` | `embeddings[0] = {type: "dense", provider, model_id, feature, dimension_size}` | node `provider` (default `litellm`, the operator default); `provider_config.model_id`; `embeddings_column` (default `embeddings`); dimension from the stored table |
+| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name, add_sparse_vector, feature_mappings}` | `provider`, `provider_config.index_name` / `collection_name`, effective sparse mode (see below), the node's `feature_mappings` parameter when it is a non-empty list, otherwise null |
+| `entity_store` | `derivative_store = {name: data_backend, path, table_prefix}` | `data_backend` (default `duckdb`); `path` is `database_path` for `duckdb` (default `:memory:`) and `schema` for `postgres`; `table_prefix` (default `entity_`). No table names, no Postgres connection parameters |
+| `lang_detect`, `acl_operator` | `type`, `node_id`, `name` only | used for derived fields |
+
+**Feature mappings are recorded as written, never computed.** Default mappings (`id` to `document_id`, vector to
+`vector_embeddings`, and so on) depend on the features that reach the node at run time, which the builder cannot see.
+When the node sets no mappings, `feature_mappings` is null and a consumer applies the `vectordb` operator defaults. A
+mapping entry is kept only when both `feature_name` and `mapped_column_name` are strings; the values are column names
+and are not secrets. The `allowed_users` column is "known" only when an explicit mapping names it.
+
+**Effective sparse mode.** `add_sparse_vector` is not a single key. The vectordb operator copies the node-level
+`add_sparse_vector` over the same key in `provider_config` when the node sets it (so the node wins), the Milvus and
+Weaviate adapters read it from `provider_config`, and Milvus also enters sparse mode from `provider_config.vector_mode`
+equal to `sparse`. The builder mirrors that order: node key if present, else `provider_config.add_sparse_vector`, else
+`vector_mode == "sparse"`, else false. Reading only the node key would record `false` for flows that follow the Milvus
+documentation. The value is a boolean derived from three non-secret settings, so it adds no secret exposure.
+
+Everything is read with `.get()` and type-checked, so malformed node configs degrade to null fields.
+
+**Embedding dimension.** Read from the stored table: take the embeddings column, find the first non-null value, and use
+`len(value)`. For a list column this is a cheap scalar read of one element. If the column is absent or all null, the
+dimension is null. The model is never loaded and no provider is called.
+
+**Language.** If any ancestor is `lang_detect` and the table has `lang_name`, take the most frequent value that is not
+`UNKNOWN`. Counting uses `pyarrow.compute.value_counts` on the column, so it does not materialise Python rows.
+
+**ACL propagation.** A run's value is true if *any* node of the flow definition is an `acl_operator` (ancestor,
+descendant, or sibling), otherwise false. Looking at the whole definition is deliberately conservative, because a consumer
+uses the flag to decide whether it may serve rows without per-document access control. The merge into the card (D3)
+is: true replaces null and false, false replaces null, and true is never lowered. The value is null only while no run
+has been recorded, so a consumer can treat null as "unknown" instead of "not protected". A failed first recording
+(D8) leaves null, not false.
+
+### D5. Secret exclusion by allowlist
+
+The builder never copies a config dict. It reads named location keys and nothing else.
+
+**Entity store location.** A file-backed DuckDB `database_path` is recorded as the entity store's `path`. It is a local
+path like the ingest `paths` already recorded for filesystem sources, not a credential, and the card endpoint is
+already scoped to the document set's readers. Consumers that expose cards or derivatives to other audiences must
+redact it (the derivatives view in `add-document-library-derivatives` does). A Postgres entity store records only the
+schema; host, port, user, and password are never read.
+
+**Why not reuse `core/lineage/dataset_naming.py`.** Its helpers are private and return lineage-style
+`(namespace, name)` pairs (for example `s3://docs` and `incoming`), not the `name` and `paths` the card needs. It also
+resolves `${VAR}` placeholders, which the card must not do. The builder therefore has its own closed table and copies
+only the *stripping rules* that dataset_naming applies: drop the query and fragment, never keep user info, keep scheme,
+host, port and path of a URL.
+
+| Provider | `name` | `paths` |
+|---|---|---|
+| `filesystem`, `local`, `file` | first of `paths` | `paths` |
+| `s3`, `ibm_cos` | `bucket` | `[prefix]` |
+| `sharepoint`, `onedrive`, `dropbox` | `drive_id` or `document_library_id` when present | `[folder_path]` or `[file_path]` |
+| `google_drive` | `drive_id` when present | `[folder_path]`, `[folder_id]` or `[file_id]` |
+| `box`, `box_driver` | none | `[folder_id]` or `[file_id]` |
+| `web` | host of the first URL | each URL reduced to scheme, host, port, path |
+
+Rules that apply to every row:
+
+- A value for which `is_vault_reference()` is true is skipped, so the card does not reveal that a field was a vault
+  reference or what it pointed at. This only works because the builder receives the unresolved definition (D12). The
+  skip rule is not a defence on its own: a resolved secret is an ordinary string and cannot be recognised.
+- A `${VAR}` placeholder is recorded as written. The builder does not resolve environment variables, so a resolved secret
+  can never enter the card.
+- An unknown provider yields `input: provider` with no `name` and no `paths`. This is deliberately conservative:
+  supporting a provider is a one-line table edit plus a test.
+
+Two tests guard the "no secrets" requirement. A builder-level test feeds nodes seeded with sentinel secrets under every
+credential key the repository knows, serializes the card to JSON, and asserts none of the sentinels appear. A second
+test goes through the real `PythonOperatorExecutor` with a registered fake provider, puts a `vault://` reference in a
+location field of an upstream node, builds the operator, runs the builder on the operator's own config, and asserts that
+neither the reference nor the canary value is in the card. Only the second test can catch a resolution problem like D12.
+
+**Relation to `add-secret-management`.** That change narrows `_resolve_operator_params` to the node's own declared
+fields (its task B.4), which would also leave `flow_definition` unresolved. D12 is the minimal version of the same rule
+and stays correct if B.4 lands first or later. The two changes touch the same function, so whichever lands second
+rebases over a small, local edit.
+
+### D12. Leave `flow_definition` unresolved in the executor
+
+`PythonOperatorExecutor._resolve_operator_params` is changed to resolve every key of the merged config except
+`DocpipeConstants.FLOW_DEFINITION`, which is passed through as written. The vault-path collection that decides whether
+to resolve at all ignores that key too, so a flow whose only vault references sit in other nodes triggers no provider
+call for this operator.
+
+- **Why it is safe.** Nothing in `src/` reads `flow_definition` from an operator config as a source of values. The
+  Prefect engine reads it from `global_config` before any executor exists. `OperatorUtils.is_operator_present_in_flow`
+  only looks at node names. The streaming orchestrator never puts `flow_definition` in node configs at all.
+- **Why it is right.** The key holds every node's configuration. Resolving it hands each downstream operator the
+  credentials of every other node, which is the leak `add-secret-management` is removing.
+- **Scope.** One key, one function. The operator's own parameters, `global_config` entries, and the shape of the
+  definition are unchanged.
+
+**Alternative rejected: read the snapshot from `JobStatsService.get_flow_definition()`.** That is the original authoring
+document (`type`, `depends_on`), not the compiled DAG (`operator`, `input_edges`), so the builder would need a second
+walker. It is only written when both a job ID and a job run ID exist and a stats service is configured, and
+`original_flow_def` is `None` on some CLI paths. A direct read of the compiled definition with the executor fix is simpler
+and available on every path.
+
+**Alternative rejected: pass a second, pre-resolution copy under another key.** It doubles the definition in memory and
+in Prefect task parameters, and leaves the resolved copy available to operators.
+
+### D6. Idempotency, retention, ordering
+
+- **Run identity.** `run.id = job_run_id`. Micro-batches in one run share the job run ID, so each re-recording replaces
+  the same entry.
+- **`executed_at`.** The first recording sets it from `JobStats.start_time` (epoch seconds, converted to UTC RFC 3339).
+  If stats are unavailable, the recording time is used. A replacement copies the existing `executed_at`.
+- **`duration`.** Whole seconds from `executed_at` to now, refreshed on each re-recording, so the last micro-batch leaves the
+  final value.
+- **Documents.** `input_count` and `processed_count` are overwritten on each recording with the latest stats
+  (`total_docs`, `completed_docs`), and are null when stats are missing. Counts are per job, last write wins.
+- **Operators.** Replaced on each re-recording of the run. Micro-batches share one flow definition, so the content is
+  identical.
+- **Retention.** After the merge, collect `(executed_at, flow, job, run)` for the flow entry, sort ascending, and drop the
+  oldest until at most 50 remain, then delete jobs with no runs. 50 is a module constant (`MAX_RUNS_PER_FLOW`) and is not
+  configurable in this change. Runs with unparsable `executed_at` sort as oldest, so bad data cannot pin the list.
+
+### D7. Concurrency: per-document-set lock
+
+A module-level registry (`document_set_locks.py` in the document sets application layer) maps `document_set_id` to a
+`threading.RLock`, guarded by a small registry lock. `record_run` and `update_descriptive_fields` hold the document set's
+lock across read-modify-write. This covers the Python orchestrator's thread pool and a concurrent REST PATCH against a
+running flow in the same process.
+
+**The lock must also guard the existing writers.** `DocumentSetService.update_document_set` and
+`_compute_and_update_metrics_with_ref` (called by `store_data`) read the whole `DocumentSet` and write it back. Without
+the lock, a micro-batch could read the set, a second micro-batch could record its card entry, and the first write would
+then store the stale copy without that entry. Both methods therefore take the same per-set lock around their
+read-modify-write. Their behaviour and signatures are otherwise unchanged. The lock is re-entrant, and `store_data` never
+holds it across the data write itself, only across the metadata read-modify-write.
+
+**Cross-process writers (Prefect process workers, multiple API replicas) are not serialized.** For Postgres-backed
+deployments two processes can interleave a read-modify-write and lose one entry. Mitigations: runs are re-recorded on
+every micro-batch, so a lost entry is restored by the next recording of the same run; and the loss window is the
+milliseconds between read and write. A real fix needs a row-level lock or optimistic version on the asset repository
+port, which is a separate change. This is documented in the guide.
+
+### D8. Operator integration and failure isolation
+
+In `DocumentSetOperator.transform()`, after `service.store_data(...)` succeeds on both the create and the update-by-ID
+paths, call a private helper `_record_data_card(*, table, document_set_id, metadata)`:
+
+```python
+try:
+    record = DataCardRunBuilder.build(config=self.config, table=table, stats=self._read_job_stats())
+    DataCardService(repository=metadata_repository).record_run(document_set_id=document_set_id, run=record)
+    metadata[META_DATA_CARD_STATUS] = "recorded"
+except Exception as exc:  # noqa: BLE001 - card is best effort, must never fail the node
+    logger.warning("Data card recording failed for document set %s: %s", document_set_id, type(exc).__name__)
+    metadata[META_DATA_CARD_STATUS] = "failed"
+    metadata[META_DATA_CARD_ERROR] = type(exc).__name__
+```
+
+- The helper is not reached for empty tables, a missing `id` column, or a failed store, because those paths return or
+  raise earlier.
+- Only the exception class name goes to metadata and the log, so no message text, which could contain paths or values,
+  is propagated.
+- The operator passes the metadata repository it already built for `DocumentSetService`, so no second connection is
+  opened.
+- `_read_job_stats()` calls `JobStatsService.get_job_run_stats(job_run_id=...)`, and returns `None` on any exception or
+  when `job_run_id` is empty.
+- The returned table is the untouched input table. The existing metadata keys are unchanged. Two keys are added in
+  `OperatorConstants.DocumentSet`: `META_DATA_CARD_STATUS` and `META_DATA_CARD_ERROR` (values `data_card_status`,
+  `data_card_error`). The unused `OperatorConstants.Metadata.META_DATA_CARD` stays untouched.
+
+### D9. `SessionInfo.flow_name`
+
+Add `flow_name=None` to `SessionInfo.__init__` and `create_session_info`. The abstract orchestrator, which already
+computes `self.flow_name` from the flow definition at the start of `execute`, additionally calls
+`update_session_info(flow_name=self.flow_name)`. The Prefect batch subflow, which already restores `orchestrator.flow_name`
+from `flow_definition`, passes it into the `SessionInfo` it builds.
+
+The `DocumentSetOperator` takes the name from `get_session_info().flow_name` and falls back to the flow definition `name`,
+then to the flow ID. This is the only consumer in this change.
+
+OSS has no job entity with a name, so a recorded job's `name` is always null and its `id` is the job ID.
+
+`flow_id` and `job_id` continue to come from the operator config or session as today. When `flow_id` is empty (ad-hoc
+CLI run with an inline flow), the builder uses the flow definition name as the flow key and records `id` equal to that
+name, so the card still has a stable key. Flows without a name use the literal `"unknown-flow"`.
+
+### D10. REST layer
+
+- **DTOs** (`api/dto/data_card_dto.py`): `DataCardResponse` (all fields, nested response models),
+  `DataCardUpdateRequest` with `model_config = ConfigDict(extra="forbid")` so `flows` and unknown fields fail
+  validation. The global validation handler maps that to 400, matching the rest of the API. Limits reuse
+  `DESCRIPTION_MAX_LENGTH` and `DESCRIPTION_PATTERN` from `field_definitions.py`, with new constants for `language` (64)
+  and curator fields (256).
+- **Mapper:** `DataCardMapper.to_response(*, card, flow_names)` maps the domain card to the DTO. Routes never return
+  domain objects.
+- **Routes** in `api/routes/document_sets.py`: `GET` and `PATCH /{document_set_id}/data-card`, using the existing
+  `DocumentSetIdPath`, `DocumentSetServiceDep`, and a new `DataCardServiceDep` provided by `api/dependencies.py`
+  (built from the same cached repository).
+- **404 for an unknown set:** the route first calls the document set service's `get_document_set`, so the error type,
+  message, and format are identical to existing routes.
+- **Flow name refresh.** For `GET`, the route collects the distinct flow IDs in the card and calls the flow service
+  `get_flow(flow_id)` once per ID, catching any exception to fall back to the recorded name. Lookups hit the local flow
+  repository, and the number of distinct flows writing to one document set is small. The refreshed names go to the
+  mapper only, never back to storage.
+
+### D11. Why the card is not in `DocumentSetResponse`
+
+The card can be large and is only needed on a detail page. Keeping `DocumentSetResponse` unchanged avoids growing every
+list response and keeps the existing contract byte-for-byte. A consumer that wants the card calls the dedicated route.
+
+## Alternatives Considered
+
+| Alternative | Why not |
+|---|---|
+| Separate `document_set_data_cards` table | Requires new migrations on three adapters and a join. The card already persists through the asset serialization. |
+| Store the card inside `metadata` | `metadata` is user-owned and replaced by `PATCH`, so a user update would erase provenance. |
+| Keep the flat `DataCard` and add fields | Cannot represent several flows or a run history. It is unused, so replacing it costs nothing. |
+| Record from the orchestrator instead of the operator | Puts operator-specific knowledge in the orchestrator and records even when no document set exists. Violates "business logic in transform, orchestration in orchestrator". |
+| Denylist of secret keys | Fails open when a new credential key appears. The allowlist fails closed. |
+| Opt-out parameter on `document_set` | Adds an operator parameter and properties-panel work for a metadata-only record. Deferred. |
+| Unbounded run history | Grows the asset row on every scheduled run. |
+
+## Risks / Trade-offs
+
+| Risk | Mitigation |
+|---|---|
+| Lost update when two processes write the same card (Postgres, multi-replica, process workers) | Documented limitation. Idempotent per-run replacement heals lost entries on the next micro-batch. A repository-level lock or version is a separate change. |
+| Stale write by `store_data` or `update_document_set` erasing a concurrently recorded run (same process) | Both take the same per-set lock as `record_run` (D7), with a test that races them. |
+| Card growth | 50-run retention per flow. Only allowlisted fields are stored. |
+| Enterprise schema drift | A hand-written enterprise-shaped fixture pins the documented fields, and the round-trip test fails if either side renames a field. |
+| Secret leakage through a new provider key | Allowlist table plus the sentinel-secret test. Unknown providers record nothing but the provider name. |
+| Vault references already resolved when the builder runs | D12: the executor leaves `flow_definition` unresolved. A test through the real executor fails if that regresses. |
+| Consumer reads an unrecorded card as "no ACL" | `propagate_source_acls` is true, false, or null, and null means no run has been recorded (D4). The merge never lowers true. |
+| Derivative sink on a sibling branch is not in the card | Accepted gap. Only ancestors and downstream `vectordb` / `entity_store` nodes are listed (D4). Consumers cover the rest with an explicit override. |
+| Downstream sink listed before it has run | The card records the flow as declared. A consumer must treat an unreachable store as unavailable. |
+| Micro-batch duplicates | Run ID as the identity, with a test of three sequential and N concurrent recordings. |
+| Slow card write delaying the pipeline | One read, one write per `document_set` node execution, and the work is bounded by retention. Stats lookup failures return `None` immediately. |
+| `updated_at` churn on the set | Accepted. The set is already updated on each store. |
+| Embedding dimension read on a huge table | Reads one element of one column. No materialisation. |
+| Flow renamed or deleted after a run | The card keys by ID. Names are refreshed on read and fall back to the recorded name. |
+| Breaking removal of flat `DataCard` | Unused in `src/`, and referenced only by tests and a legacy repository import. Both are updated in the same change. |
+
+## Migration Plan
+
+None. No flat `DataCard` has ever been written, so no stored data needs conversion. A stored flat card, if one exists
+somewhere, loads as an empty card (D1). Rollback is a revert. The old flat `from_dict` reads its keys with defaults, so a
+stored nested card loads as an empty flat card and nothing fails. Provenance recorded since the change is then invisible
+but not corrupt, and it reappears if the change is restored.
+
+## Open Questions
+
+None blocking. The following are deferred on purpose and recorded as non-goals: an opt-out parameter, the derivatives
+view, and cross-process locking.
