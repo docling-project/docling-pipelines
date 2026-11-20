@@ -47,7 +47,7 @@ Tasks 3.3, 4.2 and 5.1 stay unchecked. Their stored verify commands are unchange
 
 - 3.3 (`pytest tests/unit/core/orchestrator/test_flow_validator.py tests/unit/core/orchestration/`): the orchestration half contains the worker `.env` reload failure (first item under Baseline failures).
 - 4.2 (`pytest tests/unit/utils/infrastructure/`): the directory contains the `test_rate_limiter.py` collection error and the `test_audit.py` ordering failures.
-- 5.1: blocked by all of the baseline failures below. `pre-commit run --from-ref origin/main --to-ref HEAD` also checks no Python while the work is uncommitted, so it must be rerun after commit.
+- 5.1: blocked by all of the baseline failures below. `pre-commit run --from-ref origin/main --to-ref HEAD` was rerun on the committed branch and passed (all hooks, including ruff, mypy, interrogate, bandit, detect-secrets and OpenSpec strict validation), but the pytest half of the stored command is still blocked.
 
 Runs with exclusions are supplementary evidence. They do not replace the stored commands.
 
