@@ -8,16 +8,25 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from docpipe.core.constants.constants import OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.feature_propagation.features_propagator import FeaturePropagator
 from docpipe.core.orchestration.feature_propagation.models import (
     FeaturePropagationResult,
 )
+from docpipe.core.orchestration.operator_factory import OperatorFactoryProvider
 from docpipe.exceptions.docpipe_exceptions import FlowValidationException
 
 # ---------------------------------------------------------------------------
 # Module-level helpers — shared across all test classes
 # ---------------------------------------------------------------------------
+
+
+def _real_operator_class(*, short_name: str):
+    """Resolve operator classes from the real factory for fixtures that mock OperatorMetadata."""
+    return OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON).get_operator(
+        operator_name=short_name
+    )
 
 
 def _make_feature_def(
@@ -66,6 +75,7 @@ class TestFeaturePropagator:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(return_value={})
             return prop
 
@@ -178,6 +188,7 @@ class TestExtractOperatorSpecialCase:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(
                 return_value={
                     "text": _make_feature_def(description="Extracted text", available_for_filter=False),
@@ -239,6 +250,7 @@ class TestSQLFilterSpecialCase:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(return_value={})
             return prop
 
@@ -335,6 +347,7 @@ class TestOutputFeaturesToDrop:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(return_value={})
             return prop
 
@@ -424,6 +437,7 @@ class TestMergeOperatorSpecialCase:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(return_value={})
             return prop
 
@@ -540,6 +554,7 @@ class TestGlobalParameterPropagation:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(return_value={})
             return prop
 
@@ -615,6 +630,7 @@ class TestExtractOperatorEntityMode:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(return_value={})
             return prop
 
@@ -688,6 +704,7 @@ class TestEmbeddingsQuantizationSpecialCase:
         with patch.object(FeaturePropagator, "__init__", lambda x: None):
             prop = FeaturePropagator()
             prop.operator_metadata = Mock()
+            prop.operator_metadata.get_operator_class = _real_operator_class
             prop.operator_metadata.get_features = Mock(
                 return_value={
                     OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT: _make_feature_def(
