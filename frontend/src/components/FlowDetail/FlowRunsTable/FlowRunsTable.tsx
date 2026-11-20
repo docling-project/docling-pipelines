@@ -15,7 +15,7 @@ import {
 } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import { SharedDataTable } from '@/components/common/SharedDataTable';
-import { usePermissionReason } from '@/components/common/PermissionTooltip';
+import { usePermissionReason } from '@/hooks';
 import { messages } from './FlowRunsTable.messages';
 import styles from './FlowRunsTable.module.scss';
 

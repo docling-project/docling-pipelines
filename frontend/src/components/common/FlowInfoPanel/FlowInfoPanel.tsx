@@ -3,7 +3,8 @@ import { Button, Tag } from '@carbon/react';
 import { Close, Edit } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import { useAppSelector } from '@/hooks/useAppSelector';
-import { PermissionTooltip, usePermissionReason } from '../PermissionTooltip';
+import { usePermissionReason } from '@/hooks/usePermissionReason';
+import { PermissionTooltip } from '../PermissionTooltip';
 import { messages } from './FlowInfoPanel.messages';
 import styles from './FlowInfoPanel.module.scss';
 
