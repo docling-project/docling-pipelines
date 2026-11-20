@@ -44,7 +44,7 @@ This allows users to configure:
 
 - the job framework type via `job_management.framework.type`
 - the job stats storage backend and its settings via `job_management.storage`
-- the flow repository via the `LOCAL_FLOWS_DIR` environment variable
+- the flow repository via the `FLOW_REPOSITORY_BASE_DIR` environment variable
 
 Environment variables that still apply on the submitter:
 
