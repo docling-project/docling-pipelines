@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for OCR configuration — OcrConfig model, factory validation, and adapter wiring."""
 
 import logging

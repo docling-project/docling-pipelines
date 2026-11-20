@@ -60,7 +60,13 @@ def _weaviate_baseline(**overrides: Any) -> dict[str, Any]:
 
 def _weaviate_auth_baseline(**overrides: Any) -> dict[str, Any]:
     """Return a Weaviate baseline with TLS on and API-key auth, so only the mutated field is at issue."""
-    return _weaviate_baseline(auth_type="api_key", secure=True, grpc_secure=True, api_key="baseline-key", **overrides)
+    return _weaviate_baseline(
+        auth_type="api_key",
+        secure=True,
+        grpc_secure=True,
+        api_key="baseline-key",  # pragma: allowlist secret
+        **overrides,
+    )
 
 
 def _dropbox_baseline(**overrides: Any) -> dict[str, Any]:
