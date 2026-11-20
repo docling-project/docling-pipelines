@@ -16,12 +16,25 @@ same field names where they apply, so that a card is meaningful on both sides an
 
 - **Data card model.** Replace the unused flat `DataCard` with a nested provenance model: descriptive fields plus
   `flows[] -> jobs[] -> runs[] -> operators[]`, with per-operator `sources`, `embeddings`, `chunk_details`, and
-  `derivative_store`. Field names follow the enterprise schema, with two additions that retrieval needs:
-  `embeddings[].provider` and `derivative_store.add_sparse_vector`. Loading is lenient, so a card shaped like an
-  enterprise card loads and re-serializes without losing known fields, and the two additions load as null.
+  `derivative_store`. Field names follow the enterprise schema. Consumers of the card (the derivatives view in
+  `add-document-library-derivatives` and, through it, retrieval) need four things the enterprise schema does not
+  carry or this repository did not model, so the card adds them: `embeddings[].provider`,
+  `derivative_store.add_sparse_vector`, `derivative_store.table_prefix` (entity stores only), and it models the
+  enterprise field `derivative_store.feature_mappings`. Loading is lenient, so a card shaped like an enterprise card
+  loads and re-serializes without losing known fields, and the additions load as null.
 - **Automatic population.** The `document_set` operator records the current job run in the target document set's card
-  after it stores rows. The run lists the operators upstream of the node, with details for ingest sources, chunker,
-  embeddings, and vector database nodes, and derives `language` and `propagate_source_acls` from the flow.
+  after it stores rows. The run lists the operators upstream of the node plus the derivative sinks (`vectordb` and
+  `entity_store` nodes) that are upstream or downstream of it, with details for ingest sources, chunker, embeddings,
+  vector database, and entity store nodes, and derives `language` and `propagate_source_acls` from the flow.
+- **Derivative facts, not a derivatives view.** For each `vectordb` node the card records the index or collection,
+  the effective sparse mode, and the node's explicit `feature_mappings` (the index column for each feature, including
+  the vector, id, text, and `allowed_users` columns). For each `entity_store` node it records the backend, where the
+  tables live, and the table prefix. Resolving these into library-level views, merging runs across flows, and
+  exposing them over REST is the job of `add-document-library-derivatives`, not this change.
+- **ACL flag that does not fail open.** `propagate_source_acls` becomes a three-state value. It is true when the flow
+  contains any `acl_operator` node, false when a run was recorded for a flow without one, and null only while no run
+  has been recorded. True is sticky across runs. A consumer can therefore treat null as unknown instead of as
+  unprotected.
 - **Safe accumulation.** Recording is idempotent per job run (micro-batches rewrite the same entry), accumulates runs
   across jobs and flows, keeps the most recent 50 runs per flow entry, and never overwrites user-managed fields.
 - **No secrets.** The card is built from an allowlist of non-secret fields. Credentials, vault references, query strings,
@@ -46,8 +59,8 @@ routes are additive.
 **Affected REST routes:** new `GET` and `PATCH /api/v1/document-sets/{document_set_id}/data-card`. No existing route
 changes its request or response shape.
 
-**Affected operators:** `document_set` (records the card). Read-only inspection of the upstream `ingest_source`,
-`chunker`, `embeddings`, `vectordb`, `lang_detect`, and `acl_operator` node definitions. None of them change.
+**Affected operators:** `document_set` (records the card). Read-only inspection of the `ingest_source`, `chunker`,
+`embeddings`, `vectordb`, `entity_store`, `lang_detect`, and `acl_operator` node definitions. None of them change.
 
 **Affected storage adapters:** none. DuckDB, Postgres, and local adapters already persist the card through the asset
 serialization. A new application service reads and writes through the existing repository port.
@@ -74,8 +87,14 @@ serialization. A new application service reads and writes through the existing r
   relationships (`is_produced_by`, `has_a_source_of`, `creates_derivative`, `creates_derivatives_through`), no audit events, and
   no import/export asset-ID remapping. The information those relationships carry lives inside the card
   (`flow` id, `sources`, `derivative_store`).
-- **No derivatives view.** No `include=derivatives` expansion, no entity-table or correlation detail, and no feeding of
-  `is_derivative_available` on document library responses. The card records `derivative_store`, and a later change reads it.
+- **Data card only.** This change owns the card: its model, how runs are recorded into it, and its two REST routes.
+  It does not add any document set or document library capability beyond that. Specifically, it adds no derivatives
+  view or endpoint, no `include=derivatives` expansion, no entity-table enumeration or correlation detail, no
+  cross-flow merge of derivative stores, no feeding of `is_derivative_available` on document library responses, and no
+  retrieval. `add-document-library-derivatives` builds those on top of the card, and `add-retrieval-service` builds
+  retrieval on top of that.
+- **No table enumeration for entity stores.** Entity table names are decided by the curated entity keys at run time,
+  so the card records only where they live (backend, path or schema) and their prefix.
 - **No new operator parameter.** There is no switch to turn card recording off, so the operator metadata and the
   properties panel are unchanged.
 - **No document byte sizes.** `input_size` and `processed_size` stay empty; job statistics do not track them.

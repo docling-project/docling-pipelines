@@ -53,16 +53,25 @@ fields (`resource_key`, `container_id`) and would make OSS depend on enterprise 
 
 Field names follow the enterprise schema (`purpose`, `summary`, `curator`, `language`, `collection_criteria`,
 `propagate_source_acls`, `flows`). Enterprise-only fields such as `resource_key`, `container_id`, `container_type`,
-`source_asset_id`, `vector_params`, `feature_mappings`, `schema_definition`, `entities`, and `link_names` are not modelled.
+`source_asset_id`, `vector_params`, `schema_definition`, `entities`, and `link_names` are not modelled.
 A card that carries them loads, and the unmodelled keys are dropped on re-serialization. The "round trip" requirement
 therefore speaks of *documented* fields, and a contract fixture pins exactly which fields those are.
 
-**Two fields go beyond the enterprise schema.** `embeddings[].provider` and `derivative_store.add_sparse_vector` are OSS
-additions. A consumer that reads the card to run retrieval needs them: without `provider` it must fall back to a
-configured default embedding provider, and without `add_sparse_vector` it must inspect the live index schema to choose
-between hybrid and dense-only search. Both are non-secret values the operators already hold. An enterprise card loads
-with both null, and an enterprise reader that ignores unknown keys is unaffected. Enterprise convergence can adopt or
-rename them later. `provider` reads the node's own `provider` key, not `provider_config`, which may hold credentials.
+**`feature_mappings` is modelled.** The enterprise `derivative_store` carries `feature_mappings`. OSS models it as a
+list of `{feature_name, mapped_column_name}` items, the same shape as the `vectordb` operator's `feature_mappings`
+parameter. It is the only reliable record of which index column holds the vector, the document id, the text, and the
+`allowed_users` list. The embedding `feature` on an `embeddings` entry is the *source table column*, not the index
+field, so a consumer must never use it as one. Loading is lenient: a non-list value loads as null and items that are
+not objects are dropped.
+
+**Three fields go beyond the enterprise schema.** `embeddings[].provider`, `derivative_store.add_sparse_vector`, and
+`derivative_store.table_prefix` are OSS additions. A consumer that reads the card to run retrieval needs the first two:
+without `provider` it must fall back to a configured default embedding provider, and without `add_sparse_vector` it
+must inspect the live index schema to choose between hybrid and dense-only search. `table_prefix` is the prefix of an
+`entity_store` node's tables, which a consumer needs to find them. All three are non-secret values the operators
+already hold. An enterprise card loads with all three null, and an enterprise reader that ignores unknown keys is
+unaffected. Enterprise convergence can adopt or rename them later. `provider` reads the node's own `provider` key, not
+`provider_config`, which may hold credentials.
 
 `FlowItem.type` for OSS-written entries is `docpipe_flow`. Enterprise values (`ibm_udp_flow`,
 `ibm_unstructured_data_curation`) are preserved when loaded.
@@ -91,7 +100,8 @@ operators, DAGs, or pyarrow.
 2. Find or create the flow by `details.id`, then the job by `id`, then the run by `id`.
 3. Replace the run if present (preserving its `executed_at`), otherwise append.
 4. Apply retention (D6).
-5. Set `language` and `propagate_source_acls` only if they are null.
+5. Set `language` only if it is null. Merge `propagate_source_acls` as: true replaces null and false, false replaces null,
+   and true is never lowered (D4).
 6. `repository.update(asset=document_set)` and return the card.
 
 `update_descriptive_fields` applies only the six allowed keys and ignores null values.
@@ -114,10 +124,21 @@ reach the builder already replaced by the real secret, and `is_vault_reference()
 the executor so `flow_definition` is not resolved.
 
 **DAG walk.** From the `document_set` node (found by `config["id"]`, falling back to `node_id`), walk `input_edges`
-(`node_id_ref`) breadth-first, collecting every ancestor. Visited set, so a diamond is listed once. Sort the ancestors
-topologically (Kahn on the ancestor subgraph) so output is upstream to downstream and deterministic; ties broken by the
-order nodes appear in the definition. Branches that feed a `merge` are naturally included because `merge` has several
-input edges. A node that is not an ancestor, such as a sibling branch ending in another sink, is excluded.
+(`node_id_ref`) breadth-first, collecting every ancestor. Visited set, so a diamond is listed once. Branches that feed a
+`merge` are naturally included because `merge` has several input edges.
+
+**Derivative sinks downstream of the node.** A walk in the opposite direction (over the reverse of `input_edges`)
+collects the descendants of the `document_set` node, and of those only nodes whose operator is `vectordb` or
+`entity_store` are kept. This covers flows such as `sample_flows/advanced/branching_dual_embeddings.json`, where the
+vector index is written after the document set (`document_set -> vectordb`). Other descendants are not listed. The
+card describes the flow as declared, so a downstream sink is listed even if it has not run yet when the card is
+recorded. A node that is neither an ancestor nor a kept descendant, such as a `vectordb` on a sibling branch, is
+excluded; recording it is a known gap that consumers cover with an explicit override.
+
+The kept nodes (ancestors, then kept descendants) are sorted topologically over the whole definition (Kahn) so output
+is upstream to downstream and deterministic; ties are broken by the order nodes appear in the definition. Every
+`embeddings` entry that feeds a `vectordb` entry therefore appears before it, which is what a consumer relies on to pair
+the two.
 
 If `flow_definition` is missing, not a dict, has no `dag`, or the node is not found, the builder returns an empty
 `operators` list. This is the "missing flow definition" requirement, and it is also what a direct operator unit test
@@ -131,8 +152,15 @@ sees.
 | `ingest_source` | `sources[0]` = `{input: provider, name, paths}` | provider-specific location keys only (see D5) |
 | `chunker` | `chunk_details = {type, size}` | `chunk_type`, `chunk_size` in node config |
 | `embeddings` | `embeddings[0] = {type: "dense", provider, model_id, feature, dimension_size}` | node `provider` (default `litellm`, the operator default); `provider_config.model_id`; `embeddings_column` (default `embeddings`); dimension from the stored table |
-| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name, add_sparse_vector}` | `provider`, `provider_config.index_name` / `collection_name`, effective sparse mode (see below) |
+| `vectordb` | `derivative_store = {name: provider, path: index_name or collection_name, add_sparse_vector, feature_mappings}` | `provider`, `provider_config.index_name` / `collection_name`, effective sparse mode (see below), the node's `feature_mappings` parameter when it is a non-empty list, otherwise null |
+| `entity_store` | `derivative_store = {name: data_backend, path, table_prefix}` | `data_backend` (default `duckdb`); `path` is `database_path` for `duckdb` (default `:memory:`) and `schema` for `postgres`; `table_prefix` (default `entity_`). No table names, no Postgres connection parameters |
 | `lang_detect`, `acl_operator` | `type`, `node_id`, `name` only | used for derived fields |
+
+**Feature mappings are recorded as written, never computed.** Default mappings (`id` to `document_id`, vector to
+`vector_embeddings`, and so on) depend on the features that reach the node at run time, which the builder cannot see.
+When the node sets no mappings, `feature_mappings` is null and a consumer applies the `vectordb` operator defaults. A
+mapping entry is kept only when both `feature_name` and `mapped_column_name` are strings; the values are column names
+and are not secrets. The `allowed_users` column is "known" only when an explicit mapping names it.
 
 **Effective sparse mode.** `add_sparse_vector` is not a single key. The vectordb operator copies the node-level
 `add_sparse_vector` over the same key in `provider_config` when the node sets it (so the node wins), the Milvus and
@@ -150,12 +178,22 @@ dimension is null. The model is never loaded and no provider is called.
 **Language.** If any ancestor is `lang_detect` and the table has `lang_name`, take the most frequent value that is not
 `UNKNOWN`. Counting uses `pyarrow.compute.value_counts` on the column, so it does not materialise Python rows.
 
-**ACL propagation.** True if any ancestor is `acl_operator`; otherwise null (not false, so an unrelated flow does not
-override an earlier value).
+**ACL propagation.** A run's value is true if *any* node of the flow definition is an `acl_operator` (ancestor,
+descendant, or sibling), otherwise false. Looking at the whole definition is deliberately conservative, because a consumer
+uses the flag to decide whether it may serve rows without per-document access control. The merge into the card (D3)
+is: true replaces null and false, false replaces null, and true is never lowered. The value is null only while no run
+has been recorded, so a consumer can treat null as "unknown" instead of "not protected". A failed first recording
+(D8) leaves null, not false.
 
 ### D5. Secret exclusion by allowlist
 
 The builder never copies a config dict. It reads named location keys and nothing else.
+
+**Entity store location.** A file-backed DuckDB `database_path` is recorded as the entity store's `path`. It is a local
+path like the ingest `paths` already recorded for filesystem sources, not a credential, and the card endpoint is
+already scoped to the document set's readers. Consumers that expose cards or derivatives to other audiences must
+redact it (the derivatives view in `add-document-library-derivatives` does). A Postgres entity store records only the
+schema; host, port, user, and password are never read.
 
 **Why not reuse `core/lineage/dataset_naming.py`.** Its helpers are private and return lineage-style
 `(namespace, name)` pairs (for example `s3://docs` and `incoming`), not the `name` and `paths` the card needs. It also
@@ -343,6 +381,9 @@ list response and keeps the existing contract byte-for-byte. A consumer that wan
 | Enterprise schema drift | A hand-written enterprise-shaped fixture pins the documented fields, and the round-trip test fails if either side renames a field. |
 | Secret leakage through a new provider key | Allowlist table plus the sentinel-secret test. Unknown providers record nothing but the provider name. |
 | Vault references already resolved when the builder runs | D12: the executor leaves `flow_definition` unresolved. A test through the real executor fails if that regresses. |
+| Consumer reads an unrecorded card as "no ACL" | `propagate_source_acls` is true, false, or null, and null means no run has been recorded (D4). The merge never lowers true. |
+| Derivative sink on a sibling branch is not in the card | Accepted gap. Only ancestors and downstream `vectordb` / `entity_store` nodes are listed (D4). Consumers cover the rest with an explicit override. |
+| Downstream sink listed before it has run | The card records the flow as declared. A consumer must treat an unreachable store as unavailable. |
 | Micro-batch duplicates | Run ID as the identity, with a test of three sequential and N concurrent recordings. |
 | Slow card write delaying the pipeline | One read, one write per `document_set` node execution, and the work is bounded by retention. Stats lookup failures return `None` immediately. |
 | `updated_at` churn on the set | Accepted. The set is already updated on each store. |

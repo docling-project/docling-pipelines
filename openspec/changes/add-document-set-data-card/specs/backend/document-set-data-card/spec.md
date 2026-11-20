@@ -29,8 +29,16 @@ Loading a card from a dictionary SHALL accept every field of the enterprise data
 - **THEN** every documented field of the input is present and equal in the output
 
 #### Scenario: Fields absent from an enterprise card load as null
-- **WHEN** an enterprise card has embeddings without `provider` and a derivative store without `add_sparse_vector`
-- **THEN** loading succeeds, `provider` is null, and `add_sparse_vector` is null
+- **WHEN** an enterprise card has embeddings without `provider` and a derivative store without `add_sparse_vector` and `table_prefix`
+- **THEN** loading succeeds, `provider`, `add_sparse_vector`, and `table_prefix` are null
+
+#### Scenario: Feature mappings survive a round trip
+- **WHEN** an enterprise card whose derivative store carries `feature_mappings` with `feature_name` and `mapped_column_name` items is loaded and serialized
+- **THEN** the serialized derivative store holds the same items
+
+#### Scenario: Malformed feature mappings load leniently
+- **WHEN** a derivative store holds `feature_mappings` that is not a list, or a list with items that are not objects
+- **THEN** loading succeeds, a non-list value loads as null, and the non-object items are dropped
 
 #### Scenario: Unknown keys ignored
 - **WHEN** a card dictionary contains a key that the schema does not define
@@ -137,7 +145,22 @@ A recorded run's `operators` SHALL list every node in the flow definition from w
 - **THEN** operators of both branches and the merge node are listed
 
 #### Scenario: Unrelated node excluded
-- **WHEN** a node in the flow is not an ancestor of the document set node
+- **WHEN** a node in the flow is neither an ancestor of the document set node nor a downstream `vectordb` or `entity_store` node
+- **THEN** it is not listed
+
+### Requirement: Downstream derivative sinks are listed
+A recorded run's `operators` SHALL also list every `vectordb` and `entity_store` node of the flow definition that is reachable from the `document_set` node through the input edges of other nodes (a node downstream of it). No other downstream node SHALL be listed. The whole list SHALL be ordered from upstream to downstream, so that an `embeddings` entry that feeds a `vectordb` entry precedes it. The entry SHALL carry the same details as an upstream node of the same type.
+
+#### Scenario: Vector index written after the document set
+- **WHEN** the flow is ingest, extract, chunker, embeddings, document set, then vectordb
+- **THEN** the run lists the ingest, extract, chunker, embeddings, and vectordb operators in that order, with the vectordb entry carrying its derivative store
+
+#### Scenario: Other downstream node not listed
+- **WHEN** a `noop` node follows the document set node
+- **THEN** it is not listed
+
+#### Scenario: Sibling sink not listed
+- **WHEN** a `vectordb` node hangs off the embeddings node on a branch that does not include the document set node
 - **THEN** it is not listed
 
 ### Requirement: Missing flow definition
@@ -181,11 +204,18 @@ For an upstream `embeddings` node, the entry SHALL carry one `embeddings` item w
 - **THEN** its entry shows `dimension_size` 384 and `feature` `embeddings`
 
 ### Requirement: Vector database derivative store
-For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whose `name` is the provider, whose `path` is the index or collection name, and whose `add_sparse_vector` is true when the node runs in sparse mode and false otherwise. Sparse mode is set by the node's `add_sparse_vector` when present, otherwise by `provider_config.add_sparse_vector`, or by `provider_config.vector_mode` equal to `sparse`. The entry SHALL NOT record hosts, URIs, ports, or any connection parameter.
+For a listed `vectordb` node (upstream or downstream of the document set), the entry SHALL carry a `derivative_store` whose `name` is the provider and whose `path` is the index or collection name. The entry SHALL NOT record hosts, URIs, ports, or any connection parameter.
 
 #### Scenario: OpenSearch index
 - **WHEN** a vectordb node uses provider `opensearch` with index `docs_v1`
 - **THEN** its entry shows a derivative store with name `opensearch` and path `docs_v1`
+
+#### Scenario: Connection parameters excluded
+- **WHEN** the vectordb node sets `host`, `port`, and `uri`
+- **THEN** none of those values appears in the card
+
+### Requirement: Vector database sparse mode
+The `derivative_store` of a listed `vectordb` node SHALL carry `add_sparse_vector` true when the node runs in sparse mode and false otherwise. Sparse mode is set by the node's `add_sparse_vector` when present, otherwise by `provider_config.add_sparse_vector`, or by `provider_config.vector_mode` equal to `sparse`.
 
 #### Scenario: Sparse vectors enabled
 - **WHEN** a vectordb node sets `add_sparse_vector` to true
@@ -207,12 +237,42 @@ For an upstream `vectordb` node, the entry SHALL carry a `derivative_store` whos
 - **WHEN** no sparse setting is present
 - **THEN** its derivative store shows `add_sparse_vector` false
 
-#### Scenario: Connection parameters excluded
-- **WHEN** the vectordb node sets `host`, `port`, and `uri`
-- **THEN** none of those values appears in the card
+### Requirement: Vector database feature mappings
+For a `vectordb` node that sets a non-empty `feature_mappings` parameter, the derivative store SHALL carry `feature_mappings` as the list of its items that have string `feature_name` and string `mapped_column_name`, in the configured order. When the node sets no mappings, `feature_mappings` SHALL be null and SHALL NOT be computed from defaults. The embedding `feature` of an `embeddings` entry SHALL remain the name of the source table column.
+
+#### Scenario: Explicit mappings recorded
+- **WHEN** a vectordb node maps the feature `embeddings` to the column `vec`, `id` to `doc_id`, and `allowed_users` to `allowed_users`
+- **THEN** its derivative store lists those three items with their feature and column names
+
+#### Scenario: No mappings recorded as null
+- **WHEN** a vectordb node sets no `feature_mappings`
+- **THEN** its derivative store shows `feature_mappings` null
+
+#### Scenario: Malformed mapping items dropped
+- **WHEN** a vectordb node's `feature_mappings` holds an item without `mapped_column_name`
+- **THEN** that item is not recorded and the valid items are
+
+#### Scenario: Embedding feature is the source column
+- **WHEN** an embeddings node writes the column `embeddings` and a vectordb node maps it to `vector_embeddings`
+- **THEN** the embeddings entry shows `feature` `embeddings` and the derivative store maps that feature to `vector_embeddings`
+
+### Requirement: Entity store derivative store
+For an `entity_store` node listed in a run, the entry SHALL carry a `derivative_store` whose `name` is the node's `data_backend` (`duckdb` when not set), whose `path` is its `database_path` for `duckdb` (`:memory:` when not set) and its `schema` for `postgres`, and whose `table_prefix` is the node's `table_prefix` (`entity_` when not set). The entry SHALL NOT record table names, hosts, ports, users, passwords, or any other connection parameter.
+
+#### Scenario: File-backed DuckDB entity store
+- **WHEN** an entity store node uses `data_backend` `duckdb` with `database_path` `data/duckdb/entities.duckdb`
+- **THEN** its derivative store shows name `duckdb`, that path, and prefix `entity_`
+
+#### Scenario: Defaults
+- **WHEN** an entity store node sets no storage parameters
+- **THEN** its derivative store shows name `duckdb`, path `:memory:`, and prefix `entity_`
+
+#### Scenario: Postgres entity store
+- **WHEN** an entity store node uses `data_backend` `postgres` with schema `docpipe_entities` and connection parameters
+- **THEN** its derivative store shows name `postgres`, path `docpipe_entities`, and the prefix, and none of the connection parameters appears in the card
 
 ### Requirement: Derived descriptive fields
-When the flow has an upstream `lang_detect` node and the stored table has a `lang_name` column, recording SHALL set the card's `language` to the most frequent value other than `UNKNOWN`. When the flow has an upstream `acl_operator` node, recording SHALL set `propagate_source_acls` to true. A derived field SHALL be written only when it is currently null.
+When the flow has an upstream `lang_detect` node and the stored table has a `lang_name` column, recording SHALL set the card's `language` to the most frequent value other than `UNKNOWN`, only when `language` is currently null.
 
 #### Scenario: Language derived
 - **WHEN** a run records with `lang_name` values `en`, `en`, and `fr` and the card language is null
@@ -222,12 +282,35 @@ When the flow has an upstream `lang_detect` node and the stored table has a `lan
 - **WHEN** the card language is already `de` and a run derives `en`
 - **THEN** the card language stays `de`
 
+### Requirement: ACL propagation flag
+Recording SHALL derive `propagate_source_acls` from the whole flow definition: true when any node is an `acl_operator`, otherwise false. The stored value SHALL be merged so that true replaces null and false, false replaces null, and true is never replaced by false. `propagate_source_acls` SHALL be null only while no run has been recorded.
+
 #### Scenario: ACL propagation derived
 - **WHEN** the flow contains an upstream ACL operator and `propagate_source_acls` is null
 - **THEN** `propagate_source_acls` becomes true
 
+#### Scenario: ACL operator on another branch still counts
+- **WHEN** the flow contains an `acl_operator` node that is not an ancestor of the document set node
+- **THEN** `propagate_source_acls` becomes true
+
+#### Scenario: Flow without an ACL operator records false
+- **WHEN** a run is recorded for a flow with no `acl_operator` node and `propagate_source_acls` is null
+- **THEN** `propagate_source_acls` becomes false
+
+#### Scenario: True is never lowered
+- **WHEN** `propagate_source_acls` is true and a later run of a flow without an ACL operator is recorded
+- **THEN** `propagate_source_acls` stays true
+
+#### Scenario: False is raised
+- **WHEN** `propagate_source_acls` is false and a later run of a flow with an ACL operator is recorded
+- **THEN** `propagate_source_acls` becomes true
+
+#### Scenario: Unrecorded card stays unknown
+- **WHEN** recording the first run fails
+- **THEN** `propagate_source_acls` remains null, not false
+
 ### Requirement: Recording does not overwrite user-managed fields
-Recording a run SHALL change only the `flows` section and the derived fields that are null. It SHALL NOT change `purpose`, `summary`, `curator`, or `collection_criteria`, and SHALL NOT change non-null derived fields.
+Recording a run SHALL change only the `flows` section, a null `language`, and `propagate_source_acls` as merged by the derived-fields requirement. It SHALL NOT change `purpose`, `summary`, `curator`, or `collection_criteria`, and SHALL NOT change a non-null `language`.
 
 #### Scenario: User fields intact
 - **WHEN** a run is recorded for a card whose `purpose`, `summary`, `curator`, and `collection_criteria` were set through the API
