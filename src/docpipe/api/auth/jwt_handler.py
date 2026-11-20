@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """JWT token handling module."""
 
 from datetime import UTC, datetime, timedelta
@@ -21,6 +24,7 @@ class JWTClaims:
     USERNAME = "username"
     EMAIL = "email"
     FULL_NAME = "full_name"
+    ROLES = "roles"
 
 
 class JWTConfig(BaseSettings):
