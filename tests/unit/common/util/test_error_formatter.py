@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for error_formatter module."""
 
 import pytest
@@ -457,3 +460,51 @@ class TestConstants:
     def test_card_separator_constant(self, formatter):
         """Test CARD_SEPARATOR constant."""
         assert formatter.CARD_SEPARATOR == "─" * 79
+
+
+class TestDocpipeExceptionBlocks:
+    """Test optional blocks of format_docpipe_exception."""
+
+    def test_node_failures_are_rendered_in_their_own_block(self, formatter):
+        """node_failures are listed per operator and not repeated under Details."""
+        exc = DocpipeException("Flow execution failed", status_code=500)
+        exc.node_failures = {"extract": "Docling conversion failed", "chunker": ""}  # type: ignore[attr-defined]
+
+        lines = formatter.format_docpipe_exception(exception=exc).splitlines()
+
+        start = lines.index(" Failed operators:")
+        assert lines[start + 1] == f" {formatter.CARD_SEPARATOR}"
+        assert lines[start + 2] == "  [extract]"
+        assert lines[start + 3] == "  Docling conversion failed"
+        assert lines[start + 5] == "  [chunker]"
+        # An empty node error still renders an (empty) message block.
+        assert lines[start + 6] == "  "
+        assert "Node Failures" not in "\n".join(lines)
+
+    def test_non_docpipe_exception_has_no_details_block(self, formatter):
+        """A plain exception gets the header and message but no Details section."""
+        exc = ValueError("plain failure")
+        exc.status_code = 418  # type: ignore[attr-defined]
+
+        result = formatter.format_docpipe_exception(exception=exc)
+
+        assert " VALUE" in result
+        assert "plain failure" in result
+        assert "Details:" not in result
+        assert "418" not in result
+
+    def test_docpipe_exception_without_displayable_context(self, formatter):
+        """A DocpipeException whose attributes are all empty renders no Details section."""
+        exc = DocpipeException("nothing to add")
+        exc.status_code = None  # type: ignore[assignment]
+
+        result = formatter.format_docpipe_exception(exception=exc)
+
+        assert "nothing to add" in result
+        assert "Details:" not in result
+
+    def test_blank_lines_in_message_are_preserved(self, formatter):
+        """Explicit blank lines inside a message are kept as indented empty lines."""
+        lines = formatter._build_message_block(message="first\n\nsecond", indent=" ")
+
+        assert lines == [" first", " ", " second", ""]

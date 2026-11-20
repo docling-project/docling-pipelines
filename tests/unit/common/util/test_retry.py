@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for retry helper functions and decorator behaviour."""
 
 from unittest.mock import MagicMock, call, patch
@@ -10,6 +13,7 @@ from docpipe.utils.infrastructure.retry import (
     _parse_retry_result,
     _raise_on_exhaustion,
     retry_with_exponential_backoff,
+    should_retry_on_result,
 )
 
 # ---------------------------------------------------------------------------
@@ -164,3 +168,45 @@ class TestRetryDecoratorIntegration:
 
         assert result == "ok"
         assert call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Decorator without retry_logic and the default advisory-lock retry logic
+# ---------------------------------------------------------------------------
+
+
+class TestRetryDecoratorWithoutRetryLogic:
+    def test_warns_at_decoration_time(self):
+        with patch("docpipe.utils.infrastructure.retry.logger") as mock_logger:
+            retry_with_exponential_backoff()(lambda: None)
+
+        mock_logger.warning.assert_called_once_with("No retry logic provided. Function will not retry on failure.")
+
+    def test_returns_result_without_retrying(self):
+        func = MagicMock(return_value="done")
+
+        with patch("docpipe.utils.infrastructure.retry.time.sleep") as mock_sleep:
+            result = retry_with_exponential_backoff(max_retries=3)(func)()
+
+        assert result == "done"
+        func.assert_called_once_with()
+        mock_sleep.assert_not_called()
+
+    def test_raises_first_exception_without_retrying(self):
+        func = MagicMock(side_effect=RuntimeError("boom"))
+
+        with patch("docpipe.utils.infrastructure.retry.time.sleep") as mock_sleep:
+            with pytest.raises(RuntimeError, match="boom"):
+                retry_with_exponential_backoff(max_retries=3)(func)()
+
+        func.assert_called_once_with()
+        mock_sleep.assert_not_called()
+
+
+class TestShouldRetryOnResult:
+    @pytest.mark.parametrize(("result", "expected"), [(True, False), (1, False), (False, True), (None, True)])
+    def test_retries_only_on_falsy_result(self, result, expected):
+        should_retry, msg = should_retry_on_result(result, None)
+
+        assert should_retry is expected
+        assert msg == "Error in acquiring postgres advisory lock"
