@@ -61,6 +61,7 @@ class DocpipeConstants:
     DATA_FOLDER = "data_folder"
     OPERAND_NAMESPACE = "OPERAND_NAMESPACE"
     DAG = "dag"
+    VAULT_PLACEHOLDER = "__vault_placeholder__"
     DEFINITION = "definition"
     DESCRIPTION = "description"
     FLOW = "flow"
@@ -118,6 +119,10 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    # Stands in for every vault:// reference while a flow is validated. A plain string (pydantic
+    # turns str subclasses back into str) that passes the non-empty and http(s) URL checks of
+    # secret-capable fields. No provider is contacted and nothing is resolved.
+    VALIDATION_SECRET_SENTINEL = "https://vault-reference.invalid"  # nosec B105  # pragma: allowlist secret
     VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
@@ -205,7 +210,6 @@ class DocpipeConstants:
 
     # Document Library constants
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
-    LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
     _DEFAULT_DATA_ROOT = _find_project_root() / "data"
@@ -259,9 +263,6 @@ class DocumentLibraryConstants:
 
     # Size value limits (JavaScript MAX_SAFE_INTEGER for JSON compatibility)
     MAX_SAFE_INTEGER = 9007199254740991
-
-    # Bulk operation limits
-    MAX_BULK_OPERATION_SIZE = 1000  # Maximum number of items in bulk operations
 
 
 class DocpipeConfigKeys:
@@ -355,8 +356,11 @@ class EnvironmentVariables:
     DOCPIPE_LINEAGE_PRODUCER = "DOCPIPE_LINEAGE_PRODUCER"
     DOCPIPE_LINEAGE_STRICT = "DOCPIPE_LINEAGE_STRICT"
 
+    # Hugging Face offline mode (read natively by huggingface_hub / transformers)
+    HF_HUB_OFFLINE = "HF_HUB_OFFLINE"
+    TRANSFORMERS_OFFLINE = "TRANSFORMERS_OFFLINE"
+
     DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
-    DOCPIPE_API_BASE_URL = "DOCPIPE_API_BASE_URL"
     KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
     KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
     KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
@@ -456,6 +460,41 @@ class ServiceConstants:
     # text detection).
     DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
 
+    # Hugging Face local HAP text classification (text_detection capability).
+    # Model id, revision and toxic labels are one unit: change them together, in a release.
+    # The pinned revision and default labels apply only to the default model; any other
+    # model must name its toxic labels explicitly, because generic labels do not mean
+    # "toxic" for every model.
+    DEFAULT_HUGGINGFACE_HAP_MODEL_ID = "ibm-granite/granite-guardian-hap-38m"
+    DEFAULT_HUGGINGFACE_HAP_REVISION = "faf9291163c7363d4a7ba7fc1dc72243214af931"  # pragma: allowlist secret
+    DEFAULT_HUGGINGFACE_HAP_TOXIC_LABELS: tuple[str, ...] = ("LABEL_1",)
+    DEFAULT_HUGGINGFACE_HAP_MAX_LENGTH = 512  # model tokens per scored window
+    DEFAULT_HUGGINGFACE_HAP_BATCH_SIZE = 32  # spans per forward pass
+    DEFAULT_HUGGINGFACE_HAP_THRESHOLD = 0.8
+    HUGGINGFACE_HAP_TOXIC_LABELS_HINT = (
+        "Check the model's config.json id2label on Hugging Face for available label names."
+    )
+
+    # Local Hugging Face sequence-classification option values
+    HUGGINGFACE_ACTIVATION_SOFTMAX = "softmax"
+    HUGGINGFACE_ACTIVATION_SIGMOID = "sigmoid"
+    HUGGINGFACE_ACTIVATION_AUTO = "auto"  # sigmoid for multi-label models, softmax otherwise
+    HUGGINGFACE_ACTIVATIONS: tuple[str, ...] = (
+        HUGGINGFACE_ACTIVATION_SOFTMAX,
+        HUGGINGFACE_ACTIVATION_SIGMOID,
+        HUGGINGFACE_ACTIVATION_AUTO,
+    )
+    HUGGINGFACE_DEVICE_AUTO = "auto"  # cuda when available, cpu otherwise
+    HUGGINGFACE_DEVICE_CPU = "cpu"
+    HUGGINGFACE_DEVICE_CUDA = "cuda"
+    HUGGINGFACE_DEVICE_MPS = "mps"
+    HUGGINGFACE_DEVICES: tuple[str, ...] = (
+        HUGGINGFACE_DEVICE_AUTO,
+        HUGGINGFACE_DEVICE_CPU,
+        HUGGINGFACE_DEVICE_CUDA,
+        HUGGINGFACE_DEVICE_MPS,
+    )
+
 
 class ProviderConstants:
     """Canonical provider name strings used across all provider-facing APIs.
@@ -470,6 +509,7 @@ class ProviderConstants:
 
     OLLAMA: Final[str] = "ollama"
     WATSONX: Final[str] = "watsonx"
+    HUGGINGFACE: Final[str] = "huggingface"
 
 
 class DoclingClientConstants:
@@ -683,6 +723,14 @@ TERMINAL_JOB_STATUSES = frozenset(
         ExecutionStatus.CANCELED,
         ExecutionStatus.FAILED,
         ExecutionStatus.ABORTED,
+    ]
+)
+
+COMPLETED_JOB_STATUSES = frozenset(
+    [
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.COMPLETED_WITH_ERRORS,
+        ExecutionStatus.COMPLETED_WITH_WARNINGS,
     ]
 )
 

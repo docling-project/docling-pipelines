@@ -37,11 +37,11 @@ It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, B
 - ✂️ **[Chunking](docs/operators/functional/chunker_readme.md)** — Docling-native and semantic chunking strategies
 - 🔢 **[Embeddings](docs/operators/functional/embeddings_readme.md)** — vector embedding generation for any downstream vector store
 - 🔍 **[Quality operators](docs/reference/OPERATORS.md)** — language detection, readability scoring, PII/HAP detection, deduplication, redaction, SQL filtering, document classification, and ML enrichment
-- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch or Milvus (including container-free Milvus Lite), or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
+- 🗄️ **[Vector](docs/operators/vectordb/vectordb_readme.md) & [cloud storage](docs/operators/storage/storage_output_readme.md)** — write vectors to OpenSearch, Milvus (including container-free Milvus Lite), or Weaviate, or export curated documents to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive
 - 🔀 **[DAG-based flows](docs/guides/FLOW_AUTHORING_FORMAT.md) & [micro-batching](docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md)** — define pipelines as JSON with automatic dependency resolution, parallel micro-batching, and distributed execution via Prefect (thread pools, process pools, or Docker work pools)
 - 🔄 **[Incremental processing](docs/reference/GLOBAL_CONFIG.md#incremental-processing)** — stateful delta runs (backed by Parquet or PostgreSQL) that track document changes, skip unchanged files, and optionally synchronize source deletions
 - ⚡ **[Event-driven streaming](docs/guides/EVENT_STREAMING_GUIDE.md)** — real-time Kafka event consumption with Schema Registry support and routing-key-to-flow mappings for automated create/update/delete triggers
-- 🔐 **[Enterprise security & governance](docs/guides/SECURITY_BEST_PRACTICES.md)** — [HashiCorp Vault](docs/guides/VAULT_INTEGRATION_GUIDE.md) (`vault://`) secret resolution, document [ACL extraction](docs/operators/extract/acl_readme.md) and [query-time enforcement](docs/api/ACL_DOCUMENT_RETRIEVAL.md), and [OAuth2/OIDC](docs/api/OAUTH2_AUTHENTICATION.md) + LDAP/JWT REST API authentication
+- 🔐 **[Enterprise security & governance](docs/guides/SECURITY_BEST_PRACTICES.md)** — [HashiCorp Vault](docs/guides/VAULT_INTEGRATION_GUIDE.md) (`vault://`) secret resolution with a [deny-by-default policy](docs/guides/SECRETS_GUIDE.md), document [ACL extraction](docs/operators/extract/acl_readme.md) and [query-time enforcement](docs/api/ACL_DOCUMENT_RETRIEVAL.md), and [OAuth2/OIDC](docs/api/OAUTH2_AUTHENTICATION.md) + LDAP/JWT REST API authentication
 - 📊 **Observability, lineage & reporting** — [OpenLineage](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md) event emission, [OpenTelemetry](docs/guides/TELEMETRY_SETUP.md) distributed tracing and metrics, and automated per-run [CSV job reports](docs/guides/JOB_REPORT_GENERATION.md)
 - 🗂️ **Asset management** — organize pipelines and data with Projects, [Document Libraries](docs/guides/USER_GUIDE_DOCUMENT_LIBRARIES.md), [Document Sets](docs/operators/storage/document_set_readme.md), and custom [Document Class schemas](docs/reference/DOCUMENT_SCHEMAS.md) (backed by DuckDB or PostgreSQL)
 - 🔌 **[Extensible](docs/guides/CUSTOM_OPERATORS_GUIDE.md)** — load custom operators from Python packages, local paths, or S3 without modifying core code
@@ -176,6 +176,7 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 - [REST API Server](docs/api/REST_API_SERVER.md) — endpoints, OAuth2/LDAP authentication, and ACL document retrieval
 - [Event Streaming Guide](docs/guides/EVENT_STREAMING_GUIDE.md) — Kafka event-driven execution and routing-key mappings
 - [Observability & Lineage](docs/guides/TELEMETRY_SETUP.md) — OpenTelemetry tracing, [OpenLineage](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md), and [CSV Job Reports](docs/guides/JOB_REPORT_GENERATION.md)
+- [Secrets Guide](docs/guides/SECRETS_GUIDE.md) — `vault://` reference rules, path policy, audit records, and custom operator isolation
 - [Vault Integration](docs/guides/VAULT_INTEGRATION_GUIDE.md) — HashiCorp Vault `vault://` secret resolution
 - [Deployment Guides](docs/deployment/DOCKER_COMPOSE.md) — Docker Compose and [OpenShift](docs/deployment/OPENSHIFT.md) deployment
 - [Architecture](ARCHITECTURE.md) — system design and distributed execution patterns
@@ -189,7 +190,7 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 | **Extract** | Document Extractor (`extract_operator`), ACL Extraction (`acl_operator`) |
 | **Functional** | Chunking (`chunker`), Embeddings (`embeddings`), Branching Operator (`branching`), Merge Operator (`merge`), Document ID Hash (`doc_id_hash`), Entity Curation (`entity_curation`), No-op (`noop`) |
 | **Quality** | Language Annotator (`lang_detect`), Readability Operator (`readability`), PII and HAP Annotator (`pii_and_hap`), Document Classifier (`document_classifier`), Annotation Filter (`sql_filter`), Redaction (`redaction`), De-duplicator (`ededup`), ML Text Enrichment (`ml_enrichment`), Document Quality (`doc_quality`) |
-| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, and Milvus Lite |
+| **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, Milvus Lite, and Weaviate |
 | **Storage** | Document Set (`document_set`) — DuckDB/PostgreSQL-backed document collections, Storage Output (`storage_output`) — write pipeline output to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive |
 
 For per-operator configuration guides, see [Operator Configuration Guides](docs/reference/OPERATORS.md).

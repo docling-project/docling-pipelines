@@ -842,7 +842,7 @@ export function Canvas(): React.JSX.Element {
         // with a mismatched (jobRunId prop ≠ executionLogs.job_stats.job_run_id).
         dispatch(setExecutionLogs(null));
         dispatch(setCurrentRun({ jobId: flowId, jobRunId: newJobRunId }));
-        startPoll(newJobRunId);   // starts poll + dispatches setRunning(true)
+        startPoll(newJobRunId, flow.name);   // starts poll + dispatches setRunning(true)
         setIsRunMode(true);
       } catch (err: unknown) {
         dispatch(setRunning(false));
@@ -1245,6 +1245,11 @@ export function Canvas(): React.JSX.Element {
         return;
       }
 
+      // Close the suggestion panel if its source node no longer exists (e.g. deleted).
+      if (nodeSuggestion && !canvasControllerRef.current?.getNode(nodeSuggestion.sourceNodeId)) {
+        handleNodeSuggestionClose();
+      }
+
       // ── Branching link condition actions ────────────────────────────────────
       if (data.type === 'link' && data.editType === CANVAS_ACTIONS.ADD_CONDITION) {
         openLinkConditionTearsheet((data as any).id as string);
@@ -1349,7 +1354,7 @@ export function Canvas(): React.JSX.Element {
     // removeConditionFromLink, syncDeletedLinks, persistLinkCondition are plain functions
     // re-created every render; listing them here would cause unnecessary callback churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [handleRun, handleSave, openNodePanel, applyNodeDefaults, openLinkConditionTearsheet]
+    [handleRun, handleSave, openNodePanel, applyNodeDefaults, openLinkConditionTearsheet, nodeSuggestion, handleNodeSuggestionClose]
   );
 
   // Double-click on a node opens the properties panel.
@@ -1369,6 +1374,8 @@ export function Canvas(): React.JSX.Element {
       if (!controller) { return; }
       const nodeId = (source as any).nodeId as string | undefined;
       if (!nodeId) { return; }
+      // Clicking the port of the node whose card is already open toggles it closed.
+      if (nodeSuggestion?.sourceNodeId === nodeId) { return; }
       openNodeSuggestion(nodeId, controller);
       return;
     }
@@ -1377,7 +1384,7 @@ export function Canvas(): React.JSX.Element {
     if (source.clickType === 'DOUBLE_CLICK' && source.objectType === 'node' && source.id) {
       openNodePanel(String(source.id));
     }
-  }, [openNodePanel, handleNodeSuggestionClose]);
+  }, [openNodePanel, handleNodeSuggestionClose, openNodeSuggestion, nodeSuggestion]);
 
   const handleClosePropertiesDialog = useCallback(() => {
     setIsPanelOpen(false);
@@ -1461,14 +1468,14 @@ export function Canvas(): React.JSX.Element {
     // Run Again: ReadOnlyCanvas already created the new job run and passes
     // the new ID here. runPipelineFlowRef.current is intentionally kept — same flow def reused.
     dispatch(setCurrentRun({ jobId: currentJobId ?? '', jobRunId: newJobRunId }));
-    startPoll(newJobRunId);
+    startPoll(newJobRunId, currentFlowRef.current?.name);
   }, [currentJobId, dispatch, startPoll]);
 
   const handleStopFromCanvas = useCallback(() => {
     // Stop: cancel the run and schedule a quick re-poll to pick up Cancelled status.
     stopPoll();
     void cancelJobRun(currentJobRunId ?? '').catch(() => {}).finally(() => {
-      startPoll(currentJobRunId ?? '');
+      startPoll(currentJobRunId ?? '', currentFlowRef.current?.name);
     });
   }, [currentJobRunId, stopPoll, startPoll]);
 

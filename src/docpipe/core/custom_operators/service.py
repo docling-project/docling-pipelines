@@ -3,7 +3,11 @@
 
 """Service layer for custom operator management."""
 
+import hashlib
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,15 +22,46 @@ from docpipe.exceptions.docpipe_exceptions import (
     CustomOperatorInvalidDataException,
     CustomOperatorNotFoundException,
     CustomOperatorsDisabledException,
+    CustomOperatorUploadForbiddenException,
 )
+from docpipe.integrations.secrets.secret_provider import has_registered_provider
 from docpipe.storage.file_system.key_value_file_system_storage import KeyValueFileSystemStorage
 from docpipe.storage.interfaces.key_value_storage_port import KeyValueStoragePort
+from docpipe.utils.infrastructure.audit import AuditAction, AuditOutcome, emit_audit_record
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
 CUSTOM_OPERATORS_COLLECTION = "custom_operators"
+CUSTOM_OPERATORS_CONFIG_SECTION = "custom_operators"
+ALLOWED_UPLOADERS_KEY = "allowed_uploaders"
+
+
+@dataclass
+class _AuditContext:
+    """Fields of an audit record that are learned while an operation runs."""
+
+    operator_id: str | None = None
+    short_name: str | None = None
+    script_sha256: str | None = None
+
+
+def file_sha256(*, path: Path) -> str | None:
+    """Return the hex SHA-256 of a file, or None when it cannot be read."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def audit_rejection_reason(*, exc: BaseException) -> str:
+    """Return a fixed, non-sensitive reason for an audit record: the error code, or the exception class name."""
+    error_code = getattr(exc, "error_code", None)
+    if error_code is not None:
+        return str(getattr(error_code, "value", error_code))
+    return type(exc).__name__
 
 
 class CustomOperatorService:
@@ -48,6 +83,39 @@ class CustomOperatorService:
         self.metadata_storage = metadata_storage or KeyValueFileSystemStorage(
             base_dir=get_data_path(),
         )
+
+    @staticmethod
+    @contextmanager
+    def _audited(*, action: AuditAction, caller: str | None, ctx: _AuditContext) -> Iterator[_AuditContext]:
+        """Write exactly one ``docpipe.audit`` record when the wrapped operation ends, success or not."""
+        try:
+            yield ctx
+        except Exception as exc:
+            emit_audit_record(
+                caller=caller,
+                action=action,
+                outcome=AuditOutcome.REJECTED,
+                operator_id=ctx.operator_id,
+                short_name=ctx.short_name,
+                script_sha256=ctx.script_sha256,
+                reason=audit_rejection_reason(exc=exc),
+            )
+            raise
+        emit_audit_record(
+            caller=caller,
+            action=action,
+            outcome=AuditOutcome.SUCCESS,
+            operator_id=ctx.operator_id,
+            short_name=ctx.short_name,
+            script_sha256=ctx.script_sha256,
+        )
+
+    def _stored_script_sha256(self, *, operator_id: str, operator_file: str) -> str | None:
+        """Return the digest of the stored script for an operator, or None when it is not on disk."""
+        op_dir = self.file_store.get_operator_dir(operator_id=operator_id)
+        if not op_dir:
+            return None
+        return file_sha256(path=op_dir / operator_file)
 
     def _validate_uuid(self, *, operator_id: str) -> None:
         """Validate that operator_id is a valid UUID v4."""
@@ -72,6 +140,23 @@ class CustomOperatorService:
                 )
             )
 
+    @staticmethod
+    def _require_allowed_uploader(*, caller: str | None) -> None:
+        """Restrict create, update and delete to ``custom_operators.allowed_uploaders`` when secrets are in use.
+
+        With no secret provider registered every authenticated caller is permitted. With one, an unset, empty or
+        malformed list permits nobody, and so does a missing caller. The refusal never names the configured list.
+        """
+        if not has_registered_provider():
+            return
+        section = DocpipeConfigLoader.get_config().get(CUSTOM_OPERATORS_CONFIG_SECTION)
+        allowed = section.get(ALLOWED_UPLOADERS_KEY) if isinstance(section, dict) else None
+        if caller and isinstance(allowed, list) and caller in allowed:
+            return
+        raise CustomOperatorUploadForbiddenException(
+            message="You are not permitted to create, update, or delete custom operators."
+        )
+
     def _refresh_operator_factories(self) -> None:
         """Safely refresh the existing cached operator factory in the current process."""
         if not OperatorFactory.resolve_enable_custom_operators(enable_custom_operators=None):
@@ -91,8 +176,9 @@ class CustomOperatorService:
         description: str,
         operator_file_path: Path,
         original_filename: str | None = None,
+        caller: str | None = None,
     ) -> CustomOperator:
-        """Validate, store, and register a new custom operator.
+        """Validate, store, and register a new custom operator, writing one audit record.
 
         Args:
             name: Human-readable name
@@ -100,22 +186,48 @@ class CustomOperatorService:
             operator_file_path: Path to the uploaded .py file
             original_filename: Original filename from the upload (used for storage and metadata).
                                Falls back to operator_file_path.name if not provided.
+            caller: Authenticated username recorded in the audit record
 
         Returns:
             Created CustomOperator instance
         """
+        ctx = _AuditContext(script_sha256=file_sha256(path=operator_file_path))
+        with self._audited(action=AuditAction.CREATE, caller=caller, ctx=ctx):
+            return self._create_operator(
+                name=name,
+                description=description,
+                operator_file_path=operator_file_path,
+                original_filename=original_filename,
+                caller=caller,
+                ctx=ctx,
+            )
+
+    def _create_operator(
+        self,
+        *,
+        name: str,
+        description: str,
+        operator_file_path: Path,
+        original_filename: str | None,
+        caller: str | None,
+        ctx: _AuditContext,
+    ) -> CustomOperator:
+        """Create an operator; records the learned audit fields on ``ctx``."""
         self._require_custom_operators_enabled()
+        self._require_allowed_uploader(caller=caller)
         if not name or not name.strip():
             raise CustomOperatorInvalidDataException(message="Operator name cannot be empty", field_name="name")
 
         # 1. Run static AST validation
         validation_info = validate_operator_file(operator_file_path=operator_file_path)
         short_name = validation_info["short_name"]
+        ctx.short_name = short_name
 
         # 2. Check for short_name collision across existing custom operators
         existing_operators = self.list_operators()
         for existing in existing_operators:
             if existing.short_name == short_name:
+                ctx.operator_id = existing.id
                 raise CustomOperatorAlreadyExistsException(
                     message=f"Custom operator with short_name '{short_name}' already exists (id: {existing.id})",
                     short_name=short_name,
@@ -123,6 +235,7 @@ class CustomOperatorService:
                 )
 
         operator_id = str(uuid.uuid4())
+        ctx.operator_id = operator_id
         now = datetime.now(UTC)
 
         # 3. Store the operator file on disk
@@ -224,8 +337,9 @@ class CustomOperatorService:
         description: str | None = None,
         operator_file_path: Path | None = None,
         original_filename: str | None = None,
+        caller: str | None = None,
     ) -> CustomOperator:
-        """Update an existing custom operator (metadata-only or file replacement).
+        """Update an existing custom operator (metadata-only or file replacement), writing one audit record.
 
         Args:
             operator_id: UUID of the operator
@@ -234,12 +348,47 @@ class CustomOperatorService:
             operator_file_path: Optional new .py file to replace existing
             original_filename: Original filename from the upload (used for storage and metadata).
                                Falls back to operator_file_path.name if not provided.
+            caller: Authenticated username recorded in the audit record
 
         Returns:
             Updated CustomOperator instance
         """
+        ctx = _AuditContext(
+            operator_id=operator_id,
+            script_sha256=file_sha256(path=operator_file_path) if operator_file_path is not None else None,
+        )
+        with self._audited(action=AuditAction.UPDATE, caller=caller, ctx=ctx):
+            return self._update_operator(
+                operator_id=operator_id,
+                name=name,
+                description=description,
+                operator_file_path=operator_file_path,
+                original_filename=original_filename,
+                caller=caller,
+                ctx=ctx,
+            )
+
+    def _update_operator(
+        self,
+        *,
+        operator_id: str,
+        name: str | None,
+        description: str | None,
+        operator_file_path: Path | None,
+        original_filename: str | None,
+        caller: str | None,
+        ctx: _AuditContext,
+    ) -> CustomOperator:
+        """Update an operator; records the learned audit fields on ``ctx``."""
+        if operator_file_path is not None:
+            self._require_custom_operators_enabled()
+        self._require_allowed_uploader(caller=caller)
         self._validate_uuid(operator_id=operator_id)
         current = self.get_operator(operator_id=operator_id)
+        ctx.short_name = current.short_name
+        if ctx.script_sha256 is None:
+            # Metadata-only update: the script is unchanged, so record the digest of the stored one.
+            ctx.script_sha256 = self._stored_script_sha256(operator_id=operator_id, operator_file=current.operator_file)
 
         now = datetime.now(UTC)
         updated_name = name.strip() if name is not None else current.name
@@ -268,7 +417,6 @@ class CustomOperatorService:
             return current
 
         # File replacement update
-        self._require_custom_operators_enabled()
         validation_info = validate_operator_file(operator_file_path=operator_file_path)
         new_short_name = validation_info["short_name"]
 
@@ -310,12 +458,20 @@ class CustomOperatorService:
         self._refresh_operator_factories()
         return current
 
-    def delete_operator(self, *, operator_id: str) -> None:
-        """Delete custom operator files and metadata.
+    def delete_operator(self, *, operator_id: str, caller: str | None = None) -> None:
+        """Delete custom operator files and metadata, writing one audit record.
 
         Args:
             operator_id: UUID of the operator
+            caller: Authenticated username recorded in the audit record
         """
+        ctx = _AuditContext(operator_id=operator_id)
+        with self._audited(action=AuditAction.DELETE, caller=caller, ctx=ctx):
+            self._delete_operator(operator_id=operator_id, caller=caller, ctx=ctx)
+
+    def _delete_operator(self, *, operator_id: str, caller: str | None, ctx: _AuditContext) -> None:
+        """Delete an operator; records the learned audit fields on ``ctx``."""
+        self._require_allowed_uploader(caller=caller)
         self._validate_uuid(operator_id=operator_id)
 
         # 1. Ensure operator exists
@@ -328,6 +484,10 @@ class CustomOperatorService:
                 message=f"Custom operator with id '{operator_id}' not found",
                 operator_id=operator_id,
             )
+        ctx.short_name = record.get("short_name")
+        operator_file = record.get("operator_file")
+        if isinstance(operator_file, str):
+            ctx.script_sha256 = self._stored_script_sha256(operator_id=operator_id, operator_file=operator_file)
 
         # 2. Delete file directory first
         self.file_store.delete(operator_id=operator_id)

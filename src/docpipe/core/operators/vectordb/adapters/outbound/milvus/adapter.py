@@ -23,6 +23,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager impo
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -88,6 +89,7 @@ class MilvusAdapter(VectorStorePort):
                 - index_parameters: Index-specific parameters
                 - add_sparse_vector: Legacy sparse mode flag (maps to vector_mode='sparse')
         """
+        adapter_config = reveal_value(adapter_config)
         # collection_name is now part of provider_config — read it from config
         self.collection_name = adapter_config.get(OperatorConstants.VectorDB.COLLECTION_NAME)
         if not self.collection_name:
@@ -240,11 +242,12 @@ class MilvusAdapter(VectorStorePort):
         Returns:
             Tuple of (success_count, failed_items)
         """
-        # Create batches
-        batches = self.batch_processor.create_batches(documents=documents)
+        # Create batches; rows that cannot be stored are rejected here instead of failing their batch
+        batches, rejected_items = self.batch_processor.create_batches(documents=documents)
 
         # Process batches
-        success_count, failed_items = self.batch_processor.process_batches(batches=batches)
+        success_count, insert_failed_items = self.batch_processor.process_batches(batches=batches)
+        failed_items: list[dict[str, Any]] = rejected_items + insert_failed_items
 
         logger.debug("Indexed %s documents in %s batches, %s failed", success_count, len(batches), len(failed_items))
 

@@ -1,9 +1,13 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Constants module for Docpipe.
 Exports all constants from constants.py and operator_constants.py
 """
 
 from .constants import (
+    COMPLETED_JOB_STATUSES,
     TERMINAL_JOB_STATUSES,
     TERMINAL_NODE_STATES,
     AttributeDataTypes,
@@ -34,6 +38,7 @@ from .constants import (
 from .operator_constants import OperatorConstants
 
 __all__ = [
+    "COMPLETED_JOB_STATUSES",
     "TERMINAL_JOB_STATUSES",
     "TERMINAL_NODE_STATES",
     "AttributeDataTypes",
