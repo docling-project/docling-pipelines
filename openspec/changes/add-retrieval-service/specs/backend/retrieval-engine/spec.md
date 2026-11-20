@@ -2,28 +2,44 @@
 
 ## Purpose
 
-Defines the observable behavior of the native Docling Pipelines retrieval engine: derivative-driven store routing over local `DocumentLibrary`, `DocumentSet`, and `DataCard` (PR #639) assets, DuckDB Text-to-SQL with safety enforcement and self-correction, concurrent vector search across Milvus, OpenSearch, and Weaviate with optional reranking, hybrid correlation and LLM synthesis, multi-Document-Set DAG planning, and caching.
+Defines the observable behavior of the native Docling Pipelines retrieval engine: derivative-driven store routing over local `DocumentLibrary` and `DocumentSet` assets through the card-derived `DerivativeResolverPort`, DuckDB Text-to-SQL with safety enforcement and self-correction, concurrent vector search across Milvus, OpenSearch, and Weaviate with optional reranking, hybrid correlation and LLM synthesis, multi-Document-Set DAG planning, and caching.
 
 ## ADDED Requirements
 
-### Requirement: Local derivative-driven store routing
-The engine SHALL resolve SQL tables from `DocumentSet` storage attachments and vector stores from `DocumentSet.data_card` (merged with `retrieval.vector_stores` config defaults and optional `DocumentSet.metadata["retrieval_derivatives"]` overrides). Single-set routing SHALL be strictly derivative-driven with no LLM intent classification.
+### Requirement: Derivative-driven store routing
+The engine SHALL obtain vector stores and embedding metadata from `DerivativeResolverPort` (derived from `DocumentSet.data_card`), SQL tables from `DocumentSet` storage attachments, and connection settings from `retrieval.vector_stores` config, merged with optional `DocumentSet.metadata["retrieval_derivatives"]` overrides. Single-set routing SHALL be strictly derivative-driven with no LLM intent classification.
 
 #### Scenario: Document set with only a DuckDB table routes to SQL
-- **WHEN** a `DocumentSet` exposes a DuckDB SQL table and no vector store derivatives
+- **WHEN** a `DocumentSet` exposes a DuckDB SQL table (`kind: document_set_table`) and the resolver returns no vector stores
 - **THEN** only the SQL retriever is dispatched
 
-#### Scenario: Document set with vector derivative in DataCard routes to vector
-- **WHEN** a `DocumentSet.data_card` records a `vectordb` `derivative_store` (`milvus`, `opensearch`, or `weaviate`) and `embeddings` metadata, with no SQL table
-- **THEN** only the vector retriever is dispatched using the `DataCard` collection/index and embedding model
+#### Scenario: Document set with a resolved vector store routes to vector
+- **WHEN** the resolver returns a `milvus`, `opensearch`, or `weaviate` store with embedding model and dimension, and the set has no SQL table
+- **THEN** only the vector retriever is dispatched using the resolved collection or index, embedding model, and the provider connection from `retrieval.vector_stores`
 
 #### Scenario: Hybrid document set dispatches SQL and vector concurrently
-- **WHEN** a `DocumentSet` exposes both a DuckDB SQL table and one or more vector store derivatives
+- **WHEN** a `DocumentSet` exposes both a DuckDB SQL table and one or more resolved vector stores
 - **THEN** both SQL and vector retrievers are dispatched concurrently and SQL `ResultItem` entries appear before vector `ResultItem` entries in `results`
 
 #### Scenario: Missing derivatives returns partial status
 - **WHEN** a `DocumentLibrary` or `DocumentSet` has no resolvable SQL or vector derivatives
 - **THEN** no retriever is dispatched, `results` is empty, and `status` is `"partial"`
+
+#### Scenario: Index field names come from the column mapping, not the card feature
+- **WHEN** the resolver returns a store whose `column_mapping` maps the vector to `vector_embeddings` while the card records the source feature `embeddings`
+- **THEN** the query targets `vector_embeddings`, and when no mapping is recorded the `vectordb` operator defaults are used
+
+#### Scenario: Unknown embedding provider falls back to config
+- **WHEN** the resolver returns `embedding.provider` as `null`
+- **THEN** the engine embeds the query with `retrieval.embeddings.default_provider` and the recorded `model_id`
+
+#### Scenario: Cross-flow conflict is surfaced
+- **WHEN** the resolver returns a `conflicts` entry for a store (same provider and path, different embedding model or dimension across flows)
+- **THEN** the most recent resolver value is used and `additional_info` records a generic conflict note without store names or paths
+
+#### Scenario: Entity-table targets are not supported
+- **WHEN** a resolved SQL target has `kind: entity_table`
+- **THEN** it is not queried and `additional_info` records a generic unsupported-target note
 
 ### Requirement: Safe DuckDB Text-to-SQL retrieval
 The SQL retriever SHALL generate SQL via `LLMInferencePort` from a schema description (DuckDB `DESCRIBE` metadata enriched with the configured document class), validate it with an allowlist-based `sqlglot` validator (`duckdb` dialect), execute only the validator's re-serialized SQL through `DuckDBConnectionManager` on a hardened read-only connection, and self-correct up to `max_retries` times on repairable failures.
@@ -61,15 +77,23 @@ The SQL retriever SHALL generate SQL via `LLMInferencePort` from a schema descri
 - **THEN** the engine invokes `conn.interrupt()` via `CancelHandle`, aborts the query cleanly, and releases the file lock
 
 ### Requirement: DuckDB access mode and file-lock handling
-The SQL engine SHALL access document-set DuckDB files only through `DuckDBConnectionManager` and SHALL support `retrieval.sql.access_mode` values `locked` (default) and `snapshot`. In `locked` mode it SHALL acquire the per-file lock within `retrieval.sql.lock_timeout_seconds`. In `snapshot` mode it SHALL query a read-only snapshot copy that is refreshed no more often than `retrieval.sql.snapshot_ttl_seconds` and SHALL NOT take the source file lock when reading.
+The SQL engine SHALL access document-set DuckDB files only through `DuckDBConnectionManager` and SHALL support `retrieval.sql.access_mode` values `locked` (default) and `snapshot`. In `locked` mode it SHALL acquire the per-file lock within `retrieval.sql.lock_timeout_seconds`. In `snapshot` mode it SHALL query a table-scoped read-only snapshot refreshed no more often than `retrieval.sql.snapshot_ttl_seconds`, without taking the source lock when reading.
 
 #### Scenario: Locked mode serializes with ingestion and times out when the lock is busy
 - **WHEN** `access_mode` is `locked` and the per-file lock is not acquired within `lock_timeout_seconds`
 - **THEN** the SQL store is marked `unavailable` without invoking the self-correction LLM, ingestion writes are not blocked beyond the single running query, and the response `status` is `"partial"` (or `"error"` when no other store succeeded)
 
+#### Scenario: Locked mode shares the lock with the asset API and data-card writes
+- **WHEN** `access_mode` is `locked` and the document-set metadata, library, data-card and data tables share one DuckDB file
+- **THEN** a running retrieval query holds the same per-file lock that those writers use, and the deployment guide documents `snapshot` as the recommended mode under concurrent traffic
+
 #### Scenario: Cross-process writer makes the file unavailable
 - **WHEN** a writer in another process holds the DuckDB file and DuckDB raises an `IOException` on open
 - **THEN** the SQL store is marked `unavailable` with a sanitized diagnostic containing no filesystem path
+
+#### Scenario: Snapshot contains only allowlisted tables
+- **WHEN** `access_mode` is `snapshot` and a snapshot is created or refreshed
+- **THEN** it holds copies of only the allowlisted tables of the queried document sets, never the metadata, library or data-card tables or other sets' data, in a directory with mode `0700` and files with mode `0600`
 
 #### Scenario: Snapshot mode reads without taking the source lock
 - **WHEN** `access_mode` is `snapshot` and a snapshot younger than `snapshot_ttl_seconds` exists
@@ -80,15 +104,19 @@ The SQL engine SHALL access document-set DuckDB files only through `DuckDBConnec
 - **THEN** the previous snapshot is served and `additional_info` notes that the data may be stale
 
 ### Requirement: Fail-closed handling of ACL-protected document sets
-The engine SHALL treat a `DocumentSet` as ACL-protected when `DataCard.propagate_source_acls` is true or `DocumentSet.metadata["retrieval_derivatives"]["acl_protected"]` is true. For an ACL-protected set the engine SHALL skip DuckDB SQL retrieval and all DuckDB-backed helpers, SHALL query OpenSearch targets only with the mandatory `allowed_users` filter for the authenticated user, and SHALL skip Milvus and Weaviate targets.
+The engine SHALL treat a `DocumentSet` as ACL-protected when the resolver reports `acl_protected` or `DocumentSet.metadata["retrieval_derivatives"]["acl_protected"]` is true. For such a set it SHALL skip DuckDB SQL and DuckDB-backed helpers, skip Milvus and Weaviate targets, and query an OpenSearch target only with the `allowed_users` filter and only when its `allowed_users` index mapping is known.
 
 #### Scenario: ACL-protected set skips SQL regardless of retrieval.sql.enabled
 - **WHEN** a `DocumentSet` is ACL-protected, has a DuckDB table, and `retrieval.sql.enabled` is true
 - **THEN** the SQL retriever is not dispatched, `additional_info` records a generic `acl_protected_store_skipped` note, and `status` is `"partial"` unless another store returned results for the set
 
-#### Scenario: ACL-protected OpenSearch target is always filtered
-- **WHEN** an ACL-protected set has an OpenSearch vector target
+#### Scenario: ACL-protected OpenSearch target with a known mapping is always filtered
+- **WHEN** an ACL-protected set has an OpenSearch target whose `column_mapping.allowed_users` is known
 - **THEN** the query includes the `allowed_users` filter for the authenticated user, and a request without a resolvable user identity returns no hits for that target
+
+#### Scenario: ACL-protected OpenSearch target with an unknown mapping is skipped
+- **WHEN** an ACL-protected set has an OpenSearch target and the resolver reports no `allowed_users` mapping
+- **THEN** the target is not queried and a generic `acl_protected_store_skipped` note is recorded
 
 #### Scenario: ACL-protected Milvus or Weaviate target is skipped
 - **WHEN** an ACL-protected set has a Milvus or Weaviate vector target
@@ -107,7 +135,7 @@ The vector retriever SHALL support **Milvus**, **OpenSearch**, and **Weaviate** 
 
 #### Scenario: Weaviate named-vector and BM25 hybrid search
 - **WHEN** a vector target has `provider: "weaviate"`
-- **THEN** the adapter queries the collection using `weaviate-client` v4 (`near_vector` on `vector_field`, or `hybrid` when BM25/sparse mode is enabled) and closes the client on completion
+- **THEN** the adapter queries the collection using `weaviate-client` v4 (`near_vector` on the mapped vector field, or `hybrid` when BM25/sparse mode is enabled) and closes the client on completion
 
 #### Scenario: Optional reranking over expanded candidate pool
 - **WHEN** a reranker is configured (`ollama`, `watsonx`, or `cross_encoder`) and request `limit` is `L`
