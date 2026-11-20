@@ -393,7 +393,11 @@ jobs:
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Unit Tests
-        run: python -m pytest tests/unit -m "unit and not integration" -v --cov=src --cov-report=xml --cov-report=term-missing
+        # The secret conformance matrix (681 cases, about 3 minutes) runs in its own job below.
+        run: >
+          python -m pytest tests/unit -m "unit and not integration" -v
+          --deselect tests/unit/secrets_conformance/test_conformance_matrix.py
+          --cov=src --cov-report=xml --cov-report=term-missing
 
       - name: Check Python PR Coverage
         run: |
@@ -413,6 +417,54 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 14
+
+  secrets-conformance:
+    name: Secret Conformance Matrix (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: lint
+    if: >
+      !cancelled() &&
+      needs.lint.result == 'success'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+
+    env:
+      PYTHONPATH: src
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-suffix: "py312"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install System Dependencies
+        run: sudo apt-get install -y libldap2-dev libsasl2-dev
+
+      - name: Install Dependencies
+        run: |
+          # NLTK requires private data directories; the shared toolcache is group-writable.
+          umask 077
+          uv venv --python python .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run secret conformance matrix
+        run: python -m pytest tests/unit/secrets_conformance/test_conformance_matrix.py -m "unit and not integration" -v
 
   postgres-integration-test:
     name: PostgreSQL Integration Tests (PostgreSQL 16)

@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -40,8 +41,10 @@ from docpipe.core.models.session_info import create_session_info, get_session_in
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults
 from docpipe.core.orchestration.python.python_orchestrator import PythonOrchestrator
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.integrations import base_llm_client
 from docpipe.integrations.secrets.registry import get_registry
 from docpipe.integrations.secrets.secret_provider import SecretProvider, clear_providers, register_provider
+from docpipe.utils.infrastructure import performance
 from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 from docpipe.utils.infrastructure.logging import install_scrub_filter
 
@@ -505,6 +508,12 @@ def run_entry(*, entry: Entry, scenario: Scenario, workdir: Path, monkeypatch: p
     mode = {Scenario.CLIENT_FAILURE: "construct", Scenario.MID_RUN_FAILURE: "call"}.get(scenario, "ok")
     clients = FakeClients(mode=mode, text=secret_text)
     clients.install(monkeypatch=monkeypatch)
+    # The LLM client retry decorator sleeps 1s, then 2s, between attempts. Skip only that wait (the retries still run):
+    # replace the ``time`` name inside ``base_llm_client`` rather than ``time.sleep``, which is shared by the whole process.
+    monkeypatch.setattr(base_llm_client, "time", SimpleNamespace(sleep=lambda _seconds: None))
+    # ``reclaim_memory`` runs a full ``gc.collect()`` at the end of every flow (about 0.2 s here, 0.4 s on a CI runner),
+    # which was half the time of a case. Only the collection is skipped: the rest of the function still runs.
+    monkeypatch.setattr(performance, "gc", SimpleNamespace(collect=lambda *_args, **_kwargs: 0))
 
     class _Inline:
         @staticmethod

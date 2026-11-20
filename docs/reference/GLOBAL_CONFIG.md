@@ -590,7 +590,7 @@ Required when using work pool strategies (`work-pool-*`).
     "PREFECT_URL": "https://api.prefect.cloud",
     "DOCPIPE_STORAGE_BACKEND": "postgresql",
     "PYTHONPATH": "/app/src",
-    "LOCAL_FLOWS_DIR": "/app/flows",
+    "FLOW_REPOSITORY_BASE_DIR": "/app/flows",
     "DOCPIPE_DATA_PATH": "/data/docpipe"
   }
 }

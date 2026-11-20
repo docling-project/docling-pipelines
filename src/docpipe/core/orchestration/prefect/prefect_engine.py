@@ -630,8 +630,12 @@ class PrefectEngine(FlowEnginePort):
         results: FuturedList = FuturedList.from_size(len(op_flow))
         destinations: list[tuple[PrefectFuture, Any]] = []
         node_id_to_index_map = create_node_id_to_index_map(flow_def=op_flow)
-        deleted_docs_count = 0
         incremental_update_util = get_incremental_update_service()
+        deleted_docs_count = (
+            len(incremental_update_util.get_soft_deleted_doc_ids(job_id=self.orchestrator.job_id))
+            if self.orchestrator.job_id
+            else 0
+        )
 
         is_sequential_flow = (
             False
