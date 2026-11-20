@@ -2,54 +2,95 @@
 
 ## Why
 
-A pipeline run turns documents into derived data: chunks and embeddings in a vector store (OpenSearch, Milvus) and structured entities in tables (DuckDB, Postgres). Today docpipe forgets where that data went. The only link between a document set and its derived stores is the flow JSON that produced it, which holds raw `provider_config` (including credentials and `${VAR}`/`vault://` references).
+`add-document-set-data-card` gives every document set a provenance record: which flows and runs wrote it, which
+embedding model and vector index its chunks went to, and where its entity tables live. The card is a log of *runs*. It
+is nested by flow, job, and run, it can hold several flows that disagree, and each vector store's embedding model sits
+in a different operator entry than the store itself. Nobody can read "where is this document set's searchable data, and
+how do I query it" straight off the card.
 
-The planned retrieval service (`add-retrieval-service`) must answer a question over a document library without the caller knowing which index, collection, embedding model, or entity tables to use. It needs a stored, credential-free description of "what was derived from this document set, and where". That description is also useful on its own: operators and UIs can show where a library's data lives.
+Document sets and document libraries are the assets people actually work with, and today neither tells them what was
+derived from them. The `is_derivative_available` field on the document sets of a library exists but is read from
+user-owned `metadata`, so it is always `null` unless someone set it by hand. The planned retrieval service
+(`add-retrieval-service`) also needs a resolved, credential-free answer per document set, without walking cards itself.
 
-This change adds that description (a **derivative record**), records it automatically when a flow completes, and exposes it read-only over REST.
+This change turns the data card into that answer, for one document set and for a whole library, and exposes it over
+REST. It builds on the data card only: it records nothing, it adds no operator or orchestrator hook, and it stores no
+second copy of the facts.
 
 **Layer:** backend-only. No frontend, routing, BFF, or Redux changes.
 
-**Affected REST routes:** new `GET /api/v1/document-libraries/{library_id}/derivatives`.
-**Affected operators:** none change behavior. `vectordb`, `entity_store_operator`, `embeddings`, and `document_set` are read through the flow definition and node metadata.
-**Affected storage adapters:** the document set metadata repository (DuckDB/Postgres) stores the record under one reserved key of `DocumentSet.metadata`. No schema migration.
+**Depends on:** `add-document-set-data-card` (the card model, its recording, and the facts this change reads:
+`derivative_store`, `feature_mappings`, `embeddings[].provider`, `add_sparse_vector`, entity store location, and the
+three-state `propagate_source_acls`). **Used by:** `add-retrieval-service` and `add-retrieval-agent`, through
+`DerivativeResolverPort`.
 
 ## What Changes
 
-- **Derivative domain model** (pure Python, no framework imports): `DocumentSetDerivative` with `vector_stores`, `entity_tables`, and `correlation_details`. Each vector store records provider, non-secret location (index or collection name, host, port, TLS flag), embedding provider/model/dimension, chunk size/type, column mapping, the field that holds the ingest `id`, and a `correlatable` flag. Each entity table group records backend, schema, table names per entity key, and whether it is `retrievable` (persisted backend).
-- **`DerivativeRecorder`** (application layer). On successful flow completion it builds a derivative for every `document_set` node from that node's ancestors in the flow DAG (`vectordb`, `embeddings`, `entity_store_operator`) and merges it into the document set's `metadata["derivatives"]`. It never stores credentials. A failed flow does not write. A flow without a `document_set` node writes nothing and logs a warning.
-- **Flow-completion hook.** The orchestrator has one lifecycle observer slot used by lineage. Add a `CompositeExecutionObserver` so lineage and the recorder both run, each isolated from the other's failures.
-- **`DerivativeQueryService`** (application layer) and **`DerivativeResolverPort`** (domain port). The retrieval service depends on the port, never on document set internals.
-- **REST endpoint** `GET /api/v1/document-libraries/{library_id}/derivatives` with `limit` and `bookmark` pagination, returning a redacted DTO view (no filesystem paths, no credentials).
-- **Vector `id` mapping check.** The recorder inspects the vectordb feature mappings and sets `id_field` to the chunk field that holds the ingest document `id` (default mappings map `id` to `document_id`). If no mapped field carries it, the store is recorded with `correlatable: false`.
-- **In-memory entity stores** (`database_path: ":memory:"`) are recorded with `retrievable: false` because no other process can query them.
+- **Derivative domain model** (pure Python, no framework imports): `DocumentSetDerivative` with `vector_stores`,
+  `entity_tables`, `correlation_details`, `acl_state`, `acl_protected`, descriptive hints (`purpose`, `summary`,
+  `language`), and `conflicts`. It is computed from a document set's card at read time. Nothing is persisted.
+- **`DerivativeResolverPort`** (domain port) and **`DerivativeQueryService`** (application). The service reads the card
+  through a small `DataCardSourcePort`, so the derivatives code never imports document set internals or adapters.
+  The retrieval service depends on the resolver port only.
+- **Resolution rules**, one deterministic function from card to derivatives:
+  - take the latest run of each flow, union their `vectordb` and `entity_store` entries, and return each store once;
+  - pair each vector store with its embedding model by the recorded `feature_mappings`, or, with no mappings, by the
+    nearest preceding `embeddings` entry;
+  - turn `feature_mappings` into a `column_mapping` (document id, text, vector, sparse, `allowed_users` columns) and a
+    `correlatable` flag;
+  - report `conflicts` when one store is recorded with different embedding models or dimensions;
+  - map the three-state `propagate_source_acls` to `acl_state` (`protected`, `unprotected`, `unknown`) and a fail-closed
+    `acl_protected` (true unless the card says false).
+- **Document set REST API.** New `GET /api/v1/document-sets/{document_set_id}/derivatives` returns the derivatives of
+  one document set.
+- **Document library REST API.** New `GET /api/v1/document-libraries/{library_id}/derivatives` returns the derivatives
+  of every document set in the library, in the library's order, with `limit` and opaque `bookmark` pagination.
+- **Document library listing.** `GET /api/v1/document-libraries/{library_id}/document-sets` now reports
+  `is_derivative_available` computed from the derivatives and `propagate_source_acls` from the card (falling back to
+  the existing metadata value only when the card value is null). The response shape does not change.
+- **Redacted view.** The REST DTOs are built from an explicit field list. They never contain credentials, `${VAR}` or
+  `vault://` references, hosts, connection strings, or a DuckDB file path. The domain object keeps the entity store
+  `database_path` so that a consumer can open it.
+- **Error codes.** `DERIVATIVE_INVALID_BOOKMARK` (400) is added; unknown libraries and document sets reuse the
+  existing not-found codes.
 
-No **BREAKING** changes. Documents and libraries created before this change simply have no derivative record and return empty `derivative_stores`.
+No **BREAKING** changes. Document sets without a card, and libraries created before the data card existed, return empty
+derivative lists, `acl_state` `unknown`, and `is_derivative_available` false.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `backend/derivatives-api`: the read-only REST contract for listing a library's document-set derivatives, pagination, redaction, and error mapping.
-- `backend/derivative-recording`: how and when derivative records are produced at flow completion, their content rules (no secrets, ancestor scoping, correlation flag), persistence by merge, and the resolver port used by consumers.
+- `backend/derivative-resolution`: how a data card becomes derivatives (latest run per flow, union and de-duplication,
+  embedding pairing, column mapping, correlation, conflicts, ACL state), plus the `DerivativeResolverPort` contract.
+- `backend/derivatives-api`: the read-only REST contract for the derivatives of one document set and of a document
+  library: shape, pagination, redaction, authentication, and error mapping.
 
 ### Modified Capabilities
 
-- `backend/flow-execution-engine`: lifecycle observers become a composite so that more than one consumer can observe flow completion without one consumer's failure affecting another or the flow result.
+- `backend/document-libraries-api`: the document sets listed for a library report `is_derivative_available` and
+  `propagate_source_acls` from the card.
 
 ## Non-goals
 
-- No retrieval, search, or SQL execution (see `add-retrieval-service`).
-- No write or delete API for derivatives. They are system-recorded only.
-- No backfill of derivatives for document sets created before this change.
-- No new tables or migrations; no `document_id` column added to `EntityStoreOperator` output.
-- No UDP-compatible `/udp/v1` routes, `container_id`/`container_type` semantics, `attachments`, or `data_card` fields.
-- No ACL filtering of derivative metadata beyond existing document library access rules.
-- No Presto/Iceberg derivatives (follow-up through the same model).
+- **No recording.** The card is written by `add-document-set-data-card`. This change adds no recorder, no composite
+  lifecycle observer, no change to the orchestrator, and no `DocumentSet.metadata` key. A derivative missing from the
+  card (for example a `vectordb` on a sibling branch) is a gap in the card, not something this change patches.
+- **No write or delete API** for derivatives, and no backfill for document sets without a card.
+- **No retrieval, search, or SQL execution** (see `add-retrieval-service`). Entity tables are reported by location
+  and prefix; their table names are not enumerated and no table is opened.
+- **No `include=derivatives` expansion** on existing document set or library responses.
+- **No frontend** page or Redux slice.
+- **No UDP-compatible routes**, `container_id` / `container_type` semantics (they are tolerated and ignored),
+  `attachments`, or CAMS concepts.
+- **No new tables, migrations, or dependencies.**
 
 ## Impact
 
-- New: `src/docpipe/core/assets/derivatives/{domain,application}/`, `src/docpipe/api/routes/derivatives.py` (or added to `document_libraries.py`), `src/docpipe/api/dto/derivative_dto.py`, mapper.
-- Changed: `abstract_orchestrator.py` observer wiring, `dependencies.py` (providers), `api_router.py` (if separate router), `error_codes.py` (new codes).
+- New: `src/docpipe/core/assets/derivatives/{domain,application,adapters}/`, `src/docpipe/api/dto/derivative_dto.py`
+  and mapper, derivative routes added to `src/docpipe/api/routes/document_sets.py` and `document_libraries.py`.
+- Changed: `src/docpipe/api/dependencies.py` (providers), `src/docpipe/api/routes/document_libraries.py` (the
+  document-sets listing fields), `src/docpipe/exceptions/error_codes.py` and an exception class for the bookmark.
 - Dependencies: none.
-- Docs: `docs/reference/` API note and OPERATORS cross-reference for the `id` mapping requirement.
+- Docs: `docs/api/REST_API_SERVER.md`, `docs/guides/USER_GUIDE_DOCUMENT_LIBRARIES.md` (the two
+  `is_derivative_available` examples), and a section in `docs/guides/DOCUMENT_SET_DATA_CARD.md` pointing at the view.
