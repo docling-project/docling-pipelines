@@ -7,7 +7,7 @@ Defines the observable behavior of the native Docling Pipelines retrieval engine
 ## ADDED Requirements
 
 ### Requirement: Derivative-driven store routing
-The engine SHALL obtain vector stores and embedding metadata from `DerivativeResolverPort` (derived from `DocumentSet.data_card`), SQL tables from `DocumentSet` storage attachments, and connection settings from `retrieval.vector_stores` config, merged with optional `DocumentSet.metadata["retrieval_derivatives"]` overrides. Single-set routing SHALL be strictly derivative-driven with no LLM intent classification.
+The engine SHALL obtain vector stores and embedding metadata from `DerivativeResolverPort` (derived from `DocumentSet.data_card`), SQL tables from `DocumentSet` storage attachments, and connection settings from `retrieval.vector_stores` config, merged with optional `DocumentSet.metadata["retrieval_derivatives"]` overrides. Single-set routing SHALL be strictly derivative-driven with no LLM intent classification. It SHALL NOT read the data card itself.
 
 #### Scenario: Document set with only a DuckDB table routes to SQL
 - **WHEN** a `DocumentSet` exposes a DuckDB SQL table (`kind: document_set_table`) and the resolver returns no vector stores
@@ -25,9 +25,17 @@ The engine SHALL obtain vector stores and embedding metadata from `DerivativeRes
 - **WHEN** a `DocumentLibrary` or `DocumentSet` has no resolvable SQL or vector derivatives
 - **THEN** no retriever is dispatched, `results` is empty, and `status` is `"partial"`
 
+#### Scenario: Store without an embedding model is skipped
+- **WHEN** the resolver returns a store whose `embedding` is `null`
+- **THEN** the store is not queried and `additional_info` records a generic note without store names or paths
+
 #### Scenario: Index field names come from the column mapping, not the card feature
-- **WHEN** the resolver returns a store whose `column_mapping` maps the vector to `vector_embeddings` while the card records the source feature `embeddings`
-- **THEN** the query targets `vector_embeddings`, and when no mapping is recorded the `vectordb` operator defaults are used
+- **WHEN** the resolver returns a store whose `column_mapping.vector` is `vector_embeddings` while the card records the source feature `embeddings`
+- **THEN** the query targets `vector_embeddings`
+
+#### Scenario: Null mapping entries use operator defaults
+- **WHEN** the resolver returns `column_mapping` entries that are `null` for `document_id`, `text`, `vector`, or `sparse`
+- **THEN** the query uses the `vectordb` operator defaults `document_id`, `text`, `vector_embeddings`, and `sparse_embeddings`, and `allowed_users` has no default
 
 #### Scenario: Unknown embedding provider falls back to config
 - **WHEN** the resolver returns `embedding.provider` as `null`
@@ -38,7 +46,7 @@ The engine SHALL obtain vector stores and embedding metadata from `DerivativeRes
 - **THEN** the most recent resolver value is used and `additional_info` records a generic conflict note without store names or paths
 
 #### Scenario: Entity-table targets are not supported
-- **WHEN** a resolved SQL target has `kind: entity_table`
+- **WHEN** a resolved SQL target has `kind: entity_table`, or the resolver reports an entity table group
 - **THEN** it is not queried and `additional_info` records a generic unsupported-target note
 
 ### Requirement: Safe DuckDB Text-to-SQL retrieval
@@ -104,7 +112,15 @@ The SQL engine SHALL access document-set DuckDB files only through `DuckDBConnec
 - **THEN** the previous snapshot is served and `additional_info` notes that the data may be stale
 
 ### Requirement: Fail-closed handling of ACL-protected document sets
-The engine SHALL treat a `DocumentSet` as ACL-protected when the resolver reports `acl_protected` or `DocumentSet.metadata["retrieval_derivatives"]["acl_protected"]` is true. For such a set it SHALL skip DuckDB SQL and DuckDB-backed helpers, skip Milvus and Weaviate targets, and query an OpenSearch target only with the `allowed_users` filter and only when its `allowed_users` index mapping is known.
+The engine SHALL treat a `DocumentSet` as ACL-protected when the resolver reports `acl_protected` or `DocumentSet.metadata["retrieval_derivatives"]["acl_protected"]` is true. For a protected set it SHALL skip DuckDB SQL and DuckDB-backed helpers, skip Milvus and Weaviate targets, and query an OpenSearch target only with the `allowed_users` filter and only when its `allowed_users` index mapping is known.
+
+#### Scenario: Card without a recorded run is protected
+- **WHEN** the resolver reports `acl_state` `unknown` and `acl_protected` true
+- **THEN** the set is treated as ACL-protected
+
+#### Scenario: Card says unprotected
+- **WHEN** the resolver reports `acl_state` `unprotected` and no override sets `acl_protected` true
+- **THEN** the set is not ACL-protected and its stores are queried normally
 
 #### Scenario: ACL-protected set skips SQL regardless of retrieval.sql.enabled
 - **WHEN** a `DocumentSet` is ACL-protected, has a DuckDB table, and `retrieval.sql.enabled` is true
@@ -121,6 +137,17 @@ The engine SHALL treat a `DocumentSet` as ACL-protected when the resolver report
 #### Scenario: ACL-protected Milvus or Weaviate target is skipped
 - **WHEN** an ACL-protected set has a Milvus or Weaviate vector target
 - **THEN** the target is not queried and a generic `acl_protected_store_skipped` note is recorded without store names or paths
+
+### Requirement: ACL override can only tighten protection
+The resolver's `acl_protected` is fail-closed and is true unless the data card records `propagate_source_acls` false. A `DocumentSet.metadata["retrieval_derivatives"]["acl_protected"]` override SHALL be honored only when true and SHALL NOT lift protection the resolver reports.
+
+#### Scenario: Override cannot lift protection
+- **WHEN** the resolver reports `acl_protected` true and the override is false
+- **THEN** the set stays ACL-protected, and a curator who needs the set open records `propagate_source_acls` false on the data card instead
+
+#### Scenario: Override can add protection
+- **WHEN** the resolver reports `acl_protected` false and the override is true
+- **THEN** the set is treated as ACL-protected
 
 ### Requirement: Concurrent multi-backend vector retrieval
 The vector retriever SHALL support **Milvus**, **OpenSearch**, and **Weaviate** vector store targets, searching all configured targets for a `DocumentSet` concurrently and producing one `ResultItem` (`source: "vector"`) per non-empty target.
@@ -142,7 +169,7 @@ The vector retriever SHALL support **Milvus**, **OpenSearch**, and **Weaviate** 
 - **THEN** each vector target fetches `max(L, rerank_candidates)` hits, reranks them, and returns at most `L` hits in reranked order (falling back to original order truncated to `L` on reranker error)
 
 ### Requirement: Hybrid correlation and LLM synthesis
-When both SQL and vector stores exist for a `DocumentSet`, the schema prompt SHALL instruct SQL generation to include the correlation column (`document_id`). When an inference LLM is configured, the synthesizer SHALL combine SQL rows (as Markdown tables) with deduplicated vector chunks grouped by `document_id` and populate `generated_text`.
+When both SQL and vector stores exist for a `DocumentSet`, the schema prompt SHALL instruct SQL generation to include the document set table's `id` column, which the vector index stores as its mapped `document_id` column. When an inference LLM is configured, the synthesizer SHALL combine SQL rows (as Markdown tables) with deduplicated vector chunks grouped by document id and populate `generated_text`.
 
 #### Scenario: Answer synthesized from hybrid SQL and vector results
 - **WHEN** both SQL and vector retrievers return hits and an inference LLM is configured
