@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for GoogleDriveDestinationAdapter."""
 
 from unittest.mock import MagicMock, patch
@@ -238,6 +241,62 @@ class TestGoogleDriveDestinationAdapterWriteDocumentSuccess:
         assert list_call_count_after_second == list_call_count_after_first
 
 
+class TestGoogleDriveDestinationAdapterQueryEscaping:
+    """Values put into a Drive ``q`` query are escaped: backslash first, then single quote (#669)."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("plain", "plain"),
+            ("O'Brien", "O\\'Brien"),
+            ("a\\b", "a\\\\b"),
+            ("trail\\", "trail\\\\"),
+            ("it\\'s", "it\\\\\\'s"),
+        ],
+    )
+    def test_escape_query_value(self, value, expected):
+        assert GoogleDriveDestinationAdapter._escape_query_value(value) == expected
+
+    @pytest.mark.parametrize(
+        ("name", "escaped"),
+        [
+            ("O'Brien", "O\\'Brien"),
+            ("a\\b", "a\\\\b"),
+            ("trail\\", "trail\\\\"),
+        ],
+    )
+    def test_folder_lookup_query_escapes_name(self, name, escaped):
+        adapter = GoogleDriveDestinationAdapter()
+        service = _mock_service(find_folder_files=[{"id": "found_folder_id"}])
+
+        folder_id = adapter._find_folder_id(service=service, name=name, parent_id="root", drive_id=None)
+
+        assert folder_id == "found_folder_id"
+        assert service.files.return_value.list.call_args.kwargs["q"] == (
+            f"name='{escaped}' and mimeType='application/vnd.google-apps.folder' "
+            "and 'root' in parents and trashed=false"
+        )
+
+    @pytest.mark.parametrize(
+        ("name", "escaped"),
+        [
+            ("O'Brien.md", "O\\'Brien.md"),
+            ("a\\b.md", "a\\\\b.md"),
+            ("trail\\", "trail\\\\"),
+        ],
+    )
+    def test_file_lookup_query_escapes_name(self, name, escaped):
+        adapter = GoogleDriveDestinationAdapter()
+        service = _mock_service(find_folder_files=[{"id": "found_file_id"}])
+
+        file_id = adapter._find_file_id(service=service, name=name, parent_id="root", drive_id=None)
+
+        assert file_id == "found_file_id"
+        assert service.files.return_value.list.call_args.kwargs["q"] == (
+            f"name='{escaped}' and 'root' in parents and trashed=false"
+        )
+
+
 class TestGoogleDriveDestinationAdapterOverwriteFalse:
     def test_skips_when_file_exists_and_overwrite_false(self):
         adapter = GoogleDriveDestinationAdapter()
@@ -298,7 +357,8 @@ class TestGoogleDriveDestinationAdapterErrorPaths:
                 config=_make_config(),
             )
         assert result.success is False
-        assert "network down" in result.error_message
+        assert "connection failed" in result.error_message
+        assert "network down" not in result.error_message
 
     def test_returns_failed_when_create_dirs_false_and_folder_missing(self):
         adapter = GoogleDriveDestinationAdapter()

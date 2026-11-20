@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from 'express';
 import { log4js, logUtil } from '../../src/utils/logger';
 import { handleProxyError, proxyRequest } from '../utils/proxy';
-import { routeParam } from '../utils/query';
+import { queryString, routeParam } from '../utils/query';
 
 const logger = log4js.getLogger('operator.controller');
 
@@ -47,7 +47,7 @@ type AllowedProvider = typeof ALLOWED_PROVIDERS[number];
  */
 const fetchProviderModels = async (req: Request, res: Response): Promise<void> => {
   const provider = routeParam(req.params.provider);
-  const { api_base } = req.query as { api_base?: string };
+  const apiBase = queryString(req.query.api_base);
 
   if (!ALLOWED_PROVIDERS.includes(provider as AllowedProvider)) {
     logUtil.warn({ logger, message: 'Unsupported provider requested', data: { provider } });
@@ -59,7 +59,7 @@ const fetchProviderModels = async (req: Request, res: Response): Promise<void> =
     const response = await proxyRequest({
       method: 'GET',
       path: ['api', 'v1', 'providers', provider, 'models'],
-      query: { api_base },
+      query: { api_base: apiBase },
     });
 
     res.json(response.data);

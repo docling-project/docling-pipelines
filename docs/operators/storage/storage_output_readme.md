@@ -389,6 +389,28 @@ Output layout per document:
 └── report.meta.json      ← metadata sidecar
 ```
 
+## Credentials from Vault
+
+Credential fields accept a `vault://` reference as the whole value. Reference each key of
+`destination_config.credentials` separately, because a reference supplies one string:
+
+```json
+{
+  "destination_type": "s3",
+  "destination_config": {
+    "bucket_name": "pipeline-results",
+    "credentials": {
+      "access_key": "vault://hashicorp/docpipe/s3#access_key",
+      "secret_key": "vault://hashicorp/docpipe/s3#secret_key"  # pragma: allowlist secret
+    }
+  }
+}
+```
+
+The platform resolves a reference only if its path matches `secrets.vault.allowed_paths`. A literal `endpoint_url` next
+to a reference must match `secrets.vault.allowed_destinations`. See
+[Declared secret fields](../../guides/SECRETS_GUIDE.md#declared-secret-fields) for the fields per destination.
+
 ## Troubleshooting
 
 **`ValueError: 'mode' is required`** — The `mode` field is missing from the operator config. Add one

@@ -764,6 +764,33 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
             logger.error("Failed to delete job stats: %s", e)
             raise JobStatsStoreDeleteException(message=f"Failed to delete job stats: {e}", job_run_id=job_run_id) from e
 
+    @staticmethod
+    def _job_run_where_sql(
+        *,
+        job_id: str | None,
+        job_ids: list[str] | None,
+        status: ExecutionStatus | str | None,
+    ) -> tuple[str, list[Any]]:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if job_id:
+            where_clauses.append("job_id = ?")
+            params.append(job_id)
+
+        if job_ids:
+            placeholders = ", ".join("?" * len(job_ids))
+            where_clauses.append(f"job_id IN ({placeholders})")
+            params.extend(job_ids)
+
+        if status:
+            status_value = status.value if isinstance(status, ExecutionStatus) else status
+            where_clauses.append("status = ?")
+            params.append(status_value)
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        return where_sql, params
+
     def list_job_runs(
         self,
         job_id: str | None = None,
@@ -788,25 +815,7 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
         """
         try:
             with self.connection_manager.get_connection(database_path=self.database_path, read_only=True) as conn:
-                # Build query
-                where_clauses: list[str] = []
-                params: list[Any] = []
-
-                if job_id:
-                    where_clauses.append("job_id = ?")
-                    params.append(job_id)
-
-                if job_ids:
-                    placeholders = ", ".join("?" * len(job_ids))
-                    where_clauses.append(f"job_id IN ({placeholders})")
-                    params.extend(job_ids)
-
-                if status:
-                    status_value = status.value if isinstance(status, ExecutionStatus) else status
-                    where_clauses.append("status = ?")
-                    params.append(status_value)
-
-                where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+                where_sql, params = self._job_run_where_sql(job_id=job_id, job_ids=job_ids, status=status)
 
                 sql = f"""
                     SELECT * FROM job_stats
@@ -837,4 +846,37 @@ class DuckDBJobStatsStore(JobStatsStore):  # type: ignore[misc]
             logger.error("Failed to list jobs: %s", e)
             raise JobStatsStoreReadException(
                 message=f"Failed to list jobs: {e}", job_run_id=None, operation="list_job_runs"
+            ) from e
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+
+        Raises:
+            JobStatsStoreReadException: If the count operation fails
+        """
+        try:
+            with self.connection_manager.get_connection(database_path=self.database_path, read_only=True) as conn:
+                where_sql, params = self._job_run_where_sql(job_id=job_id, job_ids=job_ids, status=status)
+                sql = f"SELECT COUNT(*) FROM job_stats {where_sql}"  # nosec B608 — where_sql is parameterised clauses only
+                row = conn.execute(sql, params).fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error("Failed to count jobs: %s", e)
+            raise JobStatsStoreReadException(
+                message=f"Failed to count jobs: {e}", job_run_id=None, operation="count_job_runs"
             ) from e

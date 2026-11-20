@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for the Box destination adapter."""
 
 import os
@@ -23,6 +26,9 @@ class BoxDestinationConfig(BaseModel):
           credentials:
             credentials_json_path: "${BOX_CONFIG_PATH}"
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = ("credentials_path",)
 
     # Box JWT / App Authentication
     credentials_path: str = Field(

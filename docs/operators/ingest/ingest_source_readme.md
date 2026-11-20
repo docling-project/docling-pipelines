@@ -609,6 +609,27 @@ tables, metadata = ingest_node.transform(input_table)
 # storage_node.transform(embedded_tables[0])
 ```
 
+## Credentials from Vault
+
+The S3, IBM COS, Google Drive, OneDrive, SharePoint, Box and Dropbox providers accept a `vault://` reference as the
+whole value of a credential field in `provider_config`. The `filesystem` and `web` providers declare no such field.
+
+```json
+{
+  "provider": "s3",
+  "provider_config": {
+    "access_key": "vault://hashicorp/docpipe/s3#access_key",
+    "secret_key": "vault://hashicorp/docpipe/s3#secret_key",  # pragma: allowlist secret
+    "region": "us-east-1"
+  }
+}
+```
+
+The platform resolves the reference when it builds this node, and only if the path matches `secrets.vault.allowed_paths`.
+The extract step resolves the ingest node's own references again when it fetches content. The adapters do not copy
+credentials into document metadata. See [Declared secret fields](../../guides/SECRETS_GUIDE.md#declared-secret-fields)
+for the field list and the [sample flow](../../../sample_flows/use_cases/s3_ingest_vault.json).
+
 ## Security Best Practices
 
 1. **Credential Management:**

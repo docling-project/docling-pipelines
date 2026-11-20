@@ -19,6 +19,14 @@ class OneDriveSourceConfig(BaseModel):
     - Azure AD app-only authentication (client credentials flow)
     """
 
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "client_id",
+        "client_secret",
+        "tenant_id",
+        "drive_id",
+    )
+
     # Azure AD App Registration credentials (app-only authentication)
     client_id: str = Field(..., description="Azure AD application (client) ID", json_schema_extra={"sensitive": True})
 

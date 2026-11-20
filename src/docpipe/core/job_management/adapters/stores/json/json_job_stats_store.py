@@ -85,7 +85,7 @@ class JsonJobStatsStore(JobStatsStore):
         self._base_dir = resolved_base_dir
         self._lock_timeout = lock_timeout
 
-        logger.info(f"JsonJobStatsStore initialized: base_dir={self._base_dir}, lock_timeout={lock_timeout}s")
+        logger.info("JsonJobStatsStore initialized: base_dir=%s, lock_timeout=%ss", self._base_dir, lock_timeout)
 
     def _get_job_dir(self, *, job_run_id: str) -> Path:
         """Get directory path for a specific job run: /data/job_stats/{job_run_id}/"""
@@ -173,7 +173,7 @@ class JsonJobStatsStore(JobStatsStore):
             with Path(path).open(encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"Failed to read JSON file {path}: {e}")
+            logger.error("Failed to read JSON file %s: %s", path, e)
             raise JobStatsStoreReadException(
                 message=f"Failed to read JSON file {path}: {e}", job_run_id=None, operation="read_json"
             ) from e
@@ -287,7 +287,7 @@ class JsonJobStatsStore(JobStatsStore):
 
                 self._atomic_write_json(path=path, data=data)
 
-                logger.debug(f"Stored node stats: job_run_id={job_run_id}, node_id={node_id}, batch_id={batch_id}")
+                logger.debug("Stored node stats: job_run_id=%s, node_id=%s, batch_id=%s", job_run_id, node_id, batch_id)
         except Timeout as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for node stats write: timeout={self._lock_timeout}s",
@@ -295,7 +295,7 @@ class JsonJobStatsStore(JobStatsStore):
                 operation="store_node_stats",
             ) from e
         except Exception as e:
-            logger.error(f"Failed to store node stats: {e}")
+            logger.error("Failed to store node stats: %s", e)
             raise JobStatsStoreWriteException(
                 message=f"Failed to store node stats: {e}", job_run_id=job_run_id, operation="store_node_stats"
             ) from e
@@ -332,10 +332,10 @@ class JsonJobStatsStore(JobStatsStore):
                             node_stats = NodeStats(**data)
                             result.append(node_stats)
 
-                    logger.debug(f"Retrieved {len(result)} node stats records: job_run_id={job_run_id}")
+                    logger.debug("Retrieved %s node stats records: job_run_id=%s", len(result), job_run_id)
                     return result
                 except Exception as e:
-                    logger.error(f"Failed to read node stats: {e}")
+                    logger.error("Failed to read node stats: %s", e)
                     raise JobStatsStoreReadException(
                         message=f"Failed to read node stats: {e}", job_run_id=job_run_id, operation="get_node_stats"
                     ) from e
@@ -384,10 +384,10 @@ class JsonJobStatsStore(JobStatsStore):
                                     result[node_id] = {}
                                 result[node_id][batch_id] = node_stats
 
-                    logger.debug(f"Retrieved batch node stats: job_run_id={job_run_id}, nodes={len(result)}")
+                    logger.debug("Retrieved batch node stats: job_run_id=%s, nodes=%s", job_run_id, len(result))
                     return result
                 except Exception as e:
-                    logger.error(f"Failed to read batch node stats: {e}")
+                    logger.error("Failed to read batch node stats: %s", e)
                     raise JobStatsStoreReadException(
                         message=f"Failed to read batch node stats: {e}",
                         job_run_id=job_run_id,
@@ -489,7 +489,7 @@ class JsonJobStatsStore(JobStatsStore):
 
                     self._atomic_write_json(path=path, data=data)
 
-                logger.debug(f"Bulk stored {len(node_stats_list)} node stats: job_run_id={job_run_id}")
+                logger.debug("Bulk stored %s node stats: job_run_id=%s", len(node_stats_list), job_run_id)
         except Timeout as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for bulk node stats write: timeout={self._lock_timeout}s",
@@ -497,7 +497,7 @@ class JsonJobStatsStore(JobStatsStore):
                 operation="bulk_store_node_stats",
             ) from e
         except Exception as e:
-            logger.error(f"Failed to bulk store node stats: {e}")
+            logger.error("Failed to bulk store node stats: %s", e)
             raise JobStatsStoreWriteException(
                 message=f"Failed to bulk store node stats: {e}",
                 job_run_id=job_run_id,
@@ -595,7 +595,7 @@ class JsonJobStatsStore(JobStatsStore):
                 try:
                     return NodeStats(**data)
                 except Exception as e:
-                    logger.error(f"Failed to parse node stats from {path}: {e}")
+                    logger.error("Failed to parse node stats from %s: %s", path, e)
                     raise JobStatsStoreReadException(
                         message=f"Failed to parse node stats: {e}",
                         job_run_id=job_run_id,
@@ -641,9 +641,9 @@ class JsonJobStatsStore(JobStatsStore):
 
                         shutil.rmtree(job_dir)
 
-                        logger.info(f"Deleted job stats: job_run_id={job_run_id}")
+                        logger.info("Deleted job stats: job_run_id=%s", job_run_id)
                     except Exception as e:
-                        logger.error(f"Failed to delete job stats: {e}")
+                        logger.error("Failed to delete job stats: %s", e)
                         raise JobStatsStoreDeleteException(
                             message=f"Failed to delete job stats: {e}", job_run_id=job_run_id
                         ) from e
@@ -706,11 +706,33 @@ class JsonJobStatsStore(JobStatsStore):
 
                     return job_stats
                 except Exception as e:
-                    logger.warning(f"Failed to parse job stats from {job_stats_path}: {e}")
+                    logger.warning("Failed to parse job stats from %s: %s", job_stats_path, e)
                     return None
         except Timeout:
-            logger.warning(f"Timeout acquiring lock for job stats read: {job_run_id}")
+            logger.warning("Timeout acquiring lock for job stats read: %s", job_run_id)
             return None
+
+    def _iter_matching_job_stats(
+        self,
+        *,
+        job_id: str | None,
+        job_ids: list[str] | None,
+        status: ExecutionStatus | str | None,
+    ):
+        if not self._base_dir.exists():
+            return
+        job_ids_set = set(job_ids) if job_ids else None
+        for job_dir in self._base_dir.iterdir():
+            if not job_dir.is_dir():
+                continue
+            job_stats = self._read_job_stats_if_match(
+                job_dir=job_dir,
+                job_id=job_id,
+                job_ids_set=job_ids_set,
+                status=status,
+            )
+            if job_stats is not None:
+                yield job_stats
 
     def list_job_runs(
         self,
@@ -731,32 +753,41 @@ class JsonJobStatsStore(JobStatsStore):
         Returns:
             List of JobStats matching filters (sorted by start_time desc)
         """
-        if not self._base_dir.exists():
-            return []
-
-        job_ids_set = set(job_ids) if job_ids else None
-
         try:
-            result: list[JobStats] = []
-            for job_dir in self._base_dir.iterdir():
-                if not job_dir.is_dir():
-                    continue
-                job_stats = self._read_job_stats_if_match(
-                    job_dir=job_dir,
-                    job_id=job_id,
-                    job_ids_set=job_ids_set,
-                    status=status,
-                )
-                if job_stats is not None:
-                    result.append(job_stats)
-
-            # Sort by start_time descending (most recent first)
+            result = list(self._iter_matching_job_stats(job_id=job_id, job_ids=job_ids, status=status))
             result.sort(key=lambda x: x.start_time or 0, reverse=True)
-
-            # Apply limit
             return result[:limit]
         except Exception as e:
-            logger.error(f"Failed to list jobs: {e}")
+            logger.error("Failed to list jobs: %s", e)
             raise JobStatsStoreReadException(
                 message=f"Failed to list jobs: {e}", job_run_id=None, operation="list_job_runs"
+            ) from e
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+
+        Raises:
+            JobStatsStoreReadException: If the count operation fails
+        """
+        try:
+            return sum(1 for _ in self._iter_matching_job_stats(job_id=job_id, job_ids=job_ids, status=status))
+        except Exception as e:
+            logger.error("Failed to count jobs: %s", e)
+            raise JobStatsStoreReadException(
+                message=f"Failed to count jobs: {e}", job_run_id=None, operation="count_job_runs"
             ) from e

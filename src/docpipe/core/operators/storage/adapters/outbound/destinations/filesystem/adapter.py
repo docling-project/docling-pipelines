@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Filesystem destination adapter implementation."""
 
 from pathlib import Path
@@ -13,6 +16,8 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.filesystem.co
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -91,7 +96,7 @@ class FilesystemDestinationAdapter(DestinationAdapterPort[FilesystemDestinationC
                 doc_id="",
                 doc_name=path.name,
                 success=False,
-                error_message=str(e),
+                error_message=sanitize_exception(exc=e, config_key="storage_output.destination_config.filesystem"),
             )
 
     def ensure_directory(self, *, path: str) -> None:
@@ -114,6 +119,8 @@ class FilesystemDestinationAdapter(DestinationAdapterPort[FilesystemDestinationC
         credentials: dict[str, Any],
     ) -> FilesystemDestinationConfig:
         """Build config from operator params."""
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
         return FilesystemDestinationConfig(
             root_path=provider_config["root_path"],
             create_dirs=provider_config.get("create_dirs", True),

@@ -119,6 +119,10 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    # Stands in for every vault:// reference while a flow is validated. A plain string (pydantic
+    # turns str subclasses back into str) that passes the non-empty and http(s) URL checks of
+    # secret-capable fields. No provider is contacted and nothing is resolved.
+    VALIDATION_SECRET_SENTINEL = "https://vault-reference.invalid"  # nosec B105  # pragma: allowlist secret
     VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
@@ -206,7 +210,6 @@ class DocpipeConstants:
 
     # Document Library constants
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
-    LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
     _DEFAULT_DATA_ROOT = _find_project_root() / "data"
@@ -260,9 +263,6 @@ class DocumentLibraryConstants:
 
     # Size value limits (JavaScript MAX_SAFE_INTEGER for JSON compatibility)
     MAX_SAFE_INTEGER = 9007199254740991
-
-    # Bulk operation limits
-    MAX_BULK_OPERATION_SIZE = 1000  # Maximum number of items in bulk operations
 
 
 class DocpipeConfigKeys:
@@ -723,6 +723,14 @@ TERMINAL_JOB_STATUSES = frozenset(
         ExecutionStatus.CANCELED,
         ExecutionStatus.FAILED,
         ExecutionStatus.ABORTED,
+    ]
+)
+
+COMPLETED_JOB_STATUSES = frozenset(
+    [
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.COMPLETED_WITH_ERRORS,
+        ExecutionStatus.COMPLETED_WITH_WARNINGS,
     ]
 )
 
