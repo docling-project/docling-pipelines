@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """JobManagementService tests against a real JobTrackerService.
 
 The job stats side is the production ``JobTrackerService`` over an

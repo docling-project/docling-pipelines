@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for DuckDBJobStatsStore.
 
@@ -258,6 +261,27 @@ class TestNodeStatsCRUD:
         assert len(retrieved) == 1
         assert retrieved[0].id == sample_node_stats.id
         assert retrieved[0].name == "TestNode"
+
+    def test_deferred_execution_docs_round_trip(self, *, store, sample_node_stats, sample_job_stats):
+        """deferred_execution_docs should persist and be read back unchanged."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+        sample_node_stats.deferred_execution_docs = ["doc-a", "doc-b"]
+
+        store.store_node_stats(job_run_id=job_run_id, node_stats=sample_node_stats)
+
+        retrieved = store.get_node_stats(job_run_id=job_run_id)
+        assert retrieved[0].deferred_execution_docs == ["doc-a", "doc-b"]
+
+    def test_deferred_execution_docs_default_empty(self, *, store, sample_node_stats, sample_job_stats):
+        """Nodes without deferred docs should read back an empty list."""
+        job_run_id = sample_job_stats.job_run_id
+        store.store_job_stats(sample_job_stats)
+
+        store.store_node_stats(job_run_id=job_run_id, node_stats=sample_node_stats)
+
+        retrieved = store.get_node_stats(job_run_id=job_run_id)
+        assert retrieved[0].deferred_execution_docs == []
 
     def test_store_multiple_node_stats(self, *, store, sample_job_stats):
         """Should store multiple node stats correctly."""

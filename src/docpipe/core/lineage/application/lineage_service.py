@@ -38,6 +38,7 @@ _INTERNAL_LINEAGE_KEYS = frozenset(
         "all_doc_ids",
         "branches",
         "non_recoverable_docs_table",
+        "deferred_entries",
     }
 )
 

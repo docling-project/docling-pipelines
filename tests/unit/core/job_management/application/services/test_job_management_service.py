@@ -338,6 +338,7 @@ class TestJobManagementService:
         mock_set_session_info.assert_called_once()
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert execute_kwargs["params"][DocpipeConstants.ENABLE_MICRO_BATCHING] is True
+        assert DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in execute_kwargs["params"]
         assert execute_kwargs["params"]["custom"] == "value"
 
     @patch("docpipe.core.job_management.application.services.job_management_service.set_session_info")
@@ -397,12 +398,16 @@ class TestJobManagementService:
             job_id="job-1",
             job_run_id="run-1",
             flow_definition={"dag": []},
-            flow_config={DocpipeConstants.ENABLE_MICRO_BATCHING: False},
+            flow_config={
+                DocpipeConstants.ENABLE_MICRO_BATCHING: False,
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: False,
+            },
         )
 
         mock_set_session_info.assert_called_once()
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert execute_kwargs["params"][DocpipeConstants.ENABLE_MICRO_BATCHING] is False
+        assert execute_kwargs["params"][DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] is False
 
     @patch("docpipe.core.job_management.application.services.job_management_service.set_session_info")
     @patch("docpipe.core.orchestration.orchestrator_factory.OrchestratorFactory.create_orchestrator")
@@ -423,13 +428,20 @@ class TestJobManagementService:
             session_info=Mock(),
             job_id="job-1",
             job_run_id="run-1",
-            flow_definition={"dag": [], "global_config": {DocpipeConstants.ENABLE_MICRO_BATCHING: False}},
+            flow_definition={
+                "dag": [],
+                "global_config": {
+                    DocpipeConstants.ENABLE_MICRO_BATCHING: False,
+                    DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: False,
+                },
+            },
             flow_config={},
         )
 
         mock_set_session_info.assert_called_once()
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert DocpipeConstants.ENABLE_MICRO_BATCHING not in execute_kwargs["params"]
+        assert DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in execute_kwargs["params"]
 
     def test_serialize_validation_alerts_handles_dicts_and_unknown_types(self):
         """Test validation alert serialization across supported input shapes."""

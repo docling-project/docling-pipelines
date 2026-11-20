@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.domain.models.job_stats import JobStats
 from docpipe.core.job_management.domain.models.node_stats import NodeStats
@@ -73,6 +76,7 @@ class PostgresModelMapper:
             total_docs=domain_model.total_docs,
             failed_docs=domain_model.failed_docs,
             skipped_docs=domain_model.skipped_docs,
+            deferred_execution_docs=domain_model.deferred_execution_docs,
             docs_completed=domain_model.docs_completed,
             docs_completed_count=domain_model.docs_completed_count,
             node_metadata=domain_model.node_metadata,
@@ -134,6 +138,7 @@ class PostgresModelMapper:
             total_docs=db_model.total_docs,
             failed_docs=db_model.failed_docs,
             skipped_docs=db_model.skipped_docs,
+            deferred_execution_docs=getattr(db_model, "deferred_execution_docs", None) or [],
             docs_completed=db_model.docs_completed,
             docs_completed_count=getattr(db_model, "docs_completed_count", 0),
             node_metadata=db_model.node_metadata,

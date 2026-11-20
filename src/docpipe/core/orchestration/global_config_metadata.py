@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Global Configuration Metadata
 
@@ -78,7 +81,11 @@ class GlobalConfigMetadata:
             name="Data storage type",
             type="string",
             required=False,
-            description="Storage backend type for intermediate data during flow execution (memory or local)",
+            description=(
+                "Storage backend type for intermediate data during flow execution (memory or local). Node-level "
+                "failure resumption (max_retry_attempts) needs the intermediate node output to be persisted, so it "
+                "is inactive when this is memory or unset."
+            ),
             category=EXECUTION_CONTROL,
         ),
         # Incremental Processing
@@ -110,6 +117,30 @@ class GlobalConfigMetadata:
             category=INCREMENTAL_PROCESSING,
         ),
         # Orchestration configuration (Prefect + Micro-Batching)
+        DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: GlobalConfigParam(
+            name="Enable failed document resumption",
+            type="bool",
+            default=False,
+            required=False,
+            description=(
+                "Controls whether failed documents are resumed from intermediate node output on subsequent runs. "
+                "Disabled by default. When false, failed documents are not resumed and will be re-ingested from "
+                "the start. Set to true to opt in; requires data_storage_type other than memory."
+            ),
+            category=ORCHESTRATION,
+        ),
+        DocpipeConstants.MAX_RETRY_ATTEMPTS: GlobalConfigParam(
+            name="Maximum retry attempts",
+            type="int",
+            default=DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS,
+            required=False,
+            description=(
+                "Retries allowed for a document that failed at a node, resumed from the stored output of the "
+                "upstream node on later runs (total attempts = 1 + max_retry_attempts). Requires "
+                "data_storage_type other than memory; with memory (or unset) failed documents are re-ingested."
+            ),
+            category=ORCHESTRATION,
+        ),
         DocpipeConstants.MICRO_BATCH_SIZE: GlobalConfigParam(
             name="Micro batch size",
             type="int",
