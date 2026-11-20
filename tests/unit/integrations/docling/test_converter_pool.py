@@ -1,16 +1,23 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the process-wide Docling converter pool."""
 
+import enum
 import gc
+import hashlib
+import importlib.util
 import logging
 import sys
 import threading
 import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 
 import pytest
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretBytes, SecretStr
 
 from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.integrations.docling import converter_pool
@@ -299,7 +306,9 @@ class TestDoclingInstancePool:
         with pool.lease(key="A", factory=_Instrumented):
             pass
         assert pool._cold_wait_timeout_locked(requester="A") is None  # own idle instances do not count
-        assert 29.0 < pool._cold_wait_timeout_locked(requester="B") <= 30.0
+        cold_wait = pool._cold_wait_timeout_locked(requester="B")
+        assert cold_wait is not None
+        assert 29.0 < cold_wait <= 30.0
         monkeypatch.setattr(converter_pool, "_COLD_IDLE_SECONDS", 0.0)
         # Deadline already passed: still a positive timeout, so the wait loop can never spin.
         assert pool._cold_wait_timeout_locked(requester="B") == converter_pool._MIN_COLD_WAIT_SECONDS
@@ -690,3 +699,207 @@ class TestDefaultPool:
         pool = get_docling_pool()
         converter_pool._reinit_after_fork()
         assert get_docling_pool() is not pool
+
+
+# ---------------------------------------------------------------------------
+# Remaining fingerprint, reaper and process-wide pool edge cases
+# ---------------------------------------------------------------------------
+
+
+class _Colour(enum.Enum):
+    RED = "red"
+    BLUE = "blue"
+
+
+class _Opaque:
+    """Object without a canonical form; fingerprinted by type and repr."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+    def __repr__(self) -> str:
+        return f"_Opaque({self.label!r})"
+
+
+def _nested_list(depth: int, leaf: object) -> list:
+    value: object = leaf
+    for _ in range(depth):
+        value = [value]
+    return value  # type: ignore[return-value]
+
+
+class TestOptionsFingerprintValueKinds:
+    """Value kinds that get a dedicated canonical form in the fingerprint."""
+
+    def test_secret_bytes_are_distinguished_but_not_leaked(self):
+        """SecretBytes are hashed by their real value, never embedded."""
+        one = options_fingerprint({"key": SecretBytes(b"one")})
+        assert one == options_fingerprint({"key": SecretBytes(b"one")})
+        assert one != options_fingerprint({"key": SecretBytes(b"two")})
+        canonical = converter_pool._canonical(value=SecretBytes(b"one"), depth=0, active=set())
+        assert canonical == {"__secret__": hashlib.sha256(b"one").hexdigest()}
+
+    def test_bytes_are_hashed_by_value(self):
+        """Raw bytes compare by content and are stored as a digest."""
+        canonical = converter_pool._canonical(value=b"payload", depth=0, active=set())
+        assert set(canonical) == {"__bytes__"}
+        assert canonical["__bytes__"] == hashlib.sha256(b"payload").hexdigest()
+        assert options_fingerprint({"b": b"x"}) != options_fingerprint({"b": b"y"})
+
+    def test_enum_members_differ_by_value_and_type(self):
+        """Enum members keep their type and value."""
+        canonical = converter_pool._canonical(value=_Colour.RED, depth=0, active=set())
+        assert canonical["value"] == "red"
+        assert canonical["__enum__"].endswith("_Colour")
+        assert options_fingerprint({"c": _Colour.RED}) != options_fingerprint({"c": _Colour.BLUE})
+        assert options_fingerprint({"c": _Colour.RED}) != options_fingerprint({"c": "red"})
+
+    def test_paths_compare_by_string_form(self):
+        """Paths are reduced to their string form, distinct from plain strings."""
+        assert converter_pool._canonical(value=PurePosixPath("/m/a"), depth=0, active=set()) == {"__path__": "/m/a"}
+        assert options_fingerprint({"p": PurePosixPath("/m/a")}) != options_fingerprint({"p": PurePosixPath("/m/b")})
+        assert options_fingerprint({"p": PurePosixPath("/m/a")}) != options_fingerprint({"p": "/m/a"})
+
+    def test_sets_are_order_independent(self):
+        """Set members are sorted, so iteration order never changes the fingerprint."""
+        assert options_fingerprint({"s": {"a", "b", "c"}}) == options_fingerprint({"s": frozenset({"c", "b", "a"})})
+        assert options_fingerprint({"s": {"a", "b"}}) != options_fingerprint({"s": {"a", "c"}})
+
+    def test_unknown_objects_fall_back_to_type_and_repr(self):
+        """Objects without a canonical form are keyed by their qualified type and repr."""
+        canonical = converter_pool._canonical(value=_Opaque("x"), depth=0, active=set())
+        assert canonical == {"__repr__": converter_pool._qualified_name(_Opaque), "value": "_Opaque('x')"}
+        assert options_fingerprint({"o": _Opaque("x")}) != options_fingerprint({"o": _Opaque("y")})
+
+    def test_nesting_beyond_the_depth_limit_is_truncated(self):
+        """Structures nested deeper than the limit stop recursing and record only the type."""
+        limit = converter_pool._MAX_FINGERPRINT_DEPTH
+        canonical = converter_pool._canonical(value=_nested_list(limit + 5, 1), depth=0, active=set())
+        for _ in range(limit + 1):
+            (canonical,) = canonical
+        assert canonical == {"__too_deep__": "builtins.list"}
+        # Differences below the cut-off no longer change the fingerprint (documented trade-off).
+        assert options_fingerprint(_nested_list(limit + 5, 1)) == options_fingerprint(_nested_list(limit + 5, 2))
+        assert options_fingerprint(_nested_list(limit - 5, 1)) != options_fingerprint(_nested_list(limit - 5, 2))
+
+
+class _OneShotStop:
+    """Stand-in for the reaper's stop event: lets ``n`` intervals elapse, then stops."""
+
+    def __init__(self, *, rounds: int) -> None:
+        self.rounds = rounds
+        self.waits: list[float] = []
+
+    def wait(self, interval: float) -> bool:
+        self.waits.append(interval)
+        self.rounds -= 1
+        return self.rounds < 0
+
+
+class TestReaper:
+    """Reaper start-up guards and loop behaviour, driven without real waiting."""
+
+    def test_closed_pool_never_starts_a_reaper(self):
+        """``_ensure_reaper`` is a no-op on a closed pool even with a positive TTL."""
+        pool = DoclingInstancePool(max_size=1, idle_ttl_seconds=10)
+        pool.close()
+        pool._ensure_reaper()
+        assert pool._reaper is None
+
+    def test_reaper_survives_eviction_errors(self, monkeypatch, caplog):
+        """A failing eviction pass is logged and the loop keeps running until stopped."""
+        pool = DoclingInstancePool(max_size=1, idle_ttl_seconds=10)
+        calls: list[None] = []
+
+        def _boom() -> int:
+            calls.append(None)
+            raise RuntimeError("eviction failed")
+
+        stop = _OneShotStop(rounds=2)
+        monkeypatch.setattr(pool, "evict_expired", _boom)
+        monkeypatch.setattr(pool, "_reaper_stop", stop)
+
+        with caplog.at_level(logging.WARNING):
+            pool._reap_loop()
+
+        assert len(calls) == 2
+        assert stop.waits == [5.0, 5.0, 5.0]
+        assert caplog.text.count("reaper failed") == 2
+
+    def test_reaper_interval_is_capped(self, monkeypatch):
+        """Long TTLs still get checked at least every ``_REAPER_MAX_INTERVAL_SECONDS``."""
+        pool = DoclingInstancePool(max_size=1, idle_ttl_seconds=3600)
+        stop = _OneShotStop(rounds=0)
+        monkeypatch.setattr(pool, "_reaper_stop", stop)
+        pool._reap_loop()
+        assert stop.waits == [converter_pool._REAPER_MAX_INTERVAL_SECONDS]
+
+
+class _RacingLock:
+    """Lock double that lets another "thread" install the default pool before entry."""
+
+    def __init__(self, winner: DoclingInstancePool) -> None:
+        self.winner = winner
+
+    def __enter__(self) -> None:
+        converter_pool._default_pool = self.winner
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+class TestDefaultPoolLifecycle:
+    """Process-wide pool hooks that are not exercised through configuration tests."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_default_pool(self, monkeypatch, tmp_path):
+        """Start and end every test without a process-wide pool or pool settings."""
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_CONFIG_PATH, str(tmp_path / "absent.yaml"))
+        for name in _POOL_ENV_VARS:
+            monkeypatch.delenv(name, raising=False)
+        reset_docling_pool()
+        yield
+        reset_docling_pool()
+
+    def test_concurrent_initialisation_keeps_the_first_pool(self, monkeypatch):
+        """If another thread created the pool while we waited for the lock, it is reused."""
+        winner = DoclingInstancePool(max_size=1, idle_ttl_seconds=0)
+        monkeypatch.setattr(converter_pool, "_default_pool_lock", _RacingLock(winner))
+        monkeypatch.setattr(
+            converter_pool,
+            "_resolve_pool_settings",
+            lambda: pytest.fail("settings must not be resolved when the pool already exists"),
+        )
+        assert get_docling_pool() is winner
+
+    def test_shutdown_hook_releases_idle_instances_but_keeps_pool(self):
+        """The exit hook drops idle instances; the pool itself stays registered and usable."""
+        pool = get_docling_pool()
+        with pool.lease(key="k", factory=_Instrumented):
+            pass
+        assert pool.stats()["idle"] == 1
+
+        converter_pool.shutdown_docling_pool()
+
+        assert pool.stats()["idle"] == 0
+        assert get_docling_pool() is pool
+
+    def test_shutdown_hook_without_pool_creates_none(self):
+        """The exit hook does not create a pool just to shut it down."""
+        converter_pool.shutdown_docling_pool()
+        assert converter_pool._default_pool is None
+
+    def test_module_imports_without_fork_support(self, monkeypatch):
+        """On platforms without ``os.register_at_fork`` the module still imports and works."""
+        monkeypatch.delattr(converter_pool.os, "register_at_fork", raising=False)
+        registered: list[object] = []
+        monkeypatch.setattr(converter_pool.atexit, "register", registered.append)
+        spec = importlib.util.spec_from_file_location("_converter_pool_without_fork", converter_pool.__file__)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        assert registered == [module.shutdown_docling_pool]
+        pool = module.DoclingInstancePool(max_size=1, idle_ttl_seconds=0)
+        with pool.lease(key="k", factory=_Instrumented) as instance:
+            assert isinstance(instance, _Instrumented)
