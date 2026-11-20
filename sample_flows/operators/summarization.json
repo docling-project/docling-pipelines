@@ -1,0 +1,53 @@
+{
+  "flow_name": "standalone-document-summarization",
+  "description": "Ingest, extract, and summarize each document.",
+  "global_config": {
+    "doc_column": "content",
+    "storage": "in-memory",
+    "execute_type": "local"
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_documents",
+      "config": {
+        "provider": "filesystem",
+        "provider_config": {
+          "paths": [
+            "./sample_documents"
+          ]
+        },
+        "include_filter": "pdf,txt,docx"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_text",
+      "config": {},
+      "depends_on": [
+        "ingest_documents"
+      ]
+    },
+    {
+      "type": "summarization",
+      "name": "summarize_documents",
+      "config": {
+        "doc_column": "content",
+        "output_column": "summary",
+        "max_input_tokens": 4096,
+        "overlap_ratio": 0.1,
+        "summary_sentences": 3,
+        "summary_max_words": 50,
+        "provider": "litellm",
+        "provider_config": {
+          "model_id": "openai/llama3.1",
+          "api_base": "http://localhost:11434/v1",
+          "api_key": "<ollama>"
+        }
+      },
+      "depends_on": [
+        "extract_text"
+      ]
+    }
+  ]
+}
