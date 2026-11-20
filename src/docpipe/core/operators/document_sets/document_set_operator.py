@@ -9,7 +9,7 @@ soft-delete cleanup.
 """
 
 # Import to trigger adapter registration
-from typing import Any
+from typing import Any, cast
 
 import pyarrow as pa
 
@@ -19,6 +19,7 @@ from docpipe.core.assets.common.factories.attachment_repository_factory import A
 from docpipe.core.assets.document_sets import adapters  # noqa: F401
 from docpipe.core.assets.document_sets.application.services.document_set_service import DocumentSetService
 from docpipe.core.assets.document_sets.domain.models.document_set import DocumentSet
+from docpipe.core.assets.document_sets.domain.types import DataStoreConfig
 from docpipe.core.assets.document_sets.factories import DataStoreFactory
 from docpipe.core.constants.constants import AttributeDataTypes, DocpipeConstants, ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
@@ -159,6 +160,7 @@ class DocumentSetOperator(AbstractOperator):
                     OperatorConstants.Config.VALID_VALUES: [
                         OperatorConstants.DocumentSet.ADAPTER_DUCKDB,
                         OperatorConstants.DocumentSet.ADAPTER_FILESYSTEM,
+                        OperatorConstants.DocumentSet.ADAPTER_POSTGRES,
                     ],
                     OperatorConstants.Misc.TYPE: AttributeDataTypes.STRING,
                 },
@@ -236,9 +238,11 @@ class DocumentSetOperator(AbstractOperator):
             config_override={OperatorConstants.DocumentSet.DATABASE_PATH: self.database_path},
         )
 
+        # The repository config also carries the settings of the postgres data store
+        # (content_schema and the postgres connection block).
         data_store = DataStoreFactory.create(
             adapter_name=self.data_backend,
-            config={OperatorConstants.DocumentSet.DATABASE_PATH: self.database_path},
+            config=cast(DataStoreConfig, attachment_repo_config),
         )
 
         # Create attachment repository using same config as metadata repo

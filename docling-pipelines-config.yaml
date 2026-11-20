@@ -22,8 +22,11 @@ assets_management:
   # replace the two blocks above with the following. Any connection key left out
   # falls back to DOCPIPE_POSTGRES_HOST/PORT/DB/USER/PASSWORD; the password is
   # required (YAML or DOCPIPE_POSTGRES_PASSWORD). Tables are created on first use
-  # in the given schema. The document set data tables themselves still live in
-  # DuckDB at database_path (operator option data_backend).
+  # in the given schema. The document set data tables are written by the data
+  # store of the operator option data_backend: DuckDB at database_path (default),
+  # or PostgreSQL with data_backend: postgres. For the PostgreSQL data store, add
+  # storage_adapter: postgres (the REST API reads the data tables through it) and
+  # optionally content_schema (default docpipe_document_sets).
   # Env overrides: DOCUMENTSET_REPOSITORY_TYPE=postgres, DOCUMENTLIBRARY_REPOSITORY_TYPE=postgres
 #  documentset_repository:
 #    type: postgres
