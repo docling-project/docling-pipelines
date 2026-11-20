@@ -15,6 +15,8 @@ Exception Handling:
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from pydantic import ValidationError
+
 from docpipe.core.assets.common.application.services.asset_service import AssetService
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
 from docpipe.core.assets.flows.domain.models.flow import Flow
@@ -104,8 +106,6 @@ class FlowService(AssetService[Flow]):
 
         # If any authoring field is provided, rebuild complete authoring definition
         if has_authoring_fields:
-            from pydantic import ValidationError
-
             from docpipe.api.dto.authoring_flow_dto import AuthoringFlowCreateRequest
             from docpipe.core.assets.flows.domain.models.authoring_flow import AuthoringFlow
 
@@ -130,15 +130,23 @@ class FlowService(AssetService[Flow]):
                     tags=updates.get(OperatorConstants.Misc.TAGS, existing_flow.tags),
                 )
             except ValidationError as exc:
-                raise FlowInvalidDataException(f"Invalid flow data: {exc!s}") from exc
+                details = "; ".join(
+                    f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                    for error in exc.errors(include_input=False)
+                )
+                raise FlowInvalidDataException(f"Invalid flow data: {details}") from exc
 
             authoring_flow = AuthoringFlow.from_dict(data=authoring_dto.model_dump())
             authoring_flow.validate()
 
-            # Merge over the stored definition so keys the authoring DTO does not
-            # manage (flow_source, flow_id, ...) survive a partial update.
-            merged_definition = dict(existing_def) if isinstance(existing_def, dict) else {}
-            merged_definition.update(authoring_dto.model_dump())
+            # Merge over the stored definition only when it is already in authoring
+            # format, so keys the authoring DTO does not manage (flow_source,
+            # flow_id, ...) survive a partial update. An Elyra-format record is
+            # replaced cleanly instead of mixing both formats into one record.
+            if isinstance(existing_def, dict) and DocpipeConstants.FLOW_NAME in existing_def:
+                merged_definition = {**existing_def, **authoring_dto.model_dump()}
+            else:
+                merged_definition = authoring_dto.model_dump()
             updates[DocpipeConstants.DEFINITION] = merged_definition
             # Remove authoring-specific fields after transformation
             updates.pop(DocpipeConstants.FLOW, None)

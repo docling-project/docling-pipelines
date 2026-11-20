@@ -75,7 +75,36 @@ class TestAuthoringPartialUpdate:
         )
         mock_repository.find_by_id.return_value = existing
 
-        with pytest.raises(FlowInvalidDataException):
+        with pytest.raises(FlowInvalidDataException) as exc_info:
             service.partial_update_flow(FLOW_ID, {"flow_name": "renamed-flow"})
 
         mock_repository.partial_update.assert_not_called()
+        assert "input_value" not in str(exc_info.value)
+
+    def test_partial_update_on_elyra_flow_replaces_definition(self, service, mock_repository):
+        """An authoring PATCH on an Elyra-format flow replaces the definition cleanly.
+
+        The stored record must not end up holding Elyra keys (doc_type,
+        version, pipelines) next to authoring keys (flow_name, flow).
+        """
+        existing = Flow(
+            asset_id=FLOW_ID,
+            name="elyra-flow",
+            definition={
+                "doc_type": "pipeline",
+                "version": "3.0",
+                "pipelines": [{"id": "pipeline-1", "nodes": []}],
+            },
+        )
+        mock_repository.find_by_id.return_value = existing
+        mock_repository.partial_update.return_value = existing
+
+        service.partial_update_flow(FLOW_ID, {"flow": [AUTHORING_OPERATOR]})
+
+        mock_repository.partial_update.assert_called_once()
+        definition = mock_repository.partial_update.call_args[0][1]["definition"]
+        assert definition["flow_name"] == "elyra-flow"
+        assert definition["flow"] == [AUTHORING_OPERATOR]
+        assert "doc_type" not in definition
+        assert "version" not in definition
+        assert "pipelines" not in definition
