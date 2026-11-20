@@ -120,11 +120,12 @@ class GlobalConfigMetadata:
         DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: GlobalConfigParam(
             name="Enable failed document resumption",
             type="bool",
-            default=True,
+            default=False,
             required=False,
             description=(
                 "Controls whether failed documents are resumed from intermediate node output on subsequent runs. "
-                "When false, failed documents are not resumed and will be re-ingested from the start."
+                "Disabled by default. When false, failed documents are not resumed and will be re-ingested from "
+                "the start. Set to true to opt in; requires data_storage_type other than memory."
             ),
             category=ORCHESTRATION,
         ),

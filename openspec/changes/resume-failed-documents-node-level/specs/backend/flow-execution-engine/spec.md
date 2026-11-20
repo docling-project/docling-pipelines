@@ -25,6 +25,17 @@ When a flow executes incrementally, the engine SHALL resume a previously failed 
 - **WHEN** a document failed in a previous run but the stored output of the predecessor node is unavailable, the failed node cannot be found in the flow, or the failed node has several inputs
 - **THEN** the document is re-ingested from the root Ingest operator and processed through the entire pipeline
 
+### Requirement: Resumption is opt-in
+The engine SHALL resume failed documents only when `global_config.enable_failed_doc_resumption` is explicitly set to `true`. When the key is omitted, resumption SHALL be disabled for every entry point (CLI, REST API job runs and `DocpipeFlowManager`), and none of them SHALL inject a default value for it. The key is documented with default `false` in `docs/reference/GLOBAL_CONFIG.md` and in `src/docpipe/core/orchestration/global_config_metadata.py`.
+
+#### Scenario: Key omitted disables resumption
+- **WHEN** a flow is executed from the CLI, the REST API or `DocpipeFlowManager` and `enable_failed_doc_resumption` is not set
+- **THEN** no failure record is written, failed documents are not resumed and are re-ingested from the root Ingest operator
+
+#### Scenario: Key set to true enables resumption
+- **WHEN** `enable_failed_doc_resumption` is `true` and `data_storage_type` is set to a value other than `memory`
+- **THEN** failed documents are resumed at their failed node as described above
+
 ### Requirement: Resumption requires persisted node output
 The engine SHALL resume failed documents only when `global_config.data_storage_type` is set and is not `memory`, because resumption reads the persisted intermediate node output.
 

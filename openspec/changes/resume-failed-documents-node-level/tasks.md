@@ -40,3 +40,8 @@
 - [x] 7.1 [backend] Add `batch_num` to `FailedNode` and `DeferredRecord` in `src/docpipe/core/orchestration/models/resumption_plan.py`; record it in `ResumptionService.record_failure` (kept from the first failure at a node), copy it in `to_deferred_records`, and pass the executor's `BATCH_NUM` from `AbstractOperatorExecutor`.
 - [x] 7.2 [backend] Make the saved-output lookup batch-aware: add `batch_num` to `NodeOutputTableName`, group `inject_saved_rows` entries by batch number, and build `<node>_<index>[/<batch_num>]` in `src/docpipe/core/orchestration/adapters/resumption_factory.py`. Verify with `pytest tests/unit/core/orchestration/test_resumption_service.py tests/unit/core/orchestration/test_executor_resumption.py`.
 - [x] 7.3 [backend] Document the configuration: update `max_retry_attempts` and `data_storage_type` in `docs/reference/GLOBAL_CONFIG.md` and `src/docpipe/core/orchestration/global_config_metadata.py` (resumption inactive for `memory` or unset storage, and `batch_num`).
+
+## 8. Opt-in Default
+
+- [x] 8.1 [backend] Make resumption opt-in: default `enable_failed_doc_resumption` to `false` in `is_resumption_enabled` (`resumption_factory.py`) and `global_config_metadata.py`, and stop injecting `True` in `docpipe_cli.py`, `docpipe_flow_manager.py` and `job_management_service.py`.
+- [x] 8.2 [backend] Update `docs/reference/GLOBAL_CONFIG.md` and adjust the unit tests (`test_docpipe_cli.py`, `test_docpipe_flow_manager.py`, `test_job_management_service.py`, `test_job_management_service_with_tracker.py`, `test_resumption_service.py`) to the new default. Verify with `pytest`.

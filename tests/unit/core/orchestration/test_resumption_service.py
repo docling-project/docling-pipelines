@@ -722,6 +722,9 @@ class TestFactory:
         assert create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "memory"}) is None
         assert create_resumption_service(config={}) is None
 
+    def test_disabled_by_default_when_flag_is_not_set(self):
+        assert create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "local"}) is None
+
     def test_disabled_when_enable_failed_doc_resumption_is_false(self):
         assert (
             create_resumption_service(
@@ -734,7 +737,12 @@ class TestFactory:
         )
 
     def test_enabled_for_local_storage_with_default_retries(self):
-        service = create_resumption_service(config={DocpipeConstants.DATA_STORAGE_TYPE: "local"})
+        service = create_resumption_service(
+            config={
+                DocpipeConstants.DATA_STORAGE_TYPE: "local",
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: True,
+            }
+        )
 
         assert service.max_retry_attempts == DocpipeConstants.DEFAULT_MAX_RETRY_ATTEMPTS
 
@@ -750,6 +758,7 @@ class TestFactory:
         service = create_resumption_service(
             config={
                 DocpipeConstants.DATA_STORAGE_TYPE: "local",
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: True,
                 DocpipeConstants.JOB_ID: job_id,
                 DocpipeConstants.JOB_RUN_ID: "run-current",
             }
@@ -769,7 +778,11 @@ class TestFactory:
 
     def test_max_retry_attempts_is_configurable(self):
         service = create_resumption_service(
-            config={DocpipeConstants.DATA_STORAGE_TYPE: "local", DocpipeConstants.MAX_RETRY_ATTEMPTS: 5}
+            config={
+                DocpipeConstants.DATA_STORAGE_TYPE: "local",
+                DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION: True,
+                DocpipeConstants.MAX_RETRY_ATTEMPTS: 5,
+            }
         )
 
         assert service.max_retry_attempts == 5

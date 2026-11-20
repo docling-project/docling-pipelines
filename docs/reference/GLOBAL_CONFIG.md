@@ -245,14 +245,14 @@ Configuration for tracking and processing only changed documents.
 ### `enable_failed_doc_resumption`
 
 **Type**: `boolean`
-**Default**: `true`
-**Description**: Controls whether failed documents are resumed from intermediate node output on subsequent runs. When set to `false`, resumption logic is disabled and failed documents are re-ingested from the start.
+**Default**: `false`
+**Description**: Controls whether failed documents are resumed from intermediate node output on subsequent runs. Resumption is opt-in and is disabled by default for the CLI, the REST API and `DocpipeFlowManager`. When `false` or omitted, resumption logic is disabled and failed documents are re-ingested from the start. Set to `true` to enable it; it additionally requires `data_storage_type` to be set to a value other than `memory` (see `max_retry_attempts`).
 
 **Example**:
 ```json
 {
   "global_config": {
-    "enable_failed_doc_resumption": false
+    "enable_failed_doc_resumption": true
   }
 }
 ```

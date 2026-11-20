@@ -671,7 +671,7 @@ class TestMicroBatchingDefaults:
 
         execute_kwargs = mock_executor.execute.call_args.kwargs
         assert execute_kwargs["params"]["enable_micro_batching"] is True
-        assert execute_kwargs["params"]["enable_failed_doc_resumption"] is True
+        assert "enable_failed_doc_resumption" not in execute_kwargs["params"]
         mock_init.assert_called_once()
 
     @patch("docpipe.integrations.secrets.vault_initializer.initialize_secret_providers")

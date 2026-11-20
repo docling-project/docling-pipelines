@@ -338,7 +338,7 @@ class TestJobManagementService:
         mock_set_session_info.assert_called_once()
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert execute_kwargs["params"][DocpipeConstants.ENABLE_MICRO_BATCHING] is True
-        assert execute_kwargs["params"][DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] is True
+        assert DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in execute_kwargs["params"]
         assert execute_kwargs["params"]["custom"] == "value"
 
     @patch("docpipe.core.job_management.application.services.job_management_service.set_session_info")

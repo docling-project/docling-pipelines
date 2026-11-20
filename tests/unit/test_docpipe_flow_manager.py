@@ -524,7 +524,7 @@ class TestExecuteMethod:
 
         execute_kwargs = mock_flow_executor.execute.call_args.kwargs
         assert execute_kwargs["params"][DocpipeConstants.ENABLE_MICRO_BATCHING] is True
-        assert execute_kwargs["params"][DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION] is True
+        assert DocpipeConstants.ENABLE_FAILED_DOC_RESUMPTION not in execute_kwargs["params"]
 
     @patch("docpipe.lib.docpipe_flow_manager.OrchestratorFactory.create_orchestrator")
     @patch("docpipe.lib.docpipe_flow_manager.create_session_info")
