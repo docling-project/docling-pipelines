@@ -4,6 +4,7 @@ VLM Pipeline Options Providers
 Base class and implementations for creating VLM pipeline options for different engines.
 """
 
+import copy
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
@@ -101,12 +102,13 @@ class VlmPipelineOptionsProvider(ABC):
             logger.info(
                 f"Preset '{preset}' uses DOCTAGS format. Converting to MARKDOWN for universal API compatibility."
             )
-            vlm_options.model_spec.response_format = ResponseFormat.MARKDOWN
-            vlm_options.model_spec.prompt = (
+            model_spec = copy.deepcopy(vlm_options.model_spec)
+            model_spec.response_format = ResponseFormat.MARKDOWN
+            model_spec.prompt = (
                 "Convert this document page to markdown format. Include all text, tables, and structure."
             )
-            vlm_options.model_spec.stop_strings = []
-
+            model_spec.stop_strings = []
+            vlm_options.model_spec = model_spec
 
 class WatsonxPipelineOptionsProvider(VlmPipelineOptionsProvider):
     """
@@ -540,6 +542,9 @@ class TransformersPipelineOptionsProvider(VlmPipelineOptionsProvider):
         vlm_options = VlmConvertOptions.from_preset(preset, engine_options=engine_options)
 
         if vlm_model_name:
+            model_spec = copy.deepcopy(vlm_options.model_spec)
+            model_spec.default_repo_id = vlm_model_name
+            vlm_options.model_spec = model_spec
             logger.info(f"Using Transformers engine for local inference with model: {vlm_model_name}")
         else:
             logger.info("Using Transformers engine for local inference")

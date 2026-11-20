@@ -1,7 +1,8 @@
 """Unit tests for VLM pipeline options providers."""
 
 import pytest
-from docling.datamodel.pipeline_options import VlmPipelineOptions
+from docling.datamodel.pipeline_options import VlmConvertOptions, VlmPipelineOptions
+from docling.datamodel.pipeline_options_vlm_model import ResponseFormat
 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.integrations.docling.vlm_pipeline_options_provider import (
@@ -311,3 +312,14 @@ class TestMlxPipelineOptionsProvider:
 
         assert isinstance(options, VlmPipelineOptions)
         assert options.enable_remote_services is False
+def test_api_provider_does_not_mutate_global_preset():
+    provider = OpenAIPipelineOptionsProvider()
+    config = {"api_key": "test_key", "model_id": "gpt-4-vision-preview", "api_base": "https://api.openai.com/v1"}  # pragma: allowlist secret
+        options = provider.create_pipeline_options(preset="granite_docling", config=config)
+            assert options.vlm_options.model_spec.response_format == ResponseFormat.MARKDOWN
+            assert VlmConvertOptions.from_preset("granite_docling").model_spec.response_format == ResponseFormat.DOCTAGS
+def test_transformers_provider_applies_model_id():
+    options = TransformersPipelineOptionsProvider().create_pipeline_options(preset="granite_docling", config={"model_id": "custom/vlm-model"})
+    assert options.vlm_options.model_spec.default_repo_id == "custom/vlm-model"
+    assert VlmConvertOptions.from_preset("granite_docling").model_spec.default_repo_id != "custom/vlm-model"
+    
