@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service for flow management operations.
 
 Provides CRUD operations for flows with validation, filtering, and pagination.
@@ -11,6 +14,8 @@ Exception Handling:
 
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
+
+from pydantic import ValidationError
 
 from docpipe.core.assets.common.application.services.asset_service import AssetService
 from docpipe.core.assets.common.domain.ports.asset_repository import AssetRepository
@@ -116,17 +121,33 @@ class FlowService(AssetService[Flow]):
                 existing_def.get(OperatorConstants.Config.GLOBAL_CONFIG, {}) if isinstance(existing_def, dict) else {}
             )
 
-            authoring_dto = AuthoringFlowCreateRequest(
-                flow_name=updates.get(DocpipeConstants.NAME, existing_flow_name),
-                flow=updates.get(DocpipeConstants.FLOW, existing_flow_list),
-                global_config=updates.get(OperatorConstants.Config.GLOBAL_CONFIG, existing_global_config),
-                description=updates.get(DocpipeConstants.DESCRIPTION, existing_flow.description),
-                tags=updates.get(OperatorConstants.Misc.TAGS, existing_flow.tags),
-            )
+            try:
+                authoring_dto = AuthoringFlowCreateRequest(
+                    flow_name=updates.get(DocpipeConstants.NAME, existing_flow_name),
+                    flow=updates.get(DocpipeConstants.FLOW, existing_flow_list),
+                    global_config=updates.get(OperatorConstants.Config.GLOBAL_CONFIG, existing_global_config),
+                    description=updates.get(DocpipeConstants.DESCRIPTION, existing_flow.description),
+                    tags=updates.get(OperatorConstants.Misc.TAGS, existing_flow.tags),
+                )
+            except ValidationError as exc:
+                details = "; ".join(
+                    f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                    for error in exc.errors(include_input=False)
+                )
+                raise FlowInvalidDataException(f"Invalid flow data: {details}") from exc
+
             authoring_flow = AuthoringFlow.from_dict(data=authoring_dto.model_dump())
             authoring_flow.validate()
 
-            updates[DocpipeConstants.DEFINITION] = authoring_dto.model_dump()
+            # Merge over the stored definition only when it is already in authoring
+            # format, so keys the authoring DTO does not manage (flow_source,
+            # flow_id, ...) survive a partial update. An Elyra-format record is
+            # replaced cleanly instead of mixing both formats into one record.
+            if isinstance(existing_def, dict) and DocpipeConstants.FLOW_NAME in existing_def:
+                merged_definition = {**existing_def, **authoring_dto.model_dump()}
+            else:
+                merged_definition = authoring_dto.model_dump()
+            updates[DocpipeConstants.DEFINITION] = merged_definition
             # Remove authoring-specific fields after transformation
             updates.pop(DocpipeConstants.FLOW, None)
             updates.pop(OperatorConstants.Config.GLOBAL_CONFIG, None)
