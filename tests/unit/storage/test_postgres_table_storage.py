@@ -528,3 +528,87 @@ class TestPostgresTableStorageWidening:
 
         # The second upsert reads the columns again, because the statement could have changed them.
         assert len(engine.sql("information_schema.columns")) == 2
+
+
+class TestPostgresConnectionSettings:
+    """Connection string helper and shared engine support flat, nested, mixed and env fallback."""
+
+    def test_flat_only_settings(self, monkeypatch):
+        monkeypatch.delenv("DOCPIPE_POSTGRES_PASSWORD", raising=False)
+        url = connection.get_postgres_connection_string(
+            config={
+                "host": "flat-host",
+                "port": 5433,
+                "database": "flat-db",
+                "user": "flat-user",
+                "password": "flat-password",  # pragma: allowlist secret
+            }
+        )
+        assert url == "postgresql+psycopg2://flat-user:flat-password@flat-host:5433/flat-db"  # pragma: allowlist secret
+
+    def test_nested_only_settings(self, monkeypatch):
+        monkeypatch.delenv("DOCPIPE_POSTGRES_PASSWORD", raising=False)
+        url = connection.get_postgres_connection_string(
+            config={
+                "postgres": {
+                    "host": "nested-host",
+                    "port": 5434,
+                    "database": "nested-db",
+                    "user": "nested-user",
+                    "password": "nested-password",  # pragma: allowlist secret
+                }
+            }
+        )
+        assert (
+            url
+            == "postgresql+psycopg2://nested-user:nested-password@nested-host:5434/nested-db"  # pragma: allowlist secret
+        )
+
+    def test_nested_takes_precedence_over_flat(self, monkeypatch):
+        monkeypatch.delenv("DOCPIPE_POSTGRES_PASSWORD", raising=False)
+        url = connection.get_postgres_connection_string(
+            config={
+                "host": "flat-host",
+                "database": "flat-db",
+                "password": "flat-password",  # pragma: allowlist secret
+                "postgres": {
+                    "host": "nested-host",
+                    "password": "nested-password",  # pragma: allowlist secret
+                },
+            }
+        )
+        # Nested host & password override flat, flat database is kept
+        expected = (
+            "postgresql+psycopg2://docpipe_user:nested-password@nested-host:5432/flat-db"  # pragma: allowlist secret
+        )
+        assert url == expected
+
+    def test_mixed_company_db_and_example_password(self, monkeypatch):
+        """Mixed example required by spec: host at root, password nested."""
+        monkeypatch.delenv("DOCPIPE_POSTGRES_PASSWORD", raising=False)
+        url = connection.get_postgres_connection_string(
+            config={"host": "company-db", "postgres": {"password": "example-password"}}  # pragma: allowlist secret
+        )
+        assert "company-db" in url
+        assert "example-password" in url  # pragma: allowlist secret
+        expected = (
+            "postgresql+psycopg2://docpipe_user:example-password@company-db:5432/docpipe"  # pragma: allowlist secret
+        )
+        assert url == expected
+
+    def test_env_fallback(self, monkeypatch):
+        monkeypatch.setenv("DOCPIPE_POSTGRES_HOST", "env-host")
+        monkeypatch.setenv("DOCPIPE_POSTGRES_PORT", "5435")
+        monkeypatch.setenv("DOCPIPE_POSTGRES_DB", "env-db")
+        monkeypatch.setenv("DOCPIPE_POSTGRES_USER", "env-user")
+        monkeypatch.setenv("DOCPIPE_POSTGRES_PASSWORD", "env-password")
+
+        url = connection.get_postgres_connection_string(config={})
+        assert url == "postgresql+psycopg2://env-user:env-password@env-host:5435/env-db"  # pragma: allowlist secret
+
+    def test_storage_factory_accepts_postgresql_alias(self, engine):
+        storage = StorageFactory.create_table_storage(
+            storage_type="postgresql",
+            postgres={"host": "db", "password": "pass"},  # pragma: allowlist secret
+        )
+        assert isinstance(storage, PostgresTableStorage)

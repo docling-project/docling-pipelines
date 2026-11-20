@@ -210,6 +210,9 @@ class AssetRepositoryFactory:
         if adapter_name is not None:
             repo_type_str = adapter_name
 
+        if repo_type_str.lower() == "postgresql":
+            repo_type_str = RepositoryType.POSTGRES.value
+
         # Merge caller-supplied config on top of YAML/env resolved config
         if config_override:
             repository_config = {**repository_config, **config_override}

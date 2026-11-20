@@ -159,3 +159,23 @@ class TestCreateRepository:
             RepositoryType.DUCKDB: DuckDBAssetRepository,
             RepositoryType.POSTGRES: PostgresAssetRepository,
         }
+
+    def test_creates_postgres_repository_with_postgresql_alias(self, config_file: Path, monkeypatch) -> None:
+        from unittest.mock import MagicMock
+
+        mock_engine = MagicMock()
+        monkeypatch.setattr(
+            "docpipe.core.assets.common.adapters.repositories.postgres_storage_utils.PostgresStorageUtils.get_engine",
+            lambda *, config, owner=None: mock_engine,
+        )
+        monkeypatch.setattr(
+            "docpipe.core.assets.common.adapters.repositories.postgres_storage_utils.PostgresStorageUtils.ensure_schema",
+            lambda *, engine, schema: MagicMock(),
+        )
+        for alias in ("postgresql", "POSTGRESQL", "postgres", "POSTGRES"):
+            repo = AssetRepositoryFactory.create_repository(
+                asset_type=DocumentSet,
+                adapter_name=alias,
+                config_override={"postgres": {"host": "localhost"}},
+            )
+            assert isinstance(repo, PostgresAssetRepository)

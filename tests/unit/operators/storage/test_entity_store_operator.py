@@ -241,6 +241,19 @@ class TestPostgresConfiguration:
             schema="invoice_entities",
         )
 
+    @patch("docpipe.core.operators.storage.entity_store_operator.StorageFactory.create_table_storage")
+    def test_postgresql_alias_backend(self, mock_factory):
+        """Selecting postgresql normalizes to postgres and creates storage."""
+        mock_factory.return_value = MagicMock()
+
+        EntityStoreOperator({"data_backend": "postgresql", "schema": "invoice_entities"})
+
+        mock_factory.assert_called_once_with(
+            storage_type="postgres",
+            database_path=":memory:",
+            schema="invoice_entities",
+        )
+
     def test_postgres_credentials_are_rejected(self):
         """Connection settings in the flow configuration would be stored with every run."""
         config = {
