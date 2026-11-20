@@ -170,6 +170,25 @@ describe('AppHeader – Auth integration', () => {
       expect(store.getState().auth.user).toBeNull();
     });
   });
+
+  it('notifies the user when server sign-out fails', async () => {
+    server.use(
+      http.post('/auth/logout', () => new HttpResponse(null, { status: 500 }))
+    );
+    const { store } = renderWithProviders(<AppHeader />, { preloadedState: authedState() });
+
+    fireEvent.click(screen.getByRole('button', { name: 'User menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => {
+      expect(store.getState().auth.user).toBeNull();
+      const warning = store.getState().notifications.active.find(
+        (n) => n.kind === 'warning' && n.title === 'Sign-out incomplete'
+      );
+      expect(warning).toBeDefined();
+      expect(warning?.subtitle).toContain('session may still be active');
+    });
+  });
 });
 
 describe('AppHeader – profile menu', () => {

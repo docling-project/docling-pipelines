@@ -157,6 +157,7 @@ export function Canvas(): React.JSX.Element {
       created_on:   currentFlow.created_on ? formatDateTime(new Date(currentFlow.created_on)) : '',
       modified_on:  currentFlow.modified_on ? formatDateTime(new Date(currentFlow.modified_on)) : '',
       project_name: project?.name ?? projectId ?? '',
+      created_by:   currentFlow.created_by,
     };
   }, [currentFlow, project, projectId]);
 
@@ -1147,60 +1148,25 @@ export function Canvas(): React.JSX.Element {
       tooltip: customTooltip ?? intl.formatMessage(tooltip),
     });
 
+    const editGatedTooltipText = !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined;
+    const editBarItem = (
+      action: string,
+      label: MessageDescriptor,
+      tooltip: MessageDescriptor
+    ): object => barItem(action, label, tooltip, canEditFlow, editGatedTooltipText);
+
     const leftBar: object[] = [
-      barItem(
-        CANVAS_ACTIONS.PALETTE,
-        messages.toolbarPalette,
-        messages.toolbarPaletteTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
+      editBarItem(CANVAS_ACTIONS.PALETTE, messages.toolbarPalette, messages.toolbarPaletteTooltip),
       { divider: true },
-      barItem(
-        CANVAS_ACTIONS.UNDO,
-        messages.toolbarUndo,
-        messages.toolbarUndoTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
-      barItem(
-        CANVAS_ACTIONS.REDO,
-        messages.toolbarRedo,
-        messages.toolbarRedoTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
+      editBarItem(CANVAS_ACTIONS.UNDO, messages.toolbarUndo, messages.toolbarUndoTooltip),
+      editBarItem(CANVAS_ACTIONS.REDO, messages.toolbarRedo, messages.toolbarRedoTooltip),
       { divider: true },
-      barItem(
-        CANVAS_ACTIONS.CUT,
-        messages.toolbarCut,
-        messages.toolbarCutTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
+      editBarItem(CANVAS_ACTIONS.CUT, messages.toolbarCut, messages.toolbarCutTooltip),
       barItem(CANVAS_ACTIONS.COPY, messages.toolbarCopy, messages.toolbarCopyTooltip, true),
-      barItem(
-        CANVAS_ACTIONS.PASTE,
-        messages.toolbarPaste,
-        messages.toolbarPasteTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
-      barItem(
-        CANVAS_ACTIONS.DELETE,
-        messages.delete,
-        messages.toolbarDeleteTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
+      editBarItem(CANVAS_ACTIONS.PASTE, messages.toolbarPaste, messages.toolbarPasteTooltip),
+      editBarItem(CANVAS_ACTIONS.DELETE, messages.delete, messages.toolbarDeleteTooltip),
       { divider: true },
-      barItem(
-        CANVAS_ACTIONS.CREATE_COMMENT,
-        messages.toolbarComment,
-        messages.toolbarCommentTooltip,
-        canEditFlow,
-        !canEditFlow ? intl.formatMessage(editGatedTooltip) : undefined
-      ),
+      editBarItem(CANVAS_ACTIONS.CREATE_COMMENT, messages.toolbarComment, messages.toolbarCommentTooltip),
       { divider: true },
       {
         action: CANVAS_ACTIONS.FLOW_PROPERTIES,

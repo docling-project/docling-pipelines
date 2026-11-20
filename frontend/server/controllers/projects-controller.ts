@@ -27,7 +27,8 @@ const getProjects = async (req: Request, res: Response): Promise<void> => {
   try {
     const { limit, offset, name, tags } = req.query;
 
-    const response = await proxyRequest({ req,
+    const response = await proxyRequest({
+      req,
       method: 'GET',
       path: ['api', 'v1', 'projects'],
       query: {

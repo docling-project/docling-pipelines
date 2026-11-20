@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiClient } from '@/services/api/client';
+import { apiClient, resetAuthRedirectLatch, stripUiBasename } from '@/services/api/client';
 import { server } from '../../../mocks/server';
 import { http, HttpResponse } from 'msw';
 import { waitFor } from '@testing-library/react';
@@ -30,6 +30,7 @@ describe('apiClient', () => {
 describe('apiClient additional requirements', () => {
   beforeEach(() => {
     mockAssign.mockClear();
+    resetAuthRedirectLatch();
 
     // Safely mock window.location in JSDOM
     delete (window as any).location;
@@ -143,5 +144,49 @@ describe('apiClient additional requirements', () => {
 
     expect(mockAssign).toHaveBeenCalledTimes(1);
     expect(mockAssign).toHaveBeenCalledWith('/ui/login?return_to=%2F%3Ftab%3D1');
+  });
+
+  it('skips 401 redirect for /auth/logout and /auth/config endpoints', async () => {
+    server.use(
+      http.post('http://localhost:3000/auth/logout', () => new HttpResponse(null, { status: 401 })),
+      http.get('http://localhost:3000/auth/config', () => new HttpResponse(null, { status: 401 }))
+    );
+
+    await expect(apiClient.post('http://localhost:3000/auth/logout', {})).rejects.toThrow();
+    await expect(apiClient.get('http://localhost:3000/auth/config')).rejects.toThrow();
+
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it('skips 401 redirect when already on /ui/login to prevent redirect loops', async () => {
+    server.use(
+      http.get('http://localhost:3000/api/flows', () => new HttpResponse(null, { status: 401 }))
+    );
+
+    window.location.pathname = '/ui/login';
+    window.location.search = '?return_to=%2Fprojects';
+
+    await expect(apiClient.get('http://localhost:3000/api/flows')).rejects.toThrow();
+
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it('does not strip /ui prefix from paths like /uix/foo', async () => {
+    expect(stripUiBasename('/uix/foo')).toBe('/uix/foo');
+    expect(stripUiBasename('/ui')).toBe('/');
+    expect(stripUiBasename('/ui/')).toBe('/');
+    expect(stripUiBasename('/ui/projects')).toBe('/projects');
+
+    server.use(
+      http.get('http://localhost:3000/api/flows', () => new HttpResponse(null, { status: 401 }))
+    );
+
+    window.location.pathname = '/uix/foo';
+    window.location.search = '';
+
+    await expect(apiClient.get('http://localhost:3000/api/flows')).rejects.toThrow();
+
+    expect(mockAssign).toHaveBeenCalledTimes(1);
+    expect(mockAssign).toHaveBeenCalledWith('/ui/login?return_to=%2Fuix%2Ffoo');
   });
 });

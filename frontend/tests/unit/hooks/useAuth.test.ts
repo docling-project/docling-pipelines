@@ -77,7 +77,16 @@ describe('useAuth', () => {
     const { result } = renderAuth(authStateFixture({ overrides: { status: 'unauthenticated', user: null } }));
     expect(result.current.isLoading).toBe(false);
     expect(result.current.isAuthenticated).toBe(false);
+    expect(result.current.isError).toBe(false);
     expect(result.current.canEdit).toBe(false);
     expect(result.current.user).toBeNull();
+  });
+
+  it('error status fails closed with isError true', () => {
+    const { result } = renderAuth(authStateFixture({ overrides: { status: 'error', user: null, error: '503' } }));
+    expect(result.current.isError).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(result.current.canEdit).toBe(false);
   });
 });

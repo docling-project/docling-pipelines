@@ -284,6 +284,8 @@ BFF_PORT=3001
 - `BFF_PORT`: BFF listen port, default `3001`.
 - `BFF_HOST`: BFF bind address. It defaults to `127.0.0.1`, so a locally started BFF is not reachable from other hosts. The BFF container image sets `BFF_HOST=0.0.0.0` so Compose peers and Kubernetes probes can reach it. The BFF that the REST API starts itself in the wheel keeps the loopback default.
 
+> **Security:** The BFF container binds `0.0.0.0` on port `3001` only for internal Compose/Kubernetes networking and relays `Cookie` and `Authorization` headers to the backend without authenticating requests itself. Port `3001` **must not** be published externally.
+
 ### Adding New BFF Endpoints
 
 1. **Create action** in `src/services/api/actions/`:

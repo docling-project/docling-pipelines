@@ -11,9 +11,11 @@ Object.defineProperty(window, 'location', {
 });
 
 const mockLogin = vi.fn();
+const mockGetAuthConfig = vi.fn();
 vi.mock('@/services/api/actions/auth-actions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/api/actions/auth-actions')>()),
   login: (...args: unknown[]) => mockLogin(...args),
+  getAuthConfig: (...args: unknown[]) => mockGetAuthConfig(...args),
 }));
 
 vi.mock('@carbon-labs/react-animated-header/es/components/AnimatedBackground/AnimatedBackground', () => ({
@@ -45,6 +47,7 @@ describe('Login page', () => {
   beforeEach(() => {
     mockAssign.mockClear();
     mockLogin.mockReset();
+    mockGetAuthConfig.mockReset();
   });
 
   it('renders correctly when credential login is available', async () => {
@@ -220,7 +223,7 @@ describe('Login page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
       await waitFor(() => {
-        expect(mockLogin).toHaveBeenCalledWith({ username: 'alice', password: 'valid-secret' });
+        expect(mockLogin).toHaveBeenCalledWith({ username: 'alice', password: 'valid-secret' }); // pragma: allowlist secret
       });
 
       expect(passwordInput.value).toBe('valid-secret');
@@ -238,7 +241,7 @@ describe('Login page', () => {
     await waitFor(() => {
       expect(screen.getByText('Logging in...')).toBeDefined();
     });
-    expect(mockLogin).toHaveBeenCalledWith({ username: 'alice', password: 'secret' });
+    expect(mockLogin).toHaveBeenCalledWith({ username: 'alice', password: 'secret' }); // pragma: allowlist secret
     expect(screen.queryByRole('button', { name: 'Log in' })).toBeNull();
     expect(screen.getByRole('button', { name: /Logging in/ }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByLabelText('Username').hasAttribute('disabled')).toBe(true);
@@ -263,7 +266,7 @@ describe('Login page', () => {
     expect(screen.getByText('Invalid credentials')).toBeDefined();
   });
 
-  it('shows retry later message on 429 error', async () => {
+  it('shows retry-after seconds in 429 error message when retryAfter is present', async () => {
     await renderLogin({
       preloadedState: {
         auth: {
@@ -279,7 +282,79 @@ describe('Login page', () => {
       },
     });
 
+    expect(screen.getByText('Too many failed attempts. Please retry in 60 seconds.')).toBeDefined();
+  });
+
+  it('falls back to generic retry later message on 429 when retryAfter is null', async () => {
+    await renderLogin({
+      preloadedState: {
+        auth: {
+          user: null,
+          authEnabled: true,
+          providers: [],
+          credentialLogin: true,
+          status: 'unauthenticated',
+          error: 'Too many requests',
+          errorStatus: 429,
+          retryAfter: null,
+        },
+      },
+    });
+
     expect(screen.getByText('Too many failed attempts. Please retry later.')).toBeDefined();
+  });
+
+  it.each(['idle', 'loading'] as const)(
+    'shows loading state while auth status is %s without flashing no-login-method warning',
+    async (status) => {
+      await renderLogin({
+        preloadedState: {
+          auth: {
+            user: null,
+            authEnabled: true,
+            providers: [],
+            credentialLogin: false,
+            status,
+            error: null,
+            errorStatus: null,
+            retryAfter: null,
+          },
+        },
+      });
+
+      expect(screen.getByText('Loading sign-in options...')).toBeDefined();
+      expect(screen.queryByText('No login method is currently configured.')).toBeNull();
+    }
+  );
+
+  it('shows dedicated error state with Retry button when bootstrap fails without showing no-login-method warning', async () => {
+    mockGetAuthConfig.mockResolvedValue({
+      data: { auth_enabled: true, credential_login: true, providers: [] },
+    });
+
+    await renderLogin({
+      preloadedState: {
+        auth: {
+          user: null,
+          authEnabled: true,
+          providers: [],
+          credentialLogin: false,
+          status: 'error',
+          error: 'Service unavailable',
+          errorStatus: 503,
+          retryAfter: null,
+        },
+      },
+    });
+
+    expect(screen.getByText('Could not load sign-in options')).toBeDefined();
+    expect(screen.queryByText('No login method is currently configured.')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(mockGetAuthConfig).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows no login method configured warning when neither is available', async () => {

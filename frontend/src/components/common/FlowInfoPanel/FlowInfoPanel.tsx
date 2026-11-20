@@ -2,7 +2,6 @@ import React from 'react';
 import { Button, Tag } from '@carbon/react';
 import { Close, Edit } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
-import { useAppSelector } from '@/hooks/useAppSelector';
 import { usePermissionReason } from '@/hooks/usePermissionReason';
 import { PermissionTooltip } from '../PermissionTooltip';
 import { messages } from './FlowInfoPanel.messages';
@@ -10,8 +9,8 @@ import styles from './FlowInfoPanel.module.scss';
 
 /**
  * Display-only subset of flow metadata shown in the "About flow" side panel.
- * Derived from {@link FlowRow} in `FlowDetail` — already formatted for display
- * (timestamps are locale strings, not raw ISO 8601).
+ * Derived from {@link FlowRow} in `FlowDetail` or `currentFlow` in `Canvas` —
+ * already formatted for display (timestamps are locale strings, not raw ISO 8601).
  */
 export interface FlowPanelData {
   /** Flow UUID. */
@@ -28,10 +27,7 @@ export interface FlowPanelData {
   modified_on: string;
   /** Project name slug used to navigate back to the project detail page. */
   project_name: string;
-  /**
-   * Username of the flow creator. Optional: when omitted, the panel resolves the
-   * owner from the flow in the Redux store (`flow.items` or `flow.currentFlow`).
-   */
+  /** Username of the flow creator, or `null`/`undefined` if unowned. */
   created_by?: string | null;
 }
 
@@ -49,11 +45,11 @@ interface FlowInfoPanelProps {
 }
 
 /**
- * "About flow" side panel that slides in from the right of the FlowDetail page.
+ * "About flow" side panel that slides in from the right of the FlowDetail and Canvas pages.
  *
- * Display component — receives {@link FlowPanelData} and callbacks from
- * {@link FlowDetail}. Has no internal state, makes no API calls. It reads the
- * auth state itself to disable the edit button when the caller cannot modify the flow.
+ * Display component — receives {@link FlowPanelData} (including `created_by`) and
+ * callbacks from its parent. Has no internal state and makes no API calls; uses
+ * `flow.created_by` with {@link usePermissionReason} to gate the edit button.
  *
  * Rendered when the ⓘ button in the breadcrumb bar is clicked. Closes via
  * `onClose`, which also causes the ⓘ button to re-appear.
@@ -67,11 +63,7 @@ export function FlowInfoPanel({
 }: FlowInfoPanelProps): React.JSX.Element {
   const intl = useIntl();
   const { getModifyReason } = usePermissionReason();
-  const storedOwner = useAppSelector((state) =>
-    state.flow.items[flow.flow_id]?.created_by
-    ?? (state.flow.currentFlow?.flow_id === flow.flow_id ? state.flow.currentFlow.created_by : null)
-  );
-  const editReason = getModifyReason(flow.created_by !== undefined ? flow.created_by : storedOwner);
+  const editReason = getModifyReason(flow.created_by);
   return (
     <div className={styles.sidePanel}>
       <div className={styles.sidePanelHeader}>

@@ -10,7 +10,7 @@ import jobRunReducer from '@/slices/jobRunSlice';
 import assetsReducer from '@/slices/assetsSlice';
 import projectsReducer from '@/slices/projectsSlice';
 import notificationsReducer from '@/slices/notificationsSlice';
-import authReducer, { logoutUser } from '@/slices/authSlice';
+import authReducer, { clearSession, logoutUser } from '@/slices/authSlice';
 
 const combinedReducer = combineReducers({
   operators: operatorsReducer,
@@ -32,7 +32,12 @@ export function rootReducer(
   state: CombinedState | undefined,
   action: UnknownAction
 ): CombinedState {
-  if (state !== undefined && (logoutUser.fulfilled.match(action) || logoutUser.rejected.match(action))) {
+  if (
+    state !== undefined &&
+    (logoutUser.fulfilled.match(action) ||
+      logoutUser.rejected.match(action) ||
+      clearSession.match(action))
+  ) {
     return combinedReducer(
       {
         ...state,

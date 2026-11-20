@@ -50,7 +50,7 @@ export interface LoginResponse {
 // ── Redux state ──────────────────────────────────────────────────────────
 
 /** Lifecycle status of the auth state. */
-export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
+export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
 /** Error details carried by a rejected auth thunk. */
 export interface AuthErrorPayload {
