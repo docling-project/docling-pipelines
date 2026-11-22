@@ -24,6 +24,20 @@ from docpipe.utils.infrastructure.logging import get_logger
 logger = get_logger(__name__)
 
 
+class _TaskNotFoundRetry(Exception):
+    """
+    Internal signal that a status check got a 404 and should be retried.
+
+    Only this exception is retried by the backoff decorator on the status check,
+    so every other error surfaces on the first attempt. It carries the original
+    DocpipeException, which is raised to the caller once the retries are used up.
+    """
+
+    def __init__(self, original: DocpipeException) -> None:
+        super().__init__(str(original))
+        self.original = original
+
+
 class DoclingServeErrorHandler:
     """
     Extensible error handler for docling-serve exceptions.
@@ -446,12 +460,6 @@ class DoclingServeClient:
             timeout=timeout,
         )
 
-    @retry_with_backoff(
-        max_retries=DoclingClientConstants.STATUS_404_MAX_RETRIES,
-        initial_delay=DoclingClientConstants.STATUS_404_BACKOFF_BASE,
-        backoff_factor=2.0,
-        exceptions=(DocpipeException,),
-    )
     def _check_status(self, *, endpoint: str) -> dict[str, Any]:
         """
         Check task status via HTTP request with retry logic for 404 errors.
@@ -459,7 +467,9 @@ class DoclingServeClient:
         Retries on 404 errors to handle:
         - Pod restarts/terminations during HPA scaling
         - Load balancer routing issues during pod lifecycle events
-        - Transient network issues
+
+        Every other error is raised on the first attempt. Connection errors are
+        retried by the poll loop in _poll_for_completion, not here.
 
         Args:
             endpoint: Status endpoint path
@@ -471,6 +481,32 @@ class DoclingServeClient:
             DocpipeException: For HTTP errors (after retries for 404)
         """
         try:
+            return self._check_status_retrying_404(endpoint=endpoint)
+        except _TaskNotFoundRetry as retry:
+            # Retries used up: raise the original 404 error, not the internal signal
+            raise retry.original from None
+
+    @retry_with_backoff(
+        max_retries=DoclingClientConstants.STATUS_404_MAX_RETRIES,
+        initial_delay=DoclingClientConstants.STATUS_404_BACKOFF_BASE,
+        backoff_factor=2.0,
+        exceptions=(_TaskNotFoundRetry,),
+    )
+    def _check_status_retrying_404(self, *, endpoint: str) -> dict[str, Any]:
+        """
+        Run one status request; turn a 404 into the retry signal for the decorator.
+
+        Args:
+            endpoint: Status endpoint path
+
+        Returns:
+            Status response dictionary
+
+        Raises:
+            _TaskNotFoundRetry: For a 404 (retried by the decorator)
+            DocpipeException: For any other HTTP or network error (not retried)
+        """
+        try:
             return self.rest_client.call_rest_json(
                 method=RestMethod.GET,
                 url=endpoint,
@@ -478,14 +514,13 @@ class DoclingServeClient:
             )
         except DocpipeException as e:
             # Only retry on 404 errors (task not found during pod transitions)
-            if e.status_code == 404:
-                logger.warning(
-                    "Task not found (404) at %s. This may occur during pod restarts or HPA scaling. Retrying...",
-                    endpoint,
-                )
-                raise  # Let decorator handle retry
-            # For other errors, raise immediately without retry
-            raise
+            if e.status_code != 404:
+                raise
+            logger.warning(
+                "Task not found (404) at %s. This may occur during pod restarts or HPA scaling. Retrying...",
+                endpoint,
+            )
+            raise _TaskNotFoundRetry(e) from e
 
     def get_result(self, *, task_id: str) -> dict[str, Any]:
         """

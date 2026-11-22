@@ -419,3 +419,89 @@ class TestDoclingServeClient:
         )
         mock_get_result.assert_called_once_with(task_id="test-task-123")
         assert result["document"] == "processed"
+
+
+class TestCheckStatusRetries:
+    """Regression tests for #656: only a 404 status check is retried."""
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_check_status_does_not_retry_non_404_error(self, mock_call_rest_json, mock_sleep):
+        """A non-404 error is raised after a single request, without backoff."""
+        error = DocpipeException(
+            message="Internal server error",
+            status_code=500,
+            error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+        )
+        mock_call_rest_json.side_effect = error
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException) as exc_info:
+            client._check_status(endpoint="/v1/status/poll/task-1")
+
+        assert exc_info.value is error
+        assert mock_call_rest_json.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_poll_status_does_not_retry_non_404_error(self, mock_call_rest_json, mock_sleep):
+        """poll_status surfaces a non-404 status error after one request."""
+        mock_call_rest_json.side_effect = DocpipeException(
+            message="Unauthorized",
+            status_code=401,
+            error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+        )
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException, match="Unauthorized"):
+            client.poll_status(task_id="task-1")
+
+        assert mock_call_rest_json.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("docpipe.integrations.docling.client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_poll_status_connection_error_retried_only_by_poll_loop(self, mock_call_rest_json, mock_sleep):
+        """A connection error is retried by the poll loop alone, with the poll interval."""
+        mock_call_rest_json.side_effect = [
+            DocpipeException(message="Connection refused", status_code=503, error_code=ErrorCode.CONNECTION_ERROR),
+            {"task_status": "SUCCESS"},
+        ]
+
+        client = DoclingServeClient(base_url="http://localhost:5001", poll_interval=7)
+        status = client.poll_status(task_id="task-1")
+
+        assert status["task_status"] == "SUCCESS"
+        assert mock_call_rest_json.call_count == 2
+        # One sleep from the poll loop; the 404 backoff (1 s) must not run.
+        assert [c.args for c in mock_sleep.call_args_list] == [(7,)]
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_check_status_retries_404_then_succeeds(self, mock_call_rest_json, mock_sleep):
+        """A 404 is retried with backoff and the later response is returned."""
+        not_found = DocpipeException(message="Not found", status_code=404, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR)
+        mock_call_rest_json.side_effect = [not_found, not_found, {"task_status": "SUCCESS"}]
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        result = client._check_status(endpoint="/v1/status/poll/task-1")
+
+        assert result == {"task_status": "SUCCESS"}
+        assert mock_call_rest_json.call_count == 3
+        assert [c.args for c in mock_sleep.call_args_list] == [(1.0,), (2.0,)]
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_check_status_raises_original_404_after_retries(self, mock_call_rest_json, mock_sleep):
+        """After the last 404 attempt the original exception is raised."""
+        not_found = DocpipeException(message="Not found", status_code=404, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR)
+        mock_call_rest_json.side_effect = not_found
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException) as exc_info:
+            client._check_status(endpoint="/v1/status/poll/task-1")
+
+        assert exc_info.value is not_found
+        assert mock_call_rest_json.call_count == 3
+
