@@ -61,6 +61,7 @@ class DoclingServeErrorHandler:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
+        """Register the built-in handlers."""
         self.register(self._is_format_compatibility_error, self._enhance_format_compatibility_error)
 
     def register(
@@ -89,13 +90,15 @@ class DoclingServeErrorHandler:
 
     @staticmethod
     def _is_format_compatibility_error(exception: DocpipeException) -> bool:
+        """Return True for a 422 or a message with a specific format-error phrase."""
         if exception.status_code == 422:
             return True
         msg = str(exception).lower()
+        # Match specific phrases only: a bare "format" would also match words
+        # such as "information" and misreport unrelated errors as format errors.
         return any(
             indicator in msg
             for indicator in (
-                "format",
                 "to_formats",
                 "unsupported",
                 "invalid format",
@@ -107,6 +110,7 @@ class DoclingServeErrorHandler:
     def _enhance_format_compatibility_error(
         self, exception: DocpipeException, context: dict[str, Any]
     ) -> DocpipeException:
+        """Return an exception that explains the rejected formats and how to fix it."""
         requested_formats = context.get("requested_formats", [])
         message = (
             f"The docling-serve instance at {self.base_url} rejected the requested output formats. "

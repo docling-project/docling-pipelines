@@ -505,3 +505,59 @@ class TestCheckStatusRetries:
         assert exc_info.value is not_found
         assert mock_call_rest_json.call_count == 3
 
+
+class TestFormatCompatibilityErrorDetection:
+    """Regression tests for #656: only real format errors get the format hint."""
+
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_multipart")
+    def test_unrelated_message_containing_format_is_not_enhanced(self, mock_call_rest_multipart):
+        """A 400 whose message merely contains "format" (as in "information") is raised unchanged."""
+        error = DocpipeException(
+            message="Missing information in request",
+            status_code=400,
+            error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+        )
+        mock_call_rest_multipart.side_effect = error
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException) as exc_info:
+            client.submit_document(binary_content=b"data")
+
+        assert exc_info.value is error
+        assert "rejected the requested output formats" not in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Invalid format: doctagz",
+            "Unknown format 'foo'",
+            "to_formats: value is not a valid enumeration member",
+            "Output type is not supported",
+            "Unsupported output type",
+        ],
+    )
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_multipart")
+    def test_format_error_phrases_are_enhanced(self, mock_call_rest_multipart, message):
+        """Messages with a format-error phrase still get the upgrade hint."""
+        mock_call_rest_multipart.side_effect = DocpipeException(
+            message=message, status_code=400, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR
+        )
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException, match="rejected the requested output formats") as exc_info:
+            client.submit_document(binary_content=b"data", options={"additional_formats": ["doctags"]})
+
+        assert exc_info.value.status_code == 400
+        assert "['md', 'doctags']" in str(exc_info.value)
+
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_multipart")
+    def test_status_422_is_enhanced(self, mock_call_rest_multipart):
+        """A 422 is treated as a format error regardless of its message."""
+        mock_call_rest_multipart.side_effect = DocpipeException(
+            message="Unprocessable entity", status_code=422, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR
+        )
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException, match="rejected the requested output formats"):
+            client.submit_document(binary_content=b"data")
+
