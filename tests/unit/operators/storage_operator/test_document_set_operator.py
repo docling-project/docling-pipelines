@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DocumentSetOperator.
 
 Tests cover:
@@ -10,6 +13,7 @@ Tests cover:
 """
 
 import os
+import re
 
 import pyarrow as pa
 import pytest
@@ -277,6 +281,7 @@ class TestOperatorInitialization:
         assert operator.metadata_config == {"source": "test"}
         # retain_deleted_docs removed - no longer part of operator
 
+    @pytest.mark.usefixtures("duckdb_data_root")
     def test_init_with_minimal_config(self, temp_duckdb_path):
         """Test initialization with minimal configuration."""
         config = {
@@ -490,6 +495,7 @@ class TestOperatorMultipleTransforms:
         assert metadata2["total_size_bytes"] == 200
 
 
+@pytest.mark.usefixtures("duckdb_data_root")
 class TestOperatorFailures:
     """Invalid database paths and failures while storing, against a DuckDB file in tmp_path."""
 
@@ -531,3 +537,42 @@ class TestOperatorFailures:
 
         with pytest.raises(FlowExecutionFailedException, match="Unexpected error in document set operator: process"):
             DocumentSetOperator(self._config(tmp_path / "sets.duckdb")).transform(sample_table)
+
+
+class TestDatabasePathConfinement:
+    """A flow-supplied database_path must stay under the data root (DOCPIPE_DATA_PATH)."""
+
+    @staticmethod
+    def _config(database_path: str) -> dict:
+        return {"document_set_name": "Confined Set", "database_path": database_path}
+
+    @pytest.mark.parametrize("case", ["absolute_outside", "dot_dot", "symlink_escape", "sibling_prefix"])
+    def test_path_outside_the_data_root_is_rejected(self, escaping_database_paths, case):
+        database_path = escaping_database_paths[case]
+
+        with pytest.raises(FlowValidationException, match="DOCPIPE_DATA_PATH"):
+            DocumentSetOperator(self._config(database_path))
+
+        assert not os.path.lexists(database_path)
+
+    def test_rejected_path_names_the_data_root(self, escaping_database_paths, duckdb_data_root):
+        with pytest.raises(FlowValidationException, match=f"must be within {re.escape(str(duckdb_data_root))}"):
+            DocumentSetOperator(self._config(escaping_database_paths["absolute_outside"]))
+
+    def test_relative_path_under_the_data_root_resolves_against_the_working_directory(
+        self, duckdb_data_root, monkeypatch
+    ):
+        monkeypatch.chdir(duckdb_data_root)
+
+        operator = DocumentSetOperator(self._config("sets/x.duckdb"))
+
+        assert operator.database_path == str(duckdb_data_root / "sets" / "x.duckdb")
+
+    def test_absolute_path_under_the_data_root_is_accepted(self, duckdb_data_root):
+        database_path = str(duckdb_data_root / "sets" / "x.duckdb")
+
+        assert DocumentSetOperator(self._config(database_path)).database_path == database_path
+
+    @pytest.mark.usefixtures("duckdb_data_root")
+    def test_in_memory_database_is_accepted(self):
+        assert DocumentSetOperator(self._config(":memory:")).database_path == ":memory:"

@@ -15,6 +15,7 @@ from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorC
 from docpipe.storage.factory import StorageFactory
 from docpipe.storage.interfaces.table_storage_port import TableStoragePort
 from docpipe.types import FlowConfig, OperatorMetadata, OperatorOutputMetadata, TransformResult
+from docpipe.utils.core.validation import validate_flow_database_path
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -78,6 +79,9 @@ class EntityStoreOperator(AbstractOperator):
 
         if not isinstance(self.table_prefix, str) or not _TABLE_PREFIX_RE.match(self.table_prefix):
             raise ValueError(f"Invalid table_prefix: '{self.table_prefix}'. Use only letters, digits and underscores.")
+
+        if self.data_backend == OperatorConstants.Storage.BACKEND_DUCKDB:
+            self.database_path = validate_flow_database_path(self.database_path)
 
         # One storage block for every backend: the factory passes each backend its own settings.
         self.storage: TableStoragePort = StorageFactory.create_table_storage(

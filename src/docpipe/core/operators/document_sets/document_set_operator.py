@@ -344,7 +344,7 @@ class DocumentSetOperator(AbstractOperator):
         return doc_set.asset_id or ""
 
     def _validate_database_path(self, *, database_path: str) -> str:
-        """Validate and normalize database path to prevent path traversal.
+        """Validate and normalize database path, confining it to the data root.
 
         Args:
             database_path: Path to validate
@@ -353,12 +353,12 @@ class DocumentSetOperator(AbstractOperator):
             Validated and normalized absolute path
 
         Raises:
-            FlowValidationException: If path is invalid or contains traversal attempts
+            FlowValidationException: If path is invalid or resolves outside the data root
         """
-        from docpipe.utils.core.validation import validate_database_path
+        from docpipe.utils.core.validation import validate_flow_database_path
 
         try:
-            return validate_database_path(database_path)
+            return validate_flow_database_path(database_path)
         except ValueError as exc:
             logger.warning("Database path validation failed: %s", exc, extra=self.common_log_arguments)
             raise FlowValidationException(f"Invalid database path: {exc}") from exc

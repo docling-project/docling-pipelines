@@ -2566,7 +2566,7 @@ Common upstream fields from the sample flow:
 **Configuration Notes:**
 
 - `global_config.metadata_storage_type` controls the metadata storage backend (default: `duckdb`)
-- `database_path` in the operator config specifies the DuckDB file path for both metadata and data
+- `database_path` in the operator config specifies the DuckDB file path for both metadata and data. It must resolve to a location under the data root set by `DOCPIPE_DATA_PATH` (default `<project root>/data`); a relative path is resolved against the process working directory
 - `data_backend` in the operator config controls the PyArrow table data adapter (default: `duckdb`)
 
 **Flow Pattern**
@@ -2667,6 +2667,8 @@ For new backends, implement the `DocumentSetStorage` port and register it with `
 | `schema`          | string |       No | `docpipe_entities`     | PostgreSQL schema of the entity tables (`postgres` backend)              |
 | `table_prefix`    | string |       No | `entity_`              | Prefix of every entity table name                                        |
 | `entities_column` | string |       No | `transformed_entities` | Column that holds the curated entities                                   |
+
+With the `duckdb` backend, a `database_path` file must resolve to a location under the data root set by `DOCPIPE_DATA_PATH` (default `<project root>/data`); a relative path is resolved against the process working directory.
 
 The `postgres` backend connects with the `DOCPIPE_POSTGRES_*` environment variables; connection settings in the operator configuration are rejected. See [Entity Store README](../operators/storage/entity_store_operator_readme.md).
 
