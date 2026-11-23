@@ -158,6 +158,7 @@ services:
       - ./data:/opt/app-root/src/data:rw
       - ./logs:/opt/app-root/src/logs:rw
       - ./docling-pipelines-config.yaml:/opt/app-root/src/config/docling-pipelines-config.yaml:ro
+      - ../../sample_documents:/opt/app-root/src/sample_documents:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 30s
