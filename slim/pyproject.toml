@@ -30,7 +30,7 @@ dependencies = [
     "filelock==4.2.1",
     "ftfy==6.3.1",
     "google-api-python-client==2.190.0",
-    "google-auth-httplib2==0.3.0",
+    "google-auth-httplib2==0.4.4",
     "google-auth-oauthlib==1.2.4",
     "google-cloud-storage==3.9.0",
     "google-re2==1.1.20251105",
@@ -141,7 +141,7 @@ telemetry = [
 extract = [
     "accelerate==1.15.0",
     "docling[rapidocr]==2.142.1",
-    "sentence-transformers==6.1.0",
+    "sentence-transformers==6.3.0",
     "transformers>=5.17.0,<5.18.0",
 ]
 

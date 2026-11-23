@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Validation service for flow definitions.
 
 Provides validation operations for flow definitions including DAG structure,
@@ -422,13 +425,12 @@ class ValidationService:
             validator = FlowValidator(orchestrator=orchestrator)
 
             # Run validation with feature propagation
-            try:
-                propagation_result = validator.validate_dag_with_features(flow_def=dag_flow, global_config={})
-                result: dict[str, Any] = {"status": "SUCCEEDED", "message": None, "errors": [], "warnings": []}
-                logger.debug("Flow validation successful with %d nodes", len(propagation_result.available_features))
-                return result
-            except FlowValidationException as e:
-                return self._format_validation_exception_response(exception=e)
+            propagation_result = validator.validate_dag_with_features(flow_def=dag_flow, global_config={})
+            result: dict[str, Any] = {"status": "SUCCEEDED", "message": None, "errors": [], "warnings": []}
+            logger.debug("Flow validation successful with %d nodes", len(propagation_result.available_features))
+            return result
 
+        except FlowValidationException as e:
+            return self._format_validation_exception_response(exception=e)
         except Exception as e:
             return self._format_unexpected_exception_response(exception=e)

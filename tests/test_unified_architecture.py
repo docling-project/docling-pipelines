@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Simple test to verify the unified asset architecture works end-to-end.
 
 This test demonstrates:
@@ -12,6 +15,7 @@ import pytest
 from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
 from docpipe.core.assets.flows.domain.models.flow import Flow
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 
 
 @pytest.fixture
@@ -46,7 +50,7 @@ def test_unified_architecture_end_to_end(temp_flows_dir):
     )
 
     # 4. Save via service
-    created_flow = service.create_flow(flow=flow)
+    created_flow = service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     # 5. Verify creation
     assert created_flow.asset_id is not None
@@ -70,7 +74,7 @@ def test_unified_architecture_end_to_end(temp_flows_dir):
 
     # 8. Update flow
     retrieved_flow.description = "Updated description"
-    updated_flow = service.update_flow(flow=retrieved_flow)
+    updated_flow = service.update_flow(flow=retrieved_flow, actor=SYSTEM_ACTOR)
 
     assert updated_flow.description == "Updated description"
     assert updated_flow.modified_on is not None

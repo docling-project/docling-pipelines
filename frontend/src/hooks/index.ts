@@ -11,3 +11,5 @@ export { useJobRunPoller } from './useJobRunPoller';
 export type { UseJobRunPollerResult } from './useJobRunPoller';
 export { useNodeSuggestion } from './useNodeSuggestion';
 export type { NodeSuggestionState, UseNodeSuggestionReturn } from './useNodeSuggestion';
+export { usePermissionReason } from './usePermissionReason';
+export type { UsePermissionReasonReturn } from './usePermissionReason';

@@ -43,6 +43,9 @@ export const MILVUS_BINARY_METRIC_VALUES = ['HAMMING', 'JACCARD'] as const;
 /** Milvus dense similarity metrics */
 export const MILVUS_DENSE_METRIC_VALUES = ['L2', 'IP', 'COSINE'] as const;
 
+/** Milvus GPU index (GPU_*) metrics — GPU mode accepts only L2 and IP. */
+export const MILVUS_GPU_METRIC_VALUES = ['L2', 'IP'] as const;
+
 // ── Provider configuration map ───────────────────────────────────────────────
 
 /**

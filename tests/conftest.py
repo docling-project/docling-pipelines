@@ -30,6 +30,41 @@ def setup_python_path():
 
 
 # ============================================================================
+# Authentication Fixtures
+# ============================================================================
+
+
+# These fixtures use their own MonkeyPatch instances instead of the ``monkeypatch``
+# fixture so they do not change the teardown order of tests that request it.
+@pytest.fixture(autouse=True)
+def _auth_disabled_by_default():
+    """Run every test with API authentication off so existing tests need no credentials."""
+    from docpipe.api.auth.config import reset_auth_settings_cache
+
+    reset_auth_settings_cache()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DOCPIPE_AUTH_ENABLED", "false")
+        reset_auth_settings_cache()
+        yield
+    reset_auth_settings_cache()
+
+
+@pytest.fixture
+def auth_enabled(_auth_disabled_by_default):
+    """Turn API authentication on for tests that assert 401 or other auth behavior.
+
+    The setting is read per request, so this takes effect inside an already-built app.
+    """
+    from docpipe.api.auth.config import reset_auth_settings_cache
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        reset_auth_settings_cache()
+        yield
+    reset_auth_settings_cache()
+
+
+# ============================================================================
 # Directory Fixtures
 # ============================================================================
 
