@@ -16,12 +16,8 @@
 - [ ] 2.5 [backend] In `postgres_incremental_store.py`, add a `_write_transaction` helper that opens `engine.begin()`, executes `SELECT set_config('lock_timeout', :val, true)` using the store's `lock_timeout`, acquires `pg_advisory_xact_lock(hashtext(:key))` with key `<schema>.inc_update_metadata:<job_id>`, and unrolls `sqlalchemy.exc.OperationalError` (`exc.orig` with `pgcode == '55P03'` or `isinstance(exc.orig, psycopg2.errors.LockNotAvailable)`) into `LockTimeoutError`. Apply the retry decorator to `upsert_records`.
 - [ ] 2.6 [backend] Rewrite `mark_missing_docs_as_deleted`, `unmark_soft_deleted_docs`, `purge_soft_deleted_docs`, `delete_docs`, and `clear` as set-based SQL inside `_write_transaction`. Pass `doc_ids` lists as single array parameters. Keep read methods (`get_processed_docs`, `get_soft_deleted_doc_ids`) lock-free using `self._table`.
 - [ ] 2.7 [backend] Update PostgreSQL unit tests in `tests/unit/core/incremental_metadata/test_postgres_incremental_store.py` for statement-based execution, error mapping, and retry behavior. Verify: `pytest tests/unit/core/incremental_metadata/test_postgres_incremental_store.py -v` passes.
-
-## Phase 3: Documentation and Validation
-
-- [ ] 3.1 [backend] Update `docs/guides/ADVANCED_CONFIGURATION.md` (Incremental Metadata Configuration): document single-host limit for filesystem backend (unsupported on NFS/FUSE), PostgreSQL requirement for distributed workloads, `lock_timeout` configuration, schema qualification, and caller guidance regarding empty source listings. Verify: links resolve and markdown renders correctly.
-- [ ] 3.2 [backend] Run test suites: `pytest tests/unit/core/incremental_metadata/ tests/unit/operators/ingest/ -v`. Verify: all pass without warnings.
-- [ ] 3.3 [backend] Run repository pre-commit checks: `pre-commit run --from-ref origin/main --to-ref HEAD` and `openspec validate incremental-metadata-portalocker-pg-locks --strict`. Verify: both pass.
+- [ ] 2.8 [backend] Update `docs/guides/ADVANCED_CONFIGURATION.md` (Incremental Metadata Configuration): document single-host limit for filesystem backend (unsupported on NFS/FUSE), PostgreSQL requirement for distributed workloads, `lock_timeout` configuration, schema qualification, and caller guidance regarding empty source listings. Verify: links resolve and markdown renders correctly.
+- [ ] 2.9 [backend] Run test suites and repository checks: `pytest tests/unit/core/incremental_metadata/ tests/unit/operators/ingest/ -v`, `pre-commit run --from-ref origin/main --to-ref HEAD`, and `openspec validate incremental-metadata-portalocker-pg-locks --strict`. Verify: both pass.
 
 ## Workflow follow-up
 
