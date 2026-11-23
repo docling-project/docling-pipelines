@@ -5,12 +5,17 @@
 Pytest configuration and fixtures for docling-pipelines tests.
 """
 
+import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+
+# ``docpipe.api.main`` validates the auth configuration at import time, and authentication is on by
+# default. Opt out before any test module is collected; ``auth_enabled`` turns it back on per test.
+os.environ.setdefault("DOCPIPE_AUTH_ENABLED", "false")
 
 
 # Centralized path setup - automatically adds backend to Python path
