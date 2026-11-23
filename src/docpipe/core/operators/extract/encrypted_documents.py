@@ -26,6 +26,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, Va
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.integrations.secrets.secret_provider import is_vault_reference
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -105,7 +106,9 @@ class DocumentPasswordsConfig(BaseModel):
         if value is None:
             return cls()
         try:
-            return cls.model_validate(value)
+            # A vault:// reference arrives resolved as an opaque SecretValue; the password is consumed
+            # here, straight into SecretStr, and never held as plain text afterwards.
+            return cls.model_validate(reveal_value(value))
         except ValidationError as exc:
             raise DocumentPasswordsConfigError(messages=cls._describe_errors(exc=exc)) from None
 

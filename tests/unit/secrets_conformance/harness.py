@@ -636,7 +636,10 @@ def _make_constructor_reject(*, entry: Entry, monkeypatch: pytest.MonkeyPatch, c
     def reject(self: Any, config: dict[str, Any], *args: Any, **kwargs: Any) -> None:
         node: Any = config
         for segment in path:
-            node = node.get(segment) if isinstance(node, dict) else None
+            if isinstance(node, list):
+                node = node[int(segment)]
+            else:
+                node = node.get(segment) if isinstance(node, dict) else None
         value = node.reveal() if hasattr(node, "reveal") else node
 
         class Model(BaseModel):

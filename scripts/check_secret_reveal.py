@@ -43,12 +43,14 @@ REVEAL_MODULE_SUFFIX = "secrets.secret_value"
 # * ``resolver.py`` registers the revealed value with the scrubber the moment it is resolved.
 # * ``isolation/proxy.py`` hands the revealed values to an isolated operator's worker over its private pipe.
 # * ``chunker.py`` builds its own docling-serve client; it has no adapter layer.
+# * ``encrypted_documents.py`` turns resolved document passwords into ``SecretStr`` where they are parsed.
 ALLOWED_FILES: frozenset[str] = frozenset(
     {
         "src/docpipe/integrations/secrets/secret_value.py",
         "src/docpipe/integrations/secrets/resolver.py",
         "src/docpipe/core/orchestration/operator_loader/isolation/proxy.py",
         "src/docpipe/core/operators/functional/chunker.py",
+        "src/docpipe/core/operators/extract/encrypted_documents.py",
     }
 )
 

@@ -917,6 +917,23 @@ def test_operator_declares_password_paths_secret_capable() -> None:
 
 
 @pytest.mark.unit
+def test_resolved_secret_values_are_accepted_as_passwords() -> None:
+    """The resolver hands over opaque SecretValue objects in place of vault:// references."""
+    from docpipe.integrations.secrets.secret_value import SecretValue
+
+    config = DocumentPasswordsConfig.from_config(
+        {
+            "rules": [{"match": "*.pdf", "passwords": [SecretValue(value="resolved-1"), PASSWORD]}],
+            "default": [SecretValue(value="resolved-2")],
+        }
+    )
+
+    assert [p.get_secret_value() for p in config.rules[0].passwords] == ["resolved-1", PASSWORD]
+    assert [p.get_secret_value() for p in config.default] == ["resolved-2"]
+    assert "resolved-1" not in repr(config)
+
+
+@pytest.mark.unit
 def test_flow_validator_placeholder_matches_shared_constant() -> None:
     from docpipe.core.orchestration.flow_validator import FlowValidator
 
