@@ -15,7 +15,8 @@ import {
 } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import type { FlowRow, FlowRunStatus } from '@/types';
-import { SharedDataTable, EditDetailsModal, DeleteModal } from '@/components/common';
+import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip } from '@/components/common';
+import { usePermissionReason } from '@/hooks';
 import { messages } from './FlowsTable.messages';
 import styles from './FlowsTable.module.scss';
 
@@ -98,6 +99,7 @@ export function FlowsTable({
   onDeleteFlow,
 }: FlowsTableProps): React.JSX.Element {
   const intl = useIntl();
+  const { createReason, getModifyReason } = usePermissionReason();
   // Flow | Runs | Needs review | Tags | Last modified | Created on
   const tableHeaders = [
     { key: 'name',        header: intl.formatMessage(messages.headerFlow)         },
@@ -149,16 +151,19 @@ export function FlowsTable({
         onClick={onRefresh}
         disabled={isLoading}
       />
-      <Button
-        kind="primary"
-        renderIcon={Add}
-        onClick={onNewFlow}
-        className={styles.newFlowButton}
-      >
-        {intl.formatMessage(messages.newFlow)}
-      </Button>
+      <PermissionTooltip reason={createReason} align="bottom-end">
+        <Button
+          kind="primary"
+          renderIcon={Add}
+          onClick={onNewFlow}
+          disabled={createReason !== null}
+          className={styles.newFlowButton}
+        >
+          {intl.formatMessage(messages.newFlow)}
+        </Button>
+      </PermissionTooltip>
     </>
-  ), [isLoading, onNewFlow, onRefresh, intl]);
+  ), [isLoading, onNewFlow, onRefresh, intl, createReason]);
 
   // Note: `id`/`tagsSearch` are extra string fields folded in purely so
   // SharedDataTable's built-in search (which matches any string value in the
@@ -208,6 +213,7 @@ export function FlowsTable({
         renderCell={(cell, row) => {
           const original = rowMap.get(row.id);
           if (!original) { return undefined; }
+          const modifyReason = getModifyReason(original.created_by);
           switch (cell.info.header) {
             case 'name':
               return (
@@ -246,6 +252,9 @@ export function FlowsTable({
                  >
                    <OverflowMenuItem
                      itemText={intl.formatMessage(messages.actionEditDetails)}
+                     disabled={modifyReason !== null}
+                     requireTitle={modifyReason !== null}
+                     title={modifyReason ?? undefined}
                      onClick={() => { setEditTarget(original); }}
                    />
                    <OverflowMenuItem
@@ -254,6 +263,9 @@ export function FlowsTable({
                    />
                    <OverflowMenuItem
                      itemText={intl.formatMessage(messages.actionDelete)}
+                     disabled={modifyReason !== null}
+                     requireTitle={modifyReason !== null}
+                     title={modifyReason ?? undefined}
                      isDelete
                      hasDivider
                      onClick={() => { setDeleteTarget(original); }}
