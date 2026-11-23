@@ -312,6 +312,9 @@ class SQLFilterOperator(AbstractOperator):
                     con.register("input_table", input_table)
                     if is_auth_enabled():
                         con.execute("SET enable_external_access = false;")
+                        con.execute("SET autoinstall_known_extensions = false;")
+                        con.execute("SET autoload_known_extensions = false;")
+                        con.execute("SET lock_configuration = true;")
                     # collect per-criterion stats before the main filter (filter_criteria_list path only)
                     if len(self.filter_criteria) > 0 and not self.filter_criteria_json:
                         stats_row = con.execute(stats_sql).fetchone()
