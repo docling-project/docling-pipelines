@@ -58,6 +58,10 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.newResourceNamePlaceholder',
     defaultMessage: 'e.g. my_{resourceLabel}',
   },
+  newResourceNameExamplePlaceholder: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.newResourceNameExamplePlaceholder',
+    defaultMessage: 'e.g. {example}',
+  },
   engine: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.engine',
     defaultMessage: 'Engine',
@@ -78,6 +82,15 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.sparseVectorLabel',
     defaultMessage: 'Compute sparse vectors for hybrid search',
   },
+  bm25Label: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.bm25Label',
+    defaultMessage: 'Enable sparse (BM25) keyword retrieval',
+  },
+  bm25Tooltip: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.bm25Tooltip',
+    defaultMessage:
+      'Uses BM25 keyword matching on the indexed content field (sparse search), without generating or storing separate sparse vectors. Combine with dense vector search for hybrid search.',
+  },
   createNew: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.createNew',
     defaultMessage: 'Create new',
@@ -94,6 +107,11 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.nameOnlyLettersNumbersUnderscores',
     defaultMessage: 'Only letters, numbers, and underscores are allowed',
   },
+  weaviateCollectionNameInvalid: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.weaviateCollectionNameInvalid',
+    defaultMessage:
+      'Name must start with an uppercase letter and contain only letters, numbers, and underscores',
+  },
   nameAlreadyExists: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.nameAlreadyExists',
     defaultMessage: '"{name}" already exists — choose a different name',
@@ -106,6 +124,14 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.unsupportedCollectionSubtitle',
     defaultMessage:
       'The selected {resourceLabel} is not compatible since it does not have a vector field configured. Select another {resourceLabel} or create a new one.',
+  },
+  unsupportedReasonSubtitle: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.unsupportedReasonSubtitle',
+    defaultMessage: 'The selected {resourceLabel} cannot be used: {reason}.',
+  },
+  enrichmentFailed: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.enrichmentFailed',
+    defaultMessage: 'Could not read from the vector database: {reason}',
   },
   unsupportedIndexSubtitle: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.unsupportedIndexSubtitle',
@@ -140,6 +166,18 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricHamming',
     defaultMessage: 'Hamming distance',
   },
+  metricDot: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricDot',
+    defaultMessage: 'Dot product',
+  },
+  metricL2Squared: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricL2Squared',
+    defaultMessage: 'Squared Euclidean distance',
+  },
+  metricManhattan: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricManhattan',
+    defaultMessage: 'Manhattan distance',
+  },
   metricJaccard: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricJaccard',
     defaultMessage: 'Jaccard distance',
@@ -167,6 +205,10 @@ export const messages = defineMessages({
   metricTypeLabel: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricTypeLabel',
     defaultMessage: 'Metric type',
+  },
+  distanceMetricLabel: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.distanceMetricLabel',
+    defaultMessage: 'Distance metric',
   },
   resourceIndex: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.resourceIndex',

@@ -23,6 +23,21 @@ describe('VaultInput', () => {
     expect((input as HTMLInputElement).value).toBe('plain-value');
   });
 
+  it('masked defaults to true and masks the direct value', () => {
+    renderVaultInput({ value: 'plain-value' });
+    expect(document.getElementById('test-vault-input')).toHaveAttribute('type', 'password');
+  });
+
+  it('masked={false} renders the direct value as visible text and keeps the Vault toggle', () => {
+    const { onChange } = renderVaultInput({ value: 'alice', masked: false });
+    const input = document.getElementById('test-vault-input') as HTMLInputElement;
+    expect(input).toHaveAttribute('type', 'text');
+    expect(input.value).toBe('alice');
+    expect(document.getElementById('test-vault-input-vault-toggle')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'bob' } });
+    expect(onChange).toHaveBeenCalledWith('bob');
+  });
+
   it('renders labelText in header when hideLabel is false and custom labelComponent when provided', () => {
     const { rerender } = renderVaultInput({ labelText: 'Custom Label' });
     const labelSpan = document.querySelector('span[class*="label"]');

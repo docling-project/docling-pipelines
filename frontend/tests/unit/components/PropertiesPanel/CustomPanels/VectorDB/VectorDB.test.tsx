@@ -145,10 +145,15 @@ describe('VectorDBPanelBody', () => {
     expect(container).toBeInTheDocument();
   });
 
-  it('renders provider dropdown', () => {
+  it('renders the provider dropdown with the fallback providers when metadata lists none', () => {
+    Element.prototype.scrollIntoView = vi.fn();
     renderWithProviders(<VectorDBPanelBody controller={makeController()} />);
-    const providerEl = document.getElementById('vectordb-provider');
-    expect(providerEl ?? document.body).toBeInTheDocument();
+
+    const dropdown = screen.getByRole('combobox', { name: /^provider$/i });
+    expect(document.getElementById('vectordb-provider-dropdown')).toBeInTheDocument();
+
+    fireEvent.click(dropdown);
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['opensearch', 'milvus']);
   });
 
   it('renders provider_config TextArea', () => {
@@ -772,6 +777,7 @@ describe('VectorDBPanelBody', () => {
   // ── Provider dropdown change clears config ────────────────────────────────
 
   it('changing provider dropdown clears provider_config and feature_mappings', () => {
+    Element.prototype.scrollIntoView = vi.fn();
     const controller = makeController({
       getPropertyValue: vi.fn((p: { name: string }) => {
         if (p.name === 'provider') return 'opensearch';
@@ -781,21 +787,13 @@ describe('VectorDBPanelBody', () => {
       }),
     });
     renderWithProviders(<VectorDBPanelBody controller={controller} />);
-    // Find the provider dropdown and change to milvus
-    const providerDropdown = document.getElementById('vectordb-provider-dropdown') as HTMLButtonElement | null;
-    if (providerDropdown) {
-      fireEvent.click(providerDropdown);
-      const milvusOption = screen.queryByText('milvus');
-      if (milvusOption) {
-        fireEvent.click(milvusOption);
-        // updatePropertyValue called for provider, provider_config clear, feature_mappings clear
-        expect(controller.updatePropertyValue).toHaveBeenCalled();
-      } else {
-        expect(document.body).toBeInTheDocument();
-      }
-    } else {
-      expect(document.body).toBeInTheDocument();
-    }
+
+    fireEvent.click(screen.getByRole('combobox', { name: /^provider$/i }));
+    fireEvent.click(screen.getByRole('option', { name: 'milvus' }));
+
+    expect(controller.updatePropertyValue).toHaveBeenCalledWith({ name: 'provider' }, 'milvus');
+    expect(controller.updatePropertyValue).toHaveBeenCalledWith({ name: 'provider_config' }, {});
+    expect(controller.updatePropertyValue).toHaveBeenCalledWith({ name: 'feature_mappings' }, []);
   });
 
   // ── VectorDB summary table select-all and remove ──────────────────────────
