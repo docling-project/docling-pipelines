@@ -300,7 +300,7 @@ class DoclingAdapter(TextExtractionPort):
             logger.warning(
                 "Could not import OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
-                exc,
+                sanitize_exception(exc=exc, config_key="ocr_engine_options"),
             )
             return None
 

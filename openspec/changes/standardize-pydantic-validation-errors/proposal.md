@@ -24,6 +24,10 @@
   - `FlowValidator` and `AclOperator._initialize_acl_adapter` render through `sanitize_exception` in their existing handlers.
 - Render the three swallowing sinks above through `sanitize_exception` and stop emitting raw tracebacks there. The ACL generic handler gets the same treatment (message and `exc_info`), with exception chaining preserved for propagation.
 - Add sentinel regression tests at representative public boundaries: REST flow validation, `DocpipeFlowManager.validate()`, and the CLI.
+- Review follow-ups (PR #627):
+  - The sanitizer walks the complete exception graph (`__cause__`, `__context__`, `ExceptionGroup` members, no depth cap, cycle-safe) and exposes `is_sensitive_chain`, the single sensitivity decision (design Decision 7).
+  - Every ACL exception site that writes to a log, a raised `FlowExecutionFailedException` message, or run-metadata `reason` uses `sanitize_exception` on both `fail_on_error` paths. When the chain is sensitive the wrapper is raised after the `except` block with a sanitized stand-in as its only cause, so the job-path traceback prints neither the input nor `input_value` (Decision 8). This supersedes "keep `raise ... from e`" for sensitive chains in task 3.4.
+  - Google Drive and Box lazy-fetch handlers keep a traceback only when the chain is not sensitive (Decision 9); the Box generator, download and `fetch_documents` sites and the Docling OCR `ImportError` branch render through `sanitize_exception` (Decision 10).
 
 ## Non-goals
 
@@ -41,7 +45,8 @@
 
 ## Impact
 
-- **Code**: `utils/infrastructure/exception_sanitizer.py`, `core/operators/ingest/adapters/outbound/sources/{box,google_drive}/adapter.py`, `core/operators/extract/adapters/outbound/text_extraction/docling_adapter.py`, `core/operators/vectordb/` (`vectordb_operator.py`, `weaviate/config.py`, `weaviate/adapter.py`), `core/operators/quality/pii_and_hap/adapters/outbound/` (huggingface, presidio, watsonx), `core/operators/ingest/adapters/outbound/sources/web/config.py`, `core/orchestration/flow_validator.py`, `core/operators/acl/acl_operator.py`.
+- **Code**: `utils/infrastructure/exception_sanitizer.py`, `core/operators/ingest/adapters/outbound/sources/{box,google_drive}/adapter.py`, `core/operators/extract/adapters/outbound/text_extraction/docling_adapter.py`, `core/operators/vectordb/` (`vectordb_operator.py`, `weaviate/config.py`, `weaviate/adapter.py`), `core/operators/quality/pii_and_hap/adapters/outbound/` (huggingface, presidio, watsonx), `core/operators/ingest/adapters/outbound/sources/web/config.py`, `core/orchestration/flow_validator.py`, `core/operators/acl/acl_operator.py`. Review follow-ups also touch the sanitizer's chain traversal and the Box and Google Drive lazy-fetch handlers.
+- **ACL cause chain**: for a sensitive failure `__cause__` is a sanitized stand-in, not the original exception; the assertions that pin the original are updated.
 - **Message text**: sanitizer output changes from `<key>.<field>: Field required` to `<key>.<field> is not provided`; `Value error, ` becomes `Value error: `. A search of `tests/`, `src/` and `docs/` found no consumer of the old text beyond the sanitizer's own tests.
 - **APIs and DTOs**: no schema change.
 - **Dependencies**: none.

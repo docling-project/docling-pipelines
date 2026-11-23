@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
+import traceback
 import types
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 
 from docpipe.core.operators.ingest.adapters.outbound.sources.box.adapter import BoxSourceAdapter
 from docpipe.core.operators.ingest.adapters.outbound.sources.box.config import BoxSourceConfig
+from docpipe.utils.infrastructure.exception_sanitizer import SanitizedCause
 
 
 class TestBoxSourceConfig:
@@ -710,6 +712,111 @@ class TestBoxFetchBinaryContent:
                 provider_config={"credentials_json_path": "/tmp/box.json"},
             )
         assert result is None
+
+    def test_non_sensitive_failure_keeps_traceback(self, caplog):
+        adapter = BoxSourceAdapter()
+
+        with caplog.at_level("ERROR"):
+            with patch.object(adapter, "_get_box_client", side_effect=RuntimeError("unexpected")):
+                result = adapter.fetch_binary_content(
+                    source_id="123",
+                    provider_config={"credentials_json_path": "/tmp/box.json"},
+                )
+
+        assert result is None
+        assert any(record.exc_info is not None for record in caplog.records)
+
+    def test_sensitive_failure_logs_no_traceback_and_no_sentinel(self, caplog):
+        adapter = BoxSourceAdapter()
+        error = ConnectionError(f"could not reach https://user:{_SENTINEL}@api.box.example/oauth2/token")
+
+        with caplog.at_level("DEBUG"):
+            with patch.object(adapter, "_get_box_client", side_effect=error):
+                result = adapter.fetch_binary_content(
+                    source_id="123",
+                    provider_config={"credentials_json_path": "/tmp/box.json"},
+                )
+
+        assert result is None
+        assert caplog.records
+        for record in caplog.records:
+            assert _SENTINEL not in record.getMessage()
+            assert _SENTINEL not in (record.exc_text or "")
+            assert record.exc_info is None
+
+
+# ---------------------------------------------------------------------------
+# Sensitive failures on the generator, download and fetch_documents paths
+# ---------------------------------------------------------------------------
+
+_SENTINEL = "SENTINEL_BOX_API_TOKEN_8c4e"
+
+
+def _sensitive_error() -> Exception:
+    return ConnectionError(f"could not reach https://user:{_SENTINEL}@api.box.example/oauth2/token")
+
+
+class TestBoxSensitiveFailuresAreNotPrinted:
+    def test_iter_box_files_propagates_a_clean_exception(self, caplog):
+        adapter = BoxSourceAdapter()
+        mock_client = Mock()
+        mock_client.folders.get_folder_by_id.side_effect = _sensitive_error()
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(Exception) as exc_info:
+                list(adapter._iter_box_files(client=mock_client, config=_make_config(), folder_id="0"))
+
+        assert _SENTINEL not in "".join(traceback.format_exception(exc_info.value))
+        assert isinstance(exc_info.value, SanitizedCause)
+        assert caplog.records
+        for record in caplog.records:
+            assert _SENTINEL not in record.getMessage()
+            assert _SENTINEL not in (record.exc_text or "")
+            assert record.exc_info is None
+
+    def test_iter_box_files_keeps_a_non_sensitive_exception(self):
+        adapter = BoxSourceAdapter()
+        error = RuntimeError("API error")
+        mock_client = Mock()
+        mock_client.folders.get_folder_by_id.side_effect = error
+
+        with pytest.raises(RuntimeError) as exc_info:
+            list(adapter._iter_box_files(client=mock_client, config=_make_config(), folder_id="0"))
+
+        assert exc_info.value is error
+
+    def test_download_file_content_logs_sanitized_text(self, caplog):
+        adapter = BoxSourceAdapter()
+        mock_client = Mock()
+        mock_client.downloads.download_file.side_effect = _sensitive_error()
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(ConnectionError):
+                adapter._download_file_content(client=mock_client, file_id="123")
+
+        assert caplog.records
+        for record in caplog.records:
+            assert _SENTINEL not in record.getMessage()
+            assert _SENTINEL not in (record.exc_text or "")
+            assert record.exc_info is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_documents_message_and_traceback_are_clean(self, caplog):
+        adapter = BoxSourceAdapter()
+
+        with caplog.at_level("DEBUG"):
+            with patch.object(adapter, "_get_box_client", side_effect=_sensitive_error()):
+                with pytest.raises(ValueError, match="Failed to fetch documents from Box") as exc_info:
+                    async for _ in adapter.fetch_documents(_make_config(folder_id="folder1")):
+                        pass
+
+        assert _SENTINEL not in str(exc_info.value)
+        assert _SENTINEL not in "".join(traceback.format_exception(exc_info.value))
+        assert isinstance(exc_info.value.__cause__, SanitizedCause)
+        assert exc_info.value.__context__ is None
+        assert _SENTINEL not in caplog.text
+        for record in caplog.records:
+            assert record.exc_info is None
 
 
 # ---------------------------------------------------------------------------

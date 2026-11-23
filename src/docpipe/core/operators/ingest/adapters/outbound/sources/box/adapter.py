@@ -17,7 +17,7 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.integrations.secrets.secret_value import reveal_value
-from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
+from docpipe.utils.infrastructure.exception_sanitizer import is_sensitive_chain, sanitize_exception, sanitized_cause
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -98,6 +98,7 @@ class BoxSourceAdapter(DocumentSourcePort):
         """
         if folder_id is None:
             folder_id = config.folder_id
+        failure: Exception | None = None
         try:
             folder = client.folders.get_folder_by_id(folder_id)
             items = client.folders.get_folder_items(folder.id)
@@ -122,8 +123,11 @@ class BoxSourceAdapter(DocumentSourcePort):
 
                 yield file_info
         except Exception as e:
-            logger.exception("Error iterating Box files: %s", e)
-            raise
+            logger.error("Error iterating Box files: %s", sanitize_exception(exc=e, config_key="box"))
+            failure = e
+        # Raised after the except block so the original is not attached as __context__ (see sanitized_cause)
+        if failure is not None:
+            raise sanitized_cause(exc=failure, config_key="box")
 
     def _compute_relative_path(self, *, file_info, root_folder_id: str) -> str | None:
         """Compute the path of a file relative to the configured root folder.
@@ -162,7 +166,7 @@ class BoxSourceAdapter(DocumentSourcePort):
             stream = client.downloads.download_file(file_id)
             return stream.read()
         except Exception as e:
-            logger.exception("Error downloading file %s: %s", file_id, e)
+            logger.error("Error downloading file %s: %s", file_id, sanitize_exception(exc=e, config_key="box"))
             raise
 
     def _parse_modified_time(self, modified_at: str | None):
@@ -239,6 +243,7 @@ class BoxSourceAdapter(DocumentSourcePort):
 
     async def fetch_documents(self, config: BoxSourceConfig) -> AsyncGenerator[Document, None]:  # type: ignore[override]
         """Fetch documents from Box using the Box SDK."""
+        failure: Exception | None = None
         try:
             client = self._get_box_client(config=config)
 
@@ -269,8 +274,14 @@ class BoxSourceAdapter(DocumentSourcePort):
                 "Box SDK dependencies not installed. Install with: uv pip install 'docling-pipelines[box]'"
             ) from e
         except Exception as e:
-            logger.exception("Error fetching documents from Box: %s", e)
-            raise ValueError(f"Failed to fetch documents from Box: {e!s}") from e
+            failure = e
+        # Raised after the except block so the original is not attached as __context__ (see sanitized_cause)
+        if failure is not None:
+            message = sanitize_exception(exc=failure, config_key="box")
+            logger.error("Error fetching documents from Box: %s", message)
+            raise ValueError(f"Failed to fetch documents from Box: {message}") from sanitized_cause(
+                exc=failure, config_key="box"
+            )
 
     async def test_connection(self, config: BoxSourceConfig) -> tuple[bool, str]:
         """Test Box connection using the Box SDK."""
@@ -383,6 +394,13 @@ class BoxSourceAdapter(DocumentSourcePort):
         except ValueError as e:
             logger.error("Box authentication error: %s", sanitize_exception(exc=e, config_key="box"))
             return None
-        except Exception:
-            logger.exception("Unexpected error fetching binary content from Box %s", source_id)
+        except Exception as e:
+            if is_sensitive_chain(exc=e):
+                logger.error(
+                    "Unexpected error fetching binary content from Box %s: %s",
+                    source_id,
+                    sanitize_exception(exc=e, config_key="box"),
+                )
+            else:
+                logger.exception("Unexpected error fetching binary content from Box %s", source_id)
             return None

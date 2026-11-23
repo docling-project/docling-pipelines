@@ -5,6 +5,7 @@
 
 import socket
 import ssl
+import traceback
 from typing import Self
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +25,7 @@ from docpipe.utils.infrastructure.exception_sanitizer import (
     CATEGORY_TLS,
     CATEGORY_VALIDATION,
     format_pydantic_errors,
+    is_sensitive_chain,
     sanitize_exception,
 )
 
@@ -298,6 +300,60 @@ class TestWrapperMessageIsKept:
         wrapper = self._docpipe_exception(message="Step failed.", cause=cause)
 
         assert sanitize_exception(exc=wrapper, config_key=KEY) == f"{KEY}: Step failed."
+
+    @staticmethod
+    def _mixed_chain(*, secret: str) -> RuntimeError:
+        """RuntimeError -> classified HTTPError -> unclassified ValueError, with the secret in the outer and innermost text."""
+        try:
+            try:
+                raise ValueError(secret)
+            except ValueError as innermost:
+                raise requests.exceptions.HTTPError("request failed") from innermost
+        except requests.exceptions.HTTPError as middle:
+            try:
+                raise RuntimeError(f"operation failed: {secret}") from middle
+            except RuntimeError as outer:
+                return outer
+
+    def test_unclassified_link_below_the_wrapper_is_a_redaction_source(self):
+        wrapper = self._mixed_chain(secret=CANARY)
+
+        text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert CANARY not in text
+        assert text.startswith(f"{KEY}: ")
+
+    def test_unclassified_link_reached_through_context_is_a_redaction_source(self):
+        try:
+            try:
+                raise ValueError(CANARY)
+            except ValueError:
+                raise requests.exceptions.HTTPError("request failed")  # noqa: B904 - context is the point
+        except requests.exceptions.HTTPError as middle:
+            try:
+                raise RuntimeError(f"operation failed: {CANARY}") from middle
+            except RuntimeError as outer:
+                wrapper = outer
+
+        assert CANARY not in sanitize_exception(exc=wrapper, config_key=KEY)
+
+    def test_unclassified_link_with_a_truncated_copy_falls_back_to_the_category(self):
+        secret = f"token-{CANARY}-tail"
+        try:
+            try:
+                raise ValueError(secret)
+            except ValueError as innermost:
+                raise requests.exceptions.HTTPError("request failed") from innermost
+        except requests.exceptions.HTTPError as middle:
+            try:
+                raise RuntimeError(f"operation failed: {secret[:-5]}") from middle
+            except RuntimeError as outer:
+                wrapper = outer
+
+        text = sanitize_exception(exc=wrapper, config_key=KEY)
+
+        assert CANARY not in text
+        assert text == f"{KEY}: {CATEGORY_HTTP}"
 
     def test_node_failure_message_keeps_the_hint(self):
         from docpipe.core.job_management.adapters.services.job_tracker_service import JobTrackerService
@@ -575,3 +631,121 @@ class TestMessageWriters:
 
         assert CANARY not in str(orchestrator.message)
         assert CATEGORY_CONNECTION in str(orchestrator.message)
+
+
+def _plain(*, label: str) -> RuntimeError:
+    return RuntimeError(f"layer {label}")
+
+
+def _stack(*, leaf: BaseException, depth: int, via: str) -> RuntimeError:
+    """Wrap ``leaf`` in ``depth`` plain exceptions linked through ``via``; the outermost embeds the leaf text."""
+    inner: BaseException = leaf
+    for level in range(depth):
+        text = f"top: {leaf}" if level == depth - 1 else f"layer {level}"
+        outer = RuntimeError(text)
+        setattr(outer, "__cause__" if via == "cause" else "__context__", inner)
+        inner = outer
+    assert isinstance(inner, RuntimeError)
+    return inner
+
+
+def _shadowed(*, leaf: BaseException, sensitive_via: str) -> RuntimeError:
+    top = RuntimeError(f"top: {leaf}")
+    if sensitive_via == "context":
+        top.__cause__ = _plain(label="cause")
+        top.__context__ = leaf
+    else:
+        top.__cause__ = leaf
+        top.__context__ = _plain(label="context")
+    return top
+
+
+def _alternating(*, leaf: BaseException, depth: int) -> RuntimeError:
+    inner: BaseException = leaf
+    for level in range(depth):
+        text = f"top: {leaf}" if level == depth - 1 else f"layer {level}"
+        outer = RuntimeError(text)
+        if level % 2:
+            outer.__cause__ = inner
+        else:
+            outer.__context__ = inner
+        inner = outer
+    assert isinstance(inner, RuntimeError)
+    return inner
+
+
+def _grouped(*, leaf: BaseException) -> BaseExceptionGroup:
+    assert isinstance(leaf, Exception)
+    return ExceptionGroup(f"top: {leaf}", [_plain(label="sibling"), leaf])
+
+
+def _cyclic(*, leaf: BaseException) -> RuntimeError:
+    top = RuntimeError(f"top: {leaf}")
+    top.__cause__ = leaf
+    leaf.__cause__ = top
+    return top
+
+
+def _sentinel_exception(*, kind: str) -> Exception:
+    if kind == "validation":
+        return _validation_error(value=CANARY)
+    return ConnectionError(f"https://u:{CANARY}@host")
+
+
+_SENSITIVE_SHAPES = {
+    "context_shadowed_by_cause": lambda leaf: _shadowed(leaf=leaf, sensitive_via="context"),
+    "cause_beside_context": lambda leaf: _shadowed(leaf=leaf, sensitive_via="cause"),
+    "cause_depth_11": lambda leaf: _stack(leaf=leaf, depth=11, via="cause"),
+    "cause_depth_50": lambda leaf: _stack(leaf=leaf, depth=50, via="cause"),
+    "context_depth_11": lambda leaf: _stack(leaf=leaf, depth=11, via="context"),
+    "alternating_depth_12": lambda leaf: _alternating(leaf=leaf, depth=12),
+    "exception_group_member": lambda leaf: _grouped(leaf=leaf),
+    "cycle": lambda leaf: _cyclic(leaf=leaf),
+}
+
+
+class TestChainTraversal:
+    @pytest.mark.parametrize("shape", sorted(_SENSITIVE_SHAPES))
+    @pytest.mark.parametrize("kind", ["validation", "connection"])
+    def test_sensitive_link_is_found_and_never_printed(self, shape, kind):
+        top = _SENSITIVE_SHAPES[shape](_sentinel_exception(kind=kind))
+
+        assert is_sensitive_chain(exc=top) is True
+        text = sanitize_exception(exc=top, config_key=KEY)
+        assert CANARY not in text
+        assert "input_value" not in text
+
+    @pytest.mark.parametrize("shape", sorted(_SENSITIVE_SHAPES))
+    def test_parity_with_formatted_traceback(self, shape):
+        top = _SENSITIVE_SHAPES[shape](_sentinel_exception(kind="validation"))
+
+        printed = "".join(traceback.format_exception(top))
+        if CANARY in printed:
+            assert is_sensitive_chain(exc=top) is True
+
+    def test_suppressed_context_is_still_followed(self):
+        leaf = _validation_error(value=CANARY)
+        try:
+            try:
+                raise leaf
+            except ValidationError:
+                raise RuntimeError(f"top: {leaf}") from None
+        except RuntimeError as wrapper:
+            top = wrapper
+
+        assert top.__suppress_context__ is True
+        assert is_sensitive_chain(exc=top) is True
+        assert CANARY not in sanitize_exception(exc=top, config_key=KEY)
+
+    def test_long_chain_without_a_classified_link_is_not_sensitive(self):
+        top = _stack(leaf=RuntimeError("plain detail"), depth=50, via="cause")
+
+        assert is_sensitive_chain(exc=top) is False
+        assert sanitize_exception(exc=top, config_key=KEY) == str(top)
+
+    def test_cycle_without_a_classified_link_terminates(self):
+        first, second = RuntimeError("a"), RuntimeError("b")
+        first.__cause__ = second
+        second.__cause__ = first
+
+        assert is_sensitive_chain(exc=first) is False

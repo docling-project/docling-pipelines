@@ -56,7 +56,7 @@ Provider configuration validators SHALL NOT interpolate rejected input that can 
 - **THEN** the message may include that model identifier, and both `format_pydantic_errors` and `sanitize_exception` preserve it as a permitted non-sensitive diagnostic
 
 ### Requirement: Handlers render configuration failures without raw text
-Adapters, validation boundaries and local log handlers that handle a constructor or configuration failure SHALL render it through the shared formatter or `sanitize_exception` rather than `str(exc)`, and SHALL NOT emit a raw traceback or chained exception text.
+Adapters, validation boundaries and local log handlers that handle a constructor or configuration failure SHALL render it through the shared formatter or `sanitize_exception` rather than `str(exc)`, and SHALL NOT emit chained cause text that carries a rejected input value.
 
 #### Scenario: Presidio or Watsonx provider configuration error
 - **WHEN** a Presidio or Watsonx provider configuration is rejected with a sentinel input value
@@ -68,11 +68,27 @@ Adapters, validation boundaries and local log handlers that handle a constructor
 
 #### Scenario: ACL adapter initialization failure
 - **WHEN** ACL adapter configuration is rejected and the failing field holds a sentinel value
-- **THEN** the raised `FlowExecutionFailedException` message and every emitted log record, including any attached traceback text, do not contain the sentinel, and the original exception remains available as `__cause__`
+- **THEN** the raised `FlowExecutionFailedException` message, every emitted log record, and the traceback that the job path formats from the exception chain do not contain the sentinel or Pydantic's `input_value`, and `__cause__` is an exception whose text is the sanitized rendering rather than the original `ValidationError`
+
+#### Scenario: Sensitive link anywhere in an ACL failure chain
+- **WHEN** an ACL operator raises a wrapper for an exception whose `__cause__` or `__context__` chain contains a `ValidationError`, or a classified client, HTTP, database, or network exception whose text carries a sentinel
+- **THEN** the wrapper's `__cause__` is an exception carrying sanitized text, the wrapper's `__context__` is `None`, and no formatted traceback of the wrapper contains the sentinel or Pydantic's `input_value`
+
+#### Scenario: Raised ACL failure message with fail_on_error
+- **WHEN** ACL extraction fails for a document with `fail_on_error` set to true and the underlying exception text carries a sentinel
+- **THEN** the raised `FlowExecutionFailedException` message does not contain the sentinel, and the same holds with `fail_on_error` set to false for the recorded failed-document `reason`
 
 #### Scenario: Swallowed lazy-fetch or OCR option error
 - **WHEN** Google Drive or Box lazy binary fetch, or Docling OCR option construction, hits a `ValidationError` whose input is a sentinel and handles it by returning `None` or falling back to defaults
 - **THEN** the return value or fallback is unchanged and no emitted log record, including any traceback text, contains the sentinel or Pydantic's `input_value`
+
+#### Scenario: Non-sensitive failure keeps its traceback
+- **WHEN** a Google Drive lazy binary fetch fails with an error whose chain carries no sensitive link, such as a plain `RuntimeError` or `OSError` with no credential in its text
+- **THEN** the log record includes the traceback, and the sanitized text is used for the message
+
+#### Scenario: Sensitive HTTP or API failure omits the traceback
+- **WHEN** a Google Drive lazy binary fetch fails with an HTTP or API error whose message carries a sentinel
+- **THEN** the log record contains the sanitized category and config key, carries no traceback, and does not contain the sentinel
 
 ### Requirement: Adapter-owned error selection
 Adapters SHALL keep their own error-selection policy while rendering messages through the shared formatter.

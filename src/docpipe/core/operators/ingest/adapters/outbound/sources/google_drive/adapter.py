@@ -23,7 +23,7 @@ from docpipe.core.operators.ingest.ports.outbound.document_source import Documen
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.secrets.registry import cache_key_digest
 from docpipe.integrations.secrets.secret_value import reveal_value
-from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
+from docpipe.utils.infrastructure.exception_sanitizer import is_sensitive_chain, sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -676,11 +676,14 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             return content
 
         except Exception as e:
-            logger.error(
-                "Error fetching binary content from Google Drive %s: %s",
-                source_id,
-                sanitize_exception(exc=e, config_key="google_drive"),
-            )
+            if is_sensitive_chain(exc=e):
+                logger.error(
+                    "Error fetching binary content from Google Drive %s: %s",
+                    source_id,
+                    sanitize_exception(exc=e, config_key="google_drive"),
+                )
+            else:
+                logger.exception("Error fetching binary content from Google Drive %s", source_id)
             return None
 
     def build_config_from_operator_params(

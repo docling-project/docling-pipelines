@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.extract.adapters.outbound.factories.text_extraction_adapter_factory import (
@@ -289,6 +289,31 @@ def test_docling_adapter_rejected_ocr_option_logs_no_sentinel(caplog) -> None:
         assert sentinel not in record.getMessage()
         assert "input_value" not in record.getMessage()
         assert sentinel not in (record.exc_text or "")
+        assert record.exc_info is None
+
+
+def test_docling_adapter_import_failure_caused_by_validation_error_logs_no_sentinel(caplog) -> None:
+    """An import failure chained to a validation error falls back to defaults without logging the rejected value."""
+    sentinel = "SENTINEL_DOCLING_OCR_IMPORT_6f3a"
+
+    def _failing_import(name: str, *args, **kwargs):
+        try:
+            _StrictEasyOcrOptions(lang=sentinel)  # type: ignore[arg-type]
+        except ValidationError as validation_error:
+            raise ImportError(f"cannot load {name}: {validation_error}") from validation_error
+
+    adapter = _make_lib_adapter({"engine": "easyocr"})
+
+    with caplog.at_level(logging.WARNING, logger="docpipe"):
+        with patch("importlib.import_module", side_effect=_failing_import):
+            result = adapter._build_ocr_options()
+
+    assert result is None
+    warnings = [record for record in caplog.records if "Could not import OCR options" in record.getMessage()]
+    assert warnings
+    for record in caplog.records:
+        assert sentinel not in record.getMessage()
+        assert "input_value" not in record.getMessage()
         assert record.exc_info is None
 
 

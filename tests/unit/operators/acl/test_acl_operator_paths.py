@@ -8,11 +8,13 @@ and records the ACLRequests the operator builds.
 """
 
 import json
+import traceback
 from typing import Any
 from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
+import requests
 from pydantic import BaseModel, ValidationError
 
 from docpipe.core.constants.constants import DocpipeConstants, Metrics
@@ -23,6 +25,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     DocpipeException,
     FlowExecutionFailedException,
 )
+from docpipe.utils.infrastructure.exception_sanitizer import SanitizedCause
 
 _FACTORY = "docpipe.core.operators.acl.acl_operator.ACLAdapterFactory.create_adapter"
 _INGEST_METADATA = {"provider": "sharepoint"}
@@ -232,6 +235,15 @@ class TestAdapterInitialisation:
             with pytest.raises(FlowExecutionFailedException, match=r"Failed to initialize ACL adapter.*plugin import"):
                 _operator(fail_on_error=True).transform(_table(ids=["a"]))
 
+    def test_non_sensitive_cause_is_chained_unchanged(self) -> None:
+        original = RuntimeError("plugin import failed")
+
+        with patch(_FACTORY, side_effect=original):
+            with pytest.raises(FlowExecutionFailedException) as exc_info:
+                _operator(fail_on_error=True).transform(_table(ids=["a"]))
+
+        assert exc_info.value.__cause__ is original
+
     def test_validation_error_with_rejected_input_omits_the_sentinel(self) -> None:
         sentinel = "SENTINEL_ACL_INIT_VALUE_3f7a"
         with pytest.raises(ValidationError) as caught:
@@ -243,7 +255,9 @@ class TestAdapterInitialisation:
                 _operator(fail_on_error=True).transform(_table(ids=["a"]))
 
         assert sentinel not in str(exc_info.value)
-        assert exc_info.value.__cause__ is original
+        assert isinstance(exc_info.value.__cause__, SanitizedCause)
+        assert exc_info.value.__cause__ is not original
+        assert exc_info.value.__context__ is None
 
     def test_network_error_with_rejected_input_omits_the_sentinel_from_every_record(self, caplog) -> None:
         sentinel = "SENTINEL_ACL_INIT_GENERIC_9b2e"
@@ -255,12 +269,174 @@ class TestAdapterInitialisation:
                     _operator(fail_on_error=True).transform(_table(ids=["a"]))
 
         assert sentinel not in str(exc_info.value)
-        assert exc_info.value.__cause__ is original
+        assert isinstance(exc_info.value.__cause__, SanitizedCause)
+        assert exc_info.value.__cause__ is not original
         assert caplog.records
         for record in caplog.records:
             assert sentinel not in record.getMessage()
             assert sentinel not in (record.exc_text or "")
             assert record.exc_info is None
+
+
+_SENTINEL = "SENTINEL_ACL_CHAIN_5d1c"
+
+
+def _validation_error() -> ValidationError:
+    with pytest.raises(ValidationError) as caught:
+        _ProviderSettings(tenant_id=_SENTINEL)  # type: ignore[arg-type]
+    return caught.value
+
+
+def _direct() -> Exception:
+    return _validation_error()
+
+
+def _wrapped_validation_error() -> Exception:
+    inner = _validation_error()
+    try:
+        raise ValueError(f"settings rejected: {inner}") from inner
+    except ValueError as wrapper:
+        return wrapper
+
+
+def _credential_url_connection_error() -> Exception:
+    return ConnectionError(f"could not reach https://user:{_SENTINEL}@login.example/token")
+
+
+def _unclassified_inner_cause() -> Exception:
+    """RuntimeError -> HTTPError -> ValueError: the secret sits in the outer and the unclassified innermost text."""
+    try:
+        try:
+            raise ValueError(_SENTINEL)
+        except ValueError as innermost:
+            raise requests.exceptions.HTTPError("request failed") from innermost
+    except requests.exceptions.HTTPError as middle:
+        try:
+            raise RuntimeError(f"operation failed: {_SENTINEL}") from middle
+        except RuntimeError as outer:
+            return outer
+
+
+_SENSITIVE_CAUSES = {
+    "unclassified_inner_cause": _unclassified_inner_cause,
+    "validation_error": _direct,
+    "value_error_from_validation_error": _wrapped_validation_error,
+    "connection_error_with_credential_url": _credential_url_connection_error,
+}
+
+
+def _assert_traceback_is_clean(*, error: BaseException) -> None:
+    printed = "".join(traceback.format_exception(error))
+    assert _SENTINEL not in printed
+    assert "input_value" not in printed
+
+
+class _FailingResponse:
+    """Provider response that raises the given exception when its users are read."""
+
+    extraction_success = True
+    extraction_warnings: tuple[str, ...] = ()
+
+    def __init__(self, *, error: Exception) -> None:
+        self._error = error
+
+    @property
+    def allowed_users(self) -> set[str]:
+        raise self._error
+
+
+class TestSensitiveChainIsNotPrinted:
+    """A sensitive cause never reaches the traceback the job path formats, on any raise site."""
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_initialisation_traceback(self, cause: str, caplog) -> None:
+        with caplog.at_level("DEBUG"):
+            with patch(_FACTORY, side_effect=_SENSITIVE_CAUSES[cause]()):
+                with pytest.raises(FlowExecutionFailedException) as exc_info:
+                    _operator(fail_on_error=True).transform(_table(ids=["a"]))
+
+        _assert_traceback_is_clean(error=exc_info.value)
+        assert exc_info.value.__context__ is None
+        assert _SENTINEL not in caplog.text
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_batch_failure_with_fail_on_error(self, cause: str, caplog) -> None:
+        adapter = FakeAdapter(error=_SENSITIVE_CAUSES[cause]())
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(FlowExecutionFailedException) as exc_info:
+                _run(_operator(fail_on_error=True), _table(ids=["a"]), adapter)
+
+        assert _SENTINEL not in str(exc_info.value)
+        _assert_traceback_is_clean(error=exc_info.value)
+        assert exc_info.value.__context__ is None
+        assert _SENTINEL not in caplog.text
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_batch_failure_reason_without_fail_on_error(self, cause: str, caplog) -> None:
+        adapter = FakeAdapter(error=_SENSITIVE_CAUSES[cause]())
+
+        with caplog.at_level("DEBUG"):
+            _, metadata = _run(_operator(fail_on_error=False), _table(ids=["a", "b"]), adapter)
+
+        reasons = [entry["reason"] for entry in metadata[Metrics.External.FAILED_DOCS]]
+        assert len(reasons) == 2
+        assert all(_SENTINEL not in reason and "input_value" not in reason for reason in reasons)
+        assert _SENTINEL not in caplog.text
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_per_document_failure_with_fail_on_error(self, cause: str, caplog) -> None:
+        adapter = FakeAdapter(responses=[_FailingResponse(error=_SENSITIVE_CAUSES[cause]())])  # type: ignore[list-item]
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(FlowExecutionFailedException) as exc_info:
+                _run(_operator(fail_on_error=True), _table(ids=["a"]), adapter)
+
+        assert _SENTINEL not in str(exc_info.value)
+        _assert_traceback_is_clean(error=exc_info.value)
+        assert exc_info.value.__context__ is None
+        assert _SENTINEL not in caplog.text
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_per_document_reason_without_fail_on_error(self, cause: str, caplog) -> None:
+        adapter = FakeAdapter(
+            responses=[_FailingResponse(error=_SENSITIVE_CAUSES[cause]()), _response(users={"b@contoso.com"})]  # type: ignore[list-item]
+        )
+
+        with caplog.at_level("DEBUG"):
+            output, metadata = _run(_operator(fail_on_error=False), _table(ids=["a", "b"]), adapter)
+
+        assert output.column("id").to_pylist() == ["b"]
+        reason = metadata[Metrics.External.FAILED_DOCS][0]["reason"]
+        assert _SENTINEL not in reason
+        assert "input_value" not in reason
+        assert _SENTINEL not in caplog.text
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_output_table_failure(self, cause: str, caplog) -> None:
+        adapter = FakeAdapter(responses=[_response(users={"a@contoso.com"})])
+
+        with caplog.at_level("DEBUG"):
+            with patch(
+                "docpipe.core.operators.acl.acl_operator.TransformUtils.add_column",
+                side_effect=_SENSITIVE_CAUSES[cause](),
+            ):
+                with pytest.raises(FlowExecutionFailedException) as exc_info:
+                    _run(_operator(fail_on_error=True), _table(ids=["a"]), adapter)
+
+        assert _SENTINEL not in str(exc_info.value)
+        _assert_traceback_is_clean(error=exc_info.value)
+        assert exc_info.value.__context__ is None
+        assert _SENTINEL not in caplog.text
+
+    def test_non_sensitive_batch_failure_keeps_the_original_cause(self) -> None:
+        original = RuntimeError("Graph API rejected the batch")
+        adapter = FakeAdapter(error=original)
+
+        with pytest.raises(FlowExecutionFailedException) as exc_info:
+            _run(_operator(fail_on_error=True), _table(ids=["a"]), adapter)
+
+        assert exc_info.value.__cause__ is original
 
 
 class TestPerDocumentHandling:
@@ -277,9 +453,17 @@ class TestPerDocumentHandling:
         assert output.column("allowed_users").to_pylist() == [["x@contoso.com"], ["y@contoso.com"]]
 
     def test_batch_failure_raises_when_fail_on_error(self) -> None:
-        adapter = FakeAdapter(error=TimeoutError("Graph API timed out"))
+        adapter = FakeAdapter(error=RuntimeError("Graph API rejected the batch"))
 
-        with pytest.raises(FlowExecutionFailedException, match="Batch ACL extraction failed: Graph API timed out"):
+        with pytest.raises(FlowExecutionFailedException, match="Batch ACL extraction failed: Graph API rejected"):
+            _run(_operator(fail_on_error=True), _table(ids=["a"]), adapter)
+
+    def test_batch_timeout_is_reduced_to_its_category(self) -> None:
+        adapter = FakeAdapter(error=TimeoutError("Graph API timed out for https://u:secret@host"))
+
+        with pytest.raises(
+            FlowExecutionFailedException, match="Batch ACL extraction failed: sharepoint: request timed"
+        ):
             _run(_operator(fail_on_error=True), _table(ids=["a"]), adapter)
 
     def test_document_without_metadata_gets_empty_provider_metadata(self) -> None:

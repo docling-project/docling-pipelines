@@ -49,7 +49,7 @@ from docpipe.exceptions.docpipe_exceptions import (
     FlowValidationException,
 )
 from docpipe.utils.data.transform import TransformUtils
-from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception, sanitized_cause
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -272,6 +272,7 @@ class ACLOperator(AbstractOperator):
         Raises:
             FlowExecutionFailedException: If the provider is unsupported or initialization fails
         """
+        failure: tuple[str, BaseException, int] | None = None
         try:
             adapter = ACLAdapterFactory.create_adapter(
                 provider=provider,
@@ -289,12 +290,8 @@ class ACLOperator(AbstractOperator):
             return adapter
 
         except ValueError as e:
-            # Re-raise configuration errors as FlowExecutionFailedException
-            raise FlowExecutionFailedException(
-                f"Failed to initialize ACL adapter for provider '{provider}': "
-                f"{sanitize_exception(exc=e, config_key=provider)}",
-                status_code=400,
-            ) from e
+            # Configuration errors become a 400; the wrapper is raised after this block (see sanitized_cause)
+            failure = (sanitize_exception(exc=e, config_key=provider), sanitized_cause(exc=e, config_key=provider), 400)
         except (ConfigurationError, FlowValidationException, FlowExecutionFailedException, DocpipeException):
             # Re-raise Docpipe exceptions as-is
             raise
@@ -302,9 +299,35 @@ class ACLOperator(AbstractOperator):
             # Wrap unknown exceptions; the log carries the sanitized text and no traceback
             sanitized = sanitize_exception(exc=e, config_key=provider)
             logger.error("Unexpected error initializing ACL adapter: %s", sanitized, extra=self.common_log_arguments)
-            raise FlowExecutionFailedException(
-                f"Failed to initialize ACL adapter for provider '{provider}': {sanitized}"
-            ) from e
+            failure = (sanitized, sanitized_cause(exc=e, config_key=provider), 500)
+
+        text, cause, status_code = failure
+        raise FlowExecutionFailedException(
+            f"Failed to initialize ACL adapter for provider '{provider}': {text}",
+            status_code=status_code,
+        ) from cause
+
+    def _handle_document_failure(
+        self,
+        *,
+        e: Exception,
+        message: str,
+        provider: str,
+        metadata: dict[str, Any],
+        doc_id: Any,
+        doc_name: Any,
+    ) -> tuple[str, BaseException] | None:
+        """Log one document failure with sanitized text and record it, or return what the caller must raise.
+
+        With ``fail_on_error`` the sanitized text and the cause to chain are returned so the caller raises after
+        its ``except`` block has exited. Otherwise the document is recorded as failed and None is returned.
+        """
+        sanitized = sanitize_exception(exc=e, config_key=provider)
+        logger.error(message, doc_id, sanitized, extra=self.common_log_arguments)
+        if self.fail_on_error:
+            return sanitized, sanitized_cause(exc=e, config_key=provider)
+        self.record_failed_document(metadata=metadata, doc_id=str(doc_id), doc_name=str(doc_name), reason=sanitized)
+        return None
 
     @staticmethod
     def get_required_features() -> list[str]:
@@ -533,6 +556,7 @@ class ACLOperator(AbstractOperator):
             )
 
         # Step 2: Execute ONE async batch call for all requests
+        batch_failure: tuple[str, BaseException] | None = None
         if acl_requests:
             try:
                 logger.info(
@@ -544,22 +568,26 @@ class ACLOperator(AbstractOperator):
                 responses: list[ACLResponse] = asyncio.run(acl_adapter.extract_acls_batch(requests=acl_requests))
 
             except Exception as e:
-                logger.exception("Batch ACL extraction failed: %s", e, extra=self.common_log_arguments)
+                sanitized = sanitize_exception(exc=e, config_key=provider)
+                logger.error("Batch ACL extraction failed: %s", sanitized, extra=self.common_log_arguments)
 
                 if self.fail_on_error:
-                    raise FlowExecutionFailedException(f"Batch ACL extraction failed: {e!s}") from e
-
-                # If fail_on_error=false, treat all as failed
-                for context in request_contexts:
-                    self.record_failed_document(
-                        metadata=metadata,
-                        doc_id=str(context["doc_id"]),
-                        doc_name=str(context["doc_name"]),
-                        reason=str(e),
-                    )
+                    batch_failure = (sanitized, sanitized_cause(exc=e, config_key=provider))
+                else:
+                    # If fail_on_error=false, treat all as failed
+                    for context in request_contexts:
+                        self.record_failed_document(
+                            metadata=metadata,
+                            doc_id=str(context["doc_id"]),
+                            doc_name=str(context["doc_name"]),
+                            reason=sanitized,
+                        )
                 responses = []
         else:
             responses = []
+
+        if batch_failure is not None:
+            raise FlowExecutionFailedException(f"Batch ACL extraction failed: {batch_failure[0]}") from batch_failure[1]
 
         # Step 3: Process results synchronously
         successful_row_indices: list[int] = []
@@ -570,6 +598,7 @@ class ACLOperator(AbstractOperator):
             doc_id = context["doc_id"]
             doc_name = context["doc_name"]
 
+            document_failure: tuple[str, BaseException] | None = None
             try:
                 # Check if extraction succeeded
                 if not acl_response.extraction_success:
@@ -618,44 +647,32 @@ class ACLOperator(AbstractOperator):
                 raise
             except DocpipeException as e:
                 # Wrap other Docpipe exceptions with ACL context
-                logger.exception(
-                    "Docpipe exception processing document %s: %s",
-                    doc_id,
-                    e,
-                    extra=self.common_log_arguments,
-                )
-
-                if self.fail_on_error:
-                    raise FlowExecutionFailedException(f"ACL extraction failed for document {doc_id}: {e!s}") from e
-
-                # Skip this document
-                self.record_failed_document(
+                document_failure = self._handle_document_failure(
+                    e=e,
+                    message="Docpipe exception processing document %s: %s",
+                    provider=provider,
                     metadata=metadata,
-                    doc_id=str(doc_id),
-                    doc_name=str(doc_name),
-                    reason=str(e),
+                    doc_id=doc_id,
+                    doc_name=doc_name,
                 )
             except Exception as e:
                 # Wrap unknown exceptions
-                logger.exception(
-                    "Unexpected error processing document %s: %s",
-                    doc_id,
-                    e,
-                    extra=self.common_log_arguments,
-                )
-
-                if self.fail_on_error:
-                    raise FlowExecutionFailedException(f"ACL extraction failed for document {doc_id}: {e!s}") from e
-
-                # Skip this document
-                self.record_failed_document(
+                document_failure = self._handle_document_failure(
+                    e=e,
+                    message="Unexpected error processing document %s: %s",
+                    provider=provider,
                     metadata=metadata,
-                    doc_id=str(doc_id),
-                    doc_name=str(doc_name),
-                    reason=str(e),
+                    doc_id=doc_id,
+                    doc_name=doc_name,
                 )
+
+            if document_failure is not None:
+                raise FlowExecutionFailedException(
+                    f"ACL extraction failed for document {doc_id}: {document_failure[0]}"
+                ) from document_failure[1]
 
         # Create output table with only successful rows
+        table_failure: tuple[str, BaseException] | None = None
         try:
             if successful_row_indices:
                 # Filter table to only successful rows
@@ -672,10 +689,15 @@ class ACLOperator(AbstractOperator):
                 schema = table.schema.append(pa.field(OperatorConstants.ACL.ALLOWED_USERS_COLUMN, pa.string()))
                 output_table = pa.Table.from_arrays([pa.array([], type=field.type) for field in schema], schema=schema)
         except Exception as e:
-            logger.exception("Failed to create output table: %s", e, extra=self.common_log_arguments)
+            sanitized = sanitize_exception(exc=e, config_key=provider)
+            logger.error("Failed to create output table: %s", sanitized, extra=self.common_log_arguments)
+            table_failure = (sanitized, sanitized_cause(exc=e, config_key=provider))
+
+        if table_failure is not None:
             raise FlowExecutionFailedException(
-                f"Failed to create output table with {OperatorConstants.ACL.ALLOWED_USERS_COLUMN} column: {e!s}"
-            ) from e
+                f"Failed to create output table with {OperatorConstants.ACL.ALLOWED_USERS_COLUMN} column: "
+                f"{table_failure[0]}"
+            ) from table_failure[1]
 
         # Calculate processing time
         processing_time = time.time() - start_time

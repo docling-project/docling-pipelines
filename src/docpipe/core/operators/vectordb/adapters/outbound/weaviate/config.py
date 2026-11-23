@@ -182,6 +182,8 @@ class WeaviateConfig(BaseModel):
         """Fail when an environment reference is unset, naming the field and not the variable.
 
         resolve_env_var's message carries the reference name, which would otherwise reach every rendered error.
+        A value that starts with ``$`` is read as a reference, so a literal secret written that way would be
+        echoed as its own variable name. The cost is that the message no longer names the unset variable.
         """
         try:
             resolve_env_var(value)
