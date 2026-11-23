@@ -80,6 +80,14 @@ spec:
                 secretKeyRef:
                   name: docpipe-auth
                   key: JWT_SECRET_KEY
+            # Kubernetes deployments typically sit behind a TLS-terminating Ingress.
+            # Mark session cookies Secure and trust proxy headers (X-Forwarded-Proto /
+            # X-Forwarded-For) from the Ingress controller. Set to "false" if exposing
+            # plain HTTP without a trusted reverse proxy.
+            - name: DOCPIPE_AUTH_COOKIE_SECURE
+              value: "true"
+            - name: DOCPIPE_TRUST_PROXY_HEADERS
+              value: "true"
           volumeMounts:
             # FastAPI writes DuckDB files (job_stats.duckdb, document_sets.duckdb)
             # and job stats here at runtime. Backed by the docpipe-data PVC so data
