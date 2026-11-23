@@ -82,3 +82,48 @@
   pointer-events: none;
   line-height: 1;
 }
+
+// ── Profile menu ─────────────────────────────────────────────────────────────
+// Popover panel anchored under the profile button. Colours come from the Carbon
+// tokens, which the g100 Theme wrapper resolves to dark values in both app themes.
+.profilePanel {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-02;
+  min-inline-size: 16rem;
+  max-inline-size: 20rem;
+  padding: $spacing-05;
+}
+
+.profileName {
+  @include type-style('heading-compact-01');
+  margin: 0;
+  color: $text-primary;
+  word-break: break-word;
+}
+
+.profileEmail {
+  @include type-style('body-compact-01');
+  margin: 0;
+  color: $text-secondary;
+  word-break: break-all;
+}
+
+.profileRoles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-01;
+  margin-block-start: $spacing-01;
+}
+
+.profileDivider {
+  block-size: 1px;
+  margin: $spacing-03 0;
+  border: 0;
+  background-color: $border-subtle-01;
+}
+
+.profileSignOut {
+  inline-size: 100%;
+  justify-content: flex-start;
+}

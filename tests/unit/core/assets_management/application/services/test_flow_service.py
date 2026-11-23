@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for FlowService."""
 
 import logging
@@ -9,6 +12,7 @@ import pytest
 
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
 from docpipe.core.assets.flows.domain.models.flow import Flow
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.exceptions.docpipe_exceptions import (
     AssetInvalidDataException,
     DocpipeException,
@@ -28,7 +32,7 @@ class TestFlowServiceCreate:
 
         # Act & Assert
         with pytest.raises(FlowAlreadyExistsException, match="already exists"):
-            service.create_flow(flow=sample_flow_with_id, is_elyra=True)
+            service.create_flow(flow=sample_flow_with_id, is_elyra=True, actor=SYSTEM_ACTOR)
 
         # Verify save was never called
         mock_flow_repository.save.assert_not_called()
@@ -41,7 +45,7 @@ class TestFlowServiceCreate:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.create_flow(flow=sample_flow_domain, is_elyra=True)
+        result = service.create_flow(flow=sample_flow_domain, is_elyra=True, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result == sample_flow_domain
@@ -55,7 +59,7 @@ class TestFlowServiceCreate:
 
         # Act & Assert
         with pytest.raises(AssetInvalidDataException, match="flow name cannot be empty"):
-            service.create_flow(flow=invalid_flow)
+            service.create_flow(flow=invalid_flow, actor=SYSTEM_ACTOR)
 
         # Verify save was never called
         mock_flow_repository.save.assert_not_called()
@@ -69,7 +73,7 @@ class TestFlowServiceCreate:
         # Act & Assert
         with patch("docpipe.core.assets.flows.application.services.flow_service.logger") as mock_logger:
             with pytest.raises(FlowAlreadyExistsException, match="already exists"):
-                service.create_flow(flow=sample_flow_with_id, is_elyra=True)
+                service.create_flow(flow=sample_flow_with_id, is_elyra=True, actor=SYSTEM_ACTOR)
 
             # Verify warning was logged before exception
             mock_logger.warning.assert_called_once()
@@ -84,7 +88,7 @@ class TestFlowServiceCreate:
 
         # Act & Assert
         with pytest.raises(OSError, match="Disk full"):
-            service.create_flow(flow=sample_flow_domain, is_elyra=True)
+            service.create_flow(flow=sample_flow_domain, is_elyra=True, actor=SYSTEM_ACTOR)
 
     def test_create_flow_with_is_elyra_false_stores_authoring_format(self, mock_flow_repository):
         """Test that is_elyra=False stores flow in authoring format without transformation."""
@@ -104,7 +108,7 @@ class TestFlowServiceCreate:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.create_flow(flow=authoring_flow, is_elyra=False)
+        result = service.create_flow(flow=authoring_flow, is_elyra=False, actor=SYSTEM_ACTOR)
 
         # Assert - No transformation should occur, flow stored as-is
         assert result == authoring_flow
@@ -124,7 +128,7 @@ class TestFlowServiceCreate:
 
         # Act
         with patch("docpipe.utils.orchestration.elyra_converter.ElyraConverter") as mock_converter_class:
-            result = service.create_flow(flow=elyra_flow, is_elyra=True)
+            result = service.create_flow(flow=elyra_flow, is_elyra=True, actor=SYSTEM_ACTOR)
 
             # Assert - converter should not be instantiated when is_elyra=True
             mock_converter_class.assert_not_called()
@@ -195,7 +199,7 @@ class TestFlowServiceUpdate:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.update_flow(sample_flow_with_id)
+        result = service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result == sample_flow_with_id
@@ -213,7 +217,7 @@ class TestFlowServiceUpdate:
         # Act
         with patch("docpipe.core.assets.flows.domain.models.flow.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2024, 12, 31, 23, 59, 59, tzinfo=UTC)
-            service.update_flow(sample_flow_with_id)
+            service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
 
         # Assert
         assert sample_flow_with_id.modified_on != original_modified
@@ -226,7 +230,7 @@ class TestFlowServiceUpdate:
 
         # Act & Assert
         with pytest.raises(FlowInvalidDataException, match="Flow ID is required for update"):
-            service.update_flow(sample_flow_domain)
+            service.update_flow(sample_flow_domain, actor=SYSTEM_ACTOR)
 
     def test_update_flow_with_nonexistent_id_raises_error(self, mock_flow_repository, sample_flow_with_id):
         """Test updating a non-existent flow raises FlowNotFoundException."""
@@ -236,7 +240,7 @@ class TestFlowServiceUpdate:
 
         # Act & Assert
         with pytest.raises(DocpipeException, match="not found"):
-            service.update_flow(sample_flow_with_id)
+            service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
 
     def test_update_flow_validates_before_saving(self, mock_flow_repository, sample_flow_with_id):
         """Test that flow validation occurs before updating."""
@@ -247,7 +251,7 @@ class TestFlowServiceUpdate:
 
         # Act & Assert
         with pytest.raises(AssetInvalidDataException, match="flow name cannot be empty"):
-            service.update_flow(sample_flow_with_id)
+            service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
 
         # Verify save was never called
         mock_flow_repository.save.assert_not_called()
@@ -286,7 +290,7 @@ class TestFlowServiceUpdate:
         mock_flow_repository.update.return_value = incoming_flow
         service = FlowService(repository=mock_flow_repository)
 
-        service.update_flow(incoming_flow)
+        service.update_flow(incoming_flow, actor=SYSTEM_ACTOR)
 
         # created_on and created_by must be restored from the stored flow
         assert incoming_flow.created_on == original_created_on
@@ -303,7 +307,7 @@ class TestFlowServicePartialUpdate:
 
         # Act & Assert
         with pytest.raises(FlowInvalidDataException, match="updates dictionary cannot be empty"):
-            service.partial_update_flow("test-123", {})
+            service.partial_update_flow("test-123", {}, actor=SYSTEM_ACTOR)
 
         # Verify repository was never called
         mock_flow_repository.find_by_id.assert_not_called()
@@ -325,7 +329,7 @@ class TestFlowServicePartialUpdate:
         handler.setLevel(logging.INFO)
         flow_logger.addHandler(handler)
         try:
-            result = service.partial_update_flow("test-flow-id-123", updates)
+            result = service.partial_update_flow("test-flow-id-123", updates, actor=SYSTEM_ACTOR)
         finally:
             flow_logger.removeHandler(handler)
 
@@ -350,7 +354,7 @@ class TestFlowServicePartialUpdate:
         updates = {"name": "Updated Flow Name"}
 
         # Act
-        result = service.partial_update_flow("test-flow-id-123", updates)
+        result = service.partial_update_flow("test-flow-id-123", updates, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result.name == "Updated Flow Name"
@@ -368,7 +372,7 @@ class TestFlowServicePartialUpdate:
         updates = {"description": "Updated description"}
 
         # Act
-        result = service.partial_update_flow("test-flow-id-123", updates)
+        result = service.partial_update_flow("test-flow-id-123", updates, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result.description == "Updated description"
@@ -393,7 +397,7 @@ class TestFlowServicePartialUpdate:
         handler.setLevel(logging.WARNING)
         flow_logger.addHandler(handler)
         try:
-            result = service.partial_update_flow("test-flow-id-123", updates)
+            result = service.partial_update_flow("test-flow-id-123", updates, actor=SYSTEM_ACTOR)
         finally:
             flow_logger.removeHandler(handler)
 
@@ -416,7 +420,7 @@ class TestFlowServicePartialUpdate:
 
         # Act & Assert
         with pytest.raises(AssetInvalidDataException, match="flow name cannot be empty"):
-            service.partial_update_flow("test-flow-id-123", updates)
+            service.partial_update_flow("test-flow-id-123", updates, actor=SYSTEM_ACTOR)
 
         # Verify update was never called (partial_update handles validation internally)
         mock_flow_repository.update.assert_not_called()
@@ -429,7 +433,7 @@ class TestFlowServicePartialUpdate:
 
         # Act & Assert
         with pytest.raises(DocpipeException):
-            service.partial_update_flow("nonexistent-id", {"name": "New Name"})
+            service.partial_update_flow("nonexistent-id", {"name": "New Name"}, actor=SYSTEM_ACTOR)
 
 
 class TestFlowServiceDelete:
@@ -442,11 +446,11 @@ class TestFlowServiceDelete:
 
         # Act & Assert - empty string
         with pytest.raises(DocpipeException, match="asset_id cannot be empty"):
-            service.delete_flow("")
+            service.delete_flow("", actor=SYSTEM_ACTOR)
 
         # Act & Assert - whitespace only
         with pytest.raises(DocpipeException, match="asset_id cannot be empty"):
-            service.delete_flow("   ")
+            service.delete_flow("   ", actor=SYSTEM_ACTOR)
 
         # Verify repository was never called
         mock_flow_repository.delete.assert_not_called()
@@ -458,7 +462,7 @@ class TestFlowServiceDelete:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.delete_flow("test-flow-id")
+        result = service.delete_flow("test-flow-id", actor=SYSTEM_ACTOR)
 
         # Assert
         assert result is True
@@ -472,7 +476,7 @@ class TestFlowServiceDelete:
 
         # Act & Assert
         with pytest.raises(DocpipeException, match="Asset with ID 'nonexistent-id' not found"):
-            service.delete_flow("nonexistent-id")
+            service.delete_flow("nonexistent-id", actor=SYSTEM_ACTOR)
 
     def test_delete_flow_handles_repository_exception(self, mock_flow_repository):
         """Test that repository exceptions are propagated."""
@@ -482,7 +486,7 @@ class TestFlowServiceDelete:
 
         # Act & Assert
         with pytest.raises(OSError, match="Delete error"):
-            service.delete_flow("test-id")
+            service.delete_flow("test-id", actor=SYSTEM_ACTOR)
 
 
 class TestFlowServiceBulkDelete:
@@ -502,7 +506,7 @@ class TestFlowServiceBulkDelete:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.bulk_delete_flows(flow_ids)
+        result = service.bulk_delete_flows(flow_ids, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result["total_deleted"] == 3
@@ -525,7 +529,7 @@ class TestFlowServiceBulkDelete:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.bulk_delete_flows(flow_ids)
+        result = service.bulk_delete_flows(flow_ids, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result["total_deleted"] == 2
@@ -542,7 +546,7 @@ class TestFlowServiceBulkDelete:
 
         # Act & Assert
         with pytest.raises(FlowInvalidDataException, match="flow_ids list cannot be empty"):
-            service.bulk_delete_flows([])
+            service.bulk_delete_flows([], actor=SYSTEM_ACTOR)
 
         # Verify repository was never called
         mock_flow_repository.bulk_delete.assert_not_called()
@@ -564,7 +568,7 @@ class TestFlowServiceBulkDelete:
         service = FlowService(repository=mock_flow_repository)
 
         # Act
-        result = service.bulk_delete_flows(flow_ids)
+        result = service.bulk_delete_flows(flow_ids, actor=SYSTEM_ACTOR)
 
         # Assert
         assert result["total_deleted"] == 0
@@ -582,7 +586,7 @@ class TestFlowServiceBulkDelete:
 
         # Act & Assert
         with pytest.raises(OSError, match="Disk error"):
-            service.bulk_delete_flows(flow_ids)
+            service.bulk_delete_flows(flow_ids, actor=SYSTEM_ACTOR)
 
     def test_bulk_delete_flows_parallel_execution(self, mock_flow_repository):
         """Test that bulk delete can handle parallel execution."""
@@ -598,7 +602,7 @@ class TestFlowServiceBulkDelete:
         }
 
         service = FlowService(repository=mock_flow_repository)
-        result = service.bulk_delete_flows(flow_ids)
+        result = service.bulk_delete_flows(flow_ids, actor=SYSTEM_ACTOR)
 
         assert result["total_deleted"] == 20
         assert len(result["deleted"]) == 20
@@ -626,7 +630,7 @@ class TestFlowServiceBulkDelete:
         }
 
         service = FlowService(repository=mock_flow_repository)
-        result = service.bulk_delete_flows(flow_ids)
+        result = service.bulk_delete_flows(flow_ids, actor=SYSTEM_ACTOR)
 
         # Verify partial success
         assert result["total_requested"] == 10
@@ -1097,12 +1101,12 @@ class TestFlowServicePartialUpdateEdgeCases:
     def test_partial_update_flow_raises_on_empty_flow_id(self, mock_flow_repository):
         service = FlowService(repository=mock_flow_repository)
         with pytest.raises(FlowInvalidDataException, match="flow_id cannot be empty"):
-            service.partial_update_flow("", {"description": "x"})
+            service.partial_update_flow("", {"description": "x"}, actor=SYSTEM_ACTOR)
 
     def test_partial_update_flow_raises_on_whitespace_flow_id(self, mock_flow_repository):
         service = FlowService(repository=mock_flow_repository)
         with pytest.raises(FlowInvalidDataException, match="flow_id cannot be empty"):
-            service.partial_update_flow("   ", {"description": "x"})
+            service.partial_update_flow("   ", {"description": "x"}, actor=SYSTEM_ACTOR)
 
     def test_partial_update_flow_returns_existing_when_only_unknown_fields(
         self, mock_flow_repository, sample_flow_with_id
@@ -1111,7 +1115,7 @@ class TestFlowServicePartialUpdateEdgeCases:
         mock_flow_repository.find_by_id.return_value = sample_flow_with_id
         service = FlowService(repository=mock_flow_repository)
 
-        result = service.partial_update_flow("test-flow-id-123", {"unknown_field_xyz": "value"})
+        result = service.partial_update_flow("test-flow-id-123", {"unknown_field_xyz": "value"}, actor=SYSTEM_ACTOR)
 
         assert result == sample_flow_with_id
         mock_flow_repository.partial_update.assert_not_called()
@@ -1123,7 +1127,9 @@ class TestFlowServicePartialUpdateEdgeCases:
         mock_flow_repository.find_by_id.return_value = sample_flow_with_id
         service = FlowService(repository=mock_flow_repository)
 
-        result = service.partial_update_flow("test-flow-id-123", {"flow_id": "new-id", "created_by": "hacker"})
+        result = service.partial_update_flow(
+            "test-flow-id-123", {"flow_id": "new-id", "created_by": "hacker"}, actor=SYSTEM_ACTOR
+        )
 
         assert result == sample_flow_with_id
         mock_flow_repository.partial_update.assert_not_called()
@@ -1136,7 +1142,7 @@ class TestFlowServiceUpdateFlowIdWhitespace:
         service = FlowService(repository=mock_flow_repository)
         sample_flow_domain.flow_id = "   "
         with pytest.raises(FlowInvalidDataException, match="Flow ID is required for update"):
-            service.update_flow(sample_flow_domain)
+            service.update_flow(sample_flow_domain, actor=SYSTEM_ACTOR)
 
 
 class TestFlowServiceContainerIdFilter:
