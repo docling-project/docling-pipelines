@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Configuration model for the Google Drive destination adapter."""
 
 from pathlib import Path
@@ -26,6 +29,13 @@ class GoogleDriveDestinationConfig(BaseModel):
           credentials:
             service_account_json_path: "${GDRIVE_SA_JSON_PATH}"
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "service_account_json_path",
+        "credentials_path",
+        "token_path",
+    )
 
     # Google Drive destination configuration
     folder_id: str = Field(

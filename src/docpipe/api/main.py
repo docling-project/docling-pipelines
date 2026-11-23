@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """FastAPI application main entry point.
 
 This module configures the FastAPI application with:
@@ -28,11 +31,19 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from docpipe.api.api_router import api_router
-from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.bootstrap_auth import BootstrapAdminAuthenticator
+from docpipe.api.auth.config import get_auth_settings
+from docpipe.api.auth.dependencies import CSRF_HEADER, get_current_user
 from docpipe.api.auth.jwt_handler import JWTClaims, JWTConfig, create_access_token
 from docpipe.api.auth.ldap_auth import LDAPAuthenticator, LDAPConfig
-from docpipe.api.auth.models import LoginRequest, TokenResponse, User
+from docpipe.api.auth.models import AuthConfigResponse, LoginRequest, LoginResponse, User
+from docpipe.api.auth.oauth2_config import get_oauth2_config
+from docpipe.api.auth.oauth2_provider import group_claim_names
+from docpipe.api.auth.oauth2_routes import list_enabled_providers
 from docpipe.api.auth.oauth2_routes import router as oauth2_router
+from docpipe.api.auth.ports import AuthenticatorPort
+from docpipe.api.auth.session_cookie import clear_session_cookie, set_session_cookie
+from docpipe.api.auth.startup_validation import validate_auth_startup
 from docpipe.api.middleware.api_logging_middleware import ApiLoggingMiddleware
 from docpipe.api.middleware.error_handler import (
     docpipe_exception_handler,
@@ -42,8 +53,10 @@ from docpipe.api.middleware.error_handler import (
 )
 from docpipe.api.middleware.payload_validation import PayloadValidationMiddleware
 from docpipe.api.middleware.rate_limit import (
-    RATE_LIMIT_WINDOW_SECONDS,
-    check_login_rate_limit,
+    get_client_ip,
+    login_retry_after,
+    record_failed_login,
+    reset_login_failures,
 )
 from docpipe.api.middleware.security_headers import SecurityHeadersMiddleware
 from docpipe.api.middleware.transaction_middleware import TransactionMiddleware
@@ -52,6 +65,7 @@ from docpipe.core.constants.constants import EnvironmentVariables
 from docpipe.core.event_streaming.factory import EventStreamingFactory
 from docpipe.core.job_management.adapters.config.job_management_factory import get_default_factory
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.audit import sanitize_for_log
 from docpipe.utils.infrastructure.logging import (
     configure_third_party_loggers,
     set_dpk_log_level_from_ds_log_level,
@@ -161,6 +175,7 @@ def _start_bff() -> tuple[subprocess.Popen | None, str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan."""
+    _initialize_auth_at_startup()
     try:
         get_default_factory().initialize_storage()
     except Exception as exc:
@@ -172,6 +187,10 @@ async def lifespan(app: FastAPI):
     from docpipe.integrations.secrets.vault_initializer import initialize_secret_providers
 
     initialize_secret_providers()
+    # Build the audit handlers now so a bad audit.file shows up at start-up (fail-open: stdout stays active)
+    from docpipe.utils.infrastructure.audit import initialize_audit_logger
+
+    initialize_audit_logger()
     event_listener = EventStreamingFactory.create_kafka_listener()
     bff_process, started_bff_url = _start_bff()
     # Shared AsyncClient — reused across all proxy_to_bff requests so the
@@ -196,6 +215,7 @@ async def lifespan(app: FastAPI):
             event_listener.start()
         yield
     finally:
+        _reset_auth_on_shutdown()
         if event_listener is not None:
             await event_listener.stop()
         if app.state.bff_client is not None:
@@ -268,28 +288,77 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-try:
-    ldap_authenticator: LDAPAuthenticator | None = None
-    ldap_config: LDAPConfig | None = LDAPConfig()
-    if ldap_config:
-        ldap_authenticator = LDAPAuthenticator(ldap_config)
+_UNINITIALIZED = object()
 
+ldap_config: LDAPConfig | None = None
+ldap_authenticator: LDAPAuthenticator | None | object = _UNINITIALIZED
+jwt_config: JWTConfig | None | object = _UNINITIALIZED
+bootstrap_authenticator: BootstrapAdminAuthenticator | None | object = _UNINITIALIZED
+
+
+def _init_ldap_authenticator() -> LDAPAuthenticator | None:
+    """Initialize the LDAP authenticator from the current environment if configured."""
+    global ldap_config
     try:
-        jwt_config: JWTConfig | None = JWTConfig()
-        logger.info("Authentication configurations initialized successfully")
+        ldap_config = LDAPConfig()
+        # LDAP counts as configured only when a server is set, so a deployment with neither LDAP
+        # nor the bootstrap administrator answers login with 503.
+        if ldap_config and ldap_config.ldap_server:
+            return LDAPAuthenticator(ldap_config)
     except Exception as e:
-        logger.warning(
-            "JWT secret key not configured: %s. Login and token issuance "
-            "are disabled. Set JWT_SECRET_KEY to enable authentication.",
-            e,
-        )
-        jwt_config = None
+        logger.error("Failed to initialize LDAP configuration: %s", e)
+        ldap_config = None
+    return None
 
-except Exception as e:
-    logger.error("Failed to initialize authentication configurations: %s", e)
-    ldap_config = None
-    jwt_config = None
-    ldap_authenticator = None
+
+def _get_ldap_authenticator() -> LDAPAuthenticator | None:
+    """Return the active LDAP authenticator, initializing lazily when lifespan did not run."""
+    if ldap_authenticator is not _UNINITIALIZED:
+        return cast(LDAPAuthenticator | None, ldap_authenticator)
+    return _init_ldap_authenticator()
+
+
+def _get_jwt_config() -> JWTConfig | None:
+    """Return the active JWT configuration, validating lazily when lifespan did not run."""
+    if jwt_config is not _UNINITIALIZED:
+        return cast(JWTConfig | None, jwt_config)
+    return validate_auth_startup(settings=get_auth_settings(), cors_origins=allowed_origins)
+
+
+def _get_bootstrap_authenticator() -> BootstrapAdminAuthenticator | None:
+    """Return the active bootstrap authenticator, initializing lazily when lifespan did not run."""
+    if bootstrap_authenticator is not _UNINITIALIZED:
+        return cast(BootstrapAdminAuthenticator | None, bootstrap_authenticator)
+    return BootstrapAdminAuthenticator.from_settings(settings=get_auth_settings())
+
+
+def _initialize_auth_at_startup() -> None:
+    """Validate and initialize auth configuration during application lifespan startup."""
+    global ldap_authenticator, jwt_config, bootstrap_authenticator
+    settings = get_auth_settings()
+    if ldap_authenticator is _UNINITIALIZED:
+        ldap_authenticator = _init_ldap_authenticator()
+    # Fails startup with a ConfigurationError when auth is enabled and JWT_SECRET_KEY is missing, weak or
+    # a placeholder. A bad configuration must never silently disable login.
+    if jwt_config is _UNINITIALIZED:
+        jwt_config = validate_auth_startup(settings=settings, cors_origins=allowed_origins)
+    # The bootstrap administrator is configured outside the LDAP try block on purpose: a partial
+    # or invalid configuration must stop startup instead of silently disabling the break-glass login.
+    if bootstrap_authenticator is _UNINITIALIZED:
+        bootstrap_authenticator = BootstrapAdminAuthenticator.from_settings(settings=settings)
+    logger.info(
+        "OIDC role mapping reads groups from the %s claim(s)",
+        ", ".join(group_claim_names(config=get_oauth2_config())),
+    )
+
+
+def _reset_auth_on_shutdown() -> None:
+    """Reset lifespan-initialized auth globals on shutdown."""
+    global ldap_authenticator, jwt_config, bootstrap_authenticator
+    ldap_authenticator = _UNINITIALIZED
+    jwt_config = _UNINITIALIZED
+    bootstrap_authenticator = _UNINITIALIZED
+
 
 # More specific handlers first, then generic.
 app.add_exception_handler(DocpipeException, cast(Any, docpipe_exception_handler))
@@ -324,29 +393,48 @@ async def health_check():
     return HealthCheckResponse(status="healthy")
 
 
-@app.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: LoginRequest, request: Request):
-    """Authenticate user via LDAP and return JWT token.
+@app.post("/auth/login", response_model=LoginResponse, response_model_exclude_none=True)
+async def login(credentials: LoginRequest, request: Request, response: Response):
+    """Authenticate with the configured authenticators, set the session cookie and return the token.
+
+    Browser clients (requests carrying ``X-Requested-With``) receive only the HttpOnly session
+    cookie and the ``user`` object in the JSON body (``access_token`` is omitted). Non-browser
+    script clients receive ``access_token`` in the JSON body as well.
 
     Args:
         credentials: Login credentials (username and password)
-        request: FastAPI request object (used for rate limiting)
+        request: FastAPI request object (used for rate limiting and the cookie ``Secure`` flag)
+        response: Response that carries the session cookie
 
     Returns:
-        TokenResponse with access token
+        LoginResponse with the access token (for script clients) and the authenticated user
 
     Raises:
-        HTTPException: If authentication fails or LDAP is not configured
+        HTTPException: 401 if authentication fails, 429 if throttled, 503 if no login method is configured
     """
-    client_ip = request.client.host if request.client else "unknown"
-    if not check_login_rate_limit(client_ip=client_ip):
-        logger.warning("Rate limit exceeded for login from IP: %s", client_ip)
+    settings = get_auth_settings()
+    client_ip = get_client_ip(
+        request=request,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_count=settings.trusted_proxy_count,
+    )
+    retry_after = login_retry_after(client_ip=client_ip, username=credentials.username)
+    if retry_after:
+        logger.warning("Login throttled for client address: %s", sanitize_for_log(client_ip))
+        # The body is identical whether or not the username exists.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many login attempts. Please wait {RATE_LIMIT_WINDOW_SECONDS} seconds before retrying.",
+            detail="Too many failed login attempts. Please wait before retrying.",
+            headers={"Retry-After": str(retry_after)},
         )
 
-    if ldap_authenticator is None or jwt_config is None:
+    active_bootstrap = _get_bootstrap_authenticator()
+    active_ldap = _get_ldap_authenticator()
+    active_jwt = _get_jwt_config()
+    authenticators: list[AuthenticatorPort] = [
+        candidate for candidate in (active_bootstrap, active_ldap) if candidate is not None
+    ]
+    if not authenticators or active_jwt is None:
         logger.error("Authentication not configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -354,33 +442,87 @@ async def login(credentials: LoginRequest, request: Request):
         )
 
     try:
-        user: User | None = ldap_authenticator.authenticate(credentials.username, credentials.password)
+        user: User | None = None
+        for authenticator in authenticators:
+            user = authenticator.authenticate(username=credentials.username, password=credentials.password)
+            if user is not None:
+                break
 
         if not user:
-            logger.warning("Failed login attempt for user: %s", credentials.username)
+            record_failed_login(client_ip=client_ip, username=credentials.username)
+            logger.warning("Failed login attempt for user: %s", sanitize_for_log(credentials.username))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password",
+                detail="Invalid credentials",
             )
 
+        reset_login_failures(client_ip=client_ip, username=credentials.username)
         token_data = {
             JWTClaims.USERNAME: user.username,
             JWTClaims.EMAIL: user.email,
             JWTClaims.FULL_NAME: user.full_name,
+            JWTClaims.ROLES: [role.value for role in user.roles],
         }
-        access_token: str = create_access_token(token_data, jwt_config)
+        access_token: str = create_access_token(token_data, active_jwt)
+        set_session_cookie(
+            response=response,
+            request=request,
+            settings=settings,
+            token=access_token,
+            max_age_seconds=active_jwt.jwt_access_token_expire_minutes * 60,
+        )
 
-        logger.info("User logged in successfully: %s", credentials.username)
-        return TokenResponse(access_token=access_token)
+        logger.info("User logged in successfully: %s", sanitize_for_log(user.username))
+        is_browser_client = bool(request.headers.get(CSRF_HEADER, "").strip())
+        return LoginResponse(
+            access_token=None if is_browser_client else access_token,
+            user=user,
+        )
 
     except (HTTPException, DocpipeException):
         raise
     except Exception as e:
-        logger.error("Login error for user %s: %s", credentials.username, e)
+        logger.error("Login error for user %s: %s", sanitize_for_log(credentials.username), e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service error",
         ) from e
+
+
+@app.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    """Clear the session cookie.
+
+    Succeeds with or without a valid session, so an expired cookie can still be cleared. A
+    token that was already issued stays valid until it expires (up to 30 minutes).
+
+    Args:
+        request: FastAPI request object
+        response: Response that carries the expiring cookie
+
+    Returns:
+        Confirmation message
+    """
+    clear_session_cookie(response=response, request=request, settings=get_auth_settings())
+    return {"message": "Logged out"}
+
+
+@app.get("/auth/config", response_model=AuthConfigResponse)
+async def get_auth_config():
+    """Describe the authentication setup to unauthenticated callers.
+
+    Returns:
+        Whether auth is enabled, whether credential login is available, and the OIDC providers
+        (name, display name and authorize URL only; never ids, secrets or endpoint addresses)
+    """
+    active_bootstrap = _get_bootstrap_authenticator()
+    active_ldap = _get_ldap_authenticator()
+    active_jwt = _get_jwt_config()
+    return AuthConfigResponse(
+        auth_enabled=get_auth_settings().enabled,
+        credential_login=(active_bootstrap is not None or active_ldap is not None) and active_jwt is not None,
+        providers=list_enabled_providers(),
+    )
 
 
 @app.get("/auth/me", response_model=User)
@@ -388,25 +530,12 @@ async def get_current_user_info(current_user: Annotated[User, Depends(get_curren
     """Get current authenticated user information.
 
     Args:
-        current_user: Current authenticated user from JWT token
+        current_user: Current authenticated user from the session
 
     Returns:
-        User information
+        User information, including roles
     """
     return current_user
-
-
-@app.get("/protected")
-async def protected_route(current_user: Annotated[User, Depends(get_current_user)]):
-    """Example protected endpoint requiring authentication.
-
-    Args:
-        current_user: Current authenticated user from JWT token
-
-    Returns:
-        Welcome message with username
-    """
-    return {"message": f"Hello {current_user.username}", "user": current_user}
 
 
 app.include_router(oauth2_router)

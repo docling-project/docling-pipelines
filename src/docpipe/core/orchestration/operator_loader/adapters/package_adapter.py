@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Package adapter for loading custom operators from installed Python packages."""
 
 import importlib
@@ -15,6 +18,7 @@ from docpipe.core.orchestration.operator_loader.adapters.factories.operator_sour
 from docpipe.core.orchestration.operator_loader.ports.operator_source import (
     OperatorInfo,
     OperatorSourcePort,
+    TrustClass,
     ValidationResult,
 )
 from docpipe.core.orchestration.operator_loader.validator import OperatorValidator
@@ -168,6 +172,7 @@ class PackageAdapter(OperatorSourcePort):
                             module_path=entry_point.value,
                             category=str(getattr(operator_class, OperatorConstants.Misc.CATEGORY)),
                             source_location=f"{self.ADAPTER_NAME}:{self.package_name}",
+                            trust_class=TrustClass.DEPLOYER_INSTALLED,
                         )
                         operators.append(op_info)
 
@@ -209,6 +214,7 @@ class PackageAdapter(OperatorSourcePort):
                         module_path=f"{self.full_module_path}:{class_attribute}",
                         category=str(getattr(op_class, OperatorConstants.Misc.CATEGORY)),
                         source_location=f"{self.ADAPTER_NAME}:{self.package_name}",
+                        trust_class=TrustClass.DEPLOYER_INSTALLED,
                     )
                     operators.append(op_info)
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for document_classifier operator.
 Tests the operator with sample documents from the fixtures directory.
@@ -1091,3 +1094,49 @@ def test_document_classifier_validate_unsupported_provider():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_new_document_formats_are_classifiable():
+    """Classifier accepts the added formats except plain-text variants."""
+    from docpipe.core.constants.operator_constants import OperatorConstants
+
+    extensions = set(OperatorConstants.FileExtensions.CLASSIFICATION_FILE_EXTENSIONS)
+    assert {
+        f".{ext}"
+        for ext in "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht pptm xlsm xltx xltm".split()
+    } <= extensions
+    assert not {".markdown", ".text", ".qmd", ".rmd"} & extensions
+
+
+def test_new_formats_classification_validation(basic_litellm_config):
+    names = [
+        f"sample.{ext}"
+        for ext in "csv epub eml msg tex latex adoc asciidoc asc vtt htm xhtml mhtml mht pptm xlsm xltx xltm markdown".split()
+    ]
+    table = pa.table({"id": [str(i) for i in range(len(names))], "name": names, "content": ["example"] * len(names)})
+    adapter = MagicMock()
+    adapter.classify_document.return_value = ClassificationResponse(
+        document_type="invoice", confidence=9, reasoning="Test", success=True
+    )
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as factory:
+        factory.create_adapter.return_value = adapter
+        operator = DocumentClassifierOperator(basic_litellm_config)
+        _, metadata = operator.transform(table)
+    assert metadata["processed_docs"] == len(names) - 1
+    assert [doc["name"] for doc in metadata["skipped_docs"]] == ["sample.markdown"]
+
+
+def test_unreadable_office_variants_are_not_classified(basic_litellm_config):
+    names = [f"sample.{extension}" for extension in ("dotx", "docm", "dotm", "potx", "ppsx", "potm", "ppsm")]
+    table = pa.table({"id": [str(i) for i in range(len(names))], "name": names, "content": ["example"] * len(names)})
+    adapter = MagicMock()
+    with patch(
+        "docpipe.core.operators.quality.classification.document_classifier.ClassificationAdapterFactory"
+    ) as factory:
+        factory.create_adapter.return_value = adapter
+        operator = DocumentClassifierOperator(basic_litellm_config)
+        _, metadata = operator.transform(table)
+    assert {doc["name"] for doc in metadata["skipped_docs"]} == set(names)
+    adapter.classify_document.assert_not_called()

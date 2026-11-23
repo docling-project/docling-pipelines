@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, act, waitFor, fireEvent } from '@testing-library/react';
 import { ProjectsCard } from '@/components/cards/ProjectsCard';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
+import { authStateFixture } from '../../../mocks/fixtures/store.fixture';
 import { server } from '../../../mocks/server';
 import { http, HttpResponse } from 'msw';
 
@@ -556,5 +557,48 @@ describe('ProjectsCard', () => {
     expect(rows.length).toBeLessThanOrEqual(5);
     // Row 5 (the oldest) should be cut off
     expect(screen.queryByText('Row 5')).not.toBeInTheDocument();
+  });
+});
+
+// ── permission gating ─────────────────────────────────────────────────────
+
+describe('ProjectsCard permission gating', () => {
+  const GATED = [
+    { role: 'viewer', enabled: false },
+    { role: 'editor', enabled: true },
+    { role: 'admin', enabled: true },
+  ] as const;
+
+  describe.each(GATED)('$role', ({ role, enabled }) => {
+    it('gates the header create button', async () => {
+      useOneProjectApi();
+      await act(async () => { renderCard({ preloadedState: { auth: authStateFixture({ role }) } }); });
+      await screen.findByText('Alpha Project');
+      expect(getHeaderIconButton()?.hasAttribute('disabled')).toBe(!enabled);
+    });
+
+    it('gates the empty-state create CTA', async () => {
+      useEmptyProjectsApi();
+      await act(async () => { renderCard({ preloadedState: { auth: authStateFixture({ role }) } }); });
+      await waitForEmptyState();
+      const cta = screen.getByText('Create project', { selector: 'button' });
+      expect(cta.hasAttribute('disabled')).toBe(!enabled);
+    });
+  });
+
+  it('explains the missing role on the disabled create actions for a viewer', async () => {
+    useEmptyProjectsApi();
+    await act(async () => { renderCard({ preloadedState: { auth: authStateFixture({ role: 'viewer' }) } }); });
+    await waitForEmptyState();
+    expect(
+      screen.getAllByText('You need the editor role to do this', { selector: '[role="tooltip"] *' }).length
+    ).toBe(2);
+  });
+
+  it('keeps project navigation available for a viewer', async () => {
+    useOneProjectApi();
+    await act(async () => { renderCard({ preloadedState: { auth: authStateFixture({ role: 'viewer' }) } }); });
+    fireEvent.click(await screen.findByText('Alpha Project'));
+    expect(mockNavigate).toHaveBeenCalled();
   });
 });

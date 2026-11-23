@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """S3 adapter for loading custom operators from S3 buckets."""
 
 from pathlib import Path
@@ -18,6 +21,7 @@ from docpipe.core.orchestration.operator_loader.adapters.filesystem_adapter impo
 from docpipe.core.orchestration.operator_loader.ports.operator_source import (
     OperatorInfo,
     OperatorSourcePort,
+    TrustClass,
     ValidationResult,
 )
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
@@ -82,9 +86,12 @@ class S3Adapter(OperatorSourcePort):
         # Download operators to cache
         self._download_operators()
 
-        # Delegate to filesystem adapter for actual loading
+        # Delegate to filesystem adapter for discovery. Object-store operators are always untrusted, whatever the
+        # local cache path is, so they are described from their AST and never imported.
         # Type checker has issues with decorator type inference
-        self.filesystem_adapter = FilesystemAdapter(str(self.cache_dir / self.prefix))  # type: ignore[call-arg]
+        self.filesystem_adapter = FilesystemAdapter(  # type: ignore[call-arg]
+            str(self.cache_dir / self.prefix), trust_class=TrustClass.UNTRUSTED
+        )
 
         logger.info("Initialized S3 adapter for %s, cache: %s", self.uri, self.cache_dir)
 

@@ -290,7 +290,7 @@ export function VectorDBPanelBody({
         database: milvusDatabase,
         secure: milvusSecure,
       };
-      if (milvusAuthType !== 'uri') {
+      if (milvusAuthType !== 'uri' && milvusAuthType !== 'lite') {
         defaults.host = milvusHost;
         defaults.port = Number(milvusPort);
       }
@@ -299,6 +299,24 @@ export function VectorDBPanelBody({
     return parsedSavedConfig;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, parsedSavedConfig]);
+
+  // ── Upstream feature inspection for Milvus Lite restriction ───────────────
+  const hasUpstreamBinaryVector = useMemo(
+    () =>
+      Object.values(currentNodeInputFeatures).some(
+        (feature) => feature?.type === 'vector_binary'
+      ),
+    [currentNodeInputFeatures]
+  );
+
+  const showMilvusLiteBinaryWarning =
+    provider === VECTORDB_PROVIDERS.MILVUS &&
+    milvusAuthType === 'lite' &&
+    hasUpstreamBinaryVector;
+
+  const showOpenSearchBinaryWarning =
+    provider === VECTORDB_PROVIDERS.OPENSEARCH &&
+    hasUpstreamBinaryVector;
 
   // ── Required param validation ─────────────────────────────────────────────
   const validate = getRequiredParamValidator(nodeAttributes);
@@ -506,7 +524,7 @@ export function VectorDBPanelBody({
 
             {provider === VECTORDB_PROVIDERS.MILVUS && (
               <div className={common.accordionContent}>
-                {milvusAuthType !== 'uri' && (
+                {milvusAuthType !== 'uri' && milvusAuthType !== 'lite' && (
                   <>
                     <div className={common.formField}>
                       <TextInput
@@ -544,7 +562,7 @@ export function VectorDBPanelBody({
                     placeholder="default"
                   />
                 </div>
-                {milvusAuthType !== 'uri' && (
+                {milvusAuthType !== 'uri' && milvusAuthType !== 'lite' && (
                   <div className={common.formField}>
                     <Toggle
                       id="milvus-secure"
@@ -664,7 +682,7 @@ export function VectorDBPanelBody({
                     id="milvus-auth-type"
                     label={intl.formatMessage(messages.selectAuthType)}
                     titleText={intl.formatMessage(messages.authType)}
-                    items={['standalone', 'grpc', 'uri', 'token']}
+                    items={['standalone', 'grpc', 'uri', 'token', 'lite']}
                     selectedItem={milvusAuthType}
                     onChange={({ selectedItem }: { selectedItem?: string | null }) => {
                       if (selectedItem) {
@@ -740,7 +758,7 @@ export function VectorDBPanelBody({
                     />
                   </div>
                 )}
-                {milvusAuthType === 'uri' && (
+                {(milvusAuthType === 'uri' || milvusAuthType === 'lite') && (
                   <div className={common.formField}>
                     <TextInput
                       id="milvus-uri"
@@ -749,7 +767,7 @@ export function VectorDBPanelBody({
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         updateMilvusAuthField('uri', e.target.value);
                       }}
-                      placeholder="https://xxx.zillizcloud.com"
+                      placeholder={milvusAuthType === 'lite' ? './milvus_demo.db' : 'https://xxx.zillizcloud.com'}
                     />
                   </div>
                 )}
@@ -777,6 +795,32 @@ export function VectorDBPanelBody({
           </AccordionItem>
         </Accordion>
       </div>
+
+      {/* ── Milvus Lite binary vector restriction warning ── */}
+      {showMilvusLiteBinaryWarning && (
+        <div className={common.formField}>
+          <InlineNotification
+            kind="warning"
+            title={intl.formatMessage(messages.milvusLiteBinaryWarningTitle)}
+            subtitle={intl.formatMessage(messages.milvusLiteBinaryWarning)}
+            lowContrast
+            hideCloseButton
+          />
+        </div>
+      )}
+
+      {/* ── OpenSearch binary vector restriction warning ── */}
+      {showOpenSearchBinaryWarning && (
+        <div className={common.formField}>
+          <InlineNotification
+            kind="warning"
+            title={intl.formatMessage(messages.openSearchBinaryWarningTitle)}
+            subtitle={intl.formatMessage(messages.openSearchBinaryWarning)}
+            lowContrast
+            hideCloseButton
+          />
+        </div>
+      )}
 
       {/* ── Provider configuration validation error ── */}
       {providerConfigError && (

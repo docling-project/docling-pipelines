@@ -1,6 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Pydantic config models for LLM-based entity extraction adapters."""
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +14,12 @@ class LLMEntityConfig(BaseModel):
     Describes the fields the user writes inside ``entity_extraction.provider_config``
     when selecting the ``litellm`` provider in an Extract operator node.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "api_base",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
@@ -47,6 +56,13 @@ class WatsonxEntityConfig(LLMEntityConfig):
     instead. ``temperature`` and ``max_tokens`` are read by the entity extraction
     factory, not by WatsonXAdapter directly.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "api_base",
+        "url",
+    )
 
     model_config = ConfigDict(extra="ignore")
 
