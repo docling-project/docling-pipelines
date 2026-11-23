@@ -60,4 +60,4 @@ Stdio is the standard for local agent integrations. It requires zero network por
 - **Arguments**:
   - `job_id` (string, required): Job identifier.
   - `job_run_id` (string, optional): Specific job run identifier.
-- **Behavior**: Reads execution stats from the DuckDB job store (`data/duckdb/job_stats.duckdb`).
+- **Behavior**: Reads execution stats via the configured job stats store/service (supporting both DuckDB and PostgreSQL backends).

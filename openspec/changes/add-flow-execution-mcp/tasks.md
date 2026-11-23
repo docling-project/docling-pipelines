@@ -7,7 +7,7 @@
   - [ ] 2.1 Implement `validate_flow` tool using `DocpipeFlowManager.validate()`
   - [ ] 2.2 Implement `create_flow` tool with pre-validation and file output
   - [ ] 2.3 Implement `run_flow` tool using `DocpipeFlowManager.execute()`
-  - [ ] 2.4 Implement `get_job_status` tool querying `DuckDBJobStatsStore`
+  - [ ] 2.4 Implement `get_job_status` tool querying the configured job stats store via domain port/service
 - [ ] 3. Server assembly
   - [ ] 3.1 Implement `create_server()` in `src/docpipe/mcp/server.py` with stdio transport
   - [ ] 3.2 Implement CLI entrypoint in `src/docpipe/mcp/__main__.py`
