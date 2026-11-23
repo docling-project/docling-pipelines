@@ -52,6 +52,7 @@ dependencies = [
     "milvus-lite==3.2.2",
     "mlx==0.32.4; sys_platform == 'darwin'",
     "msal==1.39.0",
+    "networkx==3.7",
     "nltk==3.10.4",
     "numpy>=2.0.0,<3.0.0",
     "o365==2.1.10",

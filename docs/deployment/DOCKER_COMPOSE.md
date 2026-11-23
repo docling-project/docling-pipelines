@@ -31,7 +31,7 @@ docker compose -f docker/docker-compose.yml build
 or, for a GPU build, use:
 
 ```bash
-# docker compose -f docker/docker-compose.yml build --build-arg COMPUTE_BACKEND=gpu
+# docker compose -f docker/docker-compose.yml build --build-arg DEPENDENCIES=gpu
 ```
 
 ## Step 3: Start Application

@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'darwin'",
@@ -1329,6 +1329,7 @@ dependencies = [
     { name = "milvus-lite" },
     { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "msal" },
+    { name = "networkx" },
     { name = "nltk" },
     { name = "numpy" },
     { name = "o365" },
@@ -1498,6 +1499,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.4.0" },
     { name = "nbconvert", marker = "extra == 'notebooks'", specifier = "==7.17.2" },
     { name = "nbformat", marker = "extra == 'notebooks'", specifier = "==5.10.4" },
+    { name = "networkx", specifier = "==3.7" },
     { name = "nltk", specifier = "==3.10.4" },
     { name = "numpy", specifier = ">=2.0.0,<3.0.0" },
     { name = "o365", specifier = "==2.1.10" },

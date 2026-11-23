@@ -28,12 +28,12 @@ RUN pip install --no-cache-dir uv
 
 # Cache dependencies separately from backend source changes.
 COPY pyproject.toml uv.lock ./
-ARG COMPUTE_BACKEND=cpu
-# Use CPU dependencies by default, or select GPU support with COMPUTE_BACKEND=gpu.
-# Install the pinned torch and torchvision versions separately using CPU wheels.
-# This avoids CUDA dependencies while keeping pyproject.toml and uv.lock unchanged.
+COPY slim/pyproject.toml slim/uv.lock ./slim/
+ARG DEPENDENCIES=cpu
+# Select CPU-only wheels or locked GPU dependencies without changing the lockfile.
+# Slim installs the default dependencies from its own lockfile.
 RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
-    case "$COMPUTE_BACKEND" in \
+    case "$DEPENDENCIES" in \
         gpu) \
             uv export --locked --no-dev --no-emit-project \
                 --format pylock.toml --output-file pylock.toml && \
@@ -50,10 +50,15 @@ RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
                 --format requirements.txt --output-file requirements-cpu.txt && \
             uv pip install --python /opt/docpipe-venv/bin/python \
                 --no-cache --torch-backend=cpu -r requirements-cpu.txt ;; \
-        *) echo "COMPUTE_BACKEND must be cpu or gpu" >&2; exit 1 ;; \
+        slim) \
+            uv export --project slim --locked --no-dev --no-emit-project \
+                --format pylock.toml --output-file pylock.toml && \
+            uv pip install --python /opt/docpipe-venv/bin/python \
+                --no-cache --require-hashes -r pylock.toml ;; \
+        *) echo "DEPENDENCIES must be cpu, gpu, or slim" >&2; exit 1 ;; \
     esac
 
-# Run the API and serve the built UI as a non-root user.
+# Run the API and serve the UI as a non-root user.
 FROM registry.access.redhat.com/ubi9/python-312-minimal
 
 USER root
