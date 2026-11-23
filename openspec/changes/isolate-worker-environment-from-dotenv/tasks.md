@@ -2,7 +2,7 @@
 
 ## 1. Regression tests first
 
-- [ ] 1.1 [backend] Add a test beside `tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py` that makes a synthetic `.env` containing a canary credential discoverable by `load_dotenv()` (use a temporary source root or monkeypatched discovery, never the real repository `.env`), starts a real worker, and asserts the canary name and value are absent from the worker's environment. Confirm it fails on current code. Verify with `pytest tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py`.
+- [ ] 1.1 [backend] Add a test (a real worker subprocess, not a check of the dictionary returned by `build_worker_environment`) beside `tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py` that makes a synthetic `.env` containing a canary credential discoverable by `load_dotenv()` (use a temporary source root or monkeypatched discovery, never the real repository `.env`), starts a real worker, and asserts the canary name and value are absent from the worker's environment. Confirm it fails on current code. Verify with `pytest tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py`.
 - [ ] 1.2 [backend] Add tests that, in a process without `PYTHON_DOTENV_DISABLED`, a discoverable `.env` is loaded and does not override an existing variable, and that with `PYTHON_DOTENV_DISABLED=1` it is not loaded. Verify with `pytest tests/unit/utils/infrastructure/`.
 
 ## 2. Implementation
@@ -17,5 +17,5 @@
 ## 4. Validation
 
 - [ ] 4.1 [backend] Run the acceptance test with a real `.env` present and with none: `pytest tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py::TestHostileOperator::test_no_inherited_environment_beyond_the_allowlist`.
-- [ ] 4.2 [backend] Run `ruff check`, `ruff format --check` and `mypy` on the changed files, and `pytest tests/unit/core/orchestration/ tests/unit/utils/infrastructure/ --ignore=tests/unit/utils/infrastructure/test_rate_limiter.py --ignore=tests/unit/utils/infrastructure/test_audit.py`. The two ignored modules are baseline failures tracked separately.
+- [ ] 4.2 [backend] Run `ruff check`, `ruff format --check` and `mypy` on the changed files, and `pytest tests/unit/core/orchestration/ tests/unit/utils/infrastructure/ --ignore=tests/unit/utils/infrastructure/test_rate_limiter.py`. The ignored rate-limiter module is a baseline failure tracked separately; `test_audit.py` is not ignored because its failure is test-order dependence tracked in #682.
 - [ ] 4.3 [backend] Run `openspec validate isolate-worker-environment-from-dotenv --strict`, then `pre-commit run --from-ref origin/main --to-ref HEAD` after committing.

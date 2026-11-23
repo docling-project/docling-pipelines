@@ -1,9 +1,17 @@
 # Spec Delta
 
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Isolated worker is spawned with an allowlisted environment
-The environment supplied when spawning a custom-operator worker under `custom_operators.isolation: process` SHALL contain only the allowlisted variables plus the variables the parent sets to operate the worker, and none of those SHALL carry a secret. Variables the operating system or the Python runtime add to a started process are outside this guarantee.
+### Requirement: Isolation guarantee is limited to in-memory and inherited state
+The `process` mode SHALL guarantee only that the worker holds no in-memory or inherited secret state, and SHALL NOT be described as blocking same-UID reads of `/proc/<ppid>/environ`, token or AppRole files, metadata endpoints, or outbound connections. The environment supplied when spawning the worker SHALL contain only the allowlisted variables plus the variables the parent sets to operate the worker, and none of those SHALL carry a secret; variables the operating system or the Python runtime add to a started process are outside this guarantee. Documentation SHALL state a distinct worker UID, restricted token location, and egress restriction as deployment preconditions.
+
+#### Scenario: Claim limited in tests
+- **WHEN** the hostile custom operator suite runs under `process` isolation
+- **THEN** it asserts only that the worker obtains no provider object, no registry entry, no other node's configuration, and no inherited environment variable or file descriptor beyond the allowlist and the variables the parent sets to operate the worker
+
+#### Scenario: Preconditions documented
+- **WHEN** the secrets guide is read
+- **THEN** it lists the distinct UID, token-file permissions, and egress restriction as deployment preconditions for `process` isolation
 
 #### Scenario: Spawn environment is exact
 - **WHEN** the parent builds the environment for a worker
@@ -12,6 +20,8 @@ The environment supplied when spawning a custom-operator worker under `custom_op
 #### Scenario: Credential variables in the parent are still dropped
 - **WHEN** the parent environment holds credential-like variables outside the allowlist
 - **THEN** the worker's environment does not contain them
+
+## ADDED Requirements
 
 ### Requirement: Isolated worker does not auto-load a .env file
 A custom-operator worker SHALL NOT load a `.env` file, from the repository root or any other location, as a side effect of importing application modules, so no dotenv-derived variable appears in its environment.

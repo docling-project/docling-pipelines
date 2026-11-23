@@ -9,7 +9,7 @@ The failure is reproducible on clean `origin/main`: `test_no_inherited_environme
 ## What Changes
 
 - **Backend: the worker environment disables `.env` loading.** `build_worker_environment` sets `PYTHON_DOTENV_DISABLED=1`, the switch `python-dotenv` (pinned `==1.2.4`) already honours inside `load_dotenv()`. The policy lives in the worker-environment builder only. `config.py` and every application process are unchanged.
-- **Backend: regression coverage.** A test starts a real worker with a discoverable `.env` holding a synthetic canary and asserts the canary is absent. A second test asserts the application still loads a `.env` and does not override existing variables.
+- **Backend: regression coverage.** A test starts a real worker subprocess with a discoverable `.env` holding a synthetic canary and asserts the canary is absent. A second test asserts the application still loads a `.env` and does not override existing variables.
 - **Backend: existing tests updated.** `TestWorkerEnvironment.test_only_allowlisted_names_pass` (exact-set assertion) and `TestHostileOperator.test_no_inherited_environment_beyond_the_allowlist` permit the one explicit control variable. Both keep asserting that credential variables are dropped.
 - **Docs.** `docs/guides/SECRETS_GUIDE.md` states that the worker does not load `.env` and that explicit same-UID file access remains a deployment precondition.
 - No REST route, operator, storage adapter or flow-JSON change. No new configuration key.
@@ -20,7 +20,7 @@ The failure is reproducible on clean `origin/main`: `test_no_inherited_environme
 <!-- None. -->
 
 ### Modified Capabilities
-- `backend/custom-operators-api`: adds a requirement that an isolated worker does not load a `.env` file. The detailed isolation requirements are still in the in-flight `add-secret-management` change, which this change does not edit or restate.
+- `backend/secret-management`: modifies "Isolation guarantee is limited to in-memory and inherited state" so the worker environment is the allowlist plus the variables the parent sets to operate the worker, and adds requirements that an isolated worker does not load a `.env` file, that application processes keep loading it, and that the secrets guide states the limit. The isolation requirements were archived into this capability with `add-secret-management` (#708).
 
 ## Impact
 
@@ -29,11 +29,11 @@ The failure is reproducible on clean `origin/main`: `test_no_inherited_environme
 - **Tests:** `tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py` (two existing assertions, one new regression test), plus a parent-side `.env` test under `tests/unit/utils/infrastructure/`.
 - **Docs:** `docs/guides/SECRETS_GUIDE.md`.
 - **Not affected:** REST routes, operators, storage adapters, `config.py`, `docker/` (the image copies only `src/docpipe/` and `.dockerignore` excludes `.env`, so containers are exposed only when a `.env` is mounted).
-- **Relationship to other changes:** independent of `standardize-pydantic-validation-errors` (PR #627), which lists this failure as a baseline problem.
+- **Relationship to other changes:** builds on the archived `add-secret-management` (#708), whose requirements now live in `openspec/specs/backend/secret-management/spec.md`. Independent of `standardize-pydantic-validation-errors` (PR #627), which lists this failure as a baseline problem.
 
 ## Non-goals
 
 - Not a sandbox. Operator code can still read any file its OS user can read, including a `.env`, by opening it explicitly or by calling `load_dotenv()` after clearing the switch. A distinct worker UID and restricted file permissions remain deployment preconditions, as the secrets guide already states.
 - No change to how the API, CLI, library or Prefect workers load `.env`.
 - No change to `ENVIRONMENT_ALLOWLIST` contents.
-- No fix for the other baseline failures (`requires_prefect` marker, Doclang, audit-logger test ordering).
+- No fix for the other baseline failures (`requires_prefect` marker, Doclang). The audit-logger failure is test-order dependence tracked in #682.
