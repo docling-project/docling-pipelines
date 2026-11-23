@@ -18,4 +18,4 @@
 
 - [x] 4.1 [backend] Run the acceptance test with a real `.env` present and with none: `pytest tests/unit/core/orchestration/operator_loader/isolation/test_isolation_worker.py::TestHostileOperator::test_no_inherited_environment_beyond_the_allowlist`.
 - [x] 4.2 [backend] Run `ruff check`, `ruff format --check` and `mypy` on the changed files, and `pytest tests/unit/core/orchestration/ tests/unit/utils/infrastructure/ --ignore=tests/unit/utils/infrastructure/test_rate_limiter.py`. The ignored rate-limiter module is a baseline failure tracked separately; `test_audit.py` is not ignored because its failure is test-order dependence tracked in #682.
-- [ ] 4.3 [backend] Run `openspec validate isolate-worker-environment-from-dotenv --strict`, then `pre-commit run --from-ref origin/main --to-ref HEAD` after committing.
+- [x] 4.3 [backend] Run `openspec validate isolate-worker-environment-from-dotenv --strict`, then `pre-commit run --from-ref origin/main --to-ref HEAD` after committing.
