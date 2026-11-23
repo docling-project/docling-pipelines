@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for DocIdHashOperator.
 Tests hashing document content using SHA-256 and adding a doc_id_hash column.
@@ -129,6 +132,23 @@ def test_hash_is_lowercase_hex():
     hashes = result[OperatorConstants.Columns.DOC_ID_HASH_DEFAULT].to_pylist()
     for h in hashes:
         assert h == h.lower(), f"Hash should be lowercase, got: {h}"
+
+
+def test_list_content_yields_16_char_truncated_hash():
+    """
+    Non-string (list-typed) content is hashed by DocIDTransform as the
+    SHA-256 of its canonical JSON, truncated to 16 hex characters. This is the
+    only case where the hash is not 64 characters and is documented in the
+    operator readme.
+    """
+    table = pa.table({"id": ["1"], DOC_COL: [["alpha", "beta"]]})
+    operator = make_operator()
+    result_tables, _ = operator.transform(table)
+
+    hashes = result_tables[0][OperatorConstants.Columns.DOC_ID_HASH_DEFAULT].to_pylist()
+    canonical_json = '["alpha","beta"]'
+    assert hashes == [sha256_hex(canonical_json)[:16]]
+    assert hashes[0] == hashes[0].lower()
 
 
 # ---------------------------------------------------------------------------

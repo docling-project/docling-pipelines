@@ -1,5 +1,5 @@
-# Copyright IBM Corp. 2026
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Port interface for HAP (Hate, Abuse and Profanity) detection adapters."""
 
@@ -13,8 +13,8 @@ class HAPDetectionPort(DetectionAdapterPort):
     """Contract for adapters that detect Hate, Abuse and Profanity content.
 
     Implementations must set ``SUPPORTS_HAP = True``.  HAP-only providers (for
-    example Detoxify or Perspective) implement this port alone; multi-capable
-    providers implement it together with ``PIIDetectionPort``.
+    example ``huggingface``, a local sequence classifier) implement this port alone;
+    multi-capable providers implement it together with ``PIIDetectionPort``.
     """
 
     @abstractmethod

@@ -10,13 +10,15 @@
  * Back button returns to FlowDetail (`/flows/:flow_id?project_id=…`).
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { InlineLoading, InlineNotification } from '@carbon/react';
 import type { PipelineFlowDef } from '@elyra/canvas';
 import { ReadOnlyCanvas } from '@/components';
 import { getJobRun, cancelJobRun, getJobRunFlowDefinition } from '@/services/api/actions/job-run-actions';
+import { getFlow } from '@/services/api/actions/flow-actions';
+import { COMPLETED_STATUSES } from '@/constants/jobRunStatus';
 import { log4js, logUtil } from '@/utils/logger';
 import { useAppDispatch, useJobRunPoller } from '@/hooks';
 import {
@@ -38,6 +40,9 @@ export function RunDetails(): React.JSX.Element {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { startPoll, stopPoll } = useJobRunPoller();
+
+  // Flow display name used in run-completion notifications (undefined = no toast).
+  const flowNameRef = useRef<string | undefined>(undefined);
 
   // Local state for the fetched pipeline flow definition
   const [pipelineFlow, setPipelineFlow] = useState<PipelineFlowDef | null>(null);
@@ -73,8 +78,20 @@ export function RunDetails(): React.JSX.Element {
         dispatch(setExecutionLogs(null));
         dispatch(setCurrentRun({ jobId: flowId, jobRunId: runId }));
 
-        // Arm the poller — it will start immediately and dispatch setRunning(true)
-        startPoll(runId);
+        // Resolve the flow name for notifications. Failure must not break the page.
+        try {
+          const flowRes = await getFlow(flowId);
+          flowNameRef.current = flowRes.data.name;
+        } catch {
+          flowNameRef.current = undefined;
+        }
+        if (cancelled) { return; }
+
+        // Arm the poller — it will start immediately and dispatch setRunning(true).
+        // Only pass the flow name for runs that are still live, so opening an
+        // already-finished run does not show a "run completed" toast.
+        const isLive = !COMPLETED_STATUSES.has(runRes.data.job_stats.status);
+        startPoll(runId, isLive ? flowNameRef.current : undefined);
 
         // If the run returned a terminal status on the first fetch, the poller's
         // first response will dispatch setRunning(false) on its own. But we set
@@ -119,7 +136,7 @@ export function RunDetails(): React.JSX.Element {
     if (!flowId) { return; }
     dispatch(setRunning(true));
     dispatch(setCurrentRun({ jobId: flowId, jobRunId: newJobRunId }));
-    startPoll(newJobRunId);
+    startPoll(newJobRunId, flowNameRef.current);
     // Navigate to the new run's URL so the URL always reflects what's shown
     void navigate(generateRoute.runDetails(flowId, newJobRunId, projectId), { replace: true });
   };
@@ -132,7 +149,7 @@ export function RunDetails(): React.JSX.Element {
         logUtil.error({ logger, message: 'Failed to cancel job run', data: err });
       })
       .finally(() => {
-        startPoll(runId);
+        startPoll(runId, flowNameRef.current);
       });
   };
 

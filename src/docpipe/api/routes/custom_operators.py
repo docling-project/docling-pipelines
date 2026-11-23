@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom operator API endpoints."""
 
 import tempfile
@@ -17,6 +20,10 @@ from fastapi import (
     Path as PathParam,
 )
 
+from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.models import User
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_custom_operator_service
 from docpipe.api.dto.custom_operator_dto import (
     CustomOperatorDeleteResponse,
@@ -37,20 +44,54 @@ from docpipe.api.dto.field_definitions import (
     UUID_PATTERN,
 )
 from docpipe.core.custom_operators.service import CustomOperatorService
+from docpipe.utils.infrastructure.audit import AuditAction, AuditOutcome, emit_audit_record
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
 MAX_OPERATOR_FILE_BYTES = 512 * 1024  # 512 KB limit
 
+# Fixed reasons for rejections that happen in the route before the service is called.
+REASON_INVALID_FILENAME = "invalid_filename"
+REASON_INVALID_EXTENSION = "invalid_extension"
+REASON_FILE_TOO_LARGE = "file_too_large"
+
+
+def _audit_rejected(
+    *,
+    caller: str,
+    action: AuditAction,
+    reason: str,
+    operator_id: str | None = None,
+) -> None:
+    """Write a ``rejected`` audit record for an attempt refused before it reaches the service.
+
+    Rejections raised inside ``CustomOperatorService`` are audited there, so a request produces one record.
+    """
+    emit_audit_record(
+        caller=caller,
+        action=action,
+        outcome=AuditOutcome.REJECTED,
+        operator_id=operator_id,
+        reason=reason,
+    )
+
+
 # Configure router
+# Every route requires a valid bearer token. Uploaded scripts are executable code, and the
+# read routes disclose the script inventory and on-disk layout.
 custom_operators_router = APIRouter(
     prefix="/custom_operators",
     tags=["Custom Operators"],
+    dependencies=[Depends(get_current_user)],
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": ErrorResponse,
             "description": "Invalid input data or validation failure",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "A secret provider is registered and the caller is not in custom_operators.allowed_uploaders",
         },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Custom operator not found"},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Custom operator conflict"},
@@ -127,6 +168,7 @@ OptionalOperatorFileForm = Annotated[
 
 @custom_operators_router.post(
     "",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=FileUploadResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create custom operator",
@@ -142,7 +184,10 @@ OptionalOperatorFileForm = Annotated[
         },
         status.HTTP_409_CONFLICT: {
             "model": ErrorResponse,
-            "description": "Custom operator with the same short_name already exists",
+            "description": (
+                "Custom operator with the same short_name already exists, or custom operators are disabled "
+                "(DOCPIPE_ENABLE_CUSTOM_OPERATORS)"
+            ),
         },
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "model": ErrorResponse,
@@ -156,15 +201,19 @@ async def create_custom_operator(
     description: OperatorDescriptionForm = "",
     operator_file: OperatorFileForm,
     service: Annotated[CustomOperatorService, Depends(get_custom_operator_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> FileUploadResponse:
     """Upload and create a new custom operator."""
+    caller = current_user.username
     filename = Path(operator_file.filename or "").name
     if not filename or "\x00" in filename or len(filename) > OPERATOR_FILE_MAX_LENGTH:
+        _audit_rejected(caller=caller, action=AuditAction.CREATE, reason=REASON_INVALID_FILENAME)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid operator filename",
         )
     if not filename.endswith(".py"):
+        _audit_rejected(caller=caller, action=AuditAction.CREATE, reason=REASON_INVALID_EXTENSION)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Operator file must have a .py extension",
@@ -172,6 +221,7 @@ async def create_custom_operator(
 
     content = await operator_file.read()
     if len(content) > MAX_OPERATOR_FILE_BYTES:
+        _audit_rejected(caller=caller, action=AuditAction.CREATE, reason=REASON_FILE_TOO_LARGE)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"Operator file exceeds the maximum allowed size of {MAX_OPERATOR_FILE_BYTES // 1024} KB",
@@ -187,6 +237,7 @@ async def create_custom_operator(
             description=description,
             operator_file_path=tmp_path,
             original_filename=filename,
+            caller=caller,
         )
         logger.info("Created custom operator %s (short_name=%s)", created.id, created.short_name)
         return FileUploadResponse(
@@ -276,6 +327,7 @@ def get_custom_operator(
 
 @custom_operators_router.patch(
     "/{operator_id}",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=FileUploadResponse,
     status_code=status.HTTP_200_OK,
     summary="Update custom operator",
@@ -293,6 +345,10 @@ def get_custom_operator(
             "model": ErrorResponse,
             "description": "Custom operator not found",
         },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "A replacement file was sent while custom operators are disabled",
+        },
         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
             "model": ErrorResponse,
             "description": "Replacement operator file exceeds the 512 KB size limit",
@@ -306,17 +362,25 @@ async def update_custom_operator(
     description: OptionalOperatorDescriptionForm = None,
     operator_file: OptionalOperatorFileForm = None,
     service: Annotated[CustomOperatorService, Depends(get_custom_operator_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> FileUploadResponse:
     """Update custom operator metadata or script file."""
+    caller = current_user.username
     tmp_path: Path | None = None
     if operator_file is not None and operator_file.filename:
         filename = Path(operator_file.filename).name
         if not filename or "\x00" in filename or len(filename) > OPERATOR_FILE_MAX_LENGTH:
+            _audit_rejected(
+                caller=caller, action=AuditAction.UPDATE, reason=REASON_INVALID_FILENAME, operator_id=operator_id
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid operator filename",
             )
         if not filename.endswith(".py"):
+            _audit_rejected(
+                caller=caller, action=AuditAction.UPDATE, reason=REASON_INVALID_EXTENSION, operator_id=operator_id
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Operator file must have a .py extension",
@@ -324,6 +388,12 @@ async def update_custom_operator(
 
         content = await operator_file.read()
         if len(content) > MAX_OPERATOR_FILE_BYTES:
+            _audit_rejected(
+                caller=caller,
+                action=AuditAction.UPDATE,
+                reason=REASON_FILE_TOO_LARGE,
+                operator_id=operator_id,
+            )
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"Operator file exceeds the maximum allowed size of {MAX_OPERATOR_FILE_BYTES // 1024} KB",
@@ -340,6 +410,7 @@ async def update_custom_operator(
             description=description,
             operator_file_path=tmp_path,
             original_filename=Path(operator_file.filename).name if operator_file and operator_file.filename else None,
+            caller=caller,
         )
         logger.info("Updated custom operator %s", operator_id)
         return FileUploadResponse(
@@ -354,6 +425,7 @@ async def update_custom_operator(
 
 @custom_operators_router.delete(
     "/{operator_id}",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=CustomOperatorDeleteResponse,
     status_code=status.HTTP_200_OK,
     summary="Delete custom operator",
@@ -373,9 +445,10 @@ def delete_custom_operator(
     *,
     operator_id: OperatorIdPath,
     service: Annotated[CustomOperatorService, Depends(get_custom_operator_service)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> CustomOperatorDeleteResponse:
     """Delete custom operator by UUID."""
-    service.delete_operator(operator_id=operator_id)
+    service.delete_operator(operator_id=operator_id, caller=current_user.username)
     logger.info("Deleted custom operator %s", operator_id)
     return CustomOperatorDeleteResponse(
         success=True,

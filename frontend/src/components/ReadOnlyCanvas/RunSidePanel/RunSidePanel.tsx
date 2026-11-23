@@ -152,6 +152,9 @@ export function RunSidePanel({
                   onClick={() => {
                     void navigator.clipboard.writeText(showFullLog ?? '').catch(() => {});
                   }}
+                  iconDescription={intl.formatMessage(messages.copyToClipboard)}
+                  feedback={intl.formatMessage(messages.copied)}
+                  feedbackTimeout={2000}
                 />
                 <button
                   className={styles.closeButton}

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow execution utilities for node mapping, logging, and validation."""
 
 import json
@@ -30,6 +33,7 @@ def sort_dag_topologically(*, dag: list[dict]) -> list[dict]:
         FlowValidationException: If the graph contains a cycle.
     """
     by_id = {node["id"]: node for node in dag}
+    original_index = {node["id"]: idx for idx, node in enumerate(dag)}
 
     # Build adjacency list from output_edges; initialise every node so isolated
     # nodes (no edges at all) are still included with in-degree zero.
@@ -37,7 +41,18 @@ def sort_dag_topologically(*, dag: list[dict]) -> list[dict]:
     for node in dag:
         adjacency[node["id"]]  # ensure every node is present even with no edges
         for edge in node.get(DocpipeConstants.OUTPUT_EDGES, []):
-            adjacency[node["id"]].append(edge[DocpipeConstants.NODE_ID_REF])
+            child_id = edge.get(DocpipeConstants.NODE_ID_REF)
+            if not child_id or child_id not in by_id:
+                raise FlowValidationException(
+                    errors=[
+                        ValidationAlert(
+                            code=ErrorCode.FLOW_VALIDATION_FAILED.value,
+                            message=f"DAG node '{node['id']}' has edge referencing unknown node '{child_id}'",
+                            message_code="INVALID_NODE_REFERENCE",
+                        )
+                    ]
+                )
+            adjacency[node["id"]].append(child_id)
 
     in_degree: dict[str, int] = defaultdict(int)
     for node_id in adjacency:
@@ -45,13 +60,17 @@ def sort_dag_topologically(*, dag: list[dict]) -> list[dict]:
         for child_id in adjacency[node_id]:
             in_degree[child_id] += 1
 
-    queue: deque[str] = deque(nid for nid, deg in in_degree.items() if deg == 0)
+    # Deterministic initial queue ordered by original node position in dag
+    queue: deque[str] = deque(
+        sorted((nid for nid, deg in in_degree.items() if deg == 0), key=lambda nid: original_index.get(nid, 0))
+    )
     topo_order: list[dict] = []
 
     while queue:
         node_id = queue.popleft()
         topo_order.append(by_id[node_id])
-        for child_id in adjacency[node_id]:
+        # Sort children deterministically by original position before appending to queue
+        for child_id in sorted(adjacency[node_id], key=lambda cid: original_index.get(cid, 0)):
             in_degree[child_id] -= 1
             if in_degree[child_id] == 0:
                 queue.append(child_id)
@@ -93,16 +112,20 @@ def create_log_folders(job_id, job_run_id, type):
     """
     Created folders for logs: <job_id>/<job_run_id>/docpipe_logs. The log for that job will be stored there
     """
+    log_file_names = {
+        "job": "job_stats.json",
+        "agg_logs": "flow_execute_aggregated.json",
+    }
+    if type not in log_file_names:
+        raise ValueError(f"Unknown log type {type!r}; expected one of {sorted(log_file_names)}")
+    log_job_run_file_name = log_file_names[type]
+
     log_location_path = get_data_path()
 
     log_app_location = DocpipeConstants.DOCPIPE_LOGS
 
     log_job_location = Path(log_location_path) / job_id / str(job_run_id) / log_app_location
     log_job_location.mkdir(parents=True, exist_ok=True)
-    if type == "job":
-        log_job_run_file_name = "job_stats.json"
-    elif type == "agg_logs":
-        log_job_run_file_name = "flow_execute_aggregated.json"
 
     return str(log_job_location / log_job_run_file_name)
 

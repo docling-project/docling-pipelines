@@ -27,6 +27,7 @@ import {
   IconButton,
 } from '@carbon/react';
 import { Edit } from '@carbon/icons-react';
+import { useIntl } from 'react-intl';
 import { NodeOperator } from '@/constants/operators';
 import { getOperatorLabel } from '@/constants/operatorLabels';
 import { getIconForOperator } from '@/utils/paletteEnhancer';
@@ -58,6 +59,7 @@ import type { FeatureAttributes } from '@/types';
 import styles from './CommonPropertiesPanel.module.scss';
 import { PROPERTIES_PANEL_CONSTANTS } from '@/constants/propertiesPanelConstants';
 import { hasAnyRequiredParamMissing } from '@/utils/requiredParamValidation';
+import { messages } from './CommonPropertiesPanel.messages';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,7 @@ interface CommonPropertiesPanelProps {
 export function CommonPropertiesPanel({
   controller,
 }: CommonPropertiesPanelProps): React.JSX.Element {
+  const intl = useIntl();
   const [selectedTab, setSelectedTab] = useState(0);
 
   // Resolve node info from Elyra controller app data
@@ -120,6 +123,8 @@ export function CommonPropertiesPanel({
   const nodeFeatureMap: NodeFeatureMap = appData.nodeFeatureMap ?? {};
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   const featuresLoading: boolean = appData.featuresLoading === true;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  const isReadOnly: boolean = appData.readOnly === true;
   const currentNodeFeatures = nodeFeatureMap[currentNodeId] ?? { input_features: {}, output_features: {} };
 
   const metadata = getOperatorLabel(operatorName);
@@ -162,15 +167,14 @@ export function CommonPropertiesPanel({
     [operatorMetadata, operatorName]
   );
 
-  // Disable the Save button whenever at least one required attribute is missing a value.
+  // Disable the Save button whenever readOnly or at least one required attribute is missing a value.
   const updateSaveButton = useCallback((): void => {
-
     const propertyValues = (controller?.getPropertyValues?.() ?? {}) as Record<string, unknown>;
 
-    const shouldDisable = hasAnyRequiredParamMissing(nodeAttributes, propertyValues);
+    const shouldDisable = isReadOnly || hasAnyRequiredParamMissing(nodeAttributes, propertyValues);
 
     controller?.setSaveButtonDisable?.(shouldDisable);
-  }, [controller, nodeAttributes]);
+  }, [controller, nodeAttributes, isReadOnly]);
 
   useEffect(() => {
     updateSaveButton();
@@ -206,15 +210,15 @@ export function CommonPropertiesPanel({
           ref={displayLabelInputRef}
           value={computedLabel}
           size="sm"
-          labelText="Display name"
+          labelText={intl.formatMessage(messages.displayName)}
           hideLabel
           readOnly={!isEditingLabel}
           onChange={handleLabelChange}
           onBlur={handleLabelBlur}
         />
-        {!isEditingLabel && (
+        {!isEditingLabel && !isReadOnly && (
           <IconButton
-            label="Edit display name"
+            label={intl.formatMessage(messages.editDisplayName)}
             autoAlign
             size="sm"
             kind="ghost"
@@ -235,19 +239,24 @@ export function CommonPropertiesPanel({
           setSelectedTab(selectedIndex);
         }}
       >
-        <TabList aria-label="properties-panel-tabs">
-          <Tab>Configuration</Tab>
-          <Tab>Input</Tab>
-          <Tab>Output</Tab>
+        <TabList aria-label={intl.formatMessage(messages.tabsAriaLabel)}>
+          <Tab>{intl.formatMessage(messages.configurationTab)}</Tab>
+          <Tab>{intl.formatMessage(messages.inputTab)}</Tab>
+          <Tab>{intl.formatMessage(messages.outputTab)}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel>
             <div className={styles.tabContent}>
               {ConfigureComponent ? (
-                <ConfigureComponent key={currentNodeId} controller={controller} />
+                <fieldset
+                  disabled={isReadOnly}
+                  style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
+                >
+                  <ConfigureComponent key={currentNodeId} controller={controller} />
+                </fieldset>
               ) : (
                 <p className={styles.configurationLabel}>
-                  Configuration parameters will be displayed here
+                  {intl.formatMessage(messages.configurationPlaceholder)}
                 </p>
               )}
             </div>

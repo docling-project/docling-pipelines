@@ -1,7 +1,9 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for IncrementalMetadataFactory."""
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -12,6 +14,16 @@ from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_fact
     get_default_factory,
 )
 from docpipe.core.incremental_metadata.adapters.stores.filesystem import FilesystemIncrementalMetadataStore
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
+
+
+@pytest.fixture(autouse=True)
+def reset_config_loader():
+    """Clear the DocpipeConfigLoader cache before and after each test."""
+    DocpipeConfigLoader.reset()
+    yield
+    DocpipeConfigLoader.reset()
 
 
 class TestIncrementalMetadataFactory:
@@ -19,7 +31,7 @@ class TestIncrementalMetadataFactory:
 
     def test_create_filesystem_store(self, *, tmp_path):
         """Test creating a filesystem store via the factory instance."""
-        factory = IncrementalMetadataFactory(backend="filesystem", config={"base_dir": str(tmp_path)})
+        factory = IncrementalMetadataFactory(storage_type="filesystem", config={"base_dir": str(tmp_path)})
         store = factory.get_store()
 
         assert isinstance(store, FilesystemIncrementalMetadataStore)
@@ -28,7 +40,7 @@ class TestIncrementalMetadataFactory:
     def test_create_store_with_lock_timeout(self, *, tmp_path):
         """Test that config is passed through to the store."""
         factory = IncrementalMetadataFactory(
-            backend="filesystem", config={"base_dir": str(tmp_path), "lock_timeout": 10.0}
+            storage_type="filesystem", config={"base_dir": str(tmp_path), "lock_timeout": 10.0}
         )
         store = factory.get_store()
 
@@ -37,13 +49,13 @@ class TestIncrementalMetadataFactory:
 
     def test_get_store_returns_singleton(self, *, tmp_path):
         """get_store() returns the same instance on repeated calls."""
-        factory = IncrementalMetadataFactory(backend="filesystem", config={"base_dir": str(tmp_path)})
+        factory = IncrementalMetadataFactory(storage_type="filesystem", config={"base_dir": str(tmp_path)})
 
         assert factory.get_store() is factory.get_store()
 
     def test_get_service_returns_singleton(self, *, tmp_path):
         """get_service() returns the same instance on repeated calls."""
-        factory = IncrementalMetadataFactory(backend="filesystem", config={"base_dir": str(tmp_path)})
+        factory = IncrementalMetadataFactory(storage_type="filesystem", config={"base_dir": str(tmp_path)})
 
         assert factory.get_service() is factory.get_service()
 
@@ -51,7 +63,7 @@ class TestIncrementalMetadataFactory:
         """Test that get_store() with an unknown backend raises DocpipeException."""
         from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
-        factory = IncrementalMetadataFactory(backend="duckdb")
+        factory = IncrementalMetadataFactory(storage_type="duckdb")
         with pytest.raises(DocpipeException, match="Unknown incremental metadata store backend"):
             factory.get_store()
 
@@ -60,86 +72,6 @@ class TestIncrementalMetadataFactory:
         backends = IncrementalMetadataFactory.list_backends()
         assert "filesystem" in backends
         assert "postgresql" in backends
-
-
-class TestFromConfigFile:
-    """Test IncrementalMetadataFactory.from_config_file()."""
-
-    def test_filesystem_backend_from_config(self, *, tmp_path):
-        """Test creating factory from YAML config with filesystem backend."""
-        config_path = tmp_path / "config.yaml"
-        config_data = {
-            "incremental_metadata": {
-                "storage": {"type": "filesystem", "config": {"base_dir": str(tmp_path / "metadata")}}
-            }
-        }
-        with Path(config_path).open("w") as f:
-            yaml.dump(config_data, f)
-
-        factory = IncrementalMetadataFactory.from_config_file(config_path=str(config_path))
-        store = factory.get_store()
-
-        assert isinstance(store, FilesystemIncrementalMetadataStore)
-
-    def test_global_storage_fallback(self, *, tmp_path):
-        """Test factory uses global_storage as fallback."""
-        config_path = tmp_path / "config.yaml"
-        config_data = {"global_storage": {"type": "filesystem", "config": {"base_dir": str(tmp_path / "global")}}}
-        with Path(config_path).open("w") as f:
-            yaml.dump(config_data, f)
-
-        factory = IncrementalMetadataFactory.from_config_file(config_path=str(config_path))
-        store = factory.get_store()
-
-        assert isinstance(store, FilesystemIncrementalMetadataStore)
-        assert store._base_dir == tmp_path / "global"
-
-    def test_service_specific_overrides_global(self, *, tmp_path):
-        """Test service-specific config overrides global_storage."""
-        config_path = tmp_path / "config.yaml"
-        config_data = {
-            "global_storage": {"type": "postgresql", "config": {"base_dir": str(tmp_path / "global")}},
-            "incremental_metadata": {
-                "storage": {"type": "filesystem", "config": {"base_dir": str(tmp_path / "specific")}}
-            },
-        }
-        with Path(config_path).open("w") as f:
-            yaml.dump(config_data, f)
-
-        factory = IncrementalMetadataFactory.from_config_file(config_path=str(config_path))
-        store = factory.get_store()
-
-        assert isinstance(store, FilesystemIncrementalMetadataStore)
-        assert store._base_dir == tmp_path / "specific"
-
-    def test_missing_file_uses_default(self, *, tmp_path):
-        """Test graceful fallback when config file doesn't exist."""
-        factory = IncrementalMetadataFactory.from_config_file(config_path=str(tmp_path / "nonexistent.yaml"))
-        store = factory.get_store()
-
-        assert isinstance(store, FilesystemIncrementalMetadataStore)
-
-    def test_empty_file_uses_default(self, *, tmp_path):
-        """Test graceful fallback on empty config file."""
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("")
-
-        factory = IncrementalMetadataFactory.from_config_file(config_path=str(config_path))
-        store = factory.get_store()
-
-        assert isinstance(store, FilesystemIncrementalMetadataStore)
-
-    def test_invalid_backend_raises_error(self, *, tmp_path):
-        """Test that an unregistered backend raises DocpipeException."""
-        from docpipe.exceptions.docpipe_exceptions import DocpipeException
-
-        config_path = tmp_path / "config.yaml"
-        config_data = {"incremental_metadata": {"storage": {"type": "duckdb"}}}
-        with Path(config_path).open("w") as f:
-            yaml.dump(config_data, f)
-
-        with pytest.raises(DocpipeException, match="Invalid storage backend 'duckdb'"):
-            IncrementalMetadataFactory.from_config_file(config_path=str(config_path))
 
 
 class TestGetDefaultFactory:
@@ -180,46 +112,98 @@ class TestGetDefaultFactory:
 
         assert store_a is store_b
 
-    def test_base_dir_env_override(self, *, tmp_path, monkeypatch):
-        """Test DOCPIPE_INCREMENTAL_BASE_DIR is picked up by the filesystem store."""
-        env_dir = tmp_path / "env_override"
-        monkeypatch.setenv("DOCPIPE_INCREMENTAL_BASE_DIR", str(env_dir))
+
+class TestCreateDefaultFactory:
+    """Tests for IncrementalMetadataFactory.create_default_factory()."""
+
+    def test_creates_filesystem_store_from_service_specific_config(self, *, tmp_path, monkeypatch):
+        """create_default_factory() uses service-specific storage config."""
+        config_data = {
+            "incremental_metadata": {
+                "storage": {"type": "filesystem", "config": {"base_dir": str(tmp_path / "metadata")}}
+            }
+        }
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump(config_data, f)
+
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
         monkeypatch.setattr(_factory_mod, "_default_factory", None)
 
-        store = get_default_factory().get_store()
+        factory = IncrementalMetadataFactory.create_default_factory()
+        store = factory.get_store()
 
         assert isinstance(store, FilesystemIncrementalMetadataStore)
-        assert store._base_dir == env_dir
 
+    def test_creates_filesystem_store_from_global_storage_fallback(self, *, tmp_path, monkeypatch):
+        """create_default_factory() falls back to global_storage when no service-specific block."""
+        config_data = {"global_storage": {"type": "filesystem", "config": {"base_dir": str(tmp_path / "global")}}}
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump(config_data, f)
 
-@pytest.mark.parametrize("service_postgres", [None, {"host": "service-host"}])
-def test_postgres_config_precedence(*, service_postgres):
-    """Service PostgreSQL settings override storage settings and global defaults."""
-    from copy import deepcopy
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+        monkeypatch.setattr(_factory_mod, "_default_factory", None)
 
-    config: dict[str, Any] = {
-        "global_storage": {
-            "type": "postgresql",
-            "config": {"lock_timeout": 10, "base_dir": "global"},
-            "postgres": {"host": "global-host"},
-        },
-        "incremental_metadata": {
-            "storage": {
-                "config": {"base_dir": "specific"},
-                "postgres": {"host": "storage-host"},
+        factory = IncrementalMetadataFactory.create_default_factory()
+        store = factory.get_store()
+
+        assert isinstance(store, FilesystemIncrementalMetadataStore)
+
+    def test_creates_filesystem_store_when_no_config_file(self, *, tmp_path, monkeypatch):
+        """create_default_factory() falls back to 'filesystem' default when config is absent."""
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(tmp_path / "absent.yaml"))
+        monkeypatch.setattr(_factory_mod, "_default_factory", None)
+
+        factory = IncrementalMetadataFactory.create_default_factory()
+        store = factory.get_store()
+
+        assert isinstance(store, FilesystemIncrementalMetadataStore)
+
+    def test_raises_docpipe_exception_for_unregistered_storage_type(self, *, tmp_path, monkeypatch):
+        """create_default_factory() raises DocpipeException when storage type is not registered."""
+        config_data = {"incremental_metadata": {"storage": {"type": "unknown_backend"}}}
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump(config_data, f)
+
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        with pytest.raises(DocpipeException, match="Invalid storage type 'unknown_backend'"):
+            IncrementalMetadataFactory.create_default_factory()
+
+    def test_storage_type_stored_on_instance(self, *, tmp_path, monkeypatch):
+        """Factory instance has the storage_type attribute set correctly."""
+        config_data = {"incremental_metadata": {"storage": {"type": "filesystem", "config": {}}}}
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump(config_data, f)
+
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+
+        factory = IncrementalMetadataFactory.create_default_factory()
+
+        assert factory._storage_type == "filesystem"
+
+    def test_config_passed_through_to_store(self, *, tmp_path, monkeypatch):
+        """Config dict from YAML is forwarded to the store constructor."""
+        store_dir = tmp_path / "store"
+        config_data = {
+            "incremental_metadata": {
+                "storage": {
+                    "type": "filesystem",
+                    "config": {"base_dir": str(store_dir), "lock_timeout": 5.0},
+                }
             }
-        },
-    }
-    if service_postgres is not None:
-        config["incremental_metadata"]["postgres"] = service_postgres
-    original = deepcopy(config)
+        }
+        config_path = tmp_path / "config.yaml"
+        with Path(config_path).open("w") as f:
+            yaml.dump(config_data, f)
 
-    backend, merged = _factory_mod._resolve_backend_and_config(yaml_config=config)
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
 
-    assert backend == "postgresql"
-    assert merged == {
-        "lock_timeout": 10,
-        "base_dir": "specific",
-        "postgres": service_postgres or {"host": "storage-host"},
-    }
-    assert config == original
+        factory = IncrementalMetadataFactory.create_default_factory()
+        store = factory.get_store()
+
+        assert isinstance(store, FilesystemIncrementalMetadataStore)
+        assert store._lock_timeout == 5.0

@@ -1,14 +1,5 @@
-# (C) Copyright IBM Corp. 2024.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#  http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Logging infrastructure with structured JSON formatting and transaction tracking.
 
@@ -17,6 +8,8 @@ This module provides:
 - setup_logging: Configures handlers and formatters for process-owning entry points
 - get_logger: Library-safe factory that attaches only a NullHandler
 - get_log_level: Utility for resolving log levels from environment
+- ScrubFilter / install_scrub_filter: remove registered secret values from every record that
+  reaches an application handler
 """
 
 import json
@@ -46,6 +39,57 @@ class Colors:
 
 
 HEALTH_API_SUFFIX = "/health"
+
+AUDIT_LOGGER_NAME = "docpipe.audit"
+
+
+class ScrubFilter(logging.Filter):
+    """Remove registered secret values from a record before any handler formats it.
+
+    Scrubs the formatted message, the traceback text, and the stack text, whatever the level. It
+    never drops a record: ``filter`` always returns True, and on any internal failure the message is
+    replaced by a fixed placeholder (fail closed) instead of being emitted unscrubbed.
+
+    Records of the ``docpipe.audit`` logger are left untouched. They carry only caller, ids, action,
+    digest and outcome, and the audit handlers ignore filters by design, so a scrub filter can
+    neither drop nor alter an audit record.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Scrub ``record`` in place and accept it."""
+        if record.name == AUDIT_LOGGER_NAME or record.name.startswith(AUDIT_LOGGER_NAME + "."):
+            return True
+        from docpipe.integrations.secrets.registry import SCRUB_FAILURE_PLACEHOLDER, get_registry, scrub
+
+        try:
+            if not get_registry().has_entries():
+                return True
+            record.msg = scrub(record.getMessage())
+            record.args = None
+            if record.exc_info and not record.exc_text:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            if record.exc_text:
+                record.exc_text = scrub(record.exc_text)
+            if record.stack_info:
+                record.stack_info = scrub(record.stack_info)
+        except Exception:
+            record.msg = SCRUB_FAILURE_PLACEHOLDER
+            record.args = None
+            record.exc_info = None
+            record.exc_text = SCRUB_FAILURE_PLACEHOLDER
+            record.stack_info = None
+        return True
+
+
+def install_scrub_filter(*, handler: logging.Handler) -> None:
+    """Attach a :class:`ScrubFilter` to an application handler, once.
+
+    Filters on a handler apply to every record that reaches it, including records propagated from
+    child loggers, so the filter belongs on handlers and not on loggers. Audit handlers ignore
+    filters, so this is a no-op for them.
+    """
+    if not any(isinstance(existing, ScrubFilter) for existing in handler.filters):
+        handler.addFilter(ScrubFilter())
 
 
 class ColoredFormatter(logging.Formatter):
@@ -217,7 +261,9 @@ class ConditionalFormatter(logging.Formatter):
         }
 
         # Include exc_info if it is present.
-        if record.exc_info:
+        if record.exc_text:
+            log_dict.update({"exc_info": record.exc_text})
+        elif record.exc_info:
             log_dict.update({"exc_info": self.formatException(record.exc_info)})
 
         # Include stack_info if it is present.
@@ -303,6 +349,7 @@ def configure_third_party_loggers(*, log_level: int | str, handler: logging.Hand
         lib_logger.handlers = []
         lib_logger.addHandler(handler)
         lib_logger.propagate = False
+    install_scrub_filter(handler=handler)
 
 
 def set_dpk_log_level_from_ds_log_level() -> None:
@@ -380,6 +427,9 @@ def setup_logging(
                     )
                 )
             root.addHandler(file_handler)
+
+    for existing_handler in root.handlers:
+        install_scrub_filter(handler=existing_handler)
 
     # Stop propagation to root — the entry point owns its output
     root.propagate = False

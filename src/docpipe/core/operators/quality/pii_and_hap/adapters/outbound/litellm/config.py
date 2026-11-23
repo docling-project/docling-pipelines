@@ -1,7 +1,9 @@
-# Copyright IBM Corp. 2026
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
 
 """Pydantic config model for the LiteLLM PII/HAP detection adapter."""
+
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +17,12 @@ class LiteLLMPIIAndHAPConfig(BaseModel):
     selecting the ``litellm`` provider in the ``pii_and_hap`` operator node.
     Ollama can be accessed via this provider using ``api_base='http://localhost:11434/v1'``.
     """
+
+    # Secret-capable keys (design D2); see docpipe.core.operators.secret_fields.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "api_key",
+        "api_base",
+    )
 
     model_config = ConfigDict(extra="ignore")
 

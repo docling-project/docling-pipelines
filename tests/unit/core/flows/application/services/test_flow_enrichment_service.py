@@ -1,5 +1,10 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for FlowEnrichmentService."""
 
+import json
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +16,13 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.feature_propagation.features_propagator import FeaturePropagator
 from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
 from docpipe.exceptions.docpipe_exceptions import FlowValidationException
+from docpipe.integrations.secrets.secret_provider import (
+    ProviderUnreachableError,
+    SecretProvider,
+    clear_providers,
+    register_provider,
+)
+from docpipe.utils.infrastructure.config_utils import DocpipeConfigLoader
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -658,20 +670,22 @@ class TestMergeOutputFeaturesSelection:
 
 
 class TestFetchVectordbMetadata:
-    """_fetch_vectordb_metadata returns None when no provider_config, or a five-key dict."""
+    """_fetch_vectordb_metadata returns fetcher result (with empty fallback for unconfigured nodes)."""
 
     def _call_fetch(self, *, node_feature_result: dict) -> Any:
         service = FlowEnrichmentService.__new__(FlowEnrichmentService)
         return service._fetch_vectordb_metadata(node_feature_result=node_feature_result)
 
-    def test_returns_none_when_provider_config_absent(self):
-        """UI distinguishes 'not configured' from 'configured but empty'."""
+    def test_returns_fallback_result_when_provider_config_absent(self):
+        """Unconfigured node returns empty fallback result with standard keys."""
         result = self._call_fetch(node_feature_result={"operator_config": {}})
-        assert result is None
+        assert isinstance(result, dict)
+        assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES in result
 
-    def test_returns_none_when_operator_config_missing(self):
+    def test_returns_fallback_result_when_operator_config_missing(self):
         result = self._call_fetch(node_feature_result={})
-        assert result is None
+        assert isinstance(result, dict)
+        assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES in result
 
     def test_returns_dict_with_five_keys_when_provider_config_present(self):
         expected = _mf_mod.VectorDBMetadataFetcher._empty_result()
@@ -768,6 +782,53 @@ class TestBuildNodeFeatureMetadataVectorDB:
         assert OperatorConstants.VectorDB.FEATURE_MAPPINGS_RESPONSE not in block
         assert OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE not in block
 
+    @pytest.mark.parametrize(
+        ("provider_name", "client_path"),
+        [
+            (
+                OperatorConstants.VectorDB.OPENSEARCH,
+                "docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearchClient",
+            ),
+            (
+                OperatorConstants.VectorDB.MILVUS,
+                "docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient",
+            ),
+            (
+                OperatorConstants.VectorDB.WEAVIATE,
+                "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateClient",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "provider_settings",
+        [{}, {"provider_config": {}}, {"provider_config": None}, {"provider_config": ""}],
+        ids=["absent", "empty-object", "null", "blank-string"],
+    )
+    def test_unconfigured_provider_values_preserve_projection_without_connecting(
+        self, *, provider_name: str, client_path: str, provider_settings: dict[str, Any]
+    ) -> None:
+        incoming = {
+            "content": _make_feature(),
+            "sparse_embeddings": _make_feature(type_=OperatorConstants.Types.TYPE_VECTOR_SPARSE),
+        }
+        node_result = _make_node_feature_result(
+            inputs=incoming,
+            available=incoming,
+            operator_config={"provider": provider_name, **provider_settings},
+        )
+        original = json.loads(json.dumps(node_result))
+        with patch(client_path) as client_cls:
+            block = self._build(node_result)
+
+        client_cls.assert_not_called()
+        assert node_result == original
+        assert set(block[OperatorConstants.Config.INPUT_FEATURES]) == set(incoming)
+        available = block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert available["content"]["name"] == "content"
+        assert available["content"]["node_id"] == "node-1"
+        assert ("sparse_embeddings" in available) == (provider_name != OperatorConstants.VectorDB.WEAVIATE)
+        assert set(block).isdisjoint(_mf_mod.VectorDBMetadataFetcher._empty_result())
+
     def test_vdb_keys_absent_when_operator_config_missing_entirely(self):
         """VDB keys must be omitted when the node has no operator_config at all."""
         nfr = _make_node_feature_result()
@@ -819,6 +880,69 @@ class TestBuildNodeFeatureMetadataVectorDB:
             "dimension_size": None,
         }
 
+    def test_vectordb_projects_and_normalizes_available_features(self):
+        """When enriching a vectordb node, available_features is projected and normalized."""
+        incoming_features = {
+            "content": _make_feature(type_="string"),
+            "embeddings": _make_feature(type_="vector"),
+            "sparse_embeddings": _make_feature(type_="vector_sparse"),
+        }
+        nfr = _make_node_feature_result(
+            inputs=incoming_features,
+            available=incoming_features,
+            operator_config={
+                "provider": "weaviate",
+                "provider_config": {"host": "localhost"},
+            },
+        )
+        fake_result = _mf_mod.VectorDBMetadataFetcher._empty_result()
+        with patch.object(_mf_mod, "VectorDBMetadataFetcher") as mock_cls:
+            mock_cls.return_value.project_mappable_features.return_value = {
+                "content": incoming_features["content"],
+                "embeddings": incoming_features["embeddings"],
+            }
+            mock_cls.return_value.fetch_metadata.return_value = fake_result
+            block = self._build(nfr)
+
+        # available_features has the provider's mappable projection (sparse excluded)
+        af = block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "content" in af
+        assert "embeddings" in af
+        assert "sparse_embeddings" not in af
+        # Ensure it was normalised (has "name", "node_id", etc.)
+        assert af["content"]["name"] == "content"
+        assert af["content"]["node_id"] == "node-1"
+
+        # input_features retains all incoming features (including sparse)
+        inf = block[OperatorConstants.Config.INPUT_FEATURES]
+        assert "sparse_embeddings" in inf
+
+    def test_weaviate_node_without_provider_config_excludes_sparse_from_available_features_and_omits_vdb_keys(self):
+        """When provider is weaviate and provider_config is absent, sparse is excluded and VDB keys are omitted."""
+        incoming_features = {
+            "content": _make_feature(type_="string"),
+            "embeddings": _make_feature(type_="vector"),
+            "sparse_embeddings": _make_feature(type_="vector_sparse"),
+        }
+        nfr = _make_node_feature_result(
+            inputs=incoming_features,
+            available=incoming_features,
+            operator_config={"provider": "weaviate"},
+        )
+        block = self._build(nfr)
+
+        af = block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "content" in af
+        assert "embeddings" in af
+        assert "sparse_embeddings" not in af
+        assert af["content"]["name"] == "content"
+
+        inf = block[OperatorConstants.Config.INPUT_FEATURES]
+        assert "sparse_embeddings" in inf
+
+        assert OperatorConstants.VectorDB.AVAILABLE_RESOURCES not in block
+        assert OperatorConstants.VectorDB.STORED_RESOURCE_METADATA not in block
+
     def test_fetcher_called_with_correct_adapter_and_config(self):
         """fetch_metadata receives adapter_name, operator_config, and available_features."""
         op_cfg = {
@@ -853,20 +977,48 @@ class TestBuildNodeFeatureMetadataVectorDB:
             assert OperatorConstants.VectorDB.STORED_RESOURCE_METADATA not in block, f"VDB key leaked into {op}"
 
 
+class TestVectorDBEnrichmentIntegration:
+    """VectorDB metadata fetcher results and provider-projected available_features merge into the node block."""
+
+    def test_vdb_metadata_merges_and_preserves_input_features(self):
+        service = FlowEnrichmentService.__new__(FlowEnrichmentService)
+        sparse = _make_feature(type_=OperatorConstants.Types.TYPE_VECTOR_SPARSE)
+        content = _make_feature()
+        nfr = _make_node_feature_result(
+            available={"content": content, "sparse_embeddings": sparse},
+            inputs={"content": content, "sparse_embeddings": sparse},
+            operator_config={"provider": OperatorConstants.VectorDB.WEAVIATE, "provider_config": {"host": "localhost"}},
+        )
+        fake_result = {
+            **_mf_mod.VectorDBMetadataFetcher._empty_result(),
+            OperatorConstants.VectorDB.AVAILABLE_RESOURCES: ["Alpha"],
+        }
+        with patch.object(_mf_mod, "VectorDBMetadataFetcher") as mock_cls:
+            mock_cls.return_value.project_mappable_features.return_value = {"content": content}
+            mock_cls.return_value.fetch_metadata.return_value = fake_result
+            block = service._build_node_feature_metadata(
+                node_id="node-vdb",
+                node_feature_result=nfr,
+                operator_type=OperatorConstants.Operators.VECTORDB,
+            )
+        assert "sparse_embeddings" not in block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "content" in block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert "sparse_embeddings" in block[OperatorConstants.Config.INPUT_FEATURES]
+        assert block[OperatorConstants.VectorDB.AVAILABLE_RESOURCES] == ["Alpha"]
+
+
 # ---------------------------------------------------------------------------
-# Tests: _resolve_dag_secrets
+# Tests: _expand_dag_env_vars
 # ---------------------------------------------------------------------------
 
 
-class TestResolveDagSecrets:
-    """_resolve_dag_secrets resolves vault:// refs and ${ENV_VAR} placeholders in-place."""
+class TestExpandDagEnvVars:
+    """_expand_dag_env_vars expands ${ENV_VAR} placeholders in place and nothing else."""
 
     def _call(self, dag_nodes: list[dict[str, Any]]) -> None:
-        """Invoke _resolve_dag_secrets with a synthetic DAG containing the given nodes."""
-        FlowEnrichmentService._resolve_dag_secrets(internal_dag={"dag": dag_nodes})
+        FlowEnrichmentService._expand_dag_env_vars(internal_dag={"dag": dag_nodes})
 
     def test_expands_env_var_placeholder_in_string_value(self, monkeypatch: Any) -> None:
-        """${VAR} placeholders in string values are expanded from the environment."""
         monkeypatch.setenv("OPENSEARCH_USERNAME", "admin")
         node: dict[str, Any] = {"id": "n1", "config": {"username": "${OPENSEARCH_USERNAME}", "host": "localhost"}}
         self._call([node])
@@ -874,110 +1026,37 @@ class TestResolveDagSecrets:
         assert node["config"]["host"] == "localhost"
 
     def test_expands_nested_env_var_placeholder(self, monkeypatch: Any) -> None:
-        """${VAR} placeholders nested inside sub-dicts are expanded."""
         monkeypatch.setenv("OS_PASS", "s3cr3t")  # pragma: allowlist secret
-        node: dict[str, Any] = {
-            "id": "n1",
-            "config": {"provider_config": {"password": "${OS_PASS}"}},
-        }  # pragma: allowlist secret
+        node: dict[str, Any] = {"id": "n1", "config": {"provider_config": {"password": "${OS_PASS}"}}}
         self._call([node])
-        assert node["config"]["provider_config"]["password"] == "s3cr3t"  # pragma: allowlist secret
+        # pragma: allowlist nextline secret
+        assert node["config"]["provider_config"]["password"] == "s3cr3t"
 
     def test_unset_env_var_left_as_is(self, monkeypatch: Any) -> None:
-        """Unset ${VAR} placeholders are left unchanged — expandvars behaviour."""
         monkeypatch.delenv("UNSET_VAR", raising=False)
         node: dict[str, Any] = {"id": "n1", "config": {"key": "${UNSET_VAR}"}}
         self._call([node])
         assert node["config"]["key"] == "${UNSET_VAR}"
 
-    def test_vault_reference_resolved_when_provider_registered(self) -> None:
-        """vault:// credentials are resolved via resolve_value when provider is registered."""
-        node: dict[str, Any] = {
-            "id": "n1",
-            "config": {"credentials": "vault://hashicorp/docpipe/s3#creds"},
-        }  # pragma: allowlist secret
-
-        with (
-            patch("docpipe.integrations.secrets.secret_provider.has_vault_references", return_value=True),
-            patch(
-                "docpipe.integrations.secrets.secret_provider.resolve_value",
-                return_value={"credentials": {"access_key": "AK", "secret_key": "SK"}},  # pragma: allowlist secret
-            ) as mock_resolve,
-        ):
-            self._call([node])
-
-        mock_resolve.assert_called_once()
-        assert node["config"]["credentials"] == {"access_key": "AK", "secret_key": "SK"}  # pragma: allowlist secret
-
-    def test_vault_failure_keeps_original_config_and_does_not_raise(self) -> None:
-        """When vault resolution fails the original config is kept and no exception propagates."""
-        from docpipe.exceptions.docpipe_exceptions import ConfigurationError
-
-        node: dict[str, Any] = {
-            "id": "n1",
-            "name": "ingest",
-            "config": {"credentials": "vault://hashicorp/docpipe/s3#creds"},
-        }  # pragma: allowlist secret
-
-        with (
-            patch("docpipe.integrations.secrets.secret_provider.has_vault_references", return_value=True),
-            patch(
-                "docpipe.integrations.secrets.secret_provider.resolve_value",
-                side_effect=ConfigurationError("provider not registered"),
-            ),
-        ):
-            self._call([node])  # must not raise
-
-        assert node["config"]["credentials"] == "vault://hashicorp/docpipe/s3#creds"  # pragma: allowlist secret
+    def test_vault_reference_is_left_unresolved(self, provider: "_FakeProvider") -> None:
+        """No reference is resolved here, and no provider is asked for anything."""
+        ref = _ref("s3/creds")
+        node: dict[str, Any] = {"id": "n1", "config": {"credentials": ref}}
+        self._call([node])
+        assert node["config"]["credentials"] == ref
+        assert provider.requests == []
 
     def test_skips_nodes_with_non_dict_config(self) -> None:
-        """Nodes whose config is not a dict are skipped without error."""
         node: dict[str, Any] = {"id": "n1", "config": None}
         self._call([node])
         assert node["config"] is None
 
     def test_skips_nodes_with_no_config_key(self) -> None:
-        """Nodes with no config key are skipped without error."""
         node: dict[str, Any] = {"id": "n1"}
         self._call([node])
         assert "config" not in node
 
-    def test_does_not_call_resolve_value_when_no_vault_refs(self) -> None:
-        """resolve_value is not called when no vault:// refs are present."""
-        node: dict[str, Any] = {"id": "n1", "config": {"host": "localhost", "port": 9200}}
-        with patch("docpipe.integrations.secrets.secret_provider.resolve_value") as mock_resolve:
-            self._call([node])
-        mock_resolve.assert_not_called()
-
-    def test_multiple_nodes_with_vault_refs_resolved_independently(self) -> None:
-        """Each node's config is resolved independently; failures in one do not affect others."""
-        nodes: list[dict[str, Any]] = [
-            {"id": "n1", "config": {"credentials": "vault://hashicorp/s3#creds"}},  # pragma: allowlist secret
-            {"id": "n2", "config": {"credentials": "vault://hashicorp/db#creds"}},  # pragma: allowlist secret
-        ]
-        resolved_values = [{"key": "val1"}, {"key": "val2"}]
-        call_count = 0
-
-        def side_effect(config: dict[str, Any]) -> dict[str, Any]:
-            nonlocal call_count
-            result: dict[str, Any] = {"credentials": resolved_values[call_count]}
-            call_count += 1
-            return result
-
-        with (
-            patch("docpipe.integrations.secrets.secret_provider.has_vault_references", return_value=True),
-            patch(
-                "docpipe.integrations.secrets.secret_provider.resolve_value",
-                side_effect=side_effect,
-            ),
-        ):
-            self._call(nodes)
-
-        assert nodes[0]["config"]["credentials"] == {"key": "val1"}
-        assert nodes[1]["config"]["credentials"] == {"key": "val2"}
-
     def test_multiple_nodes_env_vars_resolved_independently(self, monkeypatch: Any) -> None:
-        """Each node's env-var placeholders are expanded independently."""
         monkeypatch.setenv("HOST_A", "host-a")
         monkeypatch.setenv("HOST_B", "host-b")
         nodes: list[dict[str, Any]] = [
@@ -989,31 +1068,343 @@ class TestResolveDagSecrets:
         assert nodes[1]["config"]["host"] == "host-b"
 
     def test_empty_dag_does_not_raise(self) -> None:
-        """An empty DAG is handled without error."""
         self._call([])
 
 
 # ---------------------------------------------------------------------------
-# Tests: enrich_flow_with_features — _resolve_dag_secrets wiring
+# Tests: secret references during enrichment (spec: secret-management)
+# ---------------------------------------------------------------------------
+
+CANARY = "CANARY-7c2e"
+_PROVIDER = "hashicorp"
+
+
+def _ref(name: str) -> str:
+    return f"vault://{_PROVIDER}/{name}#value"
+
+
+class _FakeProvider(SecretProvider):
+    """Serves a fixed value, or fails, and records every request."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.requests: list[str] = []
+
+    def authenticate(self) -> None:
+        """Not used."""
+
+    def is_available(self) -> bool:
+        """Always available."""
+        return True
+
+    def get_secret(self, *, path: str, key: str | None = None) -> str:
+        """Record the request; fail like an unreachable Vault, or return the canary."""
+        self.requests.append(path)
+        if self.fail:
+            raise ProviderUnreachableError("vault down")
+        return CANARY
+
+
+@pytest.fixture
+def provider() -> Iterator[_FakeProvider]:
+    clear_providers()
+    fake = _FakeProvider()
+    register_provider(name=_PROVIDER, provider=fake)
+    DocpipeConfigLoader._config = {
+        "secrets": {"vault": {"allowed_paths": [f"{_PROVIDER}:**"], "allowed_destinations": ["milvus.example.com"]}}
+    }
+    yield fake
+    clear_providers()
+    DocpipeConfigLoader.reset()
+
+
+def _milvus_node_result(*, token: str) -> dict[str, Any]:
+    return _make_node_feature_result(
+        operator_config={
+            "name": "vdb",
+            "provider": "milvus",
+            "provider_config": {
+                "auth_type": "token",
+                "collection_name": "docs",
+                "host": "milvus.example.com",
+                "token": token,
+            },
+        }
+    )
+
+
+def _fetch(*, node_result: dict[str, Any]) -> Any:
+    service = FlowEnrichmentService.__new__(FlowEnrichmentService)
+    return service._fetch_vectordb_metadata(node_feature_result=node_result)
+
+
+class TestVectorDbSecretResolutionDuringEnrichment:
+    """A connecting node resolves its own references; a failure never reaches a client."""
+
+    def test_unresolvable_token_returns_empty_result_and_never_connects(
+        self, provider: _FakeProvider, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        provider.fail = True
+        node_result = _milvus_node_result(token=_ref("milvus/token"))
+        with (
+            patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient") as client_cls,
+            caplog.at_level("WARNING"),
+        ):
+            result = _fetch(node_result=node_result)
+
+        assert result == _mf_mod.VectorDBMetadataFetcher._empty_result()
+        assert set(result) == {
+            OperatorConstants.VectorDB.AVAILABLE_RESOURCES,
+            OperatorConstants.VectorDB.SELECTED_RESOURCE_SCHEMA,
+            OperatorConstants.VectorDB.FEATURE_MAPPINGS_RESPONSE,
+            OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE,
+            OperatorConstants.VectorDB.STORED_RESOURCE_METADATA,
+        }
+        client_cls.assert_not_called()
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("provider_config.token" in w and _PROVIDER in w for w in warnings)
+        assert CANARY not in caplog.text
+        assert "milvus/token" not in caplog.text
+
+    def test_unresolved_reference_is_never_passed_to_the_adapter_fetcher(self, provider: _FakeProvider) -> None:
+        provider.fail = True
+        node_result = _milvus_node_result(token=_ref("milvus/token"))
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch"
+        ) as fetch:
+            _fetch(node_result=node_result)
+        fetch.assert_not_called()
+
+    def test_unresolvable_weaviate_key_preserves_projection_without_fetching(self, provider: _FakeProvider) -> None:
+        provider.fail = True
+        reference = _ref("weaviate/key")
+        incoming = {
+            "content": _make_feature(),
+            "sparse_embeddings": _make_feature(type_=OperatorConstants.Types.TYPE_VECTOR_SPARSE),
+        }
+        node_result = _make_node_feature_result(
+            inputs=incoming,
+            available=incoming,
+            operator_config={
+                "provider": OperatorConstants.VectorDB.WEAVIATE,
+                "provider_config": {
+                    "host": "milvus.example.com",
+                    "collection_name": "Docs",
+                    "auth_type": "api_key",
+                    "secure": True,
+                    "api_key": reference,
+                },
+            },
+        )
+        original = json.loads(json.dumps(node_result))
+        service = FlowEnrichmentService.__new__(FlowEnrichmentService)
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateResourceMetadata.fetch"
+            ) as fetch,
+            patch(
+                "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateClient"
+            ) as client_cls,
+        ):
+            block = service._build_node_feature_metadata(
+                node_id="vdb", node_feature_result=node_result, operator_type=OperatorConstants.Operators.VECTORDB
+            )
+
+        fetch.assert_not_called()
+        client_cls.assert_not_called()
+        assert provider.requests == ["weaviate/key"]
+        assert node_result == original
+        assert "sparse_embeddings" not in block[OperatorConstants.Config.AVAILABLE_FEATURES]
+        assert block[OperatorConstants.Config.AVAILABLE_FEATURES]["content"]["node_id"] == "node-1"
+        assert "sparse_embeddings" in block[OperatorConstants.Config.INPUT_FEATURES]
+        expected_live = _mf_mod.VectorDBMetadataFetcher._empty_result()
+        assert {key: block[key] for key in expected_live} == expected_live
+        assert CANARY not in json.dumps(block)
+
+    def test_successful_resolution_connects_with_resolved_values(self, provider: _FakeProvider) -> None:
+        node_result = _milvus_node_result(token=_ref("milvus/token"))
+        expected = {"marker": "from-adapter"}
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch",
+            return_value=expected,
+        ) as fetch:
+            result = _fetch(node_result=node_result)
+
+        assert result == expected
+        # The fetcher receives the opaque value; the vectordb adapter reveals it when it builds its client.
+        assert fetch.call_args.kwargs["provider_config"]["token"].reveal() == CANARY
+        assert provider.requests == ["milvus/token"]
+
+    def test_resolution_does_not_mutate_the_snapshot_config(self, provider: _FakeProvider) -> None:
+        node_result = _milvus_node_result(token=_ref("milvus/token"))
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch",
+            return_value={},
+        ):
+            _fetch(node_result=node_result)
+        assert node_result["operator_config"]["provider_config"]["token"] == _ref("milvus/token")
+
+    def test_literal_credentials_are_unchanged_and_ask_no_provider(self, provider: _FakeProvider) -> None:
+        node_result = _milvus_node_result(token="literal-token")  # pragma: allowlist secret
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch",
+            return_value={},
+        ) as fetch:
+            _fetch(node_result=node_result)
+        assert fetch.call_args.kwargs["provider_config"]["token"] == "literal-token"  # pragma: allowlist secret
+        assert provider.requests == []
+
+    def test_adapter_failure_log_carries_no_exception_text(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A client error that echoes its inputs is reduced to a category before logging."""
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
+
+        class _EchoingError(ConnectionError):
+            pass
+
+        with (
+            patch(
+                "docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient",
+                side_effect=_EchoingError(f"cannot reach https://u:{CANARY}@milvus.example.com"),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = MilvusResourceMetadata().fetch(
+                provider_config={"host": "milvus.example.com", "token": CANARY},
+                operator_config={},
+                available_features={},
+                normalise_feature_mappings=lambda raw: raw,
+                default_feature_mappings_from_features=lambda *a, **k: [],
+                empty_result=_mf_mod.VectorDBMetadataFetcher._empty_result,
+            )
+        assert result == _mf_mod.VectorDBMetadataFetcher._empty_result()
+        assert CANARY not in caplog.text
+
+
+def _enrich(
+    *, nodes: list[dict[str, Any]], node_features: dict[str, Any], op_by_id: dict[str, str]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run enrich_flow_with_features with a real DAG conversion and a stub propagator."""
+    captured: dict[str, Any] = {}
+
+    def fake_propagate(*, flow_def: dict[str, Any], global_config: dict) -> dict:
+        import copy
+
+        captured["dag"] = copy.deepcopy(flow_def)
+        return node_features
+
+    mock_validator = MagicMock()
+    mock_validator.propagate_features_per_node.side_effect = fake_propagate
+    service = FlowEnrichmentService(validator_factory=lambda: mock_validator)
+    flow = {
+        "doc_type": "pipeline",
+        "version": "3.0",
+        "pipelines": [
+            {
+                "nodes": [{"id": n["id"], "op": op_by_id[n["id"]], "parameters": n["parameters"]} for n in nodes],
+                "app_data": {"ds_flow": {"name": "Test Flow", "global_config": {}}},
+            }
+        ],
+    }
+    import copy
+
+    request = copy.deepcopy(flow)
+    response = service.enrich_flow_with_features(flow_definition=flow)
+    assert flow == request, "the request body must not be mutated"
+    return response, captured
+
+
+class TestEnrichFlowSecretHandling:
+    """Whole-flow behavior: which nodes resolve, and what the response may carry."""
+
+    def _two_node_flow(self) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, str]]:
+        token = _ref("milvus/token")
+        nodes: list[dict[str, Any]] = [
+            {"id": "ing", "parameters": {"provider": "s3", "credentials": _ref("s3/creds")}},
+            {
+                "id": "vdb",
+                "parameters": {
+                    "provider": "milvus",
+                    "provider_config": {
+                        "auth_type": "token",
+                        "collection_name": "docs",
+                        "host": "milvus.example.com",
+                        "token": token,
+                    },
+                },
+            },
+        ]
+        node_features = {
+            "ing": _make_node_feature_result(operator_config=nodes[0]["parameters"]),
+            "vdb": _make_node_feature_result(operator_config=_milvus_node_result(token=token)["operator_config"]),
+        }
+        return nodes, node_features, {"ing": "ingest_source", "vdb": "vectordb"}
+
+    def test_only_the_connecting_node_resolves(self, provider: _FakeProvider) -> None:
+        nodes, node_features, ops = self._two_node_flow()
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch",
+            return_value=_mf_mod.VectorDBMetadataFetcher._empty_result(),
+        ):
+            _enrich(nodes=nodes, node_features=node_features, op_by_id=ops)
+        assert provider.requests == ["milvus/token"], "the ingest node's reference must not be resolved"
+
+    def test_dag_given_to_the_propagator_holds_no_resolved_value(self, provider: _FakeProvider) -> None:
+        nodes, node_features, ops = self._two_node_flow()
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch",
+            return_value=_mf_mod.VectorDBMetadataFetcher._empty_result(),
+        ):
+            _, captured = _enrich(nodes=nodes, node_features=node_features, op_by_id=ops)
+        assert CANARY not in json.dumps(captured["dag"], default=str)
+
+    def test_response_carries_reference_text_and_no_resolved_value(self, provider: _FakeProvider) -> None:
+        nodes, node_features, ops = self._two_node_flow()
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata.MilvusResourceMetadata.fetch",
+            return_value=_mf_mod.VectorDBMetadataFetcher._empty_result(),
+        ):
+            response, _ = _enrich(nodes=nodes, node_features=node_features, op_by_id=ops)
+        text = json.dumps(response, default=str)
+        assert CANARY not in text
+        assert _ref("milvus/token") in text
+        assert _ref("s3/creds") in text
+
+    def test_failed_node_returns_empty_result_others_still_enriched_and_no_marker(
+        self, provider: _FakeProvider
+    ) -> None:
+        provider.fail = True
+        nodes, node_features, ops = self._two_node_flow()
+        node_features["ing"][OperatorConstants.Config.OUTPUT_FEATURES] = {"content": _make_feature()}
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient") as client_cls:
+            response, _ = _enrich(nodes=nodes, node_features=node_features, op_by_id=ops)
+
+        client_cls.assert_not_called()
+        by_id = {n["id"]: n["parameters"] for n in response["pipelines"][0]["nodes"]}
+        assert by_id["vdb"][OperatorConstants.VectorDB.AVAILABLE_RESOURCES] == []
+        assert by_id["vdb"][OperatorConstants.VectorDB.STORED_RESOURCE_METADATA] == {
+            "vector_similarity": None,
+            "dimension_size": None,
+        }
+        assert "content" in by_id["ing"][OperatorConstants.Config.OUTPUT_FEATURES]
+        text = json.dumps(response, default=str).lower()
+        for marker in ("resolution_failed", "secret_failed", "unresolved", "_secret"):
+            assert marker not in text
+
+
+# ---------------------------------------------------------------------------
+# Tests: enrich_flow_with_features — env expansion wiring
 # ---------------------------------------------------------------------------
 
 
-class TestEnrichFlowWithFeaturesSecretWiring:
-    """Verify that _resolve_dag_secrets fires (step 2) before feature propagation.
-
-    enrich_flow_with_features must expand ${ENV_VAR} placeholders in node configs
-    *before* calling propagate_features_per_node, so that any operator making a
-    live connection during enrichment (e.g. VectorDB) receives resolved credentials.
-    """
+class TestEnrichFlowWithFeaturesEnvWiring:
+    """${ENV_VAR} placeholders are expanded before propagation (step 2)."""
 
     def test_env_var_expanded_before_propagation(self, monkeypatch: Any) -> None:
-        """${VAR} in a node config is resolved before propagate_features_per_node is called."""
         monkeypatch.setenv("TEST_HOST", "resolved-host")
 
         captured_dag: dict[str, Any] = {}
 
         def fake_propagate(*, flow_def: dict[str, Any], global_config: dict) -> dict:
-            # Capture the DAG state at the moment propagation is called.
             import copy
 
             captured_dag.update(copy.deepcopy(flow_def))
@@ -1033,12 +1424,6 @@ class TestEnrichFlowWithFeaturesSecretWiring:
             mock_vs_cls.return_value = mock_vs
             service = FlowEnrichmentService(validator_factory=lambda: mock_validator)
 
-        flow = _minimal_elyra_flow(("n1", "vectordb"))
-        service.enrich_flow_with_features(flow_definition=flow)
+        service.enrich_flow_with_features(flow_definition=_minimal_elyra_flow(("n1", "vectordb")))
 
-        # The DAG seen by propagate_features_per_node must already have the resolved value.
-        node_config = captured_dag["dag"][0]["config"]
-        assert node_config["host"] == "resolved-host", (
-            f"Expected 'resolved-host' but propagator received '{node_config['host']}'; "
-            "_resolve_dag_secrets must run before propagate_features_per_node."
-        )
+        assert captured_dag["dag"][0]["config"]["host"] == "resolved-host"

@@ -30,7 +30,7 @@ Docling-pipelines is a modular, operator-based data processing framework designe
 - **PyArrow Data Format**: All data flows through the pipeline as PyArrow tables, ensuring efficient memory usage and interoperability
 - **DAG-Based Workflow Execution**: Flows are defined as JSON configurations representing directed acyclic graphs (DAGs) of operator nodes
 - **Prefect Orchestration**: Workflow execution managed by Prefect with support for both ephemeral (local) and distributed execution via work pools (Docker)
-- **Modern AI/ML Integrations**: Native support for Ollama (LLM operations), Docling (document processing), OpenSearch (vector and scalar storage) and Milvus (vector storage)
+- **Modern AI/ML Integrations**: Native support for Ollama (LLM operations), Docling (document processing), OpenSearch (vector and scalar storage), Milvus (vector storage) and Weaviate (vector storage)
 
 ### Architectural Patterns
 
@@ -59,7 +59,7 @@ This architectural diversity is a deliberate design choice that supports the fra
 | **Storage**             | DuckDB (metadata and tables), Filesystem (metadata only)                                                                                              |
 | **Document Processing** | Docling (with ASR support for audio/video via ffmpeg)                                                                                                 |
 | **LLM Integration**     | Ollama, Watsonx.ai, LiteLLM (unified interface supporting 100+ LLM providers including OpenAI, Anthropic, Google, AWS Bedrock, and more), HuggingFace (native local/API support) |
-| **Vector Storage**      | OpenSearch, Milvus, NMSLIB, Faiss                                                                                                                     |
+| **Vector Storage**      | OpenSearch, Milvus, Weaviate, NMSLIB, Faiss                                                                                                                     |
 | **Language Detection**  | FastText, langdetect                                                                                                                                  |
 | **Web Framework**       | FastAPI (optional)                                                                                                                                    |
 | **Testing**             | pytest, pytest-cov                                                                                                                                    |
@@ -2484,7 +2484,7 @@ graph TB
 
 ### 8. DocumentClassifier Pattern
 
-The DocumentClassifier operator classifies documents into predefined categories using Large Language Models. It uses a simplified service-based architecture that leverages the shared LLM adapter infrastructure for multi-provider support.
+The DocumentClassifier operator classifies documents into predefined categories using Large Language Models. It uses a port/adapter architecture (`ClassificationPort`) that leverages the shared LLM adapter infrastructure for multi-provider support.
 
 **Typical Workflow Position:**
 
@@ -2511,11 +2511,16 @@ graph LR
 │                   DocumentClassifierOperator                │
 │                     (Main Operator)                         │
 └────────────────────────┬────────────────────────────────────┘
-                         │
+                         │ depends on
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  ClassificationService                      │
-│              (Business Logic Layer)                         │
+│                     ClassificationPort                      │
+│        (resolved by ClassificationAdapterFactory)           │
+└────────────────────────┬────────────────────────────────────┘
+                         │ implemented by
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              StandardLLMClassificationAdapter               │
 │  ┌─────────────────────────────────────────────────-─────┐  │
 │  │  Domain Models:                                       │  │
 │  │  - ClassificationRequest                              │  │
@@ -2542,7 +2547,7 @@ graph LR
 
 1. **LLM-Based Classification**: Uses Large Language Models for intelligent document classification
 2. **Multi-Provider Support**: LiteLLM (100+ providers) and IBM watsonx.ai via shared LLM infrastructure
-3. **Simplified Architecture**: Direct service-based design without port/adapter overhead
+3. **Port/Adapter Architecture**: Operator depends on `ClassificationPort`; adapters self-register with `ClassificationAdapterFactory`
 4. **Confidence Scoring**: 1-10 scale confidence scores for each classification
 5. **Reasoning Output**: Optional explanations for classification decisions
 6. **Shared Infrastructure**: Leverages common LLM adapter factory for consistency
@@ -2657,6 +2662,12 @@ graph TB
         SERVICE[PIIHAPService<br/>thin wrapper]
         WATSONXADAPTER[WatsonxPIIAndHAPAdapter<br/>wraps TextDetectionPort]
         LITELLMADAPTER[LiteLLMPIIAndHAPAdapter<br/>wraps LLMInferencePort]
+        HFHAPADAPTER[HuggingFaceHAPAdapter<br/>HAP only, wraps TextDetectionPort]
+    end
+
+    subgraph "Core Adapters and Integrations"
+        HFCORE[HuggingFaceAdapter<br/>sentences, toxic labels, threshold]
+        HFCLIENT[HuggingFaceClassificationClient<br/>model cache, windows, scoring]
     end
 
     subgraph "External Services"
@@ -2664,14 +2675,22 @@ graph TB
         WATSONXAPI[WatsonX.ai /ml/v1/text/detection<br/>IBM Cloud]
     end
 
+    subgraph "Local Models"
+        HFMODEL[Hugging Face classifier<br/>transformers and torch, in-process]
+    end
+
     PIIHAP --> FACTORY
     FACTORY --> PORT
     PORT --> WATSONXADAPTER
     PORT --> LITELLMADAPTER
+    PORT --> HFHAPADAPTER
     PORT --> SERVICE
 
     LITELLMADAPTER --> LITELLMAPI
     WATSONXADAPTER --> WATSONXAPI
+    HFHAPADAPTER --> HFCORE
+    HFCORE --> HFCLIENT
+    HFCLIENT --> HFMODEL
 
     style PIIHAP fill:#ffe1e1
     style FACTORY fill:#ffe1e1
@@ -2679,6 +2698,9 @@ graph TB
     style PORT fill:#fff4e1
     style WATSONXADAPTER fill:#e1ffe1
     style LITELLMADAPTER fill:#e1ffe1
+    style HFHAPADAPTER fill:#e1ffe1
+    style HFCORE fill:#e1f0ff
+    style HFCLIENT fill:#e1f0ff
 ```
 
 **Supported Providers:**
@@ -2695,6 +2717,12 @@ graph TB
    - Anthropic (claude-3-opus, claude-3-sonnet)
    - Azure OpenAI, Cohere, AWS Bedrock, Google Vertex AI
    - Easy provider switching
+
+3. **Hugging Face** (HAP only): local sequence classifier run in-process
+   - Default model `ibm-granite/granite-guardian-hap-38m` at a pinned revision; other classifiers through config
+   - Sentence-level detections with exact offsets, so redaction masks only the flagged sentence
+   - Model loaded once per process and shared across nodes, batches and threads; runs offline from the cache
+   - `HuggingFaceHAPConfig` resolves the HAP defaults before the core `HuggingFaceAdapter` is built
 
 **Configuration Examples:**
 
@@ -2734,6 +2762,22 @@ graph TB
 }
 ```
 
+**Fully local (Presidio PII + Hugging Face HAP):**
+
+```json
+{
+  "type": "pii_and_hap",
+  "name": "pii_hap_local",
+  "config": {
+    "pii_provider": "presidio",
+    "pii_provider_config": {"spacy_model": "en_core_web_sm"},
+    "hap_provider": "huggingface",
+    "hap_provider_config": {},
+    "expected_redactions": ["pii", "hap"]
+  }
+}
+```
+
 **Key Features:**
 
 1. **Detection Types**:
@@ -2749,7 +2793,7 @@ graph TB
    - Switch providers without code changes
    - Configuration-driven provider selection
    - Ollama can be accessed through LiteLLM via an OpenAI-compatible `api_base`
-   - Production deployment with WatsonX or LiteLLM
+   - Production deployment with WatsonX or LiteLLM, or fully local with Presidio (PII) and Hugging Face (HAP)
 
 4. **Extensibility**:
    - Add a new provider with a single file: create the adapter, decorate with `@register_pii_and_hap_detection_adapter`, and it is automatically discoverable
@@ -3194,7 +3238,7 @@ Legacy Ollama-only configurations are automatically converted to LiteLLM:
 
 ### 9. Document Set Hexagonal Architecture Pattern
 
-The Document Set operator follows hexagonal architecture (ports and adapters pattern) for flexible storage backend support. It uses the storage layer interfaces (KeyValueStorage and TableStorage) for persistence.
+The Document Set operator follows hexagonal architecture (ports and adapters pattern) for flexible storage backend support. It uses the storage layer interfaces (`KeyValueStoragePort` and `TableStoragePort`) for persistence.
 
 #### Architecture Overview
 
@@ -3207,10 +3251,11 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
    ┌───────────┼───────────────────┐
    │           │                   │
    ▼           ▼                   ▼
-┌──────────┐ ┌──────────────┐ ┌──────────────────┐
-│ Metadata │ │ Data Store   │ │ Attachment Repo  │
-│ Factory  │ │ Factory      │ │ Factory          │
-└────┬─────┘ └──────┬───────┘ └────────┬─────────┘
+┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
+│ Asset        │ │ Data Store   │ │ Attachment Repo  │
+│ Repository   │ │ Factory      │ │ Factory          │
+│ Factory      │ │              │ │                  │
+└──────┬───────┘ └──────┬───────┘ └────────┬─────────┘
      │               │                  │
      ▼               ▼                  ▼
 ┌──────────┐ ┌──────────────┐ ┌──────────────────┐
@@ -3220,16 +3265,15 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
      │               │                  │
      ▼               ▼                  ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-│ DuckDB       │ │ DuckDB Data  │ │ DuckDB           │
-│ Metadata     │ │ Adapter      │ │ Attachment Repo  │
-│ Adapter      │ └──────┬───────┘ └────────┬─────────┘
+│ DuckDBAsset  │ │ DuckDB Data  │ │ DuckDB           │
+│ Repository   │ │ Adapter      │ │ Attachment Repo  │
+│ [DocSet]     │ └──────┬───────┘ └────────┬─────────┘
 └──────┬───────┘        │                  │
        │                ▼                  ▼
        ▼         ┌──────────────┐ ┌──────────────────┐
 ┌──────────────┐ │ TableStorage │ │ KeyValueStorage  │
-│ KeyValue     │ │ (Interface)  │ │ (Interface)      │
-│ Storage      │ └──────────────┘ └──────────────────┘
-│ (Interface)  │
+│ KeyValue     │ │ Port         │ │ Port             │
+│ StoragePort  │ └──────────────┘ └──────────────────┘
 └──────────────┘
 ```
 
@@ -3244,7 +3288,6 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
   - `AssetRepository[DocumentSet]`: Metadata CRUD operations
   - `DocumentSetStorage`: PyArrow table data operations
 - **Types** (`types/`): TypedDict-based configuration types
-  - `RepositoryConfig`: Metadata repository configuration
   - `DataStoreConfig`: Data store configuration
   - `HealthCheckResult`: Health check response structure
 
@@ -3266,15 +3309,15 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
 **3. Adapter Layer**
 
 - **DuckDB document set adapters** (`document_sets/adapters/duckdb/`):
-  - **DuckDBAssetRepository** (`common/adapters/repositories/`): Generic metadata persistence using `KeyValueStorage`; stores in the collection returned by `DocumentSet.get_collection_name()` (i.e. `document_sets`)
-  - **DuckDBDocumentSetStorage**: Data persistence using `TableStorage`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
+  - **DuckDBAssetRepository** (`common/adapters/repositories/`): Generic metadata persistence using `KeyValueStoragePort`; stores in the collection returned by `DocumentSet.get_collection_name()` (i.e. `document_sets`)
+  - **DuckDBDocumentSetStorage**: Data persistence using `TableStoragePort`; handles schema creation, upsert, preview, deletion; returns `AttachmentRef` from `store()`
 - **Common adapters** (`common/adapters/repositories/`):
   - **DuckDBAttachmentRepository**: Persists `AttachmentRef` records in the `document_set_attachments` KV collection. Registered via `@AttachmentRepositoryFactory.register(name="duckdb")` and self-wires via its `create(*, config)` classmethod.
-- `DuckDBAssetRepository` is registered in `RepositoryFactory.get_available_repository_types()` as a dict entry (not a decorator). `DuckDBAttachmentRepository` uses the `@AttachmentRepositoryFactory.register()` decorator.
+- `DuckDBAssetRepository` is registered in `AssetRepositoryFactory.get_available_repository_types()` as a dict entry (not a decorator). `DuckDBAttachmentRepository` uses the `@AttachmentRepositoryFactory.register()` decorator.
 
 **4. Factory Layer**
 
-- **RepositoryFactory** (`common/factories/`): Creates `AssetRepository[DocumentSet]` adapters; reads backend type from `assets_management.document_set_repository.type` in `docling-pipelines-config.yaml`
+- **AssetRepositoryFactory** (`common/factories/asset_repository_factory.py`): Creates `AssetRepository[DocumentSet]` adapters; reads backend type from `assets_management.document_set_repository.type` in `docling-pipelines-config.yaml` via `DocpipeConfigLoader`
 - **DataStoreFactory** (`document_sets/factories/`): Creates data store adapters
 - **AttachmentRepositoryFactory** (`common/factories/`): Decorator-registry factory for attachment repository adapters; adapter is selected by name matching `document_set_repository.type` in `docling-pipelines-config.yaml`
 
@@ -3304,14 +3347,14 @@ To add PostgreSQL, MongoDB, or other backends:
 1. **Implement Storage Layer Interfaces** (if needed):
 
 ```python
-# Implement KeyValueStorage for metadata
-class PostgreSQLKeyValueStorage(KeyValueStorage):
+# Implement KeyValueStoragePort for metadata
+class PostgreSQLKeyValueStorage(KeyValueStoragePort):
     def save_record(self, *, collection: str, key: str, data: dict[str, Any]) -> None:
         pass
     # ... other methods
 
-# Implement TableStorage for data
-class PostgreSQLTableStorage(TableStorage):
+# Implement TableStoragePort for data
+class PostgreSQLTableStorage(TableStoragePort):
     def create_table(self, *, table_name: str, schema: pa.Schema) -> None:
         pass
     # ... other methods
@@ -3322,7 +3365,7 @@ class PostgreSQLTableStorage(TableStorage):
 ```python
 # In StorageFactory
 @staticmethod
-def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueStorage:
+def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueStoragePort:
     if storage_type == "postgresql":
         return PostgreSQLKeyValueStorage(**config)
     # ... existing types
@@ -3330,16 +3373,16 @@ def create_key_value_storage(*, storage_type: str, **config: Any) -> KeyValueSto
 
 3. **Implement Document Set Adapters**:
 
-```python
-@MetadataRepositoryFactory.register(name="postgresql", display_name="PostgreSQL")
-class PostgreSQLMetadataRepository(DocumentSetMetadataRepository):
-    def __init__(self, *, key_value_storage: KeyValueStorage):
-        self.storage = key_value_storage
-    # ... implement port methods
+Document set metadata is stored through the generic `AssetRepository[DocumentSet]` port, which
+`AssetRepositoryFactory` creates. To add a metadata backend, implement `AssetRepository`, add a value to
+`RepositoryType` and map it in `AssetRepositoryFactory.get_available_repository_types()`. `DocumentSetOperator`
+and the API call `AssetRepositoryFactory.create_repository()` directly, so there is currently no registration
+hook for metadata backends. The data plane uses its own factory:
 
+```python
 @DataStoreFactory.register(name="postgresql", display_name="PostgreSQL")
-class PostgreSQLDataStore(DocumentSetDataStore):
-    def __init__(self, *, table_storage: TableStorage):
+class PostgreSQLDataStore(DocumentSetStorage):
+    def __init__(self, *, table_storage: TableStoragePort):
         self.storage = table_storage
     # ... implement port methods
 ```
@@ -3415,9 +3458,9 @@ And the flow JSON:
 ```
 Ingest → Extract → [Other Operators] → DocumentSetOperator → [Downstream Operators]
                                               │
-                                              ├─> MetadataRepositoryFactory   → DuckDB adapter → KeyValueStorage
-                                              ├─> DataStoreFactory            → DuckDB adapter → TableStorage
-                                              ├─> AttachmentRepositoryFactory → DuckDB adapter → KeyValueStorage
+                                              ├─> AssetRepositoryFactory      → DuckDBAssetRepository → KeyValueStoragePort
+                                              ├─> DataStoreFactory            → DuckDB adapter → TableStoragePort
+                                              ├─> AttachmentRepositoryFactory → DuckDB adapter → KeyValueStoragePort
                                               └─> Original table (pass-through)
 ```
 
@@ -3440,6 +3483,48 @@ assets_management:
 - **"duckdb"** (default): Metadata and attachment coordinates stored in DuckDB key-value tables alongside the data tables.
 
 **Note**: The `data_backend` parameter in the operator's flow config controls where PyArrow table data is stored, and is independent of the metadata/attachment backend in the YAML.
+
+### OpenLineage Hexagonal Architecture Pattern
+
+Optional data lineage lives in `src/docpipe/core/lineage/` and follows the same ports-and-adapters layout as job management. It is off unless `DOCPIPE_LINEAGE_ENABLED=true`, and it needs the `lineage` extra.
+
+```mermaid
+graph TB
+    subgraph "Docling-pipelines Layer"
+        ORCH[Orchestrator]
+        OBS[Execution Observer<br/>when to emit]
+        SVC[LineageService<br/>what to emit]
+    end
+
+    subgraph "Adapter Layer (Hexagonal)"
+        PORT[LineagePublisher Port<br/>Interface]
+        OLA[OpenLineage Adapter]
+        NOOP[NoOp Adapter<br/>fallback]
+    end
+
+    BE[Console / File / HTTP<br/>Marquez]
+
+    ORCH --> OBS
+    OBS --> SVC
+    SVC --> PORT
+    PORT --> OLA
+    PORT --> NOOP
+    OLA --> BE
+
+    style ORCH fill:#ffe1e1
+    style SVC fill:#fff4e1
+    style OLA fill:#e1ffe1
+    style BE fill:#e1f5ff
+```
+
+- **Wiring**: `OrchestratorFactory` calls `lineage_factory.create_lineage_observer()`, which returns `None` when lineage is disabled, so no observer is attached. If `openlineage-python` is missing or fails to initialise, the factory logs a warning and falls back to the no-op publisher.
+- **Modes**: `flow` emits one job per run. `operator` also emits a child run per DAG node, linked to the flow run through the `parent` run facet.
+- **Dataset identity**: `dataset_naming.get_dataset_info()` maps an adapter config to an OpenLineage `(namespace, name)`. Sources and sinks share the rules, and inter-operator tables use the `inmemory://` namespace, so a node's output matches the next node's input and the backend can draw the edge.
+- **Credential safety**: the service strips credential keys from flow definitions and operator metadata before building any facet.
+- **Failure isolation**: exceptions raised inside the observer are logged as warnings and the flow continues, unless `DOCPIPE_LINEAGE_STRICT=true`.
+- **Distributed runs**: Prefect batch subflows rebuild the observer from environment variables, so the `DOCPIPE_LINEAGE_*` and `OPENLINEAGE__*` variables must be set in the worker environment.
+
+See the [OpenLineage Integration Guide](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md) for configuration, emitted events, custom facets, and adding a custom publisher.
 
 ## Deployment Patterns
 
@@ -4221,6 +4306,17 @@ docpipe/
 - **Error Codes**: Standardized error code system
 - **Error Messages**: Centralized error message management
 
+#### Configuration Loader (`utils/infrastructure/config_utils.py`)
+
+[`DocpipeConfigLoader`](src/docpipe/utils/infrastructure/config_utils.py) is the single entry point for reading `docling-pipelines-config.yaml`. Factories (asset repositories, job management, report storage, flow definition snapshots, incremental metadata, projects) and the Vault initializer use it instead of parsing the YAML file themselves.
+
+- **Thread-safe singleton**: The file is read at most once per process and cached; `DocpipeConfigLoader.reset()` clears the cache (intended for tests)
+- **Path resolution**: `DOCPIPE_CONFIG_PATH` environment variable, otherwise `<project_root>/docling-pipelines-config.yaml`
+- **Fault tolerant**: A missing file or invalid YAML returns an empty dict (with a log message), so callers fall back to their own defaults
+- **API**: `get_config()` returns the full dict; `get(key=..., default=...)` returns a top-level section; `get_storage(key, default, *, default_type)` returns a `(storage_type, config)` tuple
+- **Storage precedence** in `get_storage()`: service-specific `storage` section, then `global_storage`, then the built-in default. The built-in default is `filesystem` unless the caller passes `default_type`
+- **Per-service defaults**: incremental metadata, job run reports and flow definition snapshots use the `filesystem` default. Job management passes `default_type="inmemory"`, so job stats are not persisted unless `job_management.storage` or `global_storage` is configured
+
 #### Document Classes (`common/document_classes/`)
 #### Constants (`core/constants/`)
 
@@ -4279,16 +4375,16 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 #### Storage Interfaces
 
-**KeyValueStorage Interface** (`interfaces/key_value_storage.py`)
+**KeyValueStoragePort Interface** (`interfaces/key_value_storage_port.py`)
 
 - Interface for storing JSON-serializable records in logical collections
 - Used for asset metadata (flows, document set metadata)
 - Operations: save_record, get_record, list_records, delete_record, collection_exists, record_exists
 - Implementations:
-  - **FileSystemStorage**: JSON files organized by collection directories
+  - **KeyValueFileSystemStorage**: JSON files organized by collection directories
   - **DuckDBKeyValueStorage**: DuckDB tables with JSON columns
 
-**TableStorage Interface** (`interfaces/table_storage.py`)
+**TableStoragePort Interface** (`interfaces/table_storage_port.py`)
 
 - Interface for PyArrow table storage with SQL query capabilities
 - Used for document set data and structured data operations
@@ -4302,23 +4398,23 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 - Factory pattern for creating storage instances
 - Methods:
-  - `create_key_value_storage(storage_type, **config)`: Creates KeyValueStorage instances
-  - `create_table_storage(storage_type, **config)`: Creates TableStorage instances
+  - `create_key_value_storage(storage_type, **config)`: Creates KeyValueStoragePort instances
+  - `create_table_storage(storage_type, **config)`: Creates TableStoragePort instances
 - Supported types:
   - Key-value: "filesystem", "duckdb"
-  - Table: "duckdb"
+  - Table: "duckdb", "postgres"
 - Validates storage types and provides clear error messages
 
 #### DuckDB Implementations
 
-**DuckDBKeyValueStorage** (`duck_db/key_value_storage.py`)
+**DuckDBKeyValueStorage** (`duck_db/duckdb_key_value_storage.py`)
 
 - Stores records as JSON in DuckDB tables (one table per collection)
 - Schema: `key TEXT PRIMARY KEY, data JSON`
 - Singleton pattern per database path for connection reuse
 - Features: JSON serialization, SQL-based filtering, atomic operations
 
-**DuckDBTableStorage** (`duck_db/table_storage.py`)
+**DuckDBTableStorage** (`duck_db/duckdb_table_storage.py`)
 
 - Stores PyArrow tables directly in DuckDB
 - Features:
@@ -4330,7 +4426,7 @@ The storage layer provides a clean, interface-based abstraction for data persist
 
 #### FileSystem Implementation
 
-**FileSystemStorage** (`file_system/key_value_storage.py`)
+**KeyValueFileSystemStorage** (`file_system/key_value_file_system_storage.py`)
 
 - Stores records as JSON files in directory structure
 - Directory layout: `base_dir/collection/key.json`
@@ -4356,7 +4452,7 @@ Hexagonal architecture implementation for flow management:
 
 - **Flow**: Core entity representing pipeline definitions
 - **FlowMetadata**: Flow metadata and configuration
-- **FlowRepository (Port)**: Interface for flow persistence
+- Persistence contract: the generic `AssetRepository[Flow]` port (`core/assets/common/`)
 
 **Application Layer** (`application/services/`):
 
@@ -4364,12 +4460,12 @@ Hexagonal architecture implementation for flow management:
   - Flow creation, retrieval, updates, and deletion
   - Flow validation and configuration management
 
-**Adapter Layer** (`adapters/repositories/`):
+**Persistence** (`core/assets/common/`):
 
-- **StorageFlowRepository**: Generic repository using KeyValueStorage interface
-  - Works with any storage backend (DuckDB, filesystem)
-  - Stores flows in 'flows' collection with flow_id as key
-  - Exception wrapping with FlowNotFoundException, FlowStorageException
+- Generic asset repositories created by `AssetRepositoryFactory.create_repository(asset_type=Flow)`:
+  - **LocalAssetRepository[Flow]**: JSON files on the local filesystem (default)
+  - **DuckDBAssetRepository[Flow]**: DuckDB `flows` collection via `KeyValueStoragePort`
+  - **PostgresAssetRepository[Flow]**: PostgreSQL `<schema>.asset_records` table (`collection = 'flows'`)
 
 #### Document Sets (`assets/document_sets/`)
 
@@ -4385,10 +4481,10 @@ Hexagonal architecture implementation for document set management:
 - **AttachmentRef**: Backend-agnostic storage coordinate for asset attachments
 - **AttachmentRepository**: Port for attachment lifecycle management
 
-**Domain Ports** (`domain/ports/`):
+**Domain Ports**:
 
-- **DocumentSetMetadataRepository**: Interface for metadata persistence
-- **DocumentSetDataStore**: Interface for PyArrow table data operations
+- **AssetRepository[DocumentSet]** (`common/domain/ports/`): Interface for metadata persistence
+- **DocumentSetStorage** (`document_sets/domain/ports/`): Interface for PyArrow table data operations
 
 **Application Layer** (`application/services/`):
 
@@ -4401,13 +4497,12 @@ Hexagonal architecture implementation for document set management:
 **Adapter Layer** (`adapters/`):
 
 - **DuckDB Adapters** (`adapters/duckdb/`):
-  - **DuckDBDocumentSetMetadataRepository**: Metadata persistence using KeyValueStorage
-  - **DuckDBDocumentSetDataStore**: Data persistence using TableStorage
-  - Registered via factory decorators for automatic discovery
+  - **DuckDBDocumentSetStorage**: Data persistence using TableStoragePort
+  - Registered via factory decorator for automatic discovery
+- Metadata is persisted by the generic `DuckDBAssetRepository[DocumentSet]` (`core/assets/common/`), created by `AssetRepositoryFactory`
 
 **Factory Layer** (`factories/`):
 
-- **MetadataRepositoryFactory**: Creates metadata repository adapters
 - **DataStoreFactory**: Creates data store adapters
 - Decorator-based registration system
 - Validates adapter configuration before instantiation
@@ -4527,17 +4622,12 @@ The Assets Management module provides metadata management for document collectio
     - Attributes: library_id, name, description, tags, document_set_ids, aggregate metrics
     - Methods: create(), validate(), add_document_set(), remove_document_set(), update_aggregate_metrics()
     - Validation: Name (3-100 chars), description (max 500 chars), tags (max 20, each 1-50 chars)
-  - **DocumentLibraryRepositoryPort**: Repository interface defining persistence contract
+  - Persistence contract: the generic `AssetRepository[DocumentLibrary]` port (`core/assets/common/`)
   - **Exceptions**: DocumentLibraryNotFoundError, DocumentLibraryAlreadyExistsError, InvalidDocumentLibraryError
 
-- **Adapters Layer** (`adapters/`):
-  - **DuckDBDocumentLibraryStorage**: DuckDB storage implementation (metadata only)
-    - Tables: `document_libraries` (metadata), `library_documentset_junction` (many-to-many relationships)
-    - Schema: library_id (UUID), name, description, tags (JSON), created_at, updated_at, aggregate_metrics (JSON)
-  - **DuckDBDocumentLibraryMetadataRepository**: Repository implementation using DuckDB storage (metadata only)
-    - CRUD operations: create(), get_by_id(), get_by_name(), list_all(), update(), delete()
-    - Relationship management: add_document_set(), remove_document_set(), get_document_sets()
-    - Filtering: list_by_tags(), search_by_name()
+- **Persistence**:
+  - `DuckDBAssetRepository[DocumentLibrary]` (`core/assets/common/`), created by `AssetRepositoryFactory`
+    - Stores each library as one JSON record in the `document_libraries` collection, including its `document_set_ids`
 
 - **Application Layer** (`application/services/`):
   - **DocumentLibraryService**: Business logic orchestration
@@ -4574,7 +4664,7 @@ Operators are organized by category (defined in `OperatorCategory` enum). For co
 - **Ingest**: Data source ingestion (local files, S3, SharePoint, etc.)
 - **Functional**: Data transformation (chunking, embeddings, branching, merging)
 - **Quality**: Data quality checks (deduplication, classification, PII detection)
-- **VectorDB**: Vector storage (OpenSearch, Milvus)
+- **VectorDB**: Vector storage (OpenSearch, Milvus, Weaviate)
 - **Storage**: Persistent storage (DocumentSet with DuckDB) and file export to destinations (StorageOutputOperator — filesystem, S3, IBM COS, SharePoint, OneDrive, Google Drive)
 
 **Architecture Highlights:**

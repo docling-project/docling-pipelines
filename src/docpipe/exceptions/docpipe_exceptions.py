@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom exception types for docpipe flow validation and execution."""
 
 from json import JSONEncoder
@@ -931,11 +934,56 @@ class CustomOperatorInvalidDataException(DocpipeException):
         self.field_name = field_name
 
 
+class CustomOperatorsDisabledException(DocpipeException):
+    """Exception raised when a custom operator upload is refused because custom operators are disabled."""
+
+    def __init__(self, *, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=409,
+            error_code=ErrorCode.CUSTOM_OPERATORS_DISABLED,
+        )
+
+
+class CustomOperatorUploadForbiddenException(DocpipeException):
+    """Exception raised when the caller is not an allowed custom operator uploader."""
+
+    def __init__(self, *, message: str) -> None:
+        super().__init__(
+            message=message,
+            status_code=403,
+            error_code=ErrorCode.CUSTOM_OPERATOR_UPLOAD_FORBIDDEN,
+        )
+
+
+class PermissionDeniedException(DocpipeException):
+    """
+    Exception raised when the caller is not allowed to perform an operation.
+
+    Raised by services when an ownership or role rule refuses a write. The API
+    error handler maps it to 403 ``forbidden``. The message must stay generic and
+    never name another user.
+    """
+
+    def __init__(
+        self,
+        message: str = "Permission denied",
+        *,
+        action: str | None = None,
+        target: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=403)
+        self.action = action
+        self.target = target
+
+
 __all__ = [
     "ConfigurationError",
     "CustomOperatorAlreadyExistsException",
     "CustomOperatorInvalidDataException",
     "CustomOperatorNotFoundException",
+    "CustomOperatorUploadForbiddenException",
+    "CustomOperatorsDisabledException",
     "DatabaseMigrationException",
     "DependencyError",
     "DocpipeException",
@@ -956,6 +1004,7 @@ __all__ = [
     "JobStatsStoreInitializationException",
     "JobStatsStoreReadException",
     "JobStatsStoreWriteException",
+    "PermissionDeniedException",
     "PostgresConnectionException",
     "PostgresOperationException",
     "PostgresQueryException",

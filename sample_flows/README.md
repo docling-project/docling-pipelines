@@ -44,12 +44,17 @@ sample_flows/
    docling-pipelines --flow-file sample_flows/quickstart/basic_ingest_extract.json
    ```
 
-2. **Try a complete pipeline:**
+2. **Try a complete local pipeline (zero external services):**
+   ```bash
+   docling-pipelines --flow-file sample_flows/quickstart/milvus_lite_integration.json
+   ```
+
+3. **Try a complete pipeline with Ollama and OpenSearch:**
    ```bash
    docling-pipelines --flow-file sample_flows/quickstart/complete_pipeline_ollama.json
    ```
 
-3. **Explore advanced patterns:**
+4. **Explore advanced patterns:**
    ```bash
    docling-pipelines --flow-file sample_flows/advanced/branching_dual_embeddings_with_ingest_report.json
    ```
@@ -65,6 +70,7 @@ Perfect for beginners - simple, well-documented examples to get started.
 | Flow | Description | Prerequisites |
 |------|-------------|---------------|
 | `basic_ingest_extract.json` | Minimal 2-operator pipeline: ingest → extract | Docling |
+| [milvus_lite_integration.json](quickstart/milvus_lite_integration.json) | Container-free local pipeline: ingest → extract → chunk → local HuggingFace embeddings → Milvus Lite (`.db` file) | Docling, Sentence-Transformers, Milvus Lite (all included by default) |
 | `complete_pipeline_ollama.json` | Full local pipeline: ingest → extract → chunk → embed → OpenSearch | Ollama, OpenSearch |
 | `complete_pipeline_watsonx.json` | Full cloud pipeline with Watsonx provider | Watsonx API, OpenSearch |
 | [docker_e2e_ollama_opensearch.json](quickstart/docker_e2e_ollama_opensearch.json) | PDFs to Docling extraction, Ollama embeddings, OpenSearch | Docker stack, `/documents` PDF mount, Ollama embedding model, OpenSearch credentials |
@@ -97,8 +103,10 @@ Real-world scenarios showing practical applications.
 |------|----------|-------------|
 | `invoice_processing.json` | Invoice Processing | Complete invoice workflow with entity extraction and OpenSearch storage |
 | `s3_to_opensearch.json` | Cloud Integration | Ingest from AWS S3, process, and store in OpenSearch |
+| [s3_ingest_vault.json](use_cases/s3_ingest_vault.json) | Secrets from Vault | Ingest from S3 with `access_key` and `secret_key` as `vault://` references; needs `secrets.vault.allowed_paths` |
 | `audio_video_extraction.json` | Audio/Video Transcription | ASR transcription → chunking → embeddings → vector storage |
 | `document_set_management.json` | Document Sets | Demonstrates document_set operator for managing document collections |
+| [local_redacted_indexing.json](use_cases/local_redacted_indexing.json) | Local Redacted Indexing | Redacts PII (Presidio) and HAP (local Hugging Face classifier) before chunking, local embeddings and Milvus Lite, so neither reaches the vector store; no external services. Needs the `presidio` extra and the spaCy model `en_core_web_sm` |
 
 **Start here if:** You want to see how docling-pipelines solves real problems.
 
@@ -130,7 +138,8 @@ Complete pipelines demonstrating vector database integrations.
 |------|----------|-------------|
 | `opensearch_integration.json` | OpenSearch | Full pipeline with OpenSearch vector storage |
 | `milvus_integration.json` | Milvus | Full pipeline with Milvus vector storage |
-| [milvus_lite_integration.json](vectordb/milvus_lite_integration.json) | Milvus Lite | Docling, hybrid chunking, Hugging Face embeddings to local Milvus Lite; requires sample documents and embedding model, no database server |
+| `weaviate_integration.json` | Weaviate | Full pipeline with Weaviate vector storage (self-hosted, local server) |
+| [opensearch_vault_integration.json](vectordb/opensearch_vault_integration.json) | OpenSearch | OpenSearch host and credentials as `vault://` references; needs `secrets.vault.allowed_paths` |
 
 **Start here if:** You're setting up vector search or RAG systems.
 
@@ -344,7 +353,7 @@ All flows follow this JSON structure:
   "name": "vectordb",
   "type": "vectordb",
   "config": {
-    "provider": "milvus",  // Options: opensearch, milvus
+    "provider": "milvus",  // Options: opensearch, milvus, weaviate
     "index_name": "my_collection",
     // Provider-specific config...
   }
@@ -445,7 +454,8 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | If you want to... | Start with... |
 |-------------------|---------------|
 | Learn the basics | `quickstart/basic_ingest_extract.json` |
-| Set up RAG pipeline | `quickstart/complete_pipeline_ollama.json` |
+| Run a zero-container local RAG pipeline | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
+| Set up RAG pipeline with Ollama & OpenSearch | `quickstart/complete_pipeline_ollama.json` |
 | Run the Docker Ollama/OpenSearch pipeline | [quickstart/docker_e2e_ollama_opensearch.json](quickstart/docker_e2e_ollama_opensearch.json) |
 | Use cloud LLMs | `quickstart/complete_pipeline_watsonx.json` |
 | Classify documents | `operators/classification_ollama.json` |
@@ -455,13 +465,16 @@ Log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 | Transcribe audio/video | `use_cases/audio_video_extraction.json` |
 | Process invoices | `use_cases/invoice_processing.json` |
 | Ingest from S3 | `use_cases/s3_to_opensearch.json` |
+| Keep S3 credentials in Vault | [use_cases/s3_ingest_vault.json](use_cases/s3_ingest_vault.json) |
 | Route by quality | `advanced/branching_quality_routing.json` |
 | Parallel processing | `advanced/branching_dual_embeddings_with_ingest_report.json` |
 | Generate and merge dual embeddings | [advanced/branching_dual_embeddings.json](advanced/branching_dual_embeddings.json) |
 | Complex pipeline | `advanced/multi_stage_enrichment.json` |
 | Use OpenSearch | `vectordb/opensearch_integration.json` |
+| Keep OpenSearch credentials in Vault | [vectordb/opensearch_vault_integration.json](vectordb/opensearch_vault_integration.json) |
 | Use Milvus | `vectordb/milvus_integration.json` |
-| Use serverless Milvus Lite | [vectordb/milvus_lite_integration.json](vectordb/milvus_lite_integration.json) |
+| Use Weaviate | `vectordb/weaviate_integration.json` |
+| Use serverless Milvus Lite | [quickstart/milvus_lite_integration.json](quickstart/milvus_lite_integration.json) |
 | Export original files to Box | [storage_output/comprehensive_export_box.json](storage_output/comprehensive_export_box.json) |
 | Export original files to Google Drive | [storage_output/comprehensive_export_google_drive.json](storage_output/comprehensive_export_google_drive.json) |
 | Export original files to SharePoint | [storage_output/comprehensive_export_sharepoint.json](storage_output/comprehensive_export_sharepoint.json) |

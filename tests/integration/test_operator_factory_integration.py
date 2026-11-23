@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Integration tests for OperatorFactory with operator_loader.
 Tests environment variables, filesystem loading, S3 loading, priority resolution, and refresh.
@@ -53,7 +56,9 @@ class TestOperatorFactoryIntegration:
         os.environ[EnvironmentVariables.DOCPIPE_CUSTOM_OPERATORS] = test_operator_path
 
         # Create factory - should automatically load from environment variable
-        factory = OperatorFactoryProvider.get_operator_factory(orchestrator=OrchestratorType.PYTHON)
+        factory = OperatorFactoryProvider.get_operator_factory(
+            orchestrator=OrchestratorType.PYTHON, enable_custom_operators=True
+        )
 
         # Verify custom operator was loaded
         assert "valid_custom" in factory.operators, (
@@ -105,7 +110,7 @@ class TestFilesystemOperator(AbstractOperator):
 
             # Create factory with filesystem path
             factory = OperatorFactoryProvider.get_operator_factory(
-                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)]
+                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)], enable_custom_operators=True
             )
 
             # Verify operator was loaded
@@ -217,7 +222,7 @@ class CustomNoopOperator(AbstractOperator):
             # Clear cache and create new factory with custom operator
             OperatorFactoryProvider.operator_factories.clear()
             factory2 = OperatorFactoryProvider.get_operator_factory(
-                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)]
+                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)], enable_custom_operators=True
             )
 
             # Verify custom operator was loaded
@@ -276,7 +281,7 @@ class RefreshableOperator(AbstractOperator):
 
             # Create factory
             factory = OperatorFactoryProvider.get_operator_factory(
-                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)]
+                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)], enable_custom_operators=True
             )
 
             # Verify initial operator
@@ -381,7 +386,7 @@ class MixedSourceOperator(AbstractOperator):
 
             # Create factory with additional filesystem path
             factory = OperatorFactoryProvider.get_operator_factory(
-                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)]
+                orchestrator=OrchestratorType.PYTHON, package_names=[str(tmpdir)], enable_custom_operators=True
             )
 
             # Verify both operators are loaded

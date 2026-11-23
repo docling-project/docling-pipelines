@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Extract Operator
 
@@ -109,6 +112,8 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+import docpipe.core.operators.extract.adapters.outbound.entity_extraction
+import docpipe.core.operators.extract.adapters.outbound.text_extraction  # noqa: F401
 from docpipe.core.constants.constants import (
     AttributeDataTypes,
     DocpipeConstants,
@@ -195,7 +200,11 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
     category = OperatorCategory.Extract
     owner = DocpipeConstants.OWNER_DOCPIPE
 
-    def __init__(self, *, config: dict[str, Any]):
+    def __init__(
+        self,
+        *,
+        config: dict[str, Any],
+    ):
         """Initialize the unified extract operator.
 
         Parses the extraction mode, builds adapter-specific configuration,
@@ -310,8 +319,12 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         }
 
         # Preserve ingest_source from config if present (for cloud source binary fetching)
+        # The flow definition lets the on-demand fetch find the ingest node's own (unresolved)
+        # configuration and resolve its references at fetch time.
         if OperatorConstants.Config.INGEST_SOURCE in config:
             global_config[OperatorConstants.Config.INGEST_SOURCE] = config[OperatorConstants.Config.INGEST_SOURCE]
+            if DocpipeConstants.FLOW_DEFINITION in config:
+                global_config[DocpipeConstants.FLOW_DEFINITION] = config[DocpipeConstants.FLOW_DEFINITION]
 
         # Propagate doc_format to global_config so text adapters know the primary target format
         if self.doc_format == OperatorConstants.DocFormat.DOCLANG:
@@ -637,9 +650,9 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
 
         if self.text_extraction_mode == TextExtractionMode.DOCLING_LIBRARY:
             extensions = set(OperatorConstants.FileExtensions.DOCLING_LIBRARY_BASE_EXTENSIONS)
-            # Add audio/video if ASR is available
+            extensions.update(OperatorConstants.FileExtensions.VIDEO_EXTENSIONS)
             if is_asr_available():
-                extensions.update(OperatorConstants.FileExtensions.DOCLING_LIBRARY_AUDIO_VIDEO_EXTENSIONS)
+                extensions.update(OperatorConstants.FileExtensions.AUDIO_EXTENSIONS)
             return extensions
 
         if self.text_extraction_mode == TextExtractionMode.DOCLING_SERVE:
@@ -671,16 +684,8 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         for idx in range(table.num_rows):
             doc_name = table[OperatorConstants.Columns.NAME][idx].as_py()
 
-            # Try to get extension from document_format column first (set by ingest operators for cloud files)
-            # Fall back to extracting from filename if not available
-            file_ext = ""
-            if "document_format" in table.column_names:
-                doc_fmt = table["document_format"][idx].as_py() or ""
-                if doc_fmt:
-                    file_ext = f".{doc_fmt.lstrip('.')}"
-
-            if not file_ext:
-                file_ext = Path(doc_name).suffix.lower()
+            doc_fmt = table["document_format"][idx].as_py() if "document_format" in table.column_names else None
+            file_ext = OperatorUtils.resolve_file_extension(doc_name=doc_name, document_format=doc_fmt)
 
             if file_ext not in supported_extensions:
                 doc_id = (
@@ -984,6 +989,7 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                     self.text_adapter.extract_single_document,
                     file_path=task["doc_name"],
                     binary_content=task["binary_content"],
+                    file_extension=task.get("file_extension"),
                 )
                 text_future_to_task[future] = task
 
@@ -1054,14 +1060,39 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
                             reason=f"Column '{self.doc_column}' is empty after text extraction.",
                         )
                     else:
-                        entity_future = entity_executor.submit(
-                            self.entity_adapter.extract_entities_single,
-                            doc_id=str(task["doc_id"]),
-                            doc_name=task["doc_name"],
-                            content=extracted_content,
-                            schema=schema_to_use,
-                        )
-                        entity_future_to_info[entity_future] = (idx, str(task["doc_id"]), task["doc_name"])
+                        # Adapters that need the original file bytes (e.g. Docling VLM)
+                        # declare requires_binary_content = True on the port.
+                        # LLM-based adapters always receive extracted text.
+                        entity_content: str | bytes = extracted_content
+                        skip_reason: str | None = None
+                        if self.entity_adapter.requires_binary_content:
+                            supported = self.entity_adapter.supported_extensions
+                            if supported is not None and Path(task["doc_name"]).suffix.lower() not in supported:
+                                skip_reason = (
+                                    f"Unsupported file extension for {self.entity_adapter.ADAPTER_DISPLAY_NAME} "
+                                    f"entity extraction: {Path(task['doc_name']).suffix.lower() or '(none)'}"
+                                )
+                            elif not task.get("binary_content"):
+                                skip_reason = "Binary content unavailable for VLM extraction."
+                            else:
+                                entity_content = task["binary_content"]
+
+                        if skip_reason:
+                            AbstractOperator.record_skipped_document(
+                                metadata=metadata,
+                                doc_id=str(task["doc_id"]),
+                                doc_name=task["doc_name"],
+                                reason=skip_reason,
+                            )
+                        else:
+                            entity_future = entity_executor.submit(
+                                self.entity_adapter.extract_entities_single,
+                                doc_id=str(task["doc_id"]),
+                                doc_name=task["doc_name"],
+                                content=entity_content,
+                                schema=schema_to_use,
+                            )
+                            entity_future_to_info[entity_future] = (idx, str(task["doc_id"]), task["doc_name"])
 
                 else:
                     # ---- Text extraction failed ----
@@ -1513,7 +1544,6 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         ``@register_text_extraction_adapter``.
         """
         # Import the adapter modules so their @register_text_extraction_adapter decorators fire.
-        import docpipe.core.operators.extract.adapters.outbound.text_extraction  # noqa: F401
         from docpipe.core.operators.extract.adapters.outbound.factories.text_extraction_adapter_factory import (
             TextExtractionAdapterFactory,
         )
@@ -1540,6 +1570,42 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
             name: OperatorUtils.model_schema_to_docpipe(schema=adapter_cls.get_config_schema().model_json_schema())
             for name, adapter_cls in EntityExtractionAdapterFactory.get_registry_items()
         }
+
+    @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate each extraction adapter config class's secret-capable declarations per provider."""
+        import docpipe.core.operators.extract.adapters.outbound.entity_extraction  # noqa: F401
+        from docpipe.core.operators.extract.adapters.outbound.factories.entity_extraction_adapter_factory import (
+            EntityExtractionAdapterFactory,
+        )
+        from docpipe.core.operators.extract.adapters.outbound.factories.text_extraction_adapter_factory import (
+            TextExtractionAdapterFactory,
+        )
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+
+        text_key = OperatorConstants.Config.TEXT_EXTRACTION
+        entity_key = OperatorConstants.Config.ENTITY_EXTRACTION
+        provider_key = OperatorConstants.Config.PROVIDER
+        config_key = OperatorConstants.Config.PROVIDER_CONFIG
+        result = build_provider_secret_fields(
+            selector=f"{text_key}.{provider_key}",
+            prefix=f"{text_key}.{config_key}",
+            classes={
+                name: adapter_cls.get_config_schema()
+                for name, adapter_cls in TextExtractionAdapterFactory._registry.items()
+            },
+        )
+        result.update(
+            build_provider_secret_fields(
+                selector=f"{entity_key}.{provider_key}",
+                prefix=f"{entity_key}.{config_key}",
+                classes={
+                    name: adapter_cls.get_config_schema()
+                    for name, adapter_cls in EntityExtractionAdapterFactory.get_registry_items()
+                },
+            )
+        )
+        return result
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:
@@ -1633,6 +1699,8 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         }
 
         return {
+            "secret_fields": [],
+            "secret_fields_by_provider": ExtractOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: ExtractOperator.category.value,
             OperatorConstants.Misc.LABEL: "Document Extractor",

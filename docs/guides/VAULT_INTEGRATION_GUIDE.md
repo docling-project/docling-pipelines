@@ -1,6 +1,8 @@
 # HashiCorp Vault Integration Guide
 
 This guide covers the setup, configuration, and end-to-end usage of HashiCorp Vault for credential resolution in Docling Pipelines.
+For the path policy, destination binding, error categories, audit records and custom operator rules, see the
+[Secrets Guide](SECRETS_GUIDE.md).
 
 ---
 
@@ -11,7 +13,7 @@ This guide covers the setup, configuration, and end-to-end usage of HashiCorp Va
 - [Vault Secret Storage Patterns](#vault-secret-storage-patterns)
   - [URI specification](#uri-specification)
   - [Pattern A — Individual field reference](#pattern-a--individual-field-reference)
-  - [Pattern B — Structured JSON blob](#pattern-b--structured-json-blob)
+  - [Pattern B — One reference per key](#pattern-b--one-reference-per-key)
 - [Supported Operators and Credential Fields](#supported-operators-and-credential-fields)
 - [Vault Configuration](#vault-configuration)
   - [Configuration file (`docling-pipelines-config.yaml`)](#configuration-file-docling-pipelines-configyaml)
@@ -25,6 +27,7 @@ This guide covers the setup, configuration, and end-to-end usage of HashiCorp Va
   - [Step 5 — Run flow with Vault references](#step-5--run-flow-with-vault-references)
 - [Web UI Canvas Usage](#web-ui-canvas-usage)
 - [Security, Sanitization, and Masking Guarantees](#security-sanitization-and-masking-guarantees)
+- [Persisted credentials: rotate, purge, re-ingest](#persisted-credentials-rotate-purge-re-ingest)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -55,7 +58,7 @@ graph TD
 ```
 
 1. **Validation**: `FlowValidator` detects `vault://` strings on sensitive fields and substitutes valid mock types so validation succeeds without querying Vault.
-2. **Resolution**: `PythonOperatorExecutor` scans the operator configuration, identifies `vault://` patterns, and resolves each reference via `SecretProvider`.
+2. **Resolution**: When a node is built, only that node's own declared secret-capable fields are resolved through `SecretProvider`. A node never resolves references that belong to another node, to `global_config`, or to the flow definition, so a downstream node makes no Vault request for the ingest node's credentials. The extract step resolves the ingest node's own references when it fetches document content. A reference is resolved only if it matches `secrets.vault.allowed_paths`; with that setting unset every reference is denied, so a deployer must set it (`*:**` allows all).
 3. **Execution**: The operator receives resolved credentials in memory during execution. The transient values are never written back to disk or logs.
 
 ---
@@ -64,7 +67,7 @@ graph TD
 
 ### URI specification
 
-```
+```text
 vault://<provider>/<secret_path>#<field_key>
 ```
 
@@ -97,16 +100,18 @@ Store each credential as an individual key-value pair in Vault. Recommended for 
 }
 ```
 
-### Pattern B — Structured JSON blob
+### Pattern B — One reference per key
 
-For complex or multi-parameter credentials (e.g. cloud service accounts or full connection credential blocks), store the entire credential dictionary as a serialized JSON string in Vault.
+For a credential block with several keys, such as `destination_config.credentials`, reference each key separately. A
+reference supplies one string, so a reference to a whole object, or a JSON string in a scalar field, fails with
+`value must be a string`. Only the fields named `credentials_json` and `service_account_json` hold a structured value,
+and the resolved string is parsed as JSON once.
 
-Docpipe automatically parses the resolved string into a dictionary if the target configuration field expects an object:
-
-**Vault Secret Data (`secret/docpipe/storage_full`):**
+**Vault Secret Data (`secret/docpipe/s3`):**
 ```json
 {
-  "connection_creds": "{\"client_id\": \"<CLIENT_ID>\", \"region\": \"us-east-1\"}"
+  "access_key": "<ACCESS_KEY>",
+  "secret_key": "<SECRET_KEY>"
 }
 ```
 
@@ -119,7 +124,10 @@ Docpipe automatically parses the resolved string into a dictionary if the target
     "destination_type": "s3",
     "destination_config": {
       "bucket_name": "pipeline-results",
-      "credentials": "vault://hashicorp/docpipe/s3_full#connection_creds"
+      "credentials": {
+        "access_key": "vault://hashicorp/docpipe/s3#access_key",
+        "secret_key": "vault://hashicorp/docpipe/s3#secret_key"  # pragma: allowlist secret
+      }
     }
   }
 }
@@ -129,22 +137,22 @@ Docpipe automatically parses the resolved string into a dictionary if the target
 
 ## Supported Operators and Credential Fields
 
+Each operator declares which of its fields accept a reference. A reference in any other field is rejected as
+`field not secret-capable`. The [Secrets Guide](SECRETS_GUIDE.md#declared-secret-fields) lists every declared field.
+Examples:
+
 | Operator | Config Path | Description |
 |---|---|---|
-| **`ingest_source`** | `connection_params.access_key` | S3 / Cloud access key |
-| | `connection_params.secret_key` | S3 / Cloud secret key |
-| | `connection_params.credentials` | Full credential dictionary or JSON string |
-| | `connection_params.client_secret` | SharePoint / OAuth client secret |
-| **`embeddings`** | `provider_config.api_key` | LLM / Embedding provider API key |
-| **`extract_operator`** | `llm_config.api_key` | Extraction LLM provider API key |
-| | `entity_extraction.api_key` | Entity extraction LLM API key |
+| **`ingest_source`** | `provider_config.access_key`, `provider_config.secret_key` | S3 and IBM COS keys |
+| | `provider_config.client_secret` | SharePoint and OneDrive client secret |
+| | `provider_config.credentials_json` | Google Drive and Box credential JSON |
+| **`embeddings`** | `provider_config.api_key` | LLM and embedding provider API key |
+| **`extract_operator`** | `entity_extraction.provider_config.api_key` | Entity extraction LLM API key |
 | **`document_classifier`** | `provider_config.api_key` | Classification LLM provider API key |
-| **`vectordb`** | `provider_config.username` | OpenSearch / Milvus username |
-| | `provider_config.password` | OpenSearch / Milvus password |
-| | `provider_config.api_key` | Vector DB API token |
-| **`storage_output`** | `destination_config.credentials` | Full credential dictionary or JSON string |
+| **`vectordb`** | `provider_config.username`, `provider_config.password` | OpenSearch, Milvus and Weaviate login |
+| | `provider_config.api_key`, `provider_config.token` | Weaviate API key, Milvus token |
+| **`storage_output`** | `destination_config.credentials.<key>` | One reference per credential key |
 | | `destination_config.provider_config.access_key` | Destination S3 access key |
-| | `destination_config.provider_config.secret_key` | Destination S3 secret key |
 | | `destination_config.provider_config.client_secret` | Destination SharePoint secret |
 
 ---
@@ -180,7 +188,7 @@ Environment variables override file configuration:
 
 | Variable | Description | Default |
 |---|---|---|
-| `VAULT_ENABLED` | Enables secret provider when `true` | `false` |
+| `DOCPIPE_VAULT_ENABLED` | `true` enables the secret provider, `false` disables it and always wins | `secrets.vault.enabled` |
 | `VAULT_PROVIDER` | Provider identifier in `vault://` URIs | `hashicorp` |
 | `VAULT_ADDR` / `VAULT_URL` | HashiCorp Vault address | `http://127.0.0.1:8200` |
 | `VAULT_MOUNT_POINT` | KV v2 mount point | `secret` |
@@ -189,6 +197,8 @@ Environment variables override file configuration:
 | `VAULT_SECRET_ID` | AppRole Secret ID | `""` |
 | `VAULT_TOKEN` | Token for token-based auth | `""` |
 | `VAULT_TIMEOUT` | Request timeout in seconds | `30` |
+
+**Transport rules.** `VAULT_ADDR` must use `https` unless the host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`). `VAULT_TLS_SKIP_VERIFY` is honored only for a loopback address; with any other host the provider is not registered and a server-side log line says why. Redirects are never followed, requests use bounded connect and read timeouts, error messages never include the Vault address or transport exception text, and neither error messages nor logs include a response body. `VAULT_ADDR` must not contain credentials (`user:password@host`); such an address is refused and the provider is not registered, so a credential can never reach a log line or request URL. The Vault initializer's startup log lines still name the configured address server-side.
 
 ---
 
@@ -258,10 +268,13 @@ export VAULT_SECRET_ID=$(vault write -f -format=json auth/approle/role/docpipe-r
 
 Configure docpipe environment variables:
 ```bash
-export VAULT_ENABLED=true
+export DOCPIPE_VAULT_ENABLED=true
 export VAULT_AUTH_METHOD=approle
 export VAULT_ROLE_ID="$VAULT_ROLE_ID"
 export VAULT_SECRET_ID="$VAULT_SECRET_ID"
+
+# Allow the paths your flows use (see the Secrets Guide), in docling-pipelines-config.yaml:
+#   secrets.vault.allowed_paths: ["hashicorp:docpipe/*"]
 
 # Validate flow DAG without exposing credentials
 docling-pipelines --flow-file path/to/flow.json --validate
@@ -293,12 +306,33 @@ The web UI canvas provides interactive support for `vault://` URIs through the `
 
 ---
 
+## Persisted credentials: rotate, purge, re-ingest
+
+Earlier versions of the SharePoint and OneDrive ingest adapters wrote `client_id`, `client_secret` and `tenant_id` into each document's `metadata`. That metadata was serialized to parquet output and to `*.meta.json` storage sidecars. The adapters no longer do this, but output produced by older versions may still hold the credentials in clear text. Treat any credential found there as disclosed.
+
+1. **Find affected files.** The script lists affected files and the key names found. It never prints a value.
+
+   ```bash
+   python scripts/find_persisted_credentials.py /path/to/output /path/to/storage
+   ```
+
+   Exit status is `0` when nothing is found, `1` when at least one file is affected, and `2` on a usage error or when nothing could be scanned.
+
+2. **Rotate.** Rotate the SharePoint or OneDrive client secret in the identity provider (and the client ID or tenant if your policy requires it). Rotation is required because purging files does not recall copies already exported or backed up.
+3. **Purge.** Delete or overwrite the listed parquet files and sidecars, and any backups or copies of them.
+4. **Re-ingest.** Run the flow again with the new credentials. The regenerated output no longer contains the credentials.
+
+The `ACLOperator` now reads its credentials from its own `credentials` config instead of document metadata. See the [ACLOperator README](../operators/extract/acl_readme.md).
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Solution |
 |---|---|---|
-| `Cannot connect to Vault at http://127.0.0.1:8200` | Vault server unreachable | Verify Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
+| `Vault AppRole login failed: connection failed` (or `Vault secret read failed (kv2): connection failed`) | Vault server unreachable. Messages name a category only and omit the address | Verify Vault is running (`curl $VAULT_ADDR/v1/sys/health`) |
+| `Vault provider will not be registered - unsafe transport configuration` | Plaintext `http` to a non-loopback host, `VAULT_TLS_SKIP_VERIFY` with a non-loopback host, or credentials (`user:password@`) in `VAULT_ADDR` | Use an `https` `VAULT_ADDR` without credentials; reserve `VAULT_TLS_SKIP_VERIFY` for loopback development |
 | `Key 'api_key' not found at vault path 'docpipe/embeddings'` | Secret key name or path mismatch | Check secret contents with `vault kv get secret/docpipe/embeddings` |
-| `VAULT_URI_MALFORMED` | URI missing provider or key | Follow `vault://<provider>/<path>#<key>` format |
-| `Unregistered vault provider 'hashicorp'` | Vault provider not enabled | Set `VAULT_ENABLED=true` or update `docling-pipelines-config.yaml` |
-| `'str' object is not a mapping` | Complex field expected JSON object | Ensure the Vault secret field contains a valid JSON string or dictionary |
+| `VAULT_URI_MALFORMED` / `malformed reference` | The value contains `vault://` but is not exactly one valid reference (truncated, embedded in a longer string, `.` or `..` or empty path segment, whitespace, over 1024 characters). It is rejected, never used as a literal, and never echoed | Use the whole value `vault://<provider>/<path>[#<key>]` |
+| `Unregistered vault provider 'hashicorp'` | Vault provider not enabled | Set `DOCPIPE_VAULT_ENABLED=true` or update `docling-pipelines-config.yaml` |
+| `value must be a string` | A reference was assigned to a whole object, or the secret value is not a string | Reference each key separately (Pattern B) |

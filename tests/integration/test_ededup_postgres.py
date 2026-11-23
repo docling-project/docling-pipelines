@@ -1,17 +1,19 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Real PostgreSQL admissions, including independent worker processes.
 
-Set DOCPIPE_TEST_POSTGRES_DSN to an expendable PostgreSQL database URL.
-Tests create a unique schema and remove only that schema during teardown.
+Uses the shared PostgreSQL fixtures from ``tests/integration/conftest.py``, so the
+DOCPIPE_TEST_POSTGRES_* variables select an expendable database. Tests create a
+unique schema and remove only that schema during teardown.
 """
 
 import multiprocessing
-import os
 from concurrent.futures import ProcessPoolExecutor
 from unittest.mock import patch
-from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import event, inspect, select
 
 from docpipe.core.operators.quality.ededup_storage.adapters.postgres_store import PostgresEdedupStore
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
@@ -41,18 +43,8 @@ def _claim_in_process(args):
 
 
 @pytest.fixture
-def database():
-    url = os.getenv("DOCPIPE_TEST_POSTGRES_DSN")
-    if not url:
-        pytest.skip("Set DOCPIPE_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-    schema = "test_ededup_" + uuid4().hex
-    yield url, schema
-    engine = create_engine(url)
-    try:
-        with engine.begin() as connection:
-            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-    finally:
-        engine.dispose()
+def database(postgres_url, postgres_schemas):
+    return postgres_url, postgres_schemas("test_ededup_")
 
 
 def test_concurrent_processes_and_run_node_isolation(database):

@@ -130,6 +130,9 @@ export function JobRunLogs({
                     <div className={styles.displayedLogContent}>{displayedLog}</div>
                     <CopyButton
                       onClick={() => { void navigator.clipboard.writeText(fullLog).catch(() => {}); }}
+                      iconDescription={intl.formatMessage(messages.copyToClipboard)}
+                      feedback={intl.formatMessage(messages.copied)}
+                      feedbackTimeout={2000}
                       autoAlign
                     />
                   </div>

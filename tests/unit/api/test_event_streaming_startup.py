@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Verify explicit environment opt-in for Kafka during API startup."""
 
 from unittest.mock import MagicMock
@@ -101,3 +104,12 @@ def test_enabled_listener_requires_kafka_settings(*, monkeypatch, startup_depend
 
     startup_dependencies["start"].assert_not_called()
     startup_dependencies["kafka_imports"].import_module.assert_not_called()
+
+
+def test_api_startup_builds_audit_handlers(*, monkeypatch, mocker, startup_dependencies) -> None:
+    """The audit handlers are built at start-up so a bad audit.file is reported before the first request."""
+    monkeypatch.delenv(EnvironmentVariables.DOCPIPE_EVENT_STREAMING_ENABLED, raising=False)
+    initialize = mocker.patch("docpipe.utils.infrastructure.audit.initialize_audit_logger")
+
+    with TestClient(FastAPI(lifespan=api_main.lifespan)):
+        initialize.assert_called_once_with()

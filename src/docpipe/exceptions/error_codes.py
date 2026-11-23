@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 from enum import StrEnum
 
 
@@ -55,8 +58,10 @@ class ErrorCode(StrEnum):
 
     # Custom Operator operations
     CUSTOM_OPERATOR_NOT_FOUND = "custom_operator_not_found"
+    CUSTOM_OPERATOR_UPLOAD_FORBIDDEN = "custom_operator_upload_forbidden"
     CUSTOM_OPERATOR_ALREADY_EXISTS = "custom_operator_already_exists"
     CUSTOM_OPERATOR_INVALID_DATA = "custom_operator_invalid_data"
+    CUSTOM_OPERATORS_DISABLED = "custom_operators_disabled"
 
     # ACL extraction errors
     ACL_EXTRACTION_FAILED = "acl_extraction_failed"

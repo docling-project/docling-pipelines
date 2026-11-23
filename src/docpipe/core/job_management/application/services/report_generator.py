@@ -502,8 +502,6 @@ class JobReportGenerator:
             return None
 
         nodes_with_batches = list(self.job_stats.batch_node_stats.keys())
-        if not nodes_with_batches:
-            return None
 
         # Use DAG nodes to find the first batching operator in flow order
         if self.dag_nodes:
@@ -690,15 +688,10 @@ class JobReportGenerator:
         Returns:
             Dictionary mapping doc_id to processing_time string (e.g., "45")
         """
-        # Check if batch_node_stats available
-        if not self.job_stats.batch_node_stats:
-            logger.info("No batch_node_stats available, using node-level timing")
-            return self._build_doc_to_batch_mapping_fallback()
-
-        # Find first batching operator
+        # Find first batching operator (None when batch_node_stats is empty)
         first_batching_node = self._find_first_batching_operator()
-        if not first_batching_node or first_batching_node not in self.job_stats.batch_node_stats:
-            logger.info("No batching operator found in batch_node_stats, using node-level timing")
+        if not first_batching_node:
+            logger.info("No batch_node_stats available, using node-level timing")
             return self._build_doc_to_batch_mapping_fallback()
 
         # Get destination nodes and ingest start time

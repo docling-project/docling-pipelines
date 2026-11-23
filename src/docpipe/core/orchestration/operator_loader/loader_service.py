@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom operator loader service.
 
 This service coordinates the discovery and loading of custom operators from
@@ -13,7 +16,9 @@ from docpipe.core.orchestration.operator_loader.adapters.factories.operator_sour
 from docpipe.core.orchestration.operator_loader.ports.operator_source import (
     OperatorInfo,
     OperatorSourcePort,
+    TrustClass,
 )
+from docpipe.core.orchestration.operator_loader.untrusted_descriptor import build_untrusted_descriptor
 from docpipe.core.orchestration.operator_loader.validator import OperatorValidator
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -170,6 +175,10 @@ class CustomOperatorLoader:
             Loaded operator class if valid, None otherwise
         """
         try:
+            if op_info.trust_class == TrustClass.UNTRUSTED:
+                # Untrusted code is never imported here: register a descriptor built from its AST
+                return build_untrusted_descriptor(operator_info=op_info)
+
             # Load the module
             module = source.load_operator(operator_info=op_info)
 

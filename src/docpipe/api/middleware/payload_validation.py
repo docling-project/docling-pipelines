@@ -6,7 +6,7 @@ to prevent excessive memory usage and potential DoS attacks.
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 MAX_PAYLOAD_SIZE = 5 * 1024 * 1024  # 5 MB
 
@@ -57,11 +57,11 @@ class PayloadValidationMiddleware:
 
         consumed = False
 
-        async def replay_receive() -> dict:
+        async def replay_receive() -> Message:
             nonlocal consumed
             if not consumed:
                 consumed = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            return {"type": "http.request", "body": b"", "more_body": False}
+            return await receive()
 
         await self.app(scope, replay_receive, send)

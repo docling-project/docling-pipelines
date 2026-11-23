@@ -16,7 +16,7 @@ describe('parameterDefsService', () => {
     );
     const result = await getParameterDef({ operatorName: 'chunker' });
     expect(result.parameters).toHaveLength(1);
-    expect(result.parameters[0].id).toBe('chunk_size');
+    expect(result.parameters[0]?.id).toBe('chunk_size');
   });
 
   it('returns fallback paramDef when fetch returns 404', async () => {
@@ -25,7 +25,7 @@ describe('parameterDefsService', () => {
     );
     const result = await getParameterDef({ operatorName: 'unknown_operator' });
     expect(result.parameters).toEqual([]);
-    expect(result.uihints.group_info[0].type).toBe('customPanel');
+    expect(result.uihints.group_info[0]?.type).toBe('customPanel');
   });
 
   it('returns fallback paramDef when fetch throws', async () => {

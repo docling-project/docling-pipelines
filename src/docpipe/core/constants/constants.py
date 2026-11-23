@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Project-wide string constants, enums, and configuration keys for docpipe."""
 
 import os
@@ -58,6 +61,7 @@ class DocpipeConstants:
     DATA_FOLDER = "data_folder"
     OPERAND_NAMESPACE = "OPERAND_NAMESPACE"
     DAG = "dag"
+    VAULT_PLACEHOLDER = "__vault_placeholder__"
     DEFINITION = "definition"
     DESCRIPTION = "description"
     FLOW = "flow"
@@ -115,6 +119,11 @@ class DocpipeConstants:
     TRUE = "True"
     ABSTRACT_OPERATOR = "AbstractOperator"
     VALIDATING_FLOW = "validating_flow"
+    # Stands in for every vault:// reference while a flow is validated. A plain string (pydantic
+    # turns str subclasses back into str) that passes the non-empty and http(s) URL checks of
+    # secret-capable fields. No provider is contacted and nothing is resolved.
+    VALIDATION_SECRET_SENTINEL = "https://vault-reference.invalid"  # nosec B105  # pragma: allowlist secret
+    VALIDATION_FEATURE_TYPES = "validation_feature_types"
     SKIP_CUSTOM_OP_VALIDATION = "skip_custom_op_validation"
     SUCCESS = "success"
     TMP = "tmp"
@@ -125,7 +134,7 @@ class DocpipeConstants:
 
     # Custom Operator Control
     ENABLE_CUSTOM_OPERATORS = "enable_custom_operators"
-    ENABLE_CUSTOM_OPERATORS_DEFAULT = True
+    ENABLE_CUSTOM_OPERATORS_DEFAULT = False
 
     # Operator Ownership Tiers
     OWNER_DOCPIPE = "docpipe"
@@ -201,7 +210,6 @@ class DocpipeConstants:
 
     # Document Library constants
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
-    LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
     _DEFAULT_DATA_ROOT = _find_project_root() / "data"
@@ -256,9 +264,6 @@ class DocumentLibraryConstants:
     # Size value limits (JavaScript MAX_SAFE_INTEGER for JSON compatibility)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Bulk operation limits
-    MAX_BULK_OPERATION_SIZE = 1000  # Maximum number of items in bulk operations
-
 
 class DocpipeConfigKeys:
     """YAML configuration keys for Docpipe."""
@@ -286,6 +291,10 @@ class DocpipeConfigKeys:
     MAX_OVERFLOW = "max_overflow"
     POOL_TIMEOUT = "pool_timeout"
 
+    # API authentication configuration keys (auth.role_mapping.<role> in the config file)
+    AUTH = "auth"
+    ROLE_MAPPING = "role_mapping"
+
     # Incremental metadata configuration keys
     INCREMENTAL_METADATA = "incremental_metadata"
     STORAGE = "storage"
@@ -299,6 +308,12 @@ class DocpipeConfigKeys:
 
     # Global storage configuration keys (shared defaults for all services)
     GLOBAL_STORAGE = "global_storage"
+
+    # Docling converter pool configuration keys (docling.converter_pool.*)
+    DOCLING = "docling"
+    CONVERTER_POOL = "converter_pool"
+    SIZE = "size"
+    IDLE_TTL_SECONDS = "idle_ttl_seconds"
 
 
 class EnvironmentVariables:
@@ -334,6 +349,10 @@ class EnvironmentVariables:
     DOCPIPE_POSTGRES_USER = "DOCPIPE_POSTGRES_USER"
     DOCPIPE_POSTGRES_PASSWORD = "DOCPIPE_POSTGRES_PASSWORD"  # pragma: allowlist secret  # nosec B105
 
+    # Docling converter pool (process-wide reuse of DocumentConverter / DocumentExtractor)
+    DOCPIPE_DOCLING_CONVERTER_POOL_SIZE = "DOCPIPE_DOCLING_CONVERTER_POOL_SIZE"
+    DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS = "DOCPIPE_DOCLING_CONVERTER_IDLE_TTL_SECONDS"
+
     # OpenLineage Configuration
     DOCPIPE_LINEAGE_ENABLED = "DOCPIPE_LINEAGE_ENABLED"
     DOCPIPE_LINEAGE_MODE = "DOCPIPE_LINEAGE_MODE"
@@ -341,12 +360,42 @@ class EnvironmentVariables:
     DOCPIPE_LINEAGE_PRODUCER = "DOCPIPE_LINEAGE_PRODUCER"
     DOCPIPE_LINEAGE_STRICT = "DOCPIPE_LINEAGE_STRICT"
 
+    # Hugging Face offline mode (read natively by huggingface_hub / transformers)
+    HF_HUB_OFFLINE = "HF_HUB_OFFLINE"
+    TRANSFORMERS_OFFLINE = "TRANSFORMERS_OFFLINE"
+
     DOCPIPE_EVENT_STREAMING_ENABLED = "DOCPIPE_EVENT_STREAMING_ENABLED"
-    DOCPIPE_API_BASE_URL = "DOCPIPE_API_BASE_URL"
     KAFKA_BOOTSTRAP_SERVERS = "KAFKA_BOOTSTRAP_SERVERS"
     KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
     KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
     SCHEMA_REGISTRY_URL = "SCHEMA_REGISTRY_URL"
+
+    # API authentication and authorization
+    DOCPIPE_AUTH_ENABLED = "DOCPIPE_AUTH_ENABLED"
+    DOCPIPE_AUTH_DEFAULT_ROLE = "DOCPIPE_AUTH_DEFAULT_ROLE"
+    DOCPIPE_AUTH_ROLE_MAPPING_VIEWER = "DOCPIPE_AUTH_ROLE_MAPPING_VIEWER"
+    DOCPIPE_AUTH_ROLE_MAPPING_EDITOR = "DOCPIPE_AUTH_ROLE_MAPPING_EDITOR"
+    DOCPIPE_AUTH_ROLE_MAPPING_ADMIN = "DOCPIPE_AUTH_ROLE_MAPPING_ADMIN"
+    DOCPIPE_AUTH_COOKIE_NAME = "DOCPIPE_AUTH_COOKIE_NAME"
+    DOCPIPE_AUTH_COOKIE_SECURE = "DOCPIPE_AUTH_COOKIE_SECURE"
+    DOCPIPE_TRUST_PROXY_HEADERS = "DOCPIPE_TRUST_PROXY_HEADERS"
+    DOCPIPE_TRUSTED_PROXY_COUNT = "DOCPIPE_TRUSTED_PROXY_COUNT"
+    DOCPIPE_INGEST_ALLOWED_PATHS = "DOCPIPE_INGEST_ALLOWED_PATHS"
+    DOCPIPE_AUTH_BOOTSTRAP_USERNAME = "DOCPIPE_AUTH_BOOTSTRAP_USERNAME"
+    DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH = (
+        "DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH"  # pragma: allowlist secret  # nosec B105
+    )
+
+
+_AUTH_TRUE_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+
+
+def is_auth_enabled() -> bool:
+    """Return True when ``DOCPIPE_AUTH_ENABLED`` is set to a truthy value."""
+    raw = os.environ.get(EnvironmentVariables.DOCPIPE_AUTH_ENABLED)
+    if raw is None or not raw.strip():
+        return False
+    return raw.strip().lower() in _AUTH_TRUE_VALUES
 
 
 class LineageConstants:
@@ -438,6 +487,44 @@ class ServiceConstants:
     # a per-instance limit of 8 req/s, so concurrency stays opt-in).
     DEFAULT_WATSONX_EMBEDDINGS_BATCH_SIZE = 800
     DEFAULT_WATSONX_EMBEDDINGS_MAX_CONCURRENT_REQUESTS = 1
+    # watsonx.ai request timeout (seconds) applied by every watsonx path (inference, embeddings,
+    # text detection).
+    DEFAULT_WATSONX_REQUEST_TIMEOUT_SECONDS = 120
+
+    # Hugging Face local HAP text classification (text_detection capability).
+    # Model id, revision and toxic labels are one unit: change them together, in a release.
+    # The pinned revision and default labels apply only to the default model; any other
+    # model must name its toxic labels explicitly, because generic labels do not mean
+    # "toxic" for every model.
+    DEFAULT_HUGGINGFACE_HAP_MODEL_ID = "ibm-granite/granite-guardian-hap-38m"
+    DEFAULT_HUGGINGFACE_HAP_REVISION = "faf9291163c7363d4a7ba7fc1dc72243214af931"  # pragma: allowlist secret
+    DEFAULT_HUGGINGFACE_HAP_TOXIC_LABELS: tuple[str, ...] = ("LABEL_1",)
+    DEFAULT_HUGGINGFACE_HAP_MAX_LENGTH = 512  # model tokens per scored window
+    DEFAULT_HUGGINGFACE_HAP_BATCH_SIZE = 32  # spans per forward pass
+    DEFAULT_HUGGINGFACE_HAP_THRESHOLD = 0.8
+    HUGGINGFACE_HAP_TOXIC_LABELS_HINT = (
+        "Check the model's config.json id2label on Hugging Face for available label names."
+    )
+
+    # Local Hugging Face sequence-classification option values
+    HUGGINGFACE_ACTIVATION_SOFTMAX = "softmax"
+    HUGGINGFACE_ACTIVATION_SIGMOID = "sigmoid"
+    HUGGINGFACE_ACTIVATION_AUTO = "auto"  # sigmoid for multi-label models, softmax otherwise
+    HUGGINGFACE_ACTIVATIONS: tuple[str, ...] = (
+        HUGGINGFACE_ACTIVATION_SOFTMAX,
+        HUGGINGFACE_ACTIVATION_SIGMOID,
+        HUGGINGFACE_ACTIVATION_AUTO,
+    )
+    HUGGINGFACE_DEVICE_AUTO = "auto"  # cuda when available, cpu otherwise
+    HUGGINGFACE_DEVICE_CPU = "cpu"
+    HUGGINGFACE_DEVICE_CUDA = "cuda"
+    HUGGINGFACE_DEVICE_MPS = "mps"
+    HUGGINGFACE_DEVICES: tuple[str, ...] = (
+        HUGGINGFACE_DEVICE_AUTO,
+        HUGGINGFACE_DEVICE_CPU,
+        HUGGINGFACE_DEVICE_CUDA,
+        HUGGINGFACE_DEVICE_MPS,
+    )
 
 
 class ProviderConstants:
@@ -453,6 +540,7 @@ class ProviderConstants:
 
     OLLAMA: Final[str] = "ollama"
     WATSONX: Final[str] = "watsonx"
+    HUGGINGFACE: Final[str] = "huggingface"
 
 
 class DoclingClientConstants:
@@ -666,6 +754,14 @@ TERMINAL_JOB_STATUSES = frozenset(
         ExecutionStatus.CANCELED,
         ExecutionStatus.FAILED,
         ExecutionStatus.ABORTED,
+    ]
+)
+
+COMPLETED_JOB_STATUSES = frozenset(
+    [
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.COMPLETED_WITH_ERRORS,
+        ExecutionStatus.COMPLETED_WITH_WARNINGS,
     ]
 )
 

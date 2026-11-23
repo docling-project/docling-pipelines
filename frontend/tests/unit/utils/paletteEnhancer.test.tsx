@@ -48,21 +48,21 @@ describe('paletteEnhancer', () => {
       const nodes = [{ op: 'chunker' }, { op: 'embeddings' }, { op: 'noop' }];
       const palette = makePalette(nodes);
       const enhanced = enhancePalette(palette);
-      expect(enhanced.categories[0].node_types).toHaveLength(nodes.length);
+      expect(enhanced.categories[0]?.node_types).toHaveLength(nodes.length);
     });
 
     it('adds react_nodes_data.color to each node type', () => {
       const palette = makePalette([{ op: 'chunker' }]);
       const enhanced = enhancePalette(palette);
-      const nodeType = enhanced.categories[0].node_types[0];
-      expect((nodeType.app_data as Record<string, unknown>)['react_nodes_data']).toBeTruthy();
+      const nodeType = enhanced.categories[0]?.node_types[0];
+      expect((nodeType?.app_data as Record<string, unknown>)['react_nodes_data']).toBeTruthy();
     });
 
     it('adds ui_data.image (icon) to each node type', () => {
       const palette = makePalette([{ op: 'vectordb' }]);
       const enhanced = enhancePalette(palette);
-      const nodeType = enhanced.categories[0].node_types[0];
-      const uiData = ((nodeType.app_data as Record<string, unknown>)['ui_data']) as Record<string, unknown>;
+      const nodeType = enhanced.categories[0]?.node_types[0];
+      const uiData = ((nodeType?.app_data as Record<string, unknown>)['ui_data']) as Record<string, unknown>;
       expect(uiData['image']).toBeTruthy();
     });
 

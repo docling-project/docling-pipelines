@@ -1,10 +1,12 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Test FlowService with unified architecture.
 
 Tests the FlowService that extends AssetService[Flow] to ensure
 Flow-specific business logic works correctly.
 """
 
-import os
 import shutil
 import tempfile
 
@@ -13,6 +15,7 @@ import pytest
 from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
 from docpipe.core.assets.flows.domain.models.flow import Flow
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.exceptions.docpipe_exceptions import AssetInvalidDataException
 
 
@@ -20,11 +23,7 @@ from docpipe.exceptions.docpipe_exceptions import AssetInvalidDataException
 def temp_storage():
     """Create temporary storage directory for tests."""
     temp_dir = tempfile.mkdtemp()
-    # Set environment variable for LocalFlowRepository
-    os.environ["LOCAL_FLOWS_DIR"] = temp_dir
     yield temp_dir
-    # Cleanup
-    del os.environ["LOCAL_FLOWS_DIR"]
     shutil.rmtree(temp_dir)
 
 
@@ -54,7 +53,7 @@ def sample_flow():
 def test_create_flow(flow_service, sample_flow):
     """Test creating a flow using FlowService."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Verify flow was created
     assert created_flow.asset_id is not None
@@ -70,7 +69,7 @@ def test_create_flow(flow_service, sample_flow):
 def test_create_flow_duplicate_name(flow_service, sample_flow):
     """Test that creating a flow with duplicate name raises exception."""
     # Create first flow
-    flow_service.create_flow(flow=sample_flow)
+    flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Try to create another flow with same name
     duplicate_flow = Flow(
@@ -82,13 +81,13 @@ def test_create_flow_duplicate_name(flow_service, sample_flow):
     from docpipe.exceptions.docpipe_exceptions import FlowAlreadyExistsException
 
     with pytest.raises(FlowAlreadyExistsException, match="already exists"):
-        flow_service.create_flow(flow=duplicate_flow)
+        flow_service.create_flow(flow=duplicate_flow, actor=SYSTEM_ACTOR)
 
 
 def test_get_flow_by_id(flow_service, sample_flow):
     """Test retrieving a flow by ID."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Retrieve by ID
     retrieved_flow = flow_service.get_by_id(asset_id=created_flow.asset_id)
@@ -101,7 +100,7 @@ def test_get_flow_by_id(flow_service, sample_flow):
 def test_get_flow_by_name(flow_service, sample_flow):
     """Test retrieving a flow by name."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Retrieve by name
     retrieved_flow = flow_service.get_by_name(name="Test Pipeline")
@@ -121,7 +120,7 @@ def test_list_flows(flow_service):
             tags=["test"] if i % 2 == 0 else ["production"],
             is_hidden=i == 4,
         )
-        flow_service.create_flow(flow=flow)
+        flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     # List all flows
     all_flows = flow_service.list_flows(skip=0, limit=10)
@@ -161,7 +160,7 @@ def test_count_flows(flow_service):
             definition={"doc_type": "pipeline", "pipelines": []},
             tags=["test"] if i % 2 == 0 else ["production"],
         )
-        flow_service.create_flow(flow=flow)
+        flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     # Count all
     total = flow_service.count_flows()
@@ -175,13 +174,13 @@ def test_count_flows(flow_service):
 def test_update_flow(flow_service, sample_flow):
     """Test updating a flow."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Update flow
     created_flow.description = "Updated description"
     created_flow.tags = ["updated", "test"]
 
-    updated_flow = flow_service.update_flow(flow=created_flow)
+    updated_flow = flow_service.update_flow(flow=created_flow, actor=SYSTEM_ACTOR)
 
     assert updated_flow.description == "Updated description"
     assert updated_flow.tags == ["updated", "test"]
@@ -191,11 +190,13 @@ def test_update_flow(flow_service, sample_flow):
 def test_partial_update_flow(flow_service, sample_flow):
     """Test partially updating a flow."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Partial update
     updated_flow = flow_service.partial_update_flow(
-        flow_id=created_flow.asset_id, updates={"description": "Partially updated", "modified_by": "updater"}
+        flow_id=created_flow.asset_id,
+        updates={"description": "Partially updated", "modified_by": "updater"},
+        actor=SYSTEM_ACTOR,
     )
 
     assert updated_flow.description == "Partially updated"
@@ -206,7 +207,7 @@ def test_partial_update_flow(flow_service, sample_flow):
 def test_partial_update_protected_fields(flow_service, sample_flow):
     """Test that protected fields cannot be updated."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
     original_id = created_flow.asset_id
     original_created_on = created_flow.created_on
 
@@ -220,6 +221,7 @@ def test_partial_update_protected_fields(flow_service, sample_flow):
             "description": "Valid update",  # Valid
             "modified_by": "updater",
         },
+        actor=SYSTEM_ACTOR,
     )
 
     # Protected fields should remain unchanged
@@ -232,7 +234,7 @@ def test_partial_update_protected_fields(flow_service, sample_flow):
 def test_delete_flow(flow_service, sample_flow):
     """Test deleting a flow."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
     flow_id = created_flow.asset_id
 
     # Delete flow
@@ -253,11 +255,11 @@ def test_bulk_delete_flows(flow_service):
             description=f"Pipeline number {i}",
             definition={"doc_type": "pipeline", "pipelines": []},
         )
-        created = flow_service.create_flow(flow=flow)
+        created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
         flow_ids.append(created.asset_id)
 
     # Bulk delete
-    result = flow_service.bulk_delete_flows(flow_ids=flow_ids)
+    result = flow_service.bulk_delete_flows(flow_ids=flow_ids, actor=SYSTEM_ACTOR)
 
     assert result["total_requested"] == 3
     assert result["total_deleted"] == 3
@@ -273,11 +275,11 @@ def test_bulk_delete_partial_failure(flow_service):
     """Test bulk delete with some failures."""
     # Create one flow
     flow = Flow(name="Pipeline 1", description="Pipeline", definition={"doc_type": "pipeline", "pipelines": []})
-    created = flow_service.create_flow(flow=flow)
+    created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     # Try to delete existing and non-existing flows
     flow_ids = [created.asset_id, "nonexistent-id"]
-    result = flow_service.bulk_delete_flows(flow_ids=flow_ids)
+    result = flow_service.bulk_delete_flows(flow_ids=flow_ids, actor=SYSTEM_ACTOR)
 
     assert result["total_requested"] == 2
     assert result["total_deleted"] == 1
@@ -289,12 +291,12 @@ def test_bulk_delete_partial_failure(flow_service):
 def test_add_tags(flow_service, sample_flow):
     """Test adding tags to a flow."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Add tags using partial_update_flow
     new_tags = [*created_flow.tags, "new-tag", "another-tag"]
     updated_flow = flow_service.partial_update_flow(
-        flow_id=created_flow.asset_id, updates={"tags": new_tags, "modified_by": "updater"}
+        flow_id=created_flow.asset_id, updates={"tags": new_tags, "modified_by": "updater"}, actor=SYSTEM_ACTOR
     )
 
     assert "new-tag" in updated_flow.tags
@@ -305,12 +307,12 @@ def test_add_tags(flow_service, sample_flow):
 def test_remove_tags(flow_service, sample_flow):
     """Test removing tags from a flow."""
     # Create flow
-    created_flow = flow_service.create_flow(flow=sample_flow)
+    created_flow = flow_service.create_flow(flow=sample_flow, actor=SYSTEM_ACTOR)
 
     # Remove tags using partial_update_flow
     new_tags = [tag for tag in created_flow.tags if tag != "test"]
     updated_flow = flow_service.partial_update_flow(
-        flow_id=created_flow.asset_id, updates={"tags": new_tags, "modified_by": "updater"}
+        flow_id=created_flow.asset_id, updates={"tags": new_tags, "modified_by": "updater"}, actor=SYSTEM_ACTOR
     )
 
     assert "test" not in updated_flow.tags
@@ -324,12 +326,12 @@ def test_validation_errors(flow_service):
     # Empty name - raises AssetInvalidDataException from Flow.validate()
     flow1 = Flow(name="", description="Test", definition={"doc_type": "pipeline", "pipelines": []})
     with pytest.raises(AssetInvalidDataException):
-        flow_service.create_flow(flow=flow1)
+        flow_service.create_flow(flow=flow1, actor=SYSTEM_ACTOR)
 
     # Empty definition - raises AssetInvalidDataException from Flow.validate()
     flow2 = Flow(name="Test", description="Test", definition={})
     with pytest.raises(AssetInvalidDataException):
-        flow_service.create_flow(flow=flow2)
+        flow_service.create_flow(flow=flow2, actor=SYSTEM_ACTOR)
 
     # Invalid skip/limit - raises FlowInvalidDataException from service layer
     with pytest.raises(FlowInvalidDataException):

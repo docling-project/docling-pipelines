@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobManagementService - High-level API for job management operations.
 
@@ -8,25 +11,49 @@ coordinating between JobStatsService and JobRunManager.
 import json
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any
 
 from docpipe.core.assets.flows.application.services import FlowService
 from docpipe.core.constants.constants import (
+    TERMINAL_JOB_STATUSES,
     DocpipeConstants,
     ExecutionStatus,
     OrchestratorType,
 )
 from docpipe.core.job_management.domain.models import JobStats
 from docpipe.core.job_management.domain.ports import JobRunManager, JobStatsService
+from docpipe.core.models.actor_context import ActorContext
+from docpipe.core.models.ownership import PERMISSION_DENIED_MESSAGE, ensure_can_modify
 from docpipe.core.models.session_info import SessionInfo, get_session_info, set_session_info
 from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
     FlowValidationException,
+    JobRunNotFoundException,
+    PermissionDeniedException,
 )
+from docpipe.utils.infrastructure.audit import audited
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
+
+
+def _compute_elapsed_seconds(job_run: JobStats) -> int:
+    """Return the run duration in seconds, computed live for runs still in progress.
+
+    The stored ``duration`` is only written when a run ends, so in-progress runs
+    would otherwise report 0 until completion.
+    """
+    if job_run.duration > 0 or job_run.start_time <= 0:
+        return job_run.duration
+    if job_run.end_time > 0:
+        return max(0, job_run.end_time - job_run.start_time)
+    if job_run.status in TERMINAL_JOB_STATUSES:
+        # Finished without a recorded end time: no way to know the real duration,
+        # and measuring against "now" would make it grow forever.
+        return 0
+    return max(0, int(datetime.now(tz=UTC).timestamp()) - job_run.start_time)
 
 
 def _extract_flow_name_from_snapshot(flow_def: dict[str, Any]) -> str | None:
@@ -100,7 +127,12 @@ class JobManagementService:
         self.flow_service = flow_service
         self.executor = executor or ThreadPoolExecutor(max_workers=10)
 
-    def create_job_run_from_request(self, *, request_body: Any) -> dict[str, Any]:
+    @audited(
+        action="job_run.create",
+        target=lambda a: str(a["request_body"].entity.job.asset_ref),
+        result_target=lambda r: str(r.get("job_run_id")),
+    )
+    def create_job_run_from_request(self, *, request_body: Any, actor: ActorContext) -> dict[str, Any]:
         """
         Create and start a new job run from API request body.
 
@@ -109,6 +141,9 @@ class JobManagementService:
 
         Args:
             request_body: JobsAPIExecuteModel containing job and job_run configuration
+            actor: Caller identity. For non-system actors, the job run's ``user_id`` is the
+                caller's username, overriding any client-supplied ``user_id``. For
+                ``SYSTEM_ACTOR`` the request's ``user_id`` (or None) is used.
 
         Returns:
             dict containing at minimum ``job_id`` and ``job_run_id``.
@@ -116,7 +151,15 @@ class JobManagementService:
 
         Raises:
             JobRunOperationFailedException: If required fields are missing or invalid
+            PermissionDeniedException: If ``actor`` is not a valid ``ActorContext``.
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="job_run.create",
+                target="-",
+            )
+
         # Extract job and job_run from request
         job = request_body.entity.job
         job_run = request_body.entity.job_run
@@ -139,6 +182,9 @@ class JobManagementService:
         if job_run_config_model:
             user_id = job_run_config_model.user_id
             metadata = dict(job_run_config_model.metadata)
+        if not actor.is_system:
+            user_id = actor.username
+            flow_config[DocpipeConstants.USER_ID] = actor.username
 
         return self._create_job_run(flow_id=flow_id, flow_config=flow_config, user_id=user_id, metadata=metadata)
 
@@ -166,8 +212,6 @@ class JobManagementService:
         from docpipe.utils.orchestration.elyra_converter import ElyraConverter
 
         flow = self.flow_service.get_flow(flow_id)
-        if flow is None:
-            raise FlowNotFoundException(f"Flow not found for flow_id: {flow_id}")
 
         if hasattr(flow, DocpipeConstants.JOB_ID) and flow.job_id:
             flow_config[DocpipeConstants.JOB_ID] = flow.job_id
@@ -244,13 +288,43 @@ class JobManagementService:
         """
         return self.job_stats_service.get_job_run_stats(job_run_id=job_run_id)
 
-    def cancel_job_run(self, *, job_run_id: str) -> None:
+    def _ensure_actor_owns_job_run(self, *, job_run_id: str, actor: ActorContext, action: str) -> None:
+        """Verify ``actor`` may modify the job run, fetching its stats first.
+
+        Does nothing when ``actor`` is ``SYSTEM_ACTOR`` (CLI / library / internal callers).
+
+        Raises:
+            JobRunNotFoundException: If the job run does not exist.
+            PermissionDeniedException: If the actor may not modify the job run.
+        """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action=action,
+                target=job_run_id,
+            )
+        if actor.is_system:
+            return
+        job_stats = self.job_stats_service.get_job_run_stats(job_run_id=job_run_id)
+        if job_stats is None:
+            raise JobRunNotFoundException(message=f"Job run not found: {job_run_id}", job_run_id=job_run_id)
+        ensure_can_modify(actor=actor, owner=job_stats.user_id, action=action, target=job_run_id)
+
+    @audited(action="job_run.cancel", target=lambda a: str(a["job_run_id"]))
+    def cancel_job_run(self, *, job_run_id: str, actor: ActorContext) -> None:
         """
         Request cancellation of a job run.
 
         Args:
             job_run_id: Job run identifier
+            actor: Caller identity. Only the run's creator, an admin, ``SYSTEM_ACTOR``,
+                or any editor (for runs with no ``user_id``) may cancel.
+
+        Raises:
+            PermissionDeniedException: If ``actor`` may not cancel the job run.
         """
+        self._ensure_actor_owns_job_run(job_run_id=job_run_id, actor=actor, action="job_run.cancel")
+
         # Request cancellation via stats service
         self.job_stats_service.request_cancel_job(job_run_id=job_run_id)
 
@@ -259,13 +333,21 @@ class JobManagementService:
 
         logger.info("Requested cancellation: job_run_id=%s", job_run_id)
 
-    def delete_job_run(self, *, job_run_id: str) -> None:
+    @audited(action="job_run.delete", target=lambda a: str(a["job_run_id"]))
+    def delete_job_run(self, *, job_run_id: str, actor: ActorContext) -> None:
         """
         Delete a job run and its statistics.
 
         Args:
             job_run_id: Job run identifier
+            actor: Caller identity. Only the run's creator, an admin, ``SYSTEM_ACTOR``,
+                or any editor (for runs with no ``user_id``) may delete.
+
+        Raises:
+            PermissionDeniedException: If ``actor`` may not delete the job run.
         """
+        self._ensure_actor_owns_job_run(job_run_id=job_run_id, actor=actor, action="job_run.delete")
+
         # Request deletion via stats service
         self.job_stats_service.request_delete_job_run(job_run_id=job_run_id)
 
@@ -312,8 +394,10 @@ class JobManagementService:
                     DocpipeConstants.FAILED_DOCS,
                     DocpipeConstants.SKIPPED_DOCS,
                     DocpipeConstants.ORCHESTRATOR,
+                    DocpipeConstants.USER_ID,
                 }
             )
+            item[DocpipeConstants.DURATION] = _compute_elapsed_seconds(job_run)
             # Prefer the snapshot stored at run creation time (new rows).
             # Backward compatibility: for rows created before this fix, flow_name is None.
             # Fall back to the saved flow definition snapshot to recover the name.
@@ -334,10 +418,18 @@ class JobManagementService:
             item[DocpipeConstants.FLOW_NAME] = flow_name
             list_items.append(item)
 
+        # OpenSpec total is every match. A short page already has them all.
+        # A full page may hide later rows, so count with the same filters and no limit.
+        count = len(list_items)
+        if count < limit:
+            total = count
+        else:
+            total = self.job_stats_service.count_job_runs(job_id=job_id, status=status)
+
         return {
             "list": list_items,
-            "count": len(list_items),
-            "total": len(list_items),
+            "count": count,
+            "total": total,
         }
 
     def _execute_flow_async(
@@ -378,14 +470,13 @@ class JobManagementService:
             ):
                 params[DocpipeConstants.ENABLE_MICRO_BATCHING] = True
 
-            if self.job_run_manager and job_run_id:
-                try:
-                    self.job_run_manager.update_job_run_status(
-                        job_run_id=job_run_id,
-                        status=ExecutionStatus.STARTING.value,
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to update job run status to STARTING: %s", exc)
+            try:
+                self.job_run_manager.update_job_run_status(
+                    job_run_id=job_run_id,
+                    status=ExecutionStatus.STARTING.value,
+                )
+            except Exception as exc:
+                logger.warning("Failed to update job run status to STARTING: %s", exc)
 
             flow_executor.execute(orchestrator=orchestrator, params=params)
             logger.info("Completed async flow execution for job_run_id=%s", job_run_id)

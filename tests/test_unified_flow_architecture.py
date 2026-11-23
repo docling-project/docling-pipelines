@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Test unified asset architecture with Flow.
 
 This test verifies that the unified architecture works end-to-end:
@@ -16,6 +19,7 @@ import pytest
 from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
 from docpipe.core.assets.flows.domain.models.flow import Flow
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 
 
 @pytest.fixture
@@ -47,7 +51,7 @@ def test_create_flow_via_service(flow_service):
         tags=["test"],
     )
 
-    created_flow = flow_service.create_flow(flow=flow)
+    created_flow = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     assert created_flow.asset_id is not None
     assert created_flow.flow_id == created_flow.asset_id
@@ -60,7 +64,7 @@ def test_create_flow_via_service(flow_service):
 def test_get_flow_via_service(flow_service):
     """Test retrieving a flow through FlowService."""
     flow = Flow(name="Get Test", definition={"nodes": []})
-    created = flow_service.create_flow(flow=flow)
+    created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     retrieved = flow_service.get_flow(created.flow_id)
 
@@ -71,12 +75,12 @@ def test_get_flow_via_service(flow_service):
 def test_update_flow_via_service(flow_service):
     """Test updating a flow through FlowService."""
     flow = Flow(name="Update Test", definition={"nodes": []})
-    created = flow_service.create_flow(flow=flow)
+    created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     created.name = "Updated Name"
     created.description = "Updated description"
 
-    updated = flow_service.update_flow(created)
+    updated = flow_service.update_flow(created, actor=SYSTEM_ACTOR)
 
     assert updated.name == "Updated Name"
     assert updated.description == "Updated description"
@@ -86,9 +90,9 @@ def test_update_flow_via_service(flow_service):
 def test_delete_flow_via_service(flow_service):
     """Test deleting a flow through FlowService."""
     flow = Flow(name="Delete Test", definition={"nodes": []})
-    created = flow_service.create_flow(flow=flow)
+    created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
-    result = flow_service.delete_flow(created.flow_id)
+    result = flow_service.delete_flow(created.flow_id, actor=SYSTEM_ACTOR)
 
     assert result is True
     assert not flow_service.flow_exists(created.flow_id)
@@ -99,8 +103,8 @@ def test_list_flows_via_service(flow_service):
     flow1 = Flow(name="Flow 1", definition={"nodes": []})
     flow2 = Flow(name="Flow 2", definition={"nodes": []})
 
-    flow_service.create_flow(flow=flow1)
-    flow_service.create_flow(flow=flow2)
+    flow_service.create_flow(flow=flow1, actor=SYSTEM_ACTOR)
+    flow_service.create_flow(flow=flow2, actor=SYSTEM_ACTOR)
 
     flows = flow_service.list_flows()
 
@@ -112,7 +116,7 @@ def test_list_flows_via_service(flow_service):
 def test_flow_exists_via_service(flow_service):
     """Test checking flow existence through FlowService."""
     flow = Flow(name="Exists Test", definition={"nodes": []})
-    created = flow_service.create_flow(flow=flow)
+    created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     assert flow_service.flow_exists(created.flow_id) is True
     assert flow_service.flow_exists("nonexistent-id") is False
@@ -121,7 +125,7 @@ def test_flow_exists_via_service(flow_service):
 def test_inherited_methods_work(flow_service):
     """Test that inherited methods from AssetService work correctly."""
     flow = Flow(name="Inherited Test", definition={"nodes": []})
-    created = flow_service.create_flow(flow=flow)
+    created = flow_service.create_flow(flow=flow, actor=SYSTEM_ACTOR)
 
     # Test inherited get_by_id
     retrieved = flow_service.get_by_id(asset_id=created.flow_id)
@@ -143,6 +147,3 @@ def test_repository_health_check(flow_repository):
     assert "storage_path" in health
     assert health["storage_exists"] is True
     assert "asset_count" in health
-
-
-# Made with Bob

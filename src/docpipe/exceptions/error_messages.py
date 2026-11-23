@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Shared validation messages and structured alert payloads."""
 
 from enum import StrEnum

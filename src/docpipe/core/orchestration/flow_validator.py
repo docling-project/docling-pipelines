@@ -1,10 +1,13 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Flow validation module for docpipe orchestrator.
 
 This module contains the FlowValidator class which handles all flow validation logic
 that was previously embedded in AbstractOrchestrator.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 from docpipe.core.constants.constants import DocpipeConstants, OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
@@ -18,12 +21,14 @@ from docpipe.core.orchestration.feature_propagation import (
     disambiguate_features,
 )
 from docpipe.core.orchestration.operator_factory import OperatorFactory, OperatorFactoryProvider
+from docpipe.core.orchestration.operator_loader.ports.operator_source import TrustClass
 from docpipe.exceptions.docpipe_exceptions import (
     ErrorCode,
     FlowValidationException,
     ValidationAlert,
 )
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
+from docpipe.integrations.secrets.resolver import FindingKind, inspect_node_references
 from docpipe.types import FlowConfig
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.orchestration.flow_utils import add_validation_alert
@@ -207,7 +212,11 @@ class FlowValidator:
             )
             # Continue with whatever metadata was successfully loaded
         # Use injected propagator when available to avoid a redundant metadata load.
-        self.feature_propagator = feature_propagator if feature_propagator is not None else FeaturePropagator()
+        # Otherwise build one from the same orchestrator, so custom operators enabled only
+        # through the orchestrator (not the environment) contribute their output features.
+        self.feature_propagator = (
+            feature_propagator if feature_propagator is not None else FeaturePropagator(orchestrator=orchestrator)
+        )
 
     def validate(self, *, flow_def: FlowConfig, params: FlowConfig) -> None:
         """Main validation entry point for a flow definition.
@@ -249,23 +258,77 @@ class FlowValidator:
         self.validate_dag(flow_def=flow_def, global_config=global_config)
 
     @staticmethod
-    def _sanitize_vault_refs_for_validation(value: object, *, key: str | None = None) -> object:
-        """Replace vault:// references with safe validation mock values.
+    def _sanitize_vault_refs_for_validation(value: object) -> object:
+        """Replace every string that holds ``vault://`` with the one validation sentinel.
 
-        Operators receive non-empty mock structures rather than unresolved URIs
-        so that required presence checks and dict validation pass cleanly.
+        The sentinel is a plain string that passes the non-empty and ``http(s)://`` checks of
+        secret-capable fields, so a reference there never causes a format or missing-field
+        error. Problems with the references themselves are reported separately by
+        ``_report_reference_findings``. No provider is contacted.
         """
         from docpipe.integrations.secrets.secret_provider import is_vault_reference
 
         if isinstance(value, str) and is_vault_reference(value):
-            if key in ("credentials", "credentials_json", "provider_credentials"):
-                return {"__vault_mock__": True}
-            return "__vault_placeholder__"
+            return DocpipeConstants.VALIDATION_SECRET_SENTINEL
         if isinstance(value, dict):
-            return {k: FlowValidator._sanitize_vault_refs_for_validation(v, key=str(k)) for k, v in value.items()}
+            return {k: FlowValidator._sanitize_vault_refs_for_validation(v) for k, v in value.items()}
         if isinstance(value, list):
-            return [FlowValidator._sanitize_vault_refs_for_validation(item, key=key) for item in value]
+            return [FlowValidator._sanitize_vault_refs_for_validation(item) for item in value]
         return value
+
+    # Findings that ``_validate_vault_references`` already reports for the whole DAG; the
+    # per-node check reports only the others, so a problem is never listed twice.
+    _REPORTED_BY_DAG_CHECK: ClassVar[frozenset[FindingKind]] = frozenset(
+        {FindingKind.MALFORMED, FindingKind.PROVIDER_NOT_REGISTERED}
+    )
+    _FINDING_MESSAGES: ClassVar[dict[FindingKind, tuple[str, str]]] = {
+        FindingKind.FIELD_NOT_SECRET_CAPABLE: (
+            "VAULT_FIELD_NOT_SECRET_CAPABLE",
+            "Config key '{key}' holds a vault reference but is not a secret-capable field for this operator.",
+        ),
+        FindingKind.PATH_NOT_PERMITTED: (
+            "VAULT_PATH_NOT_PERMITTED",
+            "Config key '{key}' holds a vault reference that is outside secrets.vault.allowed_paths.",
+        ),
+        FindingKind.DESTINATION_NOT_PERMITTED: (
+            "VAULT_DESTINATION_NOT_PERMITTED",
+            "Config key '{key}' is a literal destination whose host is not in secrets.vault.allowed_destinations, "
+            "while the node reads credentials from Vault.",
+        ),
+    }
+
+    @staticmethod
+    def _report_reference_findings(
+        *,
+        operator_class: Any,
+        config: dict[str, Any],
+        op_def: dict[str, Any],
+        validate_results: ValidateStepResults,
+    ) -> bool:
+        """Report undeclared, out-of-policy, and misdirected references of one node as errors.
+
+        Messages name the config key (and the provider where there is one) and never the
+        reference text. Returns True when the node holds a reference problem that makes
+        the operator's own checks meaningless, so the caller skips them.
+        """
+        blocking = False
+        for finding in inspect_node_references(operator_class=operator_class, config=config):
+            if finding.kind is not FindingKind.PROVIDER_NOT_REGISTERED:
+                blocking = True
+            if finding.kind in FlowValidator._REPORTED_BY_DAG_CHECK:
+                continue
+            code, template = FlowValidator._FINDING_MESSAGES[finding.kind]
+            message = template.format(key=finding.config_key)
+            if finding.kind is FindingKind.PATH_NOT_PERMITTED and (
+                getattr(operator_class, "trust_class", None) == TrustClass.UNTRUSTED
+            ):
+                message = message.replace("secrets.vault.allowed_paths", "secrets.vault.custom_operator_allowed_paths")
+            add_validation_alert(
+                message=ValidationMessage(message=message, message_code=code),
+                op_def=op_def,
+                alerts=validate_results.errors,
+            )
+        return blocking
 
     @staticmethod
     def _collect_vault_refs(obj: object, *, prefix: str = "") -> list[tuple[str, str]]:
@@ -294,18 +357,25 @@ class FlowValidator:
         op_def: dict[str, Any],
         validate_results: ValidateStepResults,
     ) -> None:
-        """Validate a single vault reference URI and record any error or warning."""
+        """Validate a single vault reference URI and record any error or warning.
+
+        The error for a malformed reference names the config key only; the value
+        is never echoed.
+        """
         from docpipe.integrations.secrets.secret_provider import (
+            MalformedSecretReferenceError,
             get_provider,
-            parse_vault_reference,
+            parse_reference,
         )
 
         try:
-            provider_name, _, _ = parse_vault_reference(ref)
-        except Exception:
+            parsed = parse_reference(value=ref)
+        except MalformedSecretReferenceError:
+            parsed = None
+        if parsed is None:
             add_validation_alert(
                 message=ValidationMessage(
-                    message=f"Config key '{path}' contains a malformed vault URI: '{ref}'.",
+                    message=f"Config key '{path}' contains a malformed vault URI.",
                     message_code="VAULT_URI_MALFORMED",
                 ),
                 op_def=op_def,
@@ -313,7 +383,8 @@ class FlowValidator:
             )
             return
 
-        if not provider_name or get_provider(name=provider_name) is None:
+        provider_name = parsed.provider
+        if get_provider(name=provider_name) is None:
             add_validation_alert(
                 message=ValidationMessage(
                     message=(
@@ -601,8 +672,23 @@ class FlowValidator:
                     config = (
                         global_config
                         | op_def.get(OperatorConstants.Config.CONFIG, {})
-                        | {DocpipeConstants.VALIDATING_FLOW: True}
+                        | {
+                            DocpipeConstants.VALIDATING_FLOW: True,
+                            DocpipeConstants.VALIDATION_FEATURE_TYPES: {
+                                name: feature.get("type")
+                                for name, feature in node_result.get_input_features(node_id=node_id).items()
+                            },
+                        }
                     )
+                    if self._report_reference_findings(
+                        operator_class=operator_class,
+                        config=dict(op_def.get(OperatorConstants.Config.CONFIG, {})),
+                        op_def=op_def,
+                        validate_results=validate_results,
+                    ):
+                        # The reference errors above are the actionable ones; format checks on a
+                        # field whose reference was rejected would only report the stand-in.
+                        return node_result
                     config = self._sanitize_vault_refs_for_validation(config)
                     operator = operator_class(config=config)
                     operator.name = op_def.get(OperatorConstants.Columns.NAME)

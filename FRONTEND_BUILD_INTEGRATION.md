@@ -12,15 +12,17 @@ The docpipe project includes a React frontend that is automatically built and bu
 
 1. **Frontend Build Script** (`scripts/build_frontend.py`)
    - Executed during wheel creation via hatch build hook
-   - Checks for npm availability
-   - Installs frontend dependencies (`npm install`)
+   - Checks for npm availability and exits with an error if it is missing
+   - Installs frontend dependencies (`npm ci`)
    - Builds production frontend (`npm run build`)
+   - Bundles the BFF server (`npm run build:bff`)
    - Copies built assets to `src/docpipe/api/static/`
 
 2. **Hatch Build Hook** (`hatch_build.py`)
    - Custom hatch plugin that runs before wheel creation
    - Invokes the frontend build script
-   - Gracefully handles build failures (continues without frontend if npm unavailable)
+   - Fails the build with `Frontend build failed` if the frontend build script fails (for example, when npm is unavailable)
+   - Runs for every wheel build, including editable installs (`uv sync`, `uv pip install -e .`)
 
 3. **Static File Serving** (`src/docpipe/api/main.py`)
    - FastAPI mounts static files from `src/docpipe/api/static/`
@@ -70,13 +72,15 @@ uv build
 
 ### Build Without Node.js
 
-If Node.js/npm is not available, the build will continue without the frontend:
+Node.js and npm are required. If npm is not on `PATH`, the build fails:
 
 ```bash
-uv build
-# Warning: npm not found. Skipping frontend build.
-# Wheel will be created without frontend assets
+uv sync
+# Error: npm not found. Cannot build frontend for wheel.
+# RuntimeError: Frontend build failed
 ```
+
+Install Node.js 22.15.1 (for example with `nvm install` in the `frontend/` directory, which reads `frontend/.nvmrc`) and run the command again from the same shell. The build is skipped only when the `frontend/` directory or `frontend/package.json` is absent.
 
 ## Running the Application
 
