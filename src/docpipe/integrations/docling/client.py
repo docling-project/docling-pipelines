@@ -183,6 +183,33 @@ class DoclingServeClient:
 
         logger.info("Initialized DoclingServeClient with base_url=%s", self.base_url)
 
+    @staticmethod
+    def _as_format_list(*, value: Any, key: str) -> list[str]:
+        """
+        Return a format option as a new list.
+
+        A single string is treated as one format, so "json" does not turn into
+        the characters "j", "s", "o", "n".
+
+        Args:
+            value: The option value (None, a string, or a list or tuple of strings)
+            key: Option name, used in the error message
+
+        Returns:
+            A new list of formats (empty for None)
+
+        Raises:
+            ValueError: If the value is neither None, a string, nor a list or tuple
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list | tuple):
+            return list(value)
+        msg = f"'{key}' must be a string or a list of strings, got {type(value).__name__}"
+        raise ValueError(msg)
+
     def _build_options(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         Build options dictionary with safe defaults for the docling-serve v1 API.
@@ -210,27 +237,27 @@ class DoclingServeClient:
         }
 
         if options:
-            # Work on a copy so we never mutate the caller's dict (processing_options on the adapter
-            # is reused across every document — mutating it would lose additional_formats after the first call)
+            # Work on a copy so we never mutate the caller's dict or its lists (processing_options on
+            # the adapter is reused across every document — mutating it would change later calls)
             opts = dict(options)
 
-            # Pull out additional_formats and append to to_formats before merging the rest
+            # Pull out the format keys before the general update
             additional_formats = opts.pop("additional_formats", None)
-            if additional_formats:
-                to_formats_list: list[str] = default_options["to_formats"]  # type: ignore[assignment]
-                for fmt in additional_formats:
-                    if fmt and fmt not in to_formats_list:
-                        to_formats_list.append(fmt)
-
-            # Pull out any explicit to_formats override before the general update
             user_to_formats = opts.pop("to_formats", None)
             default_options.update(opts)
 
-            if user_to_formats:
-                # Ensure "md" is always present
-                if "md" not in user_to_formats:
-                    user_to_formats.insert(0, "md")
-                default_options["to_formats"] = user_to_formats
+            # Start from the explicit to_formats (or the default), ensure "md" is present,
+            # then append additional_formats; drop duplicates and empty entries, keep order
+            base_formats = self._as_format_list(value=user_to_formats, key="to_formats") or list(
+                default_options["to_formats"]
+            )
+            if "md" not in base_formats:
+                base_formats.insert(0, "md")
+            to_formats_list: list[str] = []
+            for fmt in [*base_formats, *self._as_format_list(value=additional_formats, key="additional_formats")]:
+                if fmt and fmt not in to_formats_list:
+                    to_formats_list.append(fmt)
+            default_options["to_formats"] = to_formats_list
 
         # Strip None values — requests serialises None as the string "None" which the server rejects
         return {k: v for k, v in default_options.items() if v is not None}

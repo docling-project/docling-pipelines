@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docpipe.core.constants.constants import DoclingClientConstants
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.docling.client import DoclingServeClient
@@ -489,7 +490,8 @@ class TestCheckStatusRetries:
 
         assert result == {"task_status": "SUCCESS"}
         assert mock_call_rest_json.call_count == 3
-        assert [c.args for c in mock_sleep.call_args_list] == [(1.0,), (2.0,)]
+        base = DoclingClientConstants.STATUS_404_BACKOFF_BASE
+        assert [c.args for c in mock_sleep.call_args_list] == [(base,), (base * 2.0,)]
 
     @patch("docpipe.integrations.base_llm_client.time.sleep")
     @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
@@ -561,3 +563,69 @@ class TestFormatCompatibilityErrorDetection:
         with pytest.raises(DocpipeException, match="rejected the requested output formats"):
             client.submit_document(binary_content=b"data")
 
+
+class TestBuildOptionsFormats:
+    """Regression tests for #656: to_formats and additional_formats are merged without mutation."""
+
+    def test_additional_formats_kept_with_explicit_to_formats(self):
+        """additional_formats are appended to an explicit to_formats list."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        options = client._build_options({"additional_formats": ["json"], "to_formats": ["doctags"]})
+
+        assert options["to_formats"] == ["md", "doctags", "json"]
+
+    @pytest.mark.parametrize(
+        ("options", "expected"),
+        [
+            ({"additional_formats": "json"}, ["md", "json"]),
+            ({"to_formats": "doctags"}, ["md", "doctags"]),
+            ({"to_formats": ("md", "doctags"), "additional_formats": ("json",)}, ["md", "doctags", "json"]),
+        ],
+        ids=["additional-string", "to-formats-string", "tuples"],
+    )
+    def test_single_string_is_one_format(self, options, expected):
+        """A single string is one format, not split into characters."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+
+        assert client._build_options(options)["to_formats"] == expected
+
+    @pytest.mark.parametrize("key", ["to_formats", "additional_formats"])
+    def test_non_list_format_option_is_rejected(self, key):
+        """A format option that is not a string or a list raises a clear ValueError."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+
+        with pytest.raises(ValueError, match=f"'{key}' must be a string or a list of strings, got int"):
+            client._build_options({key: 5})
+
+    def test_additional_formats_appended_to_default(self):
+        """Without to_formats, additional_formats are appended to the default md."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        options = client._build_options({"additional_formats": ["json", "doctags"]})
+
+        assert options["to_formats"] == ["md", "json", "doctags"]
+        assert "additional_formats" not in options
+
+    def test_formats_deduplicated_in_order(self):
+        """Duplicates and empty entries are dropped; first occurrence order is kept."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        options = client._build_options(
+            {"to_formats": ["doctags", "md", "doctags"], "additional_formats": ["md", "", "json", "doctags"]}
+        )
+
+        assert options["to_formats"] == ["doctags", "md", "json"]
+
+    def test_caller_options_not_mutated(self):
+        """The caller's dict and lists are unchanged, so reusing them gives the same result."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        to_formats = ["doctags"]
+        additional_formats = ["json"]
+        caller_options = {"to_formats": to_formats, "additional_formats": additional_formats, "do_ocr": False}
+
+        first = client._build_options(caller_options)
+        second = client._build_options(caller_options)
+
+        assert to_formats == ["doctags"]
+        assert additional_formats == ["json"]
+        assert caller_options == {"to_formats": ["doctags"], "additional_formats": ["json"], "do_ocr": False}
+        assert first == second
+        assert first["to_formats"] is not to_formats
