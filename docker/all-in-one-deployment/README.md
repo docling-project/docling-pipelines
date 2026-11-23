@@ -45,6 +45,7 @@ The default `docker-compose.yml` includes:
 | Service | Port | Description |
 |---------|------|-------------|
 | **docpipe** | 8080 | Main Docling Pipelines application API |
+| **bff** | 3001 (internal) | Backend-For-Frontend proxy service |
 | **postgres** | 5432 | PostgreSQL database |
 | **ollama** | 11434 | Ollama LLM service |
 | **opensearch** | 9200, 9600 | OpenSearch vector database |
