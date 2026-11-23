@@ -126,6 +126,8 @@ class DocumentPasswordsConfig(BaseModel):
     def plain_text_password_locations(self) -> list[str]:
         """Return the locations of passwords given as plain text rather than ``vault://`` references.
 
+        ``ExtractOperator.validate()`` reports each one as a validation error.
+
         Only meaningful during flow validation, where vault references have been replaced by
         the validation placeholder; at runtime every value has already been resolved.
         """

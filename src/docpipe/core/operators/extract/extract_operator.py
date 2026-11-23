@@ -1558,9 +1558,7 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
 
         # Vault references are replaced by a placeholder during validation, so anything else is plain text
         for location in self.document_passwords_config.plain_text_password_locations():
-            warnings.append(
-                f"{location} is a plain-text password. Store it in a secret store and use a vault:// reference."
-            )
+            errors.append(f"{location} is a plain-text password. Use a vault:// reference to a secret store instead.")
 
         # Warn about any additional_formats values that won't produce an output column
         provider_config = self.text_extraction_config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})

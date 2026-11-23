@@ -863,7 +863,43 @@ def test_flow_validator_reports_malformed_passwords_as_field_level_error() -> No
 
 
 @pytest.mark.unit
-def test_operator_validate_warns_on_plain_text_passwords() -> None:
+def test_flow_validator_fails_a_flow_with_a_plain_text_password() -> None:
+    """A plain-text password is a validation error, so the flow is invalid; a vault reference alone is not."""
+    from docpipe.core.orchestration.flow_validator import FlowValidator, ValidateStepResults
+    from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
+
+    validator = FlowValidator(orchestrator=OrchestratorFactory.create_orchestrator(orchestrator_name="python"))
+
+    def validate(passwords: list[str]) -> ValidateStepResults:
+        results = ValidateStepResults(available_features={}, errors=[], warnings=[])
+        op_def = {
+            "id": "extract-1",
+            "name": "extract_documents",
+            "operator": "extract_operator",
+            "config": {
+                "text_extraction": {"provider": "docling_library"},
+                "document_passwords": {"rules": [{"match": "*.pdf", "passwords": passwords}]},
+            },
+            "input_edges": [],
+            "output_edges": [],
+        }
+        validator._validate_node(
+            op_def=op_def, prev_result=None, global_config={}, validate_results=results, session_info=None
+        )
+        return results
+
+    rejected = validate(["vault://org/key", PASSWORD])
+    rendered = " ".join(str(e) for e in rejected.errors)
+    assert "document_passwords.rules[0].passwords[1]" in rendered
+    assert "plain-text password" in rendered
+    assert PASSWORD not in rendered + " ".join(str(w) for w in rejected.warnings)
+
+    accepted = validate(["vault://org/key"])
+    assert not any("plain-text password" in str(e) for e in accepted.errors)
+
+
+@pytest.mark.unit
+def test_operator_validate_rejects_plain_text_passwords() -> None:
     from docpipe.core.operators.extract.extract_operator import ExtractOperator
 
     operator = ExtractOperator(
@@ -878,15 +914,16 @@ def test_operator_validate_warns_on_plain_text_passwords() -> None:
     warnings: list[Any] = []
     operator.validate(errors, warnings, ["content"])
 
-    password_warnings = [w for w in warnings if "plain-text password" in str(w)]
-    assert len(password_warnings) == 1
-    assert "document_passwords.default[0]" in str(password_warnings[0])
-    assert PASSWORD not in str(warnings)
-    assert errors == []
+    password_errors = [e for e in errors if "plain-text password" in str(e)]
+    assert len(password_errors) == 1
+    assert "document_passwords.default[0]" in str(password_errors[0])
+    assert "vault://" in str(password_errors[0])
+    assert PASSWORD not in str(errors) + str(warnings)
+    assert not any("plain-text password" in str(w) for w in warnings)
 
 
 @pytest.mark.unit
-def test_operator_validate_no_warning_for_vault_references() -> None:
+def test_operator_validate_accepts_vault_references() -> None:
     from docpipe.core.operators.extract.extract_operator import ExtractOperator
 
     # FlowValidator replaces every vault:// reference with the sentinel before the operator is built,
@@ -897,10 +934,11 @@ def test_operator_validate_no_warning_for_vault_references() -> None:
             DocpipeConstants.VALIDATING_FLOW: True,
         },
     )
+    errors: list[Any] = []
     warnings: list[Any] = []
-    operator.validate([], warnings, ["content"])
+    operator.validate(errors, warnings, ["content"])
 
-    assert not any("plain-text password" in str(w) for w in warnings)
+    assert not any("plain-text password" in str(m) for m in [*errors, *warnings])
 
 
 @pytest.mark.unit
