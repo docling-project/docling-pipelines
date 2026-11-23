@@ -29,11 +29,11 @@ RUN pip install --no-cache-dir uv
 # Cache dependencies separately from backend source changes.
 COPY pyproject.toml uv.lock ./
 COPY slim/pyproject.toml slim/uv.lock ./slim/
-ARG DEPENDENCIES=cpu
+ARG BUILD_PROFILE=cpu
 # Select CPU-only wheels or locked GPU dependencies without changing the lockfile.
 # Slim installs the default dependencies from its own lockfile.
 RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
-    case "$DEPENDENCIES" in \
+    case "$BUILD_PROFILE" in \
         gpu) \
             uv export --locked --no-dev --no-emit-project \
                 --format pylock.toml --output-file pylock.toml && \
@@ -55,7 +55,7 @@ RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
                 --format pylock.toml --output-file pylock.toml && \
             uv pip install --python /opt/docpipe-venv/bin/python \
                 --no-cache --require-hashes -r pylock.toml ;; \
-        *) echo "DEPENDENCIES must be cpu, gpu, or slim" >&2; exit 1 ;; \
+        *) echo "BUILD_PROFILE must be cpu, gpu, or slim" >&2; exit 1 ;; \
     esac
 
 # Run the API and serve the UI as a non-root user.
