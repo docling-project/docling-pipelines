@@ -206,6 +206,17 @@ class DocumentDecryptor:
                     OperatorConstants.Extraction.FAILURE_REASON: exc.failure_reason,
                     OperatorConstants.Columns.DOC_COLUMN_DEFAULT: None,
                 }
+            except Exception as exc:
+                # A corrupt document can make PDFium or msoffcrypto raise something other than their
+                # own error types (ValueError, struct.error, OSError, ...). One bad document must not
+                # fail the whole batch: keep the original bytes and let extraction report the problem
+                # as it did before this feature. Only the exception type is logged; the message and
+                # traceback are left out because they come from code that handles passwords.
+                logger.warning(
+                    "Encryption check failed for %s (%s); passing the document through unchanged",
+                    name,
+                    type(exc).__name__,
+                )
 
     @classmethod
     def failed_result_future(cls, *, task: dict[str, Any]) -> Future | None:
@@ -220,6 +231,9 @@ class DocumentDecryptor:
     def _decrypt_document(self, *, name: str, path: str | None, data: bytes) -> bytes:
         """Return decrypted bytes for an encrypted document, or ``data`` unchanged otherwise."""
         suffix = PurePath(name).suffix.lower()
+        # The PDF test comes first on purpose: it also catches PDFs with a wrong extension, and a
+        # non-PDF that happens to contain the header is harmless because _decrypt_pdf returns early
+        # when the bytes carry no /Encrypt key or PDFium opens them without a password.
         if suffix == _PDF_EXTENSION or _PDF_HEADER in data[:_PDF_HEADER_SEARCH_BYTES]:
             return self._decrypt_pdf(name=name, path=path, data=data)
         if suffix in _OOXML_EXTENSIONS and data.startswith(_OLE_SIGNATURE):
@@ -266,7 +280,9 @@ class DocumentDecryptor:
                     document.save(buffer, flags=pdfium_c.FPDF_REMOVE_SECURITY)
                 finally:
                     document.close()
-                logger.info("Decrypted password-protected PDF %s with candidate %s", name, index + 1)
+                # The matching candidate is deliberately not logged: its position would reveal which
+                # password opened the document.
+                logger.info("Decrypted password-protected PDF %s", name)
                 return buffer.getvalue()
         raise self._password_incorrect(candidate_count=len(candidates))
 
@@ -310,7 +326,7 @@ class DocumentDecryptor:
             except DecryptionError:
                 raise self._unsupported_office_encryption() from None
             self._remember_winner(group=group, index=index)
-            logger.info("Decrypted password-protected Office document %s with candidate %s", name, index + 1)
+            logger.info("Decrypted password-protected Office document %s", name)
             return output.getvalue()
         raise self._password_incorrect(candidate_count=len(candidates))
 

@@ -492,6 +492,87 @@ def test_tasks_with_fetch_errors_are_left_alone() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        ("truncated.pdf", b"%PDF-1.7\n/Encrypt 5 0 R\n1 0 obj\n<<"),
+        ("garbage.pdf", b"%PDF-1.7 /Encrypt " + bytes(range(256))),
+        ("truncated.docx", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 40),
+        ("garbage.xlsx", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(range(256)) * 4),
+    ],
+)
+def test_malformed_documents_pass_through_without_failing_the_batch(name: str, data: bytes) -> None:
+    """A corrupt document must not abort decryption for the rest of the batch."""
+    good = _pdf(user_password=PASSWORD)
+    tasks = _run_decrypt(
+        decryptor=_decryptor({"default": [PASSWORD]}),
+        docs=[(name, None, data), ("good.pdf", None, good)],
+    )
+
+    assert _failure_reason(tasks[0]) is None
+    assert tasks[0][OperatorConstants.Columns.BINARY_CONTENT] == data
+    assert not _is_encrypted_pdf(tasks[1][OperatorConstants.Columns.BINARY_CONTENT])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("error", [ValueError("boom"), TypeError("boom"), OSError("boom"), RuntimeError("boom")])
+def test_unexpected_decryption_errors_pass_the_document_through(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """Any exception outside the expected types degrades to pass-through, never a batch failure."""
+    original = _pdf(user_password=PASSWORD)
+
+    def _raise(*args: Any, **kwargs: Any) -> bytes:
+        raise error
+
+    monkeypatch.setattr(DocumentDecryptor, "_decrypt_pdf", _raise)
+    tasks = _run_decrypt(
+        decryptor=_decryptor({"default": [PASSWORD]}),
+        docs=[("a.pdf", None, original), ("b.pdf", None, original)],
+    )
+
+    assert [_failure_reason(task) for task in tasks] == [None, None]
+    assert all(task[OperatorConstants.Columns.BINARY_CONTENT] is original for task in tasks)
+
+
+@pytest.mark.unit
+def test_unexpected_decryption_error_log_omits_message_and_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    def _raise(*args: Any, **kwargs: Any) -> bytes:
+        raise ValueError(f"detail with {PASSWORD}")
+
+    with patch.object(DocumentDecryptor, "_decrypt_pdf", _raise), caplog.at_level(logging.DEBUG):
+        _run_decrypt(decryptor=_decryptor({"default": [PASSWORD]}), docs=[("a.pdf", None, b"%PDF-")])
+
+    assert "ValueError" in caplog.text
+    assert PASSWORD not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.unit
+def test_success_log_does_not_reveal_which_candidate_matched() -> None:
+    decryptor = _decryptor({"default": [WRONG_PASSWORD, "another-wrong", PASSWORD]})  # pragma: allowlist secret
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Collect(level=logging.DEBUG)
+    encrypted_documents.logger.addHandler(handler)
+    try:
+        _run_decrypt(
+            decryptor=decryptor,
+            docs=[("a.pdf", None, _pdf(user_password=PASSWORD)), ("w.docx", None, _docx(password=PASSWORD))],
+        )
+    finally:
+        encrypted_documents.logger.removeHandler(handler)
+
+    messages = [record.getMessage() for record in records if "Decrypted" in record.getMessage()]
+    assert len(messages) == 2
+    assert all("candidate" not in message for message in messages)
+
+
+@pytest.mark.unit
 def test_remembered_winner_is_tried_first_for_later_documents_of_the_rule() -> None:
     candidates = [f"wrong-{i}" for i in range(4)] + [PASSWORD]  # pragma: allowlist secret
     decryptor = _decryptor({"rules": [{"match": "*.pdf", "passwords": candidates}]})
