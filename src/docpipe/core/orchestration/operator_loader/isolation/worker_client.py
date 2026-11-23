@@ -114,6 +114,7 @@ class IsolatedWorker:
         return not self._closed and self._process.poll() is None
 
     def _drain_stderr(self) -> None:
+        """Read and log remaining stderr lines from the worker process, up to the configured limit."""
         stream = self._process.stderr
         if stream is None:
             return
@@ -127,6 +128,7 @@ class IsolatedWorker:
     def _request(
         self, *, header: dict[str, Any], tables: list[pa.Table] | None = None
     ) -> tuple[dict[str, Any], list[pa.Table]]:
+        """Send a request to the worker and return the parsed reply header and output tables."""
         with self._lock:
             if self._closed:
                 raise IsolatedWorkerError(f"isolated worker for '{self._label}' is stopped")

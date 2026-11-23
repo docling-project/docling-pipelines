@@ -27,10 +27,12 @@ class TestDotenvDisabledSwitch:
 
     @pytest.fixture(autouse=True)
     def _isolate_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Remove canary and switch variables before and after each test."""
         monkeypatch.delenv(self.CANARY_NAME, raising=False)
         monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
 
     def test_dotenv_loads_file_without_the_switch(self, *, tmp_path: Path) -> None:
+        """Without the switch, load_dotenv() reads the file and sets the variable."""
         env_file = tmp_path / ".env"
         env_file.write_text(f"{self.CANARY_NAME}={self.CANARY_VALUE}\n", encoding="utf-8")
 
@@ -41,6 +43,7 @@ class TestDotenvDisabledSwitch:
     def test_dotenv_does_not_override_an_existing_variable(
         self, *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """load_dotenv() must not replace a variable that already exists in the environment."""
         monkeypatch.setenv(self.CANARY_NAME, "existing-value")
         env_file = tmp_path / ".env"
         env_file.write_text(f"{self.CANARY_NAME}=new-value-from-file\n", encoding="utf-8")
@@ -50,6 +53,7 @@ class TestDotenvDisabledSwitch:
         assert os.environ[self.CANARY_NAME] == "existing-value"
 
     def test_dotenv_is_not_loaded_when_switch_is_set(self, *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With PYTHON_DOTENV_DISABLED=1, load_dotenv() returns without reading the file."""
         monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
         env_file = tmp_path / ".env"
         env_file.write_text(f"{self.CANARY_NAME}={self.CANARY_VALUE}\n", encoding="utf-8")
