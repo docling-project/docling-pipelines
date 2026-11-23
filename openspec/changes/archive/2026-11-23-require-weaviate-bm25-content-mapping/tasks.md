@@ -13,9 +13,14 @@ Layer for every task: [backend].
 - [x] 2.1 [backend] Add a static helper that appends the content mapping as described in design D3, and call it in `fetch` on the output of `_resolve_feature_mappings`, before the response is built and after the support verdict is computed. Verify: saved mappings are preserved in order; an existing content mapping or a mapping of the content feature blocks the append; repeating with the returned mappings is stable.
 - [x] 2.2 [backend] Resolve the target from the selected collection's searchable content property, falling back to `text`. Verify: an existing collection with a searchable `content` property gets `content`, one without gets `text`.
 
+## 2b. Blank target column
+
+- [x] 2b.1 [backend] In `WeaviateIndexManager.is_content_mapping`, return false when the column is empty or whitespace-only (design D5). Verify: the adapter guard rejects `content -> ""` with the existing message, and `content -> text` is still accepted.
+- [x] 2b.2 [backend] In the completion helper, fill a blank-column row of the content feature in place instead of treating it as mapped, dropping any further blank rows of that feature. Verify: the row keeps its position, other mappings are unchanged, a non-blank content mapping still blocks, and repeating is stable.
+
 ## 3. Tests
 
-- [x] 3.1 [backend] `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`: projection cases (BM25 on and off, configured `doc_column`, saved `title -> text`, several qualifying mappings, feature absent, input not mutated) and mapping cases (saved without content, `content -> body` preserved, mapping to `text` blocks the append, collection target, repeat is stable, `is_docpipe_supported_resource` unchanged).
+- [x] 3.1 [backend] `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`: projection cases (BM25 on and off, configured `doc_column`, saved `title -> text`, several qualifying mappings, feature absent, input not mutated) and mapping cases (saved without content, blank content column filled in place, blank row beside a real content mapping untouched, `content -> body` preserved, mapping to `text` blocks the append, collection target, repeat is stable, `is_docpipe_supported_resource` unchanged).
 - [x] 3.2 [backend] `tests/unit/operators/vectordb/test_metadata_fetcher.py`: the router forwards `operator_config` to Weaviate, and the OpenSearch and Milvus projections are unchanged.
 - [x] 3.3 [backend] `tests/unit/core/flows/application/services/test_flow_enrichment_service.py`: the enrichment response for a Weaviate node with BM25 on carries `mandatory_for_vector_db: true` for the content feature and the content row in `feature_mappings`; with BM25 off it does not.
 

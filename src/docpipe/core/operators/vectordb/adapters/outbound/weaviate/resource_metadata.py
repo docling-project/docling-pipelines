@@ -129,12 +129,14 @@ class WeaviateResourceMetadata:
         available_features: dict[str, Any],
         props: dict[str, Any],
     ) -> list[dict[str, str]]:
-        """Append the content mapping that BM25 requires when the mappings have none.
+        """Complete the content mapping that BM25 requires.
 
         Returns ``feature_mappings`` unchanged when ``add_sparse_vector`` is off, the content
-        feature is unavailable, any mapping carries content, or the content feature is already
-        mapped. Otherwise returns a new list: the original mappings followed by the content
-        feature mapped to the collection's searchable content property, or ``text``.
+        feature is unavailable, a mapping already carries content (non-empty target column), or
+        the content feature is already mapped to a non-empty column. Otherwise returns a new list
+        with the content feature mapped to the collection's searchable content property, or
+        ``text``: a blank-column row of the content feature is filled in place, and when there is
+        none the mapping is appended. Other mappings keep their order and values.
         """
         if not operator_config.get(OperatorConstants.VectorDB.ADD_SPARSE_VECTOR, False):
             return feature_mappings
@@ -143,19 +145,32 @@ class WeaviateResourceMetadata:
             return feature_mappings
         feature_key = OperatorConstants.Misc.FEATURE_NAME
         column_key = OperatorConstants.Misc.MAPPED_COLUMN_NAME
-        for entry in feature_mappings:
+        blank_row: int | None = None
+        for index, entry in enumerate(feature_mappings):
             feature = entry.get(feature_key)
-            if feature == content_feature or WeaviateIndexManager.is_content_mapping(
-                feature_name=feature or "", column_name=entry.get(column_key) or ""
-            ):
+            column = entry.get(column_key) or ""
+            if WeaviateIndexManager.is_content_mapping(feature_name=feature or "", column_name=column):
                 return feature_mappings
+            if feature == content_feature:
+                if column.strip():
+                    return feature_mappings
+                blank_row = index if blank_row is None else blank_row
         content_prop = WeaviateResourceMetadata._content_property(props=props, feature_mappings=feature_mappings)
         target = (
             content_prop.name
             if content_prop is not None and content_prop.index_searchable
             else OperatorConstants.VectorDB.DEFAULT_TEXT_FIELD_NAME
         )
-        return [*feature_mappings, {feature_key: content_feature, column_key: target}]
+        completed = {feature_key: content_feature, column_key: target}
+        if blank_row is None:
+            return [*feature_mappings, completed]
+        result: list[dict[str, str]] = []
+        for index, entry in enumerate(feature_mappings):
+            if index == blank_row:
+                result.append(completed)
+            elif entry.get(feature_key) != content_feature:
+                result.append(entry)
+        return result
 
     def fetch(
         self,

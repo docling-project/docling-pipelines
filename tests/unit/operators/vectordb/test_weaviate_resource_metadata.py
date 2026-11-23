@@ -632,6 +632,19 @@ class TestBm25MandatoryProjection:
         assert projected["content"][MANDATORY] is True
         assert MANDATORY not in projected["body"]
 
+    def test_blank_content_row_does_not_count_as_saved_content_mapping(self):
+        mappings = [
+            {"feature_name": "title", "mapped_column_name": "text"},
+            {"feature_name": "body", "mapped_column_name": " "},
+        ]
+        blank_only = [{"feature_name": "content", "mapped_column_name": ""}]
+        projected = _project({"add_sparse_vector": True, "feature_mappings": blank_only})
+        assert projected["content"][MANDATORY] is True
+        assert projected["title"] is BM25_FEATURES["title"]
+        projected = _project({"add_sparse_vector": True, "feature_mappings": mappings})
+        assert projected["title"][MANDATORY] is True
+        assert projected["content"] is BM25_FEATURES["content"]
+
     def test_content_feature_absent_marks_nothing(self):
         features = {"doc_id_hash": BM25_FEATURES["doc_id_hash"], "embeddings": BM25_FEATURES["embeddings"]}
         projected = _project({"add_sparse_vector": True}, features)
@@ -694,6 +707,36 @@ class TestBm25ContentMappingCompletion:
     def test_unsearchable_collection_property_falls_back_to_text(self):
         props = {"content": _prop("content", tokenization=Tokenization.WORD, searchable=False)}
         assert _complete([PK], props=props)[-1]["mapped_column_name"] == "text"
+
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_blank_content_column_is_filled_in_place(self, blank: str):
+        email = {"feature_name": "name", "mapped_column_name": "document_name"}
+        saved = [PK, {"feature_name": "content", "mapped_column_name": blank}, email]
+        result = _complete(saved)
+        assert result == [PK, {"feature_name": "content", "mapped_column_name": "text"}, email]
+        assert saved[1]["mapped_column_name"] == blank
+
+    def test_blank_content_column_uses_collection_property_and_drops_duplicate_blank_rows(self):
+        blank = {"feature_name": "content", "mapped_column_name": ""}
+        saved = [PK, blank, {"feature_name": "content", "mapped_column_name": " "}]
+        result = _complete(saved, props={"content": _prop("content", tokenization=Tokenization.WORD)})
+        assert result == [PK, {"feature_name": "content", "mapped_column_name": "content"}]
+
+    def test_blank_content_row_beside_a_real_content_mapping_is_left_alone(self):
+        saved = [
+            PK,
+            {"feature_name": "title", "mapped_column_name": "text"},
+            {"feature_name": "content", "mapped_column_name": ""},
+        ]
+        assert _complete(saved) is saved
+
+    def test_blank_content_row_beside_content_mapped_elsewhere_is_left_alone(self):
+        saved = [
+            PK,
+            {"feature_name": "content", "mapped_column_name": "body"},
+            {"feature_name": "content", "mapped_column_name": ""},
+        ]
+        assert _complete(saved) is saved
 
     def test_repeat_is_stable(self):
         first = _complete([PK])
