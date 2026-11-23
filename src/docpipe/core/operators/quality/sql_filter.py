@@ -13,6 +13,7 @@ from docpipe.core.constants.constants import (
     DocpipeConstants,
     ExecutionStatus,
     Metrics,
+    is_auth_enabled,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
@@ -308,6 +309,9 @@ class SQLFilterOperator(AbstractOperator):
                 config={"memory_limit": self.duckdb_memory_limit, "threads": self.duckdb_threads}
             ) as con:
                 try:
+                    con.register("input_table", input_table)
+                    if is_auth_enabled():
+                        con.execute("SET enable_external_access = false;")
                     # collect per-criterion stats before the main filter (filter_criteria_list path only)
                     if len(self.filter_criteria) > 0 and not self.filter_criteria_json:
                         stats_row = con.execute(stats_sql).fetchone()

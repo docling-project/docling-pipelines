@@ -5,7 +5,7 @@ import { Add } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
 import { ROUTES, generateRoute } from '@/config';
 import { go } from '@/utils';
-import { useAppDispatch, useAppSelector, useNotify } from '@/hooks';
+import { useAppDispatch, useAppSelector, useNotify, usePermissionReason } from '@/hooks';
 import { getProjects, createProject, createFlow } from '@/services/api';
 import * as projectMapper from '@/services/api/mappers/project-mapper';
 import * as flowMapper from '@/services/api/mappers/flow-mapper';
@@ -37,6 +37,7 @@ export function ProjectsCard(): React.JSX.Element {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const notify = useNotify();
+  const { canEdit, createReason } = usePermissionReason();
 
   const projects = useAppSelector(selectProjectsArray);
   const loading = useAppSelector(selectProjectsLoading);
@@ -153,6 +154,8 @@ export function ProjectsCard(): React.JSX.Element {
         headerIcon={Add}
         headerIconDescription={intl.formatMessage(messages.createIconDescription)}
         onHeaderAction={() => { setTearsheetOpen(true); }}
+        headerActionDisabled={!canEdit}
+        headerActionDisabledReason={createReason ?? undefined}
         emptyTitle={intl.formatMessage(messages.emptyTitle)}
         emptySubtitle={intl.formatMessage(messages.emptySubtitle)}
         emptyAction={{
@@ -160,6 +163,8 @@ export function ProjectsCard(): React.JSX.Element {
           kind: 'tertiary',
           renderIcon: Add,
           onClick: () => { setTearsheetOpen(true); },
+          disabled: !canEdit,
+          disabledReason: createReason ?? undefined,
         }}
         wide
       >

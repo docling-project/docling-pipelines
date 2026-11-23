@@ -1,0 +1,9 @@
+// Disabled buttons swallow pointer events, so the tooltip trigger is a focusable
+// wrapper and the (disabled) control inside it ignores the pointer.
+.trigger {
+  display: inline-flex;
+
+  > * {
+    pointer-events: none;
+  }
+}

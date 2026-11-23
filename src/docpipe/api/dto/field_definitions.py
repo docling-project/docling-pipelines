@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Reusable field definitions and constants for Flow API DTOs.
 
 This module provides field definitions, validation patterns, and constraints
@@ -32,8 +35,8 @@ from pydantic import Field
 UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 """UUID v4 format pattern (lowercase hex with hyphens)."""
 
-USER_ID_PATTERN = r"^[a-zA-Z0-9@._-]+$"
-"""User identifier pattern (alphanumeric with common email/username characters)."""
+USER_ID_PATTERN = r"^[a-zA-Z0-9:@._-]+$"
+"""User identifier pattern (alphanumeric with provider prefix and common email/username characters)."""
 
 # Job/Node Patterns
 JOB_STATUS_PATTERN = r"^(Pending|Running|Completed|Failed|Canceled|Skipped|Queued|Starting|Paused|Resuming|Canceling|Failing|CompletedWithErrors|CompletedWithWarnings|Aborted)$"

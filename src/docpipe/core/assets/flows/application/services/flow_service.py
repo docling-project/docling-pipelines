@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Application service for flow management operations.
 
 Provides CRUD operations for flows with validation, filtering, and pagination.
@@ -17,10 +20,20 @@ from docpipe.core.assets.common.domain.ports.asset_repository import AssetReposi
 from docpipe.core.assets.flows.domain.models.flow import Flow
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.models.actor_context import ActorContext, can_modify
+from docpipe.core.models.ownership import PERMISSION_DENIED_MESSAGE, ensure_can_modify
 from docpipe.exceptions.docpipe_exceptions import (
     FlowAlreadyExistsException,
     FlowInvalidDataException,
     FlowNotFoundException,
+    PermissionDeniedException,
+)
+from docpipe.utils.infrastructure.audit import (
+    OUTCOME_DENIED,
+    OUTCOME_FAILED,
+    OUTCOME_SUCCESS,
+    audit_event,
+    audited,
 )
 
 if TYPE_CHECKING:
@@ -201,7 +214,8 @@ class FlowService(AssetService[Flow]):
             return [f for f in flows if DocpipeConstants.FLOW_NAME not in f.definition]
         return [f for f in flows if DocpipeConstants.FLOW_NAME in f.definition]
 
-    def create_flow(self, *, flow: Flow, is_elyra: bool = False) -> Flow:
+    @audited(action="flow.create", target=lambda a: a["flow"].name, result_target=lambda r: str(r.flow_id))
+    def create_flow(self, *, flow: Flow, is_elyra: bool = False, actor: ActorContext) -> Flow:
         """Create and store a new flow.
 
         This method creates a new flow in the repository with proper validation
@@ -218,6 +232,10 @@ class FlowService(AssetService[Flow]):
                            True = Elyra format, False = Authoring format.
                            This parameter is kept for backward compatibility but flows
                            are now stored in their original format. Default: False.
+            actor (ActorContext): Caller identity. For non-system actors, ``created_by`` is set
+                           to the caller's username (overriding any value on ``flow``). For
+                           ``SYSTEM_ACTOR`` (CLI, library, internal callers) ``flow.created_by``
+                           is left as is.
 
         Returns:
             Flow: The created flow with generated metadata (flow_id, created_on, modified_on).
@@ -226,28 +244,16 @@ class FlowService(AssetService[Flow]):
         Raises:
             FlowAlreadyExistsException: If flow with the same name already exists.
             FlowInvalidDataException: If flow validation fails (empty name, invalid definition, etc.).
+            PermissionDeniedException: If ``actor`` is not a valid ``ActorContext``.
             FlowStorageException: If storage operation fails (I/O errors, permission issues, etc.).
-
-        Example:
-            >>> # Create flow with internal DAG format (will be converted to Elyra)
-            >>> flow = Flow(name="My Pipeline", definition={"flow": {"dag": [], "global_config": {}}})
-            >>> created_flow = service.create_flow(flow=flow, is_elyra=False)
-            >>>
-            >>> # Create flow with Elyra format (stored as-is)
-            >>> flow = Flow(
-            ...     name="Elyra Pipeline",
-            ...     definition={"doc_type": "pipeline", "pipelines": [...]}
-            ... )
-            >>> created_flow = service.create_flow(flow=flow, is_elyra=True)
-
-        Note:
-            - Flows are stored in their original format (no conversion)
-            - Conversion to runtime DAG happens at execution time if needed
-            - created_at and modified_at are set automatically to current UTC time
-            - Use update_flow() to modify existing flows
-            - flow name must be unique across all flows in the repository
-            - Validation occurs before any persistence operations
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="flow.create",
+                target=flow.name,
+            )
+
         try:
             flow.validate()
         except ValueError as exc:
@@ -259,6 +265,9 @@ class FlowService(AssetService[Flow]):
         if self._repository.exists_by_name(name=flow.name):
             logger.warning("Attempted to create flow with existing name: %s", flow.name)
             raise FlowAlreadyExistsException(f"Flow with name '{flow.name}' already exists", flow_name=flow.name)
+
+        if not actor.is_system:
+            flow.created_by = actor.username
 
         saved_flow = self._repository.save(asset=flow)
 
@@ -338,7 +347,8 @@ class FlowService(AssetService[Flow]):
 
         return definition
 
-    def update_flow(self, flow: Flow) -> Flow:
+    @audited(action="flow.update", target=lambda a: str(a["flow"].flow_id))
+    def update_flow(self, flow: Flow, *, actor: ActorContext) -> Flow:
         """Update an existing flow with full replacement.
 
         Performs a complete update of the flow, replacing all fields. The flow must
@@ -350,6 +360,10 @@ class FlowService(AssetService[Flow]):
             flow (Flow): Flow domain entity with updated data. Must have a valid flow_id
                         that exists in the repository. All fields will be updated, so
                         ensure the flow object contains complete data.
+            actor (ActorContext): Caller identity. The caller must own the flow (or be admin,
+                        system, or the flow must be ownerless). For non-system actors,
+                        ``modified_by`` is set to the caller's username, ignoring any value
+                        on ``flow``.
 
         Returns:
             Flow: The updated flow with refreshed modified_on timestamp set to current
@@ -359,30 +373,8 @@ class FlowService(AssetService[Flow]):
             FlowInvalidDataException: If flow_id is None, empty, or if flow validation fails
                        (invalid name, definition, etc.).
             FlowNotFoundException: If flow with given ID does not exist in repository.
+            PermissionDeniedException: If ``actor`` may not modify the flow.
             FlowStorageException: If update operation fails (I/O errors, permission issues, etc.).
-
-        Example:
-            >>> # Full update of existing flow
-            >>> flow = service.get_flow("abc123")
-            >>> flow.name = "Updated Name"
-            >>> flow.description = "New description"
-            >>> flow.tags = ["production", "v2"]
-            >>> updated = service.update_flow(flow)
-            >>> print(updated.modified_at)  # Updated timestamp
-            >>>
-            >>> # Update with validation
-            >>> try:
-            ...     flow.name = ""  # Invalid
-            ...     service.update_flow(flow)
-            ... except FlowInvalidDataException as e:
-            ...     print(f"Validation failed: {e}")
-
-        Note:
-            - This is a full replacement operation - all fields are updated
-            - Use partial_update_flow() to update only specific fields
-            - modified_at timestamp is set automatically
-            - Validation occurs before any file operations
-            - Name changes trigger atomic file rename in repository
         """
         try:
             if flow.flow_id is None or not flow.flow_id.strip():
@@ -398,10 +390,14 @@ class FlowService(AssetService[Flow]):
         if existing is None:
             raise FlowNotFoundException(f"Flow {flow.flow_id} not found", flow_id=flow.flow_id)
 
+        ensure_can_modify(actor=actor, owner=existing.created_by, action="flow.update", target=flow.flow_id)
+
         # Preserve protected fields from the stored flow so a full-replacement PUT
         # never overwrites created_on / created_by with the current timestamp.
         flow.created_on = existing.created_on
         flow.created_by = existing.created_by
+        if not actor.is_system:
+            flow.modified_by = actor.username
 
         flow.update_timestamp()
 
@@ -410,7 +406,8 @@ class FlowService(AssetService[Flow]):
         logger.info("Successfully updated flow %s", updated_flow.flow_id)
         return updated_flow
 
-    def delete_flow(self, flow_id: str) -> bool:
+    @audited(action="flow.delete", target=lambda a: str(a["flow_id"]))
+    def delete_flow(self, flow_id: str, *, actor: ActorContext) -> bool:
         """Delete a flow by ID.
 
         This standardizes error handling - service layer now raises exceptions directly rather than
@@ -419,6 +416,8 @@ class FlowService(AssetService[Flow]):
         Args:
             flow_id (str): Unique identifier of the flow to delete. Cannot be None,
                           empty, or whitespace-only.
+            actor (ActorContext): Caller identity. The caller must own the flow (or be admin,
+                          system, or the flow must be ownerless).
 
         Returns:
             bool: True if flow was deleted successfully.
@@ -426,27 +425,27 @@ class FlowService(AssetService[Flow]):
         Raises:
             FlowNotFoundException: If flow with given ID does not exist.
             FlowInvalidDataException: If flow_id is None, empty string, or whitespace-only.
+            PermissionDeniedException: If ``actor`` may not delete the flow.
             FlowStorageException: If delete operation fails (I/O errors, permission issues, etc.).
-
-        Example:
-            >>> # Delete existing flow
-            >>> service.delete_flow("abc123")  # Returns True
-            >>>
-            >>> # Delete non-existent flow
-            >>> service.delete_flow("nonexistent")  # Raises FlowNotFoundException
-
-        Note:
-            - Deletion is permanent and cannot be undone
-            - Now raises FlowNotFoundException instead of returning False for missing flows
-            - Cascades to delete all associated job runs when job_stats_service is set
         """
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="flow.delete",
+                target=flow_id,
+            )
+        if not actor.is_system:
+            existing = self._repository.find_by_id(asset_id=flow_id)
+            if existing is not None:
+                ensure_can_modify(actor=actor, owner=existing.created_by, action="flow.delete", target=flow_id)
+
         # Delegate to inherited delete() from AssetService
         result = self.delete(asset_id=flow_id)
         if result:
             self._delete_job_runs_for_flow(flow_id)
         return result
 
-    def bulk_delete_flows(self, flow_ids: list[str]) -> dict[str, Any]:
+    def bulk_delete_flows(self, flow_ids: list[str], *, actor: ActorContext) -> dict[str, Any]:
         """Delete multiple flows by their IDs in a single operation.
 
         Uses the repository's bulk_delete method for efficient batch deletion.
@@ -457,6 +456,9 @@ class FlowService(AssetService[Flow]):
         Args:
             flow_ids (list[str]): List of flow identifiers to delete. Cannot be empty.
                                  Each flow_id is validated by the repository.
+            actor (ActorContext): Caller identity. Ownership is checked per flow; flows
+                                 the caller may not delete are reported in ``failed``
+                                 with a generic permission reason and are left in place.
 
         Returns:
             dict[str, Any]: Dictionary containing:
@@ -468,38 +470,60 @@ class FlowService(AssetService[Flow]):
 
         Raises:
             FlowInvalidDataException: If flow_ids list is empty or None.
+            PermissionDeniedException: If ``actor`` is not a valid ``ActorContext``.
             FlowStorageException: If a critical error occurs during bulk operation.
-
-        Example:
-            >>> # Delete multiple flows
-            >>> result = service.bulk_delete_flows(["flow1", "flow2", "flow3"])
-            >>> print(f"Deleted: {result['total_deleted']}, Failed: {result['total_failed']}")
-            >>> for failure in result['failed']:
-            ...     print(f"Flow {failure['flow_id']} failed: {failure['error']}")
-            >>>
-            >>> # All successful
-            >>> result = service.bulk_delete_flows(["flow1", "flow2"])
-            >>> assert result['total_deleted'] == 2
-            >>> assert result['total_failed'] == 0
-            >>>
-            >>> # Partial failure
-            >>> result = service.bulk_delete_flows(["existing", "nonexistent"])
-            >>> assert result['total_deleted'] == 1
-            >>> assert result['total_failed'] == 1
-
-        Note:
-            - Uses repository's bulk_delete for efficient batch processing
-            - Operation is atomic at repository level with global locking
-            - Individual flow failures don't stop the entire operation
-            - Returns detailed results for all requested deletions
         """
         if not flow_ids:
             raise FlowInvalidDataException("flow_ids list cannot be empty", field_name="flow_ids")
+        if not isinstance(actor, ActorContext):
+            raise PermissionDeniedException(
+                PERMISSION_DENIED_MESSAGE,
+                action="flow.bulk_delete",
+                target=",".join(flow_ids),
+            )
 
         logger.info("Starting bulk delete for %d flows", len(flow_ids))
 
+        refused: list[dict[str, str]] = []
+        deletable_ids = flow_ids
+        if not actor.is_system:
+            deletable_ids = []
+            for flow_id in flow_ids:
+                existing = self._repository.find_by_id(asset_id=flow_id)
+                if existing is not None and not can_modify(actor=actor, owner=existing.created_by):
+                    refused.append({"flow_id": flow_id, "error": PERMISSION_DENIED_MESSAGE})
+                    audit_event(
+                        username=actor.username,
+                        action="flow.bulk_delete",
+                        target=flow_id,
+                        outcome=OUTCOME_DENIED,
+                        status_code=403,
+                    )
+                else:
+                    deletable_ids.append(flow_id)
+
         # Delegate to repository's bulk_delete
-        result = self._repository.bulk_delete(asset_ids=flow_ids)
+        if deletable_ids:
+            result = self._repository.bulk_delete(asset_ids=deletable_ids)
+        else:
+            result = {"deleted": [], "failed": [], "total_deleted": 0, "total_failed": 0}
+        if refused:
+            result["failed"] = [*result.get("failed", []), *refused]
+            result["total_failed"] = len(result["failed"])
+        result["total_requested"] = len(flow_ids)
+
+        username = actor.username if not actor.is_system else None
+        for flow_id in result.get("deleted", []):
+            audit_event(username=username, action="flow.bulk_delete", target=flow_id, outcome=OUTCOME_SUCCESS)
+        for failure in result.get("failed", []):
+            if failure in refused:
+                continue
+            audit_event(
+                username=username,
+                action="flow.bulk_delete",
+                target=str(failure.get("flow_id", failure.get("asset_id", "-"))),
+                outcome=OUTCOME_FAILED,
+            )
 
         # Cascade-delete job runs for every successfully deleted flow
         for flow_id in result.get("deleted", []):
@@ -696,7 +720,8 @@ class FlowService(AssetService[Flow]):
         logger.info("Counted %d flows (filtered from %d)", len(filtered_flows), len(all_flows))
         return len(filtered_flows)
 
-    def partial_update_flow(self, flow_id: str, updates: dict[str, Any]) -> Flow:
+    @audited(action="flow.update", target=lambda a: str(a["flow_id"]))
+    def partial_update_flow(self, flow_id: str, updates: dict[str, Any], *, actor: ActorContext) -> Flow:
         """Partially update a flow (only provided fields).
 
         Updates only the fields specified in the updates dictionary. Protected fields
@@ -713,6 +738,10 @@ class FlowService(AssetService[Flow]):
                                      Cannot be empty dictionary.
                                      Valid fields: name, description, definition, tags,
                                      is_hidden, modified_by, etc.
+            actor (ActorContext): Caller identity. The caller must own the flow (or be admin,
+                                     system, or the flow must be ownerless). For non-system
+                                     actors, ``modified_by`` is set to the caller's username,
+                                     ignoring any client-supplied value.
 
         Returns:
             Flow: The updated flow with refreshed modified_on timestamp. Only the
@@ -722,53 +751,8 @@ class FlowService(AssetService[Flow]):
             ValueError: If flow_id is empty, updates is empty dictionary, or if
                        validation fails after applying updates.
             FileNotFoundError: If flow with given ID does not exist in repository.
+            PermissionDeniedException: If ``actor`` may not modify the flow.
             Exception: If update operation fails (I/O errors, permission issues, etc.).
-
-        Example:
-            >>> # Update only description
-            >>> updated = service.partial_update_flow(
-            ...     "abc123",
-            ...     {"description": "New description"}
-            ... )
-            >>> print(updated.description)
-            >>>
-            >>> # Update multiple fields
-            >>> updated = service.partial_update_flow(
-            ...     "abc123",
-            ...     {
-            ...         "name": "Renamed Flow",
-            ...         "tags": ["production", "v2"],
-            ...         "is_hidden": False
-            ...     }
-            ... )
-            >>>
-            >>> # Protected fields are ignored
-            >>> updated = service.partial_update_flow(
-            ...     "abc123",
-            ...     {
-            ...         "flow_id": "new-id",  # Ignored with warning
-            ...         "description": "Updated"  # Applied
-            ...     }
-            ... )
-            >>>
-            >>> # Unknown fields are ignored
-            >>> updated = service.partial_update_flow(
-            ...     "abc123",
-            ...     {
-            ...         "invalid_field": "value",  # Ignored with warning
-            ...         "name": "Valid Update"  # Applied
-            ...     }
-            ... )
-
-        Note:
-            - Only specified fields are updated; others remain unchanged
-            - Protected fields (flow_id, created_on, created_by) cannot be modified
-            - Unknown fields are logged as warnings and ignored
-            - modified_on timestamp is updated automatically
-            - Validation occurs before persistence
-            - Uses repository.update() for atomic operations
-            - Name changes trigger atomic file rename
-            - Returns original flow if no valid fields to update
         """
         self._validate_flow_id(flow_id)
 
@@ -776,6 +760,7 @@ class FlowService(AssetService[Flow]):
             raise FlowInvalidDataException("updates dictionary cannot be empty", field_name="updates")
 
         existing_flow = self.get_flow(flow_id)
+        ensure_can_modify(actor=actor, owner=existing_flow.created_by, action="flow.update", target=flow_id)
 
         # Filter unknown fields
         unknown_fields = [
@@ -799,6 +784,9 @@ class FlowService(AssetService[Flow]):
         if not validated_updates:
             logger.info("No valid fields to update for flow %s", flow_id)
             return existing_flow
+
+        if not actor.is_system:
+            validated_updates["modified_by"] = actor.username
 
         # Delegate to repository for actual update (applies updates, validates, updates timestamp, persists)
         updated_flow = self._repository.partial_update(existing_flow, validated_updates)
