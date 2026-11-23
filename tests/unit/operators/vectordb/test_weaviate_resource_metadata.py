@@ -572,3 +572,177 @@ class TestProjectMappableFeatures:
 
         # Module-level alias returns identical projection
         assert project_mappable_features(available_features=FEATURES) == projected
+
+
+MANDATORY = OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB
+BM25_FEATURES: dict[str, Any] = {
+    "doc_id_hash": {"is_primary": True, "type": "string"},
+    "title": {"type": "string"},
+    "content": {"type": "string", MANDATORY: False},
+    "body": {"type": "string"},
+    "embeddings": {"type": "vector"},
+    "sparse_embeddings": {"type": "vector_sparse"},
+}
+
+
+PK = {"feature_name": "doc_id_hash", "mapped_column_name": "pk"}
+
+
+def _project(operator_config: dict[str, Any] | None, features: dict[str, Any] | None = None) -> dict[str, Any]:
+    return WeaviateResourceMetadata.project_mappable_features(
+        available_features=BM25_FEATURES if features is None else features,
+        operator_config=operator_config,
+    )
+
+
+class TestBm25MandatoryProjection:
+    def test_content_marked_mandatory_with_bm25_on(self):
+        projected = _project({"add_sparse_vector": True})
+        assert projected["content"][MANDATORY] is True
+        assert "sparse_embeddings" not in projected
+
+    @pytest.mark.parametrize("config", [None, {}, {"add_sparse_vector": False}])
+    def test_bm25_off_returns_metadata_unchanged(self, config):
+        projected = _project(config)
+        assert projected["content"] is BM25_FEATURES["content"]
+        assert projected["content"][MANDATORY] is False
+
+    def test_input_mapping_is_not_mutated(self):
+        _project({"add_sparse_vector": True})
+        assert BM25_FEATURES["content"][MANDATORY] is False
+
+    def test_configured_doc_column_is_marked(self):
+        projected = _project({"add_sparse_vector": True, "doc_column": "body"})
+        assert projected["body"][MANDATORY] is True
+        assert projected["content"][MANDATORY] is False
+
+    def test_saved_alternative_text_mapping_locks_its_source(self):
+        mappings = [{"feature_name": "title", "mapped_column_name": "text"}]
+        projected = _project({"add_sparse_vector": True, "feature_mappings": mappings})
+        assert projected["title"][MANDATORY] is True
+        assert projected["content"] is BM25_FEATURES["content"]
+
+    def test_several_qualifying_mappings_are_all_marked(self):
+        mappings = [
+            {"feature_name": "title", "mapped_column_name": "text"},
+            {"feature_name": "content", "mapped_column_name": "body"},
+        ]
+        projected = _project({"add_sparse_vector": True, "feature_mappings": mappings})
+        assert projected["title"][MANDATORY] is True
+        assert projected["content"][MANDATORY] is True
+        assert MANDATORY not in projected["body"]
+
+    def test_content_feature_absent_marks_nothing(self):
+        features = {"doc_id_hash": BM25_FEATURES["doc_id_hash"], "embeddings": BM25_FEATURES["embeddings"]}
+        projected = _project({"add_sparse_vector": True}, features)
+        assert projected == features
+
+    def test_router_forwards_operator_config_to_weaviate(self):
+        projected = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name="weaviate",
+            available_features=BM25_FEATURES,
+            operator_config={"add_sparse_vector": True},
+        )
+        assert projected["content"][MANDATORY] is True
+
+    @pytest.mark.parametrize("provider", ["opensearch", "milvus"])
+    def test_other_providers_ignore_operator_config(self, provider: str):
+        features = {"content": {"type": "string", MANDATORY: False}}
+        projected = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=provider,
+            available_features=features,
+            operator_config={"add_sparse_vector": True},
+        )
+        assert projected["content"][MANDATORY] is False
+
+
+def _complete(
+    mappings: list[dict[str, str]],
+    *,
+    operator_config: dict[str, Any] | None = None,
+    props: dict[str, Any] | None = None,
+    features: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    return WeaviateResourceMetadata._complete_content_mapping(
+        feature_mappings=mappings,
+        operator_config={"add_sparse_vector": True, **(operator_config or {})},
+        available_features=BM25_FEATURES if features is None else features,
+        props=props or {},
+    )
+
+
+class TestBm25ContentMappingCompletion:
+    def test_appends_content_to_text_when_missing(self):
+        saved = [PK]
+        result = _complete(saved)
+        assert result == [PK, {"feature_name": "content", "mapped_column_name": "text"}]
+        assert saved == [PK]
+
+    def test_content_mapped_elsewhere_is_preserved(self):
+        saved = [PK, {"feature_name": "content", "mapped_column_name": "body"}]
+        assert _complete(saved) is saved
+
+    @pytest.mark.parametrize("column", ["text", "content"])
+    def test_any_feature_mapped_to_content_column_blocks_append(self, column: str):
+        saved = [PK, {"feature_name": "title", "mapped_column_name": column}]
+        assert _complete(saved) is saved
+
+    def test_uses_searchable_content_property_of_collection(self):
+        result = _complete([PK], props={"content": _prop("content", tokenization=Tokenization.WORD)})
+        assert result[-1] == {"feature_name": "content", "mapped_column_name": "content"}
+
+    def test_unsearchable_collection_property_falls_back_to_text(self):
+        props = {"content": _prop("content", tokenization=Tokenization.WORD, searchable=False)}
+        assert _complete([PK], props=props)[-1]["mapped_column_name"] == "text"
+
+    def test_repeat_is_stable(self):
+        first = _complete([PK])
+        assert _complete(first) == first
+
+    def test_bm25_off_returns_mappings_unchanged(self):
+        saved = [PK]
+        assert _complete(saved, operator_config={"add_sparse_vector": False}) is saved
+
+    def test_content_feature_absent_returns_mappings_unchanged(self):
+        saved = [PK]
+        assert _complete(saved, features={"doc_id_hash": BM25_FEATURES["doc_id_hash"]}) is saved
+
+    def test_configured_doc_column_is_appended(self):
+        result = _complete([PK], operator_config={"doc_column": "body"})
+        assert result[-1] == {"feature_name": "body", "mapped_column_name": "text"}
+
+
+class TestBm25FetchEnrichment:
+    def test_saved_mappings_without_content_gain_content_row(self):
+        result, _ = _fetch(
+            collection=_collection(),
+            operator_config={"add_sparse_vector": True, "feature_mappings": [PK]},
+            available_features=BM25_FEATURES,
+        )
+        assert result[VB.FEATURE_MAPPINGS_RESPONSE] == [
+            PK,
+            {"feature_name": "content", "mapped_column_name": "text"},
+        ]
+
+    def test_support_verdict_is_independent_of_completion(self):
+        config = {"feature_mappings": [PK]}
+        off, _ = _fetch(collection=_collection(), operator_config=config, available_features=BM25_FEATURES)
+        on, _ = _fetch(
+            collection=_collection(),
+            operator_config={**config, "add_sparse_vector": True},
+            available_features=BM25_FEATURES,
+        )
+        assert off[VB.FEATURE_MAPPINGS_RESPONSE] == [PK]
+        assert on[VB.IS_DOCPIPE_SUPPORTED_RESOURCE]["supported"] is True
+
+    def test_default_mappings_have_a_single_content_row(self):
+        result, _ = _fetch(
+            collection=None,
+            existing=[],
+            operator_config={"add_sparse_vector": True, "feature_mappings": []},
+            available_features=BM25_FEATURES,
+        )
+        mappings = result[VB.FEATURE_MAPPINGS_RESPONSE]
+        assert [m for m in mappings if m["feature_name"] == "content"] == [
+            {"feature_name": "content", "mapped_column_name": "text"}
+        ]
