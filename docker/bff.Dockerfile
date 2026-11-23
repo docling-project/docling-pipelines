@@ -4,6 +4,7 @@
 # ubi10/nodejs-22 matches the base used by the main Dockerfile's frontend-builder
 # stage — consistent Node version and OS libraries across both build artefacts.
 FROM registry.access.redhat.com/ubi10/nodejs-22 AS builder
+USER root
 WORKDIR /frontend
 # Copy only what npm needs to install dependencies — maximises layer cache.
 COPY frontend/package*.json ./
