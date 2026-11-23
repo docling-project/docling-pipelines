@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """OpenTelemetry telemetry service for distributed tracing and metrics.
 
 This module provides a singleton telemetry service that:
@@ -429,9 +432,10 @@ class TelemetryService:
             return
 
         try:
-            if span is None:
-                from opentelemetry import trace  # type: ignore[import-not-found]
+            # Import before the span check: set_status needs trace even when the caller passes a span.
+            from opentelemetry import trace  # type: ignore[import-not-found]
 
+            if span is None:
                 span = trace.get_current_span()
             if span is not None:
                 span.record_exception(exception)
