@@ -7,10 +7,10 @@ The Weaviate provider of the `vectordb` operator. This delta adds how flow enric
 ## ADDED Requirements
 
 ### Requirement: Weaviate enrichment advertises the content mapping required by sparse mode
-For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, flow enrichment SHALL mark the content feature (the node's `doc_column`, `content` by default) as mandatory for the vector database and SHALL return a mapping for it. With `add_sparse_vector` false or absent, enrichment SHALL return feature metadata and mappings unchanged. Upstream feature metadata SHALL NOT be modified.
+For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, flow enrichment SHALL mark the feature that supplies the BM25 text as mandatory for the vector database and SHALL return a mapping for it. With `add_sparse_vector` false or absent, enrichment SHALL return feature metadata and mappings unchanged, and upstream feature metadata SHALL NOT be modified.
 
 #### Scenario: Content marked mandatory in sparse mode
-- **WHEN** a Weaviate node with `add_sparse_vector` true is enriched and the content feature is among the upstream features
+- **WHEN** a Weaviate node with `add_sparse_vector` true and no saved content mapping is enriched, and the `doc_column` feature (`content` by default) is among the upstream features
 - **THEN** the node's `available_features` returns that feature with `mandatory_for_vector_db` true, and the enrichment response's `available_features` returns it the same way
 
 #### Scenario: Sparse mode off leaves feature metadata unchanged
@@ -18,8 +18,16 @@ For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, 
 - **THEN** the content feature keeps its original metadata, including any existing `mandatory_for_vector_db` value
 
 #### Scenario: Configured content column
-- **WHEN** the node's `doc_column` is `body` and `add_sparse_vector` is true
+- **WHEN** the node's `doc_column` is `body`, `add_sparse_vector` is true, and no saved mapping carries content
 - **THEN** the `body` feature, not `content`, is marked mandatory and mapped
+
+#### Scenario: Alternative text mapping is the mandatory feature
+- **WHEN** saved mappings contain `title -> text` (a column named `content` or `text` carries the BM25 text) and no mapping of the `content` feature, and `add_sparse_vector` is true
+- **THEN** `title` is marked `mandatory_for_vector_db` true, `content` keeps its original metadata, and no content mapping is added
+
+#### Scenario: Several mappings carry content
+- **WHEN** saved mappings contain more than one mapping with a feature or column named `content` or `text`
+- **THEN** each of their features is marked mandatory
 
 #### Scenario: Upstream metadata is not modified
 - **WHEN** a Weaviate node with `add_sparse_vector` true is enriched
@@ -27,7 +35,7 @@ For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, 
 
 #### Scenario: Content feature absent
 - **WHEN** `add_sparse_vector` is true and the upstream features do not include the content feature
-- **THEN** no feature is marked mandatory and no content mapping is added
+- **THEN** no feature is marked mandatory by this requirement and no content mapping is added
 
 #### Scenario: Saved mappings without content
 - **WHEN** a Weaviate node has saved mappings that contain no content mapping, `add_sparse_vector` is true, and the content feature is available

@@ -5,7 +5,7 @@ Layer for every task: [backend].
 ## 1. Projection
 
 - [ ] 1.1 [backend] Add the optional `operator_config` argument to `VectorDBMetadataFetcher.project_mappable_features` and forward it to the Weaviate projection only. Verify: existing calls without the argument behave as before.
-- [ ] 1.2 [backend] In `resource_metadata.py`, accept `operator_config` in `WeaviateResourceMetadata.project_mappable_features` and the module-level wrapper. With `add_sparse_vector` true and the `doc_column` feature present, return a copy of that feature with `mandatory_for_vector_db: True`; otherwise return what it returned before. Verify: the input mapping and its values are unchanged after the call.
+- [ ] 1.2 [backend] In `resource_metadata.py`, accept `operator_config` in `WeaviateResourceMetadata.project_mappable_features` and the module-level wrapper. With `add_sparse_vector` true, return copies with `mandatory_for_vector_db: True` of the sources of saved content-carrying mappings, or of the `doc_column` feature when there are none (design D2); otherwise return what it returned before. Verify: the input mapping and its values are unchanged after the call, and a saved `title -> text` locks `title` and not `content`.
 - [ ] 1.3 [backend] Pass `operator_config` from `WeaviateResourceMetadata.fetch` and from `FlowEnrichmentService` (the `vectordb` branch) into the projection. Verify: the node's `available_features` and the metadata response agree.
 
 ## 2. Mapping completion
@@ -15,7 +15,7 @@ Layer for every task: [backend].
 
 ## 3. Tests
 
-- [ ] 3.1 [backend] `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`: projection cases (BM25 on and off, configured `doc_column`, feature absent, input not mutated) and mapping cases (saved without content, `content -> body` preserved, mapping to `text` blocks the append, collection target, repeat is stable, `is_docpipe_supported_resource` unchanged).
+- [ ] 3.1 [backend] `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`: projection cases (BM25 on and off, configured `doc_column`, saved `title -> text`, several qualifying mappings, feature absent, input not mutated) and mapping cases (saved without content, `content -> body` preserved, mapping to `text` blocks the append, collection target, repeat is stable, `is_docpipe_supported_resource` unchanged).
 - [ ] 3.2 [backend] `tests/unit/operators/vectordb/test_metadata_fetcher.py`: the router forwards `operator_config` to Weaviate, and the OpenSearch and Milvus projections are unchanged.
 - [ ] 3.3 [backend] `tests/unit/core/flows/application/services/test_flow_enrichment_service.py`: the enrichment response for a Weaviate node with BM25 on carries `mandatory_for_vector_db: true` for the content feature and the content row in `feature_mappings`; with BM25 off it does not.
 

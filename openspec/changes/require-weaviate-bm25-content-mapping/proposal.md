@@ -6,12 +6,12 @@ With `add_sparse_vector` on, the Weaviate provider cannot run without a mapping 
 
 ## What Changes
 
-- Flow enrichment for a Weaviate `vectordb` node with `add_sparse_vector` true marks the content feature `mandatory_for_vector_db: true` in the node's `available_features`. With the flag off, the feature metadata is returned exactly as before.
+- Flow enrichment for a Weaviate `vectordb` node with `add_sparse_vector` true marks `mandatory_for_vector_db: true` on the feature that supplies the BM25 text in the node's `available_features`: the source of a saved mapping that carries content (for example `title` in `title -> text`), otherwise the `doc_column` feature. With the flag off, the feature metadata is returned exactly as before.
 - The same projection is used on both paths that build a node's feature metadata, so the node's `available_features` and the live metadata response agree.
 - With the flag on, enrichment returns a content mapping in `feature_mappings` when the resolved mappings, including saved ones, do not contain one. Existing mappings and their target columns are preserved and no mapping is duplicated.
 - No change to the adapter's run-time validation or to the write path.
 
-**Layer:** backend-only. No REST route, DTO, or frontend change. The properties panel already derives the locked row and its warning from `mandatory_for_vector_db`, and it re-reads `feature_mappings` when the BM25 option is toggled.
+**Layer:** backend-only. No REST route, DTO, or frontend change. The properties panel derives the locked row and its warning from `mandatory_for_vector_db` for rows it shows, and it takes `feature_mappings` from the response when a collection is selected or BM25 is toggled. On opening the mapping tearsheet it shows the node's own saved rows when it has any, so a saved flow that lacks the content row does not gain it from this change alone (see design, D4).
 
 ## Capabilities
 
@@ -28,7 +28,8 @@ None.
 - Changing how OpenSearch or Milvus enrichment projects features.
 - Adding a Weaviate-specific rule to the frontend, or a save guard for an empty content column. That gap is generic to the mapping table and also affects the other mandatory rows.
 - Changing run-time validation, the `sparse_embeddings` handling, or the default-mapping rules for a node without saved mappings.
-- Persisting the flag on flows saved before this change. They are corrected the next time enrichment runs.
+- Persisting the flag on flows saved before this change. The next enrichment response carries it, and run-time validation still rejects a flow without content.
+- Making the properties panel add a missing mandatory row to saved mappings on open. That is a generic panel behavior, not specific to Weaviate, and is left to a separate change.
 
 ## Impact
 
