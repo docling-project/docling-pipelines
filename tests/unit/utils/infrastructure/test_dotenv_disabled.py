@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -19,9 +20,13 @@ class TestDotenvDisabledSwitch:
     CANARY_VALUE = "dotenv-canary-value-cfg"  # pragma: allowlist secret
 
     @pytest.fixture(autouse=True)
-    def _isolate_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _isolate_env(self, monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
         monkeypatch.delenv(self.CANARY_NAME, raising=False)
         monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+        try:
+            yield
+        finally:
+            os.environ.pop(self.CANARY_NAME, None)
 
     def test_dotenv_loads_file_without_the_switch(self, *, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
