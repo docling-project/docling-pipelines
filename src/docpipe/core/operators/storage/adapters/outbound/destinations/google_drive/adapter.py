@@ -23,6 +23,7 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.google_drive.
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -231,6 +232,8 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
                 credentials_path: "${GDRIVE_OAUTH_CREDENTIALS_PATH}"
                 token_path: "~/.docpipe/gdrive_token.pickle"  # optional
         """
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
         folder_id = resolve_env_var(provider_config.get("folder_id"))
         if not folder_id:
             raise ValueError("Missing required Google Drive connection parameter: 'folder_id'")
@@ -358,6 +361,15 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
 
         return current_id
 
+    @staticmethod
+    def _escape_query_value(value: str) -> str:
+        """Escape *value* for use inside a single-quoted string in a Drive ``q`` query.
+
+        Drive treats a backslash as the escape character, so backslashes are
+        escaped first, then single quotes.
+        """
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
     def _find_folder_id(
         self,
         *,
@@ -367,7 +379,12 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
         drive_id: str | None,
     ) -> str | None:
         """Return the Drive ID of an existing subfolder, or None if not found."""
-        query = f"name='{name}' and mimeType='{_GDRIVE_FOLDER_MIME}' and '{parent_id}' in parents and trashed=false"
+        escaped_name = self._escape_query_value(name)
+        escaped_parent = self._escape_query_value(parent_id)
+        query = (
+            f"name='{escaped_name}' and mimeType='{_GDRIVE_FOLDER_MIME}' "
+            f"and '{escaped_parent}' in parents and trashed=false"
+        )
         list_kwargs: dict[str, Any] = {
             "q": query,
             "spaces": "drive",
@@ -393,8 +410,9 @@ class GoogleDriveDestinationAdapter(DestinationAdapterPort[GoogleDriveDestinatio
         drive_id: str | None,
     ) -> str | None:
         """Return the Drive ID of an existing file in parent_id, or None."""
-        escaped_name = name.replace("'", "\\'")
-        query = f"name='{escaped_name}' and '{parent_id}' in parents and trashed=false"
+        escaped_name = self._escape_query_value(name)
+        escaped_parent = self._escape_query_value(parent_id)
+        query = f"name='{escaped_name}' and '{escaped_parent}' in parents and trashed=false"
         list_kwargs: dict[str, Any] = {
             "q": query,
             "spaces": "drive",

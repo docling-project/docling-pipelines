@@ -252,6 +252,7 @@ class FlowEnrichmentService:
         } or None
 
         def _to_normalised(features: dict) -> dict[str, Any]:
+            """Normalise a merged feature dictionary to the standard frontend metadata format."""
             return self._normalise_feature_map(
                 feature_map={k: self._propagator.feature_metadata_to_dict(feature_meta=v) for k, v in features.items()},
                 fallback_node_id=node_id,
@@ -377,10 +378,21 @@ class FlowEnrichmentService:
             }
             available_features = self._normalise_feature_map(feature_map=filterable_features, fallback_node_id=node_id)
         elif operator_type == OperatorConstants.Operators.VECTORDB:
-            available_features = self._normalise_feature_map(
-                feature_map=available_feature_map, fallback_node_id=node_id
+            operator_config = node_feature_result.get("operator_config", {})
+            adapter_name: str = operator_config.get(
+                OperatorConstants.Config.PROVIDER,
+                OperatorConstants.VectorDB.OPENSEARCH,
             )
-            vdb_meta = self._fetch_vectordb_metadata(node_feature_result=node_feature_result)
+            from docpipe.core.operators.vectordb.metadata_fetcher import VectorDBMetadataFetcher
+
+            fetcher = VectorDBMetadataFetcher()
+            projected_features = fetcher.project_mappable_features(
+                adapter_name=adapter_name,
+                available_features=available_feature_map,
+            )
+            available_features = self._normalise_feature_map(feature_map=projected_features, fallback_node_id=node_id)
+            if operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG):
+                vdb_meta = self._fetch_vectordb_metadata(node_feature_result=node_feature_result)
         elif operator_type == OperatorConstants.Operators.MERGE:
             available_features, merge_output_features = self._build_merge_available_features(
                 node_id=node_id,
@@ -427,6 +439,7 @@ class FlowEnrichmentService:
         from docpipe.core.constants.constants import DocpipeConstants
 
         def _expand(value: Any) -> Any:
+            """Recursively expand environment variables in string, dict, or list structures."""
             if isinstance(value, str):
                 return os.path.expandvars(value)
             if isinstance(value, dict):
@@ -444,14 +457,10 @@ class FlowEnrichmentService:
         self,
         *,
         node_feature_result: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Attempt a live VectorDB metadata fetch for a vectordb operator node.
+    ) -> dict[str, Any]:
+        """Fetch live VectorDB metadata for a vectordb node.
 
-        Returns a dict with five keys when provider_config is present, or None
-        when provider_config is absent (caller omits all VDB keys from the response,
-        allowing the UI to distinguish "not configured" from "configured but empty").
-
-        Never raises. Connection failures return the empty-value fallback dict.
+        Returns a dict with five keys. Never raises — connection failures return the fallback dict.
 
         Args:
             node_feature_result: Per-node snapshot from propagate_features_per_node().
@@ -460,11 +469,6 @@ class FlowEnrichmentService:
         from docpipe.core.operators.vectordb.metadata_fetcher import VectorDBMetadataFetcher
 
         operator_config = node_feature_result.get("operator_config", {})
-        provider_config = operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
-
-        if not provider_config:
-            return None
-
         adapter_name: str = operator_config.get(
             OperatorConstants.Config.PROVIDER,
             OperatorConstants.VectorDB.OPENSEARCH,

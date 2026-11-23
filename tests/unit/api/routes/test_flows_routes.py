@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Flow API routes."""
 
 from unittest.mock import Mock
@@ -9,6 +12,7 @@ from fastapi.testclient import TestClient
 from docpipe.api.auth.dependencies import get_current_user
 from docpipe.api.routes.flows import flows_router, get_flow_service
 from docpipe.core.assets.flows.application.services.flow_service import FlowService
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.exceptions.docpipe_exceptions import (
     FlowAlreadyExistsException,
     FlowNotFoundException,
@@ -984,7 +988,7 @@ class TestDeleteFlowEndpoint:
         # Assert
         assert response.status_code == 204
         assert response.content == b""
-        override_service.delete_flow.assert_called_once_with("12345678-1234-1234-1234-123456789abc")
+        override_service.delete_flow.assert_called_once_with("12345678-1234-1234-1234-123456789abc", actor=SYSTEM_ACTOR)
 
     def test_delete_flow_with_nonexistent_id_returns_404(self, client, override_service):
         """Test deleting a non-existent flow returns 404."""
@@ -1140,7 +1144,7 @@ class TestBulkDeleteFlows:
 
         assert response.status_code == 200
         assert response.json() == result
-        override_service.bulk_delete_flows.assert_called_once_with(["flow-1", "flow-2"])
+        override_service.bulk_delete_flows.assert_called_once_with(["flow-1", "flow-2"], actor=SYSTEM_ACTOR)
 
     def test_malformed_id_list_returns_400(self, client, override_service) -> None:
         response = client.delete("/flows", params={"flow_ids": "flow-1,,flow 2"})
