@@ -29,7 +29,7 @@ None.
 - Adding a Weaviate-specific rule to the frontend, or a save guard for an empty content column. That gap is generic to the mapping table and also affects the other mandatory rows.
 - Changing run-time validation, the `sparse_embeddings` handling, or the default-mapping rules for a node without saved mappings.
 - Persisting the flag on flows saved before this change. The next enrichment response carries it, and run-time validation still rejects a flow without content.
-- Making the properties panel add a missing mandatory row to saved mappings on open. That is a generic panel behavior, not specific to Weaviate, and is left to a separate change.
+- Making the properties panel add a missing mandatory row to saved mappings on open. The same check would also stop Save when a mandatory row has a blank column, which the panel currently omits silently. Both are generic panel behaviors, not specific to Weaviate, and are handled by a separate frontend change (`require-mapped-vectordb-mandatory-features`).
 
 ## Impact
 

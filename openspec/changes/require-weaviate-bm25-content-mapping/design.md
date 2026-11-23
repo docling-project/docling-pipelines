@@ -59,7 +59,7 @@ What the panel does with the response depends on the moment:
 - **After the user selects a collection or toggles BM25**, the tearsheet builds its rows from the response only. The content row is present and locked, which is the case this change fixes.
 - **On opening the tearsheet**, `buildTableRows` uses the node's own saved rows whenever there are any, and takes only descriptions and mandatory flags from the response. For a saved BM25 flow that lacks a content row, the response flags `content` and returns a `content -> text` mapping, but no row is shown for it and Save writes the saved rows again. This change alone does not repair that case in the panel.
 
-The saved flow is still protected at validation and run time by the adapter's existing check. Showing a missing mandatory row on open would be a generic panel change that applies to every provider and every mandatory feature. It is out of scope here (proposal, Non-goals).
+The saved flow is still protected at validation and run time by the adapter's existing check. Showing a missing mandatory row on open would be a generic panel change that applies to every provider and every mandatory feature. It is out of scope here (proposal, Non-goals) and is handled by the separate frontend change `require-mapped-vectordb-mandatory-features`, which also blocks Save while a mandatory feature has no mapped column.
 
 The saved-mapping completion in D3 serves clients that read `feature_mappings` from the response and apply it: the REST API, the Python API and tooling. It is in the backend so that those clients see one contract.
 
