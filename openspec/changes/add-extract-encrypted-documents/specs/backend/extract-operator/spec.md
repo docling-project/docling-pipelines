@@ -154,17 +154,21 @@ The `extract_operator` metadata SHALL describe `document_passwords` as an option
 - **WHEN** a client requests operator metadata for `extract_operator`
 - **THEN** the `document_passwords` attribute SHALL be present, not required, and marked sensitive
 
-### Requirement: Plain-Text Password Warning
+### Requirement: Plain-Text Password Rejected
 
-Flow validation SHALL warn, without echoing the value, for each password in `document_passwords` that is a plain string rather than a `vault://` reference.
+Flow validation SHALL return an error, without echoing the value, for each password in `document_passwords` that is a plain string rather than a `vault://` reference. A flow with such an error SHALL NOT pass validation.
 
-#### Scenario: Plain-text password warned
+#### Scenario: Plain-text password rejected
 - **WHEN** a flow configures a password as a plain string in `document_passwords`
-- **THEN** flow validation SHALL return a warning that identifies its location and recommends a `vault://` reference, without the password value
+- **THEN** flow validation SHALL return an error that identifies its location and tells the author to use a `vault://` reference, without the password value, and the flow SHALL be reported as invalid
 
-#### Scenario: Vault reference not warned
+#### Scenario: Vault reference accepted
 - **WHEN** every password in `document_passwords` is a `vault://` reference
-- **THEN** flow validation SHALL NOT return a plain-text password warning
+- **THEN** flow validation SHALL NOT return a plain-text password error
+
+#### Scenario: Validation disabled
+- **WHEN** a flow sets `global_config.disable_validation` to `true` and configures a plain-string password
+- **THEN** the flow SHALL run with that password, because the check belongs to flow validation and no plain-text check exists at runtime
 
 ### Requirement: Output Table Contract For Encrypted Documents
 
