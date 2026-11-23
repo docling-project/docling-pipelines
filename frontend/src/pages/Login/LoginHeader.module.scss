@@ -1,0 +1,28 @@
+@use '@carbon/react/scss/spacing' as *;
+
+.header {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+// The product name is a plain label on the login page, never a link
+.header .headerName,
+.header .headerName:hover {
+  flex-shrink: 0;
+  cursor: default;
+  white-space: nowrap;
+  background-color: transparent;
+}
+
+.betaTag {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: $spacing-03;
+}
+
+.globalActions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
