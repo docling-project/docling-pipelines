@@ -42,7 +42,7 @@ class TestDefaults:
     def test_defaults(self):
         settings = AuthSettings.from_env()
 
-        assert settings.enabled is False
+        assert settings.enabled is True
         assert settings.default_role is Role.VIEWER
         assert settings.role_mapping == {Role.VIEWER: (), Role.EDITOR: (), Role.ADMIN: ()}
         assert settings.cookie_name == DEFAULT_COOKIE_NAME == "docpipe_access_token"
@@ -62,10 +62,15 @@ class TestParsing:
         monkeypatch.setenv(EnvironmentVariables.DOCPIPE_AUTH_ENABLED, value)
         assert AuthSettings.from_env().enabled is True
 
-    @pytest.mark.parametrize("value", ["false", "0", "no", "off", "", "garbage"])
+    @pytest.mark.parametrize("value", ["false", "0", "no", "off", "garbage"])
     def test_other_values_disable(self, monkeypatch, value):
         monkeypatch.setenv(EnvironmentVariables.DOCPIPE_AUTH_ENABLED, value)
         assert AuthSettings.from_env().enabled is False
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_blank_value_keeps_default_enabled(self, monkeypatch, value):
+        monkeypatch.setenv(EnvironmentVariables.DOCPIPE_AUTH_ENABLED, value)
+        assert AuthSettings.from_env().enabled is True
 
     def test_cookie_and_proxy_flags(self, monkeypatch):
         monkeypatch.setenv(EnvironmentVariables.DOCPIPE_AUTH_COOKIE_SECURE, "true")

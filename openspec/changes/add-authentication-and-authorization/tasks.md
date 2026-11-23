@@ -66,8 +66,8 @@ Each group below can merge on its own. The UI gating is a convenience, and every
 
 ## 8. Enable by default and finalize
 
-- [ ] 8.1 Flip the `DOCPIPE_AUTH_ENABLED` default to `true`, add the opt-out and bootstrap variables to both Docker Compose files and `.env` examples, with operator-supplied values and no default password hash; verify `docker compose config` renders and a manual login with the bootstrap admin succeeds
+- [x] 8.1 Flip the `DOCPIPE_AUTH_ENABLED` default to `true`, add the opt-out and bootstrap variables to both Docker Compose files and `.env` examples, with operator-supplied values and no default password hash; verify `docker compose config` renders and a manual login with the bootstrap admin succeeds
 - [x] 8.2 Add the route-inventory test that walks `APIRoute` entries in `app.routes` (explicitly exempting FastAPI's non-`APIRoute` `/api/v1/{docs,redoc,openapi.json,docs/oauth2-redirect}` endpoints) and fails if any `/api/v1/*` `APIRoute` lacks a session dependency or lacks an entry in the permission matrix; verify it passes and fails when a test route is added without a guard
 - [x] 8.3 Add an end-to-end enabled-mode suite covering unauthenticated 401, viewer 403 for each action the UI hides, editor own versus foreign flow, admin operator upload, logout, and CSRF header; verify `uv run pytest -v --cov=src` passes at the coverage threshold
-- [ ] 8.4 Manual verification through the UI against a local LDAP (`examples/LDAP/docker-compose.yml`) or the bootstrap admin: deep link while signed out, expired session redirects once, no token in URL or storage; record results in the PR description
-- [ ] 8.5 Run `openspec validate add-authentication-and-authorization --strict`, `uv run ruff check`, `uv run ruff format --check`, `uv run mypy .` and `pre-commit run --from-ref origin/main --to-ref HEAD`; verify all pass
+- [x] 8.4 Manual verification through the UI against a local LDAP (`examples/LDAP/docker-compose.yml`) or the bootstrap admin: deep link while signed out, expired session redirects once, no token in URL or storage; record results in the PR description
+- [x] 8.5 Run `openspec validate add-authentication-and-authorization --strict`, `uv run ruff check`, `uv run ruff format --check`, `uv run mypy .` and `pre-commit run --from-ref origin/main --to-ref HEAD`; verify all pass
