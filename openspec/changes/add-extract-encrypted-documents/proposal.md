@@ -12,12 +12,13 @@ Passing a password through Docling's PDF backend options would not solve this: D
 - **In-memory decryption before extraction**: after document bytes are fetched and before any text extraction provider or binary entity extraction adapter sees them, encrypted PDF and OOXML (`.docx`, `.pptx`, `.xlsx`) documents are detected and decrypted with the first candidate password that works. Decrypted bytes exist only in memory for that run; unencrypted documents and other formats pass through unchanged. This applies to both the sequential text-extraction path and the concurrent text-plus-entity path, and to every text extraction provider (`docling_library`, `docling_serve`).
 - **Encryption detection runs whether or not `document_passwords` is set**, so an encrypted document in a flow with no passwords configured fails with an explicit reason instead of a Docling error.
 - **Explicit, recoverable failure reasons**: `password_required` (encrypted, no candidate configured), `password_incorrect` (every candidate rejected) and `decryption_unavailable` (Office decryption library not installed). These documents are recorded as failed for the run and removed from the output table, but are **not** added to the non-recoverable documents table, so the next incremental run retries them. Adding or fixing a password therefore takes effect without `force_ingest`.
-- **Validation**: `extract_operator` validation rejects a malformed `document_passwords` object without echoing password values, and warns when a password is a plain string rather than a `vault://` reference.
+- **Validation**: `extract_operator` validation rejects a malformed `document_passwords` object without echoing password values, and rejects a password given as a plain string instead of a `vault://` reference, with an error that names its location.
 - **Packaging**: `msoffcrypto-tool` is added to the base dependencies of `docling-pipelines` and to the `extract` optional group of `docling-pipelines-slim`. A default slim install does not include it. PDF decryption uses `pypdfium2`, which Docling already depends on.
 
 ## Non-goals
 
 - Passing passwords to Docling through format or backend options.
+- Protecting the extracted output. A password-protected source does not make its output protected: extracted text and entities are written to intermediate storage like those of any other document, and are not re-encrypted.
 - Storing passwords or decrypted bytes in the `pyarrow.Table`, row metadata, operator metrics, job stats, parquet or DuckDB.
 - Password-protected archives (tracked in #150), iWork documents, legacy binary Office formats (`.doc`, `.xls`, `.ppt`), images and audio.
 - Decrypting documents for `document_classifier`, or for `extract_operator` runs that reuse content pre-fetched by `document_classifier`.
