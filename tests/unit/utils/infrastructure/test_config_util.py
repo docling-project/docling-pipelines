@@ -245,3 +245,5 @@ class TestDocpipeConfigLoaderGetStorage:
 
         assert storage_type == "inmemory"
         assert storage_config == {"base_dir": "./svc"}
+
+

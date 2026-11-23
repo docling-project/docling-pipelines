@@ -3,8 +3,11 @@
 
 """Process isolation of untrusted custom operators (task D.3): setting, proxy, worker, hostile operator."""
 
+import importlib.util
 import json
 import os
+import subprocess  # nosec B404 - test-only control process with a fixed argv
+import sys
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any, ClassVar
@@ -298,7 +301,13 @@ class TestWorkerEnvironment:
 
         environment = build_worker_environment(parent_environment=parent)
 
-        assert set(environment) == {"PATH", "LANG", "PYTHONUNBUFFERED"}
+        assert set(environment) == {"PATH", "LANG", "PYTHONUNBUFFERED", "PYTHON_DOTENV_DISABLED"}
+        assert environment["PYTHON_DOTENV_DISABLED"] == "1"
+
+    def test_a_parent_value_cannot_re_enable_dotenv_loading(self) -> None:
+        environment = build_worker_environment(parent_environment={"PYTHON_DOTENV_DISABLED": "0", "PATH": "/bin"})
+
+        assert environment["PYTHON_DOTENV_DISABLED"] == "1"
 
     def test_no_allowlisted_name_is_credential_like(self) -> None:
         assert not [
@@ -431,6 +440,7 @@ class TestHostileOperator:
     def test_no_inherited_environment_beyond_the_allowlist(self, *, report: dict[str, Any]) -> None:
         assert set(report["env"]) <= set(ENVIRONMENT_ALLOWLIST) | {
             "PYTHONUNBUFFERED",
+            "PYTHON_DOTENV_DISABLED",
             "LC_CTYPE",
             "__CF_USER_TEXT_ENCODING",
         }
@@ -463,6 +473,57 @@ class TestHostileOperator:
         assert "docpipe-worker-" in report["cwd"]
         assert report["argv"][0].endswith("worker_main.py")
         assert report["argv"][1] == "--fd"
+
+
+class TestWorkerDoesNotLoadDotenv:
+    """A discoverable ``.env`` must not reach the worker (``config.py`` calls ``load_dotenv()`` at import)."""
+
+    CANARY_NAME = "SYNTHETIC_DOTENV_CANARY"
+    CANARY_VALUE = "dotenv-canary-value-7c1"  # pragma: allowlist secret
+
+    @pytest.fixture
+    def source_root(self, *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A source root whose ``docpipe`` is a symlink, with a synthetic ``.env`` above it, as ``PYTHONPATH``.
+
+        ``load_dotenv()`` searches upward from ``config.py``'s own path, so the ``.env`` sits next to ``src/``.
+        The real repository ``.env`` is never read or written.
+        """
+        root = tmp_path / "dotenv-checkout"
+        (root / "src").mkdir(parents=True)
+        package = importlib.util.find_spec("docpipe")
+        assert package is not None and package.submodule_search_locations
+        (root / "src" / "docpipe").symlink_to(Path(package.submodule_search_locations[0]).resolve())
+        (root / ".env").write_text(f"{self.CANARY_NAME}={self.CANARY_VALUE}\n", encoding="utf-8")
+        monkeypatch.setenv("PYTHONPATH", str(root / "src"))
+        return root
+
+    @staticmethod
+    def _config_module_path(*, source_root: Path) -> str:
+        """Import ``config.py`` in a fresh interpreter started like a worker without the switch; return its path."""
+        code = "import docpipe.utils.infrastructure.config as c, json, os; print(json.dumps([c.__file__, dict(os.environ)]))"
+        environment = {"PATH": os.environ["PATH"], "PYTHONPATH": str(source_root / "src")}
+        result = subprocess.run(  # nosec B603 - fixed argv built from sys.executable, no shell
+            [sys.executable, "-c", code], env=environment, cwd=source_root, capture_output=True, text=True, check=True
+        )
+        path, loaded = json.loads(result.stdout.splitlines()[-1])
+        assert path.startswith(str(source_root))
+        return loaded.get(TestWorkerDoesNotLoadDotenv.CANARY_NAME, "")
+
+    def test_the_synthetic_env_file_is_discoverable_without_the_switch(self, *, source_root: Path) -> None:
+        # Control: without it the test below could pass because the canary is never discoverable at all.
+        assert self._config_module_path(source_root=source_root) == self.CANARY_VALUE
+
+    def test_worker_environment_has_no_dotenv_variable(
+        self, *, descriptor: type[UntrustedOperatorDescriptor], source_root: Path
+    ) -> None:
+        del source_root  # PYTHONPATH is set by the fixture; the worker inherits it through the allowlist
+        _set_isolation(value="process")
+
+        _, metadata = descriptor(config=_merged_config()).transform(_table())
+
+        env = json.loads(metadata["report"])["env"]
+        assert self.CANARY_NAME not in env
+        assert self.CANARY_VALUE not in env.values()
 
 
 REFERENCE = "vault://hashicorp/custom-ops/team-a/svc#token"  # pragma: allowlist secret

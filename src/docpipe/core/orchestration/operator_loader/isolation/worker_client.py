@@ -43,14 +43,23 @@ ENVIRONMENT_ALLOWLIST: Final[frozenset[str]] = frozenset(
     {"PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "PYTHONPATH", "VIRTUAL_ENV", "DS_LOG_LEVEL"}
 )
 
+# Read by ``python-dotenv`` inside ``load_dotenv()``; a truthy value makes it return without reading any file.
+DOTENV_DISABLED_VARIABLE: Final[str] = "PYTHON_DOTENV_DISABLED"
+
 _STOP_GRACE_SECONDS: Final[float] = 5.0
 _MAX_STDERR_LINES: Final[int] = 200
 
 
 def build_worker_environment(*, parent_environment: dict[str, str]) -> dict[str, str]:
-    """Return the allowlisted subset of ``parent_environment`` for a worker."""
+    """Return the allowlisted subset of ``parent_environment`` for a worker, plus the variables the parent sets.
+
+    ``PYTHON_DOTENV_DISABLED`` is set unconditionally: the worker imports application modules, and
+    ``docpipe.utils.infrastructure.config`` calls ``load_dotenv()`` at import, which would otherwise copy every key of a
+    discoverable ``.env`` into the worker's environment. It is not an allowlist entry, so a parent value cannot undo it.
+    """
     environment = {name: value for name, value in parent_environment.items() if name in ENVIRONMENT_ALLOWLIST}
     environment["PYTHONUNBUFFERED"] = "1"
+    environment[DOTENV_DISABLED_VARIABLE] = "1"
     return environment
 
 
