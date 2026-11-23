@@ -14,6 +14,7 @@ from docpipe.core.job_management.adapters.services.job_tracker_service import Jo
 from docpipe.core.job_management.adapters.stores.inmemory.inmemory_job_stats_store import InMemoryJobStatsStore
 from docpipe.core.job_management.application.services.job_management_service import JobManagementService
 from docpipe.core.job_management.application.services.node_stats_aggregator import NodeStatsAggregator
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.exceptions.docpipe_exceptions import (
     FlowInvalidDataException,
     FlowNotFoundException,
@@ -94,7 +95,7 @@ class TestJobManagementService:
         request_body = DummyRequestBody(job=DummyJob(asset_ref=None), job_run=DummyJobRun())
 
         with pytest.raises(FlowNotFoundException, match=r"entity\.job\.asset_ref is required"):
-            self.service.create_job_run_from_request(request_body=request_body)
+            self.service.create_job_run_from_request(request_body=request_body, actor=SYSTEM_ACTOR)
 
     def test_create_job_run_from_request_merges_job_and_job_run_config(self):
         """Test request parsing merges job and job run configuration."""
@@ -112,7 +113,7 @@ class TestJobManagementService:
         )
         self.service._create_job_run = Mock(return_value={"job_run_id": "run-1"})
 
-        result = self.service.create_job_run_from_request(request_body=request_body)
+        result = self.service.create_job_run_from_request(request_body=request_body, actor=SYSTEM_ACTOR)
 
         assert result == {"job_run_id": "run-1"}
         self.service._create_job_run.assert_called_once_with(
@@ -211,14 +212,14 @@ class TestJobManagementService:
 
     def test_cancel_job_run_requests_cancel_and_notifies_manager(self):
         """Test cancel_job_run updates services."""
-        self.service.cancel_job_run(job_run_id="run-1")
+        self.service.cancel_job_run(job_run_id="run-1", actor=SYSTEM_ACTOR)
 
         self.job_stats_service.request_cancel_job.assert_called_once_with(job_run_id="run-1")
         self.job_run_manager.cancel_job_run.assert_called_once_with(job_run_id="run-1")
 
     def test_delete_job_run_requests_delete_and_notifies_manager(self):
         """Test delete_job_run updates services."""
-        self.service.delete_job_run(job_run_id="run-1")
+        self.service.delete_job_run(job_run_id="run-1", actor=SYSTEM_ACTOR)
 
         self.job_stats_service.request_delete_job_run.assert_called_once_with(job_run_id="run-1")
         self.job_run_manager.delete_job_run.assert_called_once_with(job_run_id="run-1")
@@ -626,7 +627,7 @@ class TestFlowIdentityAPIPath:
             job_run=DummyJobRun(),
         )
 
-        self.service.create_job_run_from_request(request_body=request_body)
+        self.service.create_job_run_from_request(request_body=request_body, actor=SYSTEM_ACTOR)
 
         self.service._create_job_run.assert_called_once_with(
             flow_id="5f429668-ded4-41b5-80b9-f1d6278dc07a",

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """JobManagementService tests against a real JobTrackerService.
 
 The job stats side is the production ``JobTrackerService`` over an
@@ -24,6 +27,7 @@ from docpipe.core.job_management.adapters.services.job_tracker_service import Jo
 from docpipe.core.job_management.adapters.stores.inmemory.inmemory_job_stats_store import InMemoryJobStatsStore
 from docpipe.core.job_management.application.services.job_management_service import JobManagementService
 from docpipe.core.job_management.application.services.node_stats_aggregator import NodeStatsAggregator
+from docpipe.core.models.actor_context import SYSTEM_ACTOR
 from docpipe.core.models.session_info import get_session_info, session_info_var
 from docpipe.core.orchestration import flow_executor as flow_executor_module
 from docpipe.core.orchestration.orchestrator_factory import OrchestratorFactory
@@ -264,7 +268,7 @@ class TestCreateJobRunFrameworkContract:
         service = _service(tracker=tracker, job_run_manager=manager)
 
         with pytest.raises(RuntimeError, match=error_pattern):
-            service.create_job_run_from_request(request_body=self._request())
+            service.create_job_run_from_request(request_body=self._request(), actor=SYSTEM_ACTOR)
 
         assert tracker.list_job_runs() == []
 
@@ -275,7 +279,7 @@ class TestCreateJobRunFrameworkContract:
         flow = Flow(asset_id=FLOW_ID, name="Invoice flow", definition=AUTHORING_DEFINITION)
         service = _service(tracker=tracker, flow=flow)
 
-        created = service.create_job_run_from_request(request_body=self._request())
+        created = service.create_job_run_from_request(request_body=self._request(), actor=SYSTEM_ACTOR)
         service.shutdown()  # waits for the background execution
 
         stored = tracker.get_job_run_stats(job_run_id=created[DocpipeConstants.JOB_RUN_ID])
