@@ -34,6 +34,7 @@ title: Operator Reference
       - [MergeOperator](#mergeoperator)
       - [NOOPOperator](#noopoperator)
       - [DocIdHashOperator](#docidhashoperator)
+      - [KeywordCountOperator](#keywordcountoperator)
     - [VectorDB Operators](#vectordb-operators)
       - [VectorDBOperator](#vectordboperator)
     - [Storage Operators](#storage-operators)
@@ -2044,6 +2045,32 @@ Schemas are defined with `target_tables` specifying field mappings and transform
 **Output Schema**
 
 - `doc_id_hash`
+
+#### KeywordCountOperator
+
+**Purpose:** Count keyword and phrase occurrences in each document and write per-document counts to a fixed map column.
+
+**Category:** Functional
+
+**Class:** `core.operators.functional.keyword_count.KeywordCountOperator`
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `keywords` | array | Yes | — | Keywords to count. 1–20 strings, each at most 50 Unicode code points. |
+| `match_mode` | string | No | `literal` | `literal`, `stem`, or `lemma` |
+| `language` | string | No | `english` | Snowball stemmer language (stem mode only) |
+| `lemmatizer_model` | string | No | — | Installed spaCy model package name (lemma mode only) |
+| `case_sensitive` | boolean | No | `false` | Case-sensitive matching (literal mode only) |
+| `whole_word` | boolean | No | `true` | Whole-word boundary enforcement |
+| `unicode_normalization` | string | No | `NFC` | `NFC`, `NFKC`, or `none` |
+| `allow_overlapping` | boolean | No | `false` | Count overlapping matches |
+| `doc_column` | string | No | `content` | Input text column |
+
+**Output Schema**
+
+- `keyword_counts` — `map<string, int64>`: per-keyword occurrence counts
+
+See [`docs/operators/functional/keyword_count_readme.md`](../operators/functional/keyword_count_readme.md) for full details.
 
 ### VectorDB Operators
 

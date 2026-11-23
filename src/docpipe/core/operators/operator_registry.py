@@ -25,6 +25,7 @@ from docpipe.core.operators.functional.branching_operator import BranchingOperat
 from docpipe.core.operators.functional.chunker import ChunkerOperator
 from docpipe.core.operators.functional.doc_id_hash import DocIdHashOperator
 from docpipe.core.operators.functional.embeddings.embeddings_operator import EmbeddingsOperator
+from docpipe.core.operators.functional.keyword_count import KeywordCountOperator
 from docpipe.core.operators.functional.merge import MergeOperator
 from docpipe.core.operators.functional.noop import NOOPOperator
 
@@ -62,6 +63,7 @@ DOCPIPE_OPERATORS = frozenset(
         ChunkerOperator,
         DocIdHashOperator,
         EmbeddingsOperator,
+        KeywordCountOperator,
         MergeOperator,
         NOOPOperator,
         # Quality
