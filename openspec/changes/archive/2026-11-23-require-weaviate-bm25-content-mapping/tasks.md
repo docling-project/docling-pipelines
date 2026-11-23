@@ -24,4 +24,4 @@ Layer for every task: [backend].
 - [x] 4.1 [backend] `uv run pytest tests/unit/operators/vectordb tests/unit/core/flows -q` passes, including the existing missing-content validation test.
 - [x] 4.2 [backend] `uv run ruff check --fix .` and `uv run mypy .` report nothing new.
 - [x] 4.3 [backend] `openspec validate require-weaviate-bm25-content-mapping --strict` passes.
-- [ ] 4.4 [backend] Manual check against the local Weaviate container: enrich a node with BM25 on and saved mappings that lack content, and confirm the response carries the flag and the `content -> text` row; run the flow and confirm `text{count}` equals the object count.
+- [x] 4.4 [backend] Manual check against the local Weaviate container: enrich a node with BM25 on and saved mappings that lack content, and confirm the response carries the flag and the `content -> text` row; run the flow and confirm `text{count}` equals the object count.
