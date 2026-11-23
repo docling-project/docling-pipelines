@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docpipe.integrations.secrets.secret_value import SecretValue
+
 
 class TestGetBinaryContentLocalFile:
     """Tests for get_binary_content using local filesystem path."""
@@ -289,7 +291,7 @@ class TestFetchResolvesIngestNodeReferences:
             result = get_binary_content(doc_metadata={"source_id": source_id}, global_config=global_config)
         return result, create
 
-    def test_adapter_receives_plain_resolved_value(self):
+    def test_adapter_receives_the_opaque_resolved_value(self):
         fake = self._register()
         adapter = MagicMock()
         adapter.fetch_binary_content.return_value = b"data"
@@ -298,8 +300,8 @@ class TestFetchResolvesIngestNodeReferences:
 
         assert result == b"data"
         provider_config = adapter.fetch_binary_content.call_args.kwargs["provider_config"]
-        assert provider_config["secret_key"] == self.CANARY
-        assert type(provider_config["secret_key"]) is str
+        assert isinstance(provider_config["secret_key"], SecretValue)
+        assert provider_config["secret_key"].reveal() == self.CANARY
         assert fake.calls == [("s3/creds", "secret_key")]
 
     def test_second_document_makes_no_second_provider_call(self):

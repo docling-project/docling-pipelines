@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """S3 source adapter using boto3."""
 
 import asyncio
@@ -18,6 +21,8 @@ from docpipe.core.operators.ingest.domain.models import Document
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.aws.s3_utils import resolve_aws_account_id
+from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -257,6 +262,7 @@ class S3SourceAdapter(DocumentSourcePort):
         Raises:
             ValueError: If required parameters are missing or invalid
         """
+        provider_config = reveal_value(provider_config)
         access_key = resolve_env_var(provider_config.get("access_key"))
         secret_key = resolve_env_var(provider_config.get("secret_key"))
         bucket = resolve_env_var(value=provider_config.get("bucket"))
@@ -597,6 +603,7 @@ class S3SourceAdapter(DocumentSourcePort):
         Returns:
             bytes | None: Binary content of the S3 object, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             access_key = resolve_env_var(provider_config.get("access_key"))
             secret_key = resolve_env_var(provider_config.get("secret_key"))
@@ -623,7 +630,11 @@ class S3SourceAdapter(DocumentSourcePort):
 
             # Reuse cached boto3 client — creating a new client per document causes
             # redundant TCP handshake setup and is the main latency driver here.
-            cache_key = (access_key, endpoint_url or "", region or "")
+            cache_key = (
+                cache_key_digest(namespace="s3_source_client", parts=[access_key, secret_key]),
+                endpoint_url or "",
+                region or "",
+            )
             if cache_key not in self._client_cache:
                 client_kwargs: dict[str, Any] = {
                     "aws_access_key_id": access_key,
@@ -665,6 +676,6 @@ class S3SourceAdapter(DocumentSourcePort):
         except BotoCoreError as e:
             logger.error("S3 BotoCoreError fetching %s: %s", source_id, e)
             return None
-        except Exception:
-            logger.exception("Unexpected error fetching binary content from S3 %s", source_id)
+        except Exception as e:
+            logger.exception("Unexpected error fetching binary content from S3 %s: %s", source_id, e)
             return None

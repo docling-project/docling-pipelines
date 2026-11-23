@@ -215,3 +215,24 @@ def is_covered(*, path: str, fields: list[str]) -> bool:
         if field.endswith(".*") and path.startswith(field[:-1]):
             return True
     return False
+
+
+def declared_key_names(*, metadata: Mapping[str, Any]) -> frozenset[str]:
+    """Return the key names an operator declares as secret-capable, for any provider.
+
+    Each declared path contributes its last segment (a trailing ``.*`` contributes the object key
+    that precedes it). The union covers the operator-wide ``secret_fields``, every provider's entry in
+    ``secret_fields_by_provider`` and the ``sensitive`` floor, minus ``no_references``. Output filters such
+    as lineage statistics use it to drop a key by declaration instead of by a fixed list of names.
+    """
+    by_provider: Mapping[str, Mapping[str, list[str]]] = metadata.get(DECLARED_BY_PROVIDER_KEY, {})
+    paths: set[str] = set(effective_secret_fields(metadata=metadata))
+    for providers in by_provider.values():
+        for declared in providers.values():
+            paths.update(declared)
+    names: set[str] = set()
+    for path in paths:
+        segments = [segment for segment in path.split(".") if segment != "*"]
+        if segments:
+            names.add(segments[-1])
+    return frozenset(names)

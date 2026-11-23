@@ -3,7 +3,6 @@
 
 """SharePoint source adapter using Microsoft Graph API."""
 
-import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, cast
@@ -27,6 +26,8 @@ from docpipe.core.operators.ingest.ingest_utils import (
 from docpipe.core.operators.ingest.ports.outbound.document_source import DocumentSourcePort
 from docpipe.core.operators.operator_utils import resolve_env_var
 from docpipe.integrations.rest_client import RestMethod
+from docpipe.integrations.secrets.registry import cache_key_digest
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -118,7 +119,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         of client_secret in the key ensures that a rotated secret invalidates the cached
         loader rather than silently reusing a stale one.
         """
-        secret_hash = hashlib.sha256(client_secret.encode()).hexdigest()[:16]
+        secret_hash = cache_key_digest(namespace="sharepoint_loader", parts=[client_secret])
         key = (drive_id, client_id, tenant_id, secret_hash)
         if key not in self._loader_cache:
             self._loader_cache[key] = MicrosoftGraphLoader(
@@ -377,6 +378,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         Returns:
             bytes | None: Binary content of the SharePoint file, or None if not found or error occurred
         """
+        provider_config = reveal_value(provider_config)
         try:
             document_library_id = resolve_env_var(provider_config.get("document_library_id"))
             client_id = resolve_env_var(provider_config.get("client_id"))
@@ -477,6 +479,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         Returns:
             SharePointSourceConfig: Validated configuration object
         """
+        provider_config = reveal_value(provider_config)
         if included_extensions is None:
             included_extensions = []
 

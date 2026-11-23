@@ -2,6 +2,7 @@ import React, { type ElementType } from 'react';
 import { Button } from '@carbon/react';
 import { NoDataEmptyState } from '@carbon/ibm-products';
 import type { CarbonIconType } from '@carbon/icons-react';
+import { PermissionTooltip, PermissionButtonElement } from '@/components/common/PermissionTooltip';
 import styles from './HomeCard.module.scss';
 
 /**
@@ -12,6 +13,10 @@ interface HomeCardAction {
   kind?: 'primary' | 'secondary' | 'tertiary';
   renderIcon?: CarbonIconType;
   onClick?: () => void;
+  /** Disables the CTA. */
+  disabled?: boolean;
+  /** Tooltip explaining why the CTA is disabled. Shown only when `disabled` is true. */
+  disabledReason?: string;
 }
 
 /**
@@ -26,6 +31,10 @@ interface HomeCardProps {
   headerIconDescription: string;
   /** Called when the header icon button is clicked */
   onHeaderAction?: () => void;
+  /** Disables the header icon button. */
+  headerActionDisabled?: boolean;
+  /** Tooltip explaining why the header icon button is disabled. */
+  headerActionDisabledReason?: string;
   /** Empty state heading */
   emptyTitle: string;
   /** Empty state sub-text */
@@ -54,6 +63,8 @@ export function HomeCard({
   headerIcon,
   headerIconDescription,
   onHeaderAction,
+  headerActionDisabled = false,
+  headerActionDisabledReason,
   emptyTitle,
   emptySubtitle,
   emptyAction,
@@ -65,14 +76,17 @@ export function HomeCard({
       <div className={styles.cardHeader}>
         <span className={styles.cardTitle}>{title}</span>
         <div className={styles.cardHeaderAction}>
-          <Button
-            kind="ghost"
-            size="sm"
-            renderIcon={headerIcon}
-            iconDescription={headerIconDescription}
-            hasIconOnly
-            onClick={onHeaderAction}
-          />
+          <PermissionTooltip reason={headerActionDisabled ? headerActionDisabledReason : null} align="left">
+            <Button
+              kind="ghost"
+              size="sm"
+              renderIcon={headerIcon}
+              iconDescription={headerIconDescription}
+              hasIconOnly
+              disabled={headerActionDisabled}
+              onClick={onHeaderAction}
+            />
+          </PermissionTooltip>
         </div>
       </div>
 
@@ -83,7 +97,17 @@ export function HomeCard({
               title={emptyTitle}
               subtitle={emptySubtitle}
               size="sm"
-              action={emptyAction}
+              action={emptyAction && {
+                text: emptyAction.text,
+                kind: emptyAction.kind,
+                renderIcon: emptyAction.renderIcon,
+                onClick: emptyAction.onClick,
+                ...(emptyAction.disabled && {
+                  disabled: true,
+                  as: PermissionButtonElement,
+                  permissionReason: emptyAction.disabledReason,
+                }),
+              }}
             />
           </div>
         )}

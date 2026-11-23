@@ -111,7 +111,7 @@ class WatsonxPIIAndHAPAdapter(PIIAndHAPDetectionPort):
                 LLMConstants.ValidationKeys.ERRORS: errors,
                 LLMConstants.ValidationKeys.WARNINGS: [],
             }
-        return self._adapter.validate()
+        return self._adapter.validate_detection()
 
     def detect(self, *, payload: dict[str, Any]) -> PIIHAPDetectionResponse:
         """Detect PII/HAP using the WatsonX native text detection API.

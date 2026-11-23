@@ -1,5 +1,6 @@
 services:
   docpipe:
+    image: docling-pipelines:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -30,6 +31,7 @@ services:
         condition: service_healthy
 
   bff:
+    image: docpipe-bff:latest
     build:
       context: ..
       dockerfile: docker/bff.Dockerfile

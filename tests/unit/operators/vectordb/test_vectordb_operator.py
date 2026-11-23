@@ -2550,6 +2550,17 @@ class TestProviderValidationHookAndPassThrough:
                 VectorDBOperator(dict(self.CONFIG))
         assert exc_info.value is original
 
+    def test_docpipe_exception_wrapping_a_client_error_is_sanitized_and_keeps_its_codes(self):
+        cause = ConnectionError("cannot reach https://user:secret-token@host:19530")  # pragma: allowlist secret
+        original = DocpipeException(message=f"Failed to connect: {cause}", status_code=503)
+        original.__cause__ = cause
+        with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=original):
+            with pytest.raises(DocpipeException) as exc_info:
+                VectorDBOperator(dict(self.CONFIG))
+        assert "secret-token" not in str(exc_info.value)
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.__cause__ is original
+
     def test_unexpected_error_is_wrapped_with_cause(self):
         cause = ValueError("bad value")
         with patch("docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create", side_effect=cause):

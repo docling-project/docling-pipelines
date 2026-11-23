@@ -275,3 +275,101 @@ def test_emit_never_raises_when_logger_cannot_be_built(
     messages = " ".join(app_log.messages)
     assert "Audit record could not be written (RuntimeError)" in messages
     assert "canary-message" not in messages
+
+
+def test_emit_resolution_audit_record(capsys: pytest.CaptureFixture[str]) -> None:
+    from docpipe.core.models.session_info import create_session_info
+    from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
+
+    # Set up session info
+    create_session_info(job_id="test-job", job_run_id="test-run")
+
+    levels: list[int] = []
+
+    class _LevelCapture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            levels.append(record.levelno)
+
+    get_audit_logger().addHandler(_LevelCapture())
+
+    # Emit a resolved record
+    emit_resolution_audit_record(
+        node_name="node_1",
+        config_key="provider_config.password",
+        provider="hashicorp",
+        outcome="resolved",
+        correlation_id="corr-123",
+    )
+
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.startswith("{")]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["job_id"] == "test-job"
+    assert record["job_run_id"] == "test-run"
+    assert record["node"] == "node_1"
+    assert record["config_key"] == "provider_config.password"
+    assert record["provider"] == "hashicorp"
+    assert record["outcome"] == "resolved"
+    assert record["correlation_id"] == "corr-123"
+    assert "timestamp" in record
+    assert levels == [logging.INFO]
+
+    # Emit a policy denial record (which should go as WARNING)
+    emit_resolution_audit_record(
+        node_name="node_2",
+        config_key="provider_config.token",
+        provider="hashicorp",
+        outcome="not permitted",
+        correlation_id="corr-456",
+    )
+
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.startswith("{")]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["node"] == "node_2"
+    assert record["outcome"] == "not permitted"
+    assert levels == [logging.INFO, logging.WARNING]
+
+
+@pytest.mark.parametrize("ds_log_level", ["DEBUG", "WARNING"])
+def test_ds_log_level_does_not_hide_resolution_records(
+    ds_log_level: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from docpipe.core.models.session_info import create_session_info
+    from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
+
+    create_session_info(job_id="test-job", job_run_id="test-run")
+    monkeypatch.setenv("DS_LOG_LEVEL", ds_log_level)
+
+    emit_resolution_audit_record(
+        node_name="node_1",
+        config_key="provider_config.password",
+        provider="hashicorp",
+        outcome="resolved",
+        correlation_id="corr-123",
+    )
+
+    assert '"outcome":"resolved"' in capsys.readouterr().out
+
+
+def test_emit_resolution_audit_record_never_raises(monkeypatch: pytest.MonkeyPatch, app_log: _AppLogCapture) -> None:
+    from docpipe.utils.infrastructure.audit import emit_resolution_audit_record
+
+    def _boom() -> logging.Logger:
+        raise RuntimeError("canary-message")
+
+    monkeypatch.setattr("docpipe.utils.infrastructure.audit.get_audit_logger", _boom)
+
+    emit_resolution_audit_record(
+        node_name="node_1",
+        config_key="provider_config.password",
+        provider="hashicorp",
+        outcome="resolved",
+        correlation_id="corr-123",
+    )
+
+    messages = " ".join(app_log.messages)
+    assert "Audit record could not be written (RuntimeError)" in messages
+    assert "canary-message" not in messages

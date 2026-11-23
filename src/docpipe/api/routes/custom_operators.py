@@ -21,7 +21,9 @@ from fastapi import (
 )
 
 from docpipe.api.auth.dependencies import get_current_user
+from docpipe.api.auth.guards import require_role
 from docpipe.api.auth.models import User
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_custom_operator_service
 from docpipe.api.dto.custom_operator_dto import (
     CustomOperatorDeleteResponse,
@@ -86,6 +88,10 @@ custom_operators_router = APIRouter(
         status.HTTP_400_BAD_REQUEST: {
             "model": ErrorResponse,
             "description": "Invalid input data or validation failure",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "A secret provider is registered and the caller is not in custom_operators.allowed_uploaders",
         },
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Custom operator not found"},
         status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Custom operator conflict"},
@@ -162,6 +168,7 @@ OptionalOperatorFileForm = Annotated[
 
 @custom_operators_router.post(
     "",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=FileUploadResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create custom operator",
@@ -320,6 +327,7 @@ def get_custom_operator(
 
 @custom_operators_router.patch(
     "/{operator_id}",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=FileUploadResponse,
     status_code=status.HTTP_200_OK,
     summary="Update custom operator",
@@ -417,6 +425,7 @@ async def update_custom_operator(
 
 @custom_operators_router.delete(
     "/{operator_id}",
+    dependencies=[Depends(require_role(Role.ADMIN))],
     response_model=CustomOperatorDeleteResponse,
     status_code=status.HTTP_200_OK,
     summary="Delete custom operator",

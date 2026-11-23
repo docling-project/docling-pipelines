@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for fail-fast mode downstream operator skipping.
 
@@ -15,6 +18,17 @@ from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.abstract_orchestrator import AbstractOrchestrator
 from docpipe.core.orchestration.ports.flow_engine import ExecuteStepResults
+
+
+class _StubOperator:
+    """Operator stand-in: the orchestrator reads declared secret fields from the operator class."""
+
+    category = Mock(value="functional")
+
+    @staticmethod
+    def get_metadata() -> dict[str, Any]:
+        """Return metadata that declares no secret fields."""
+        return {}
 
 
 class TestFailFastDownstreamSkip:
@@ -159,7 +173,7 @@ class TestFailFastDownstreamSkip:
 
         # Mock the executor and execution
         mock_executor = Mock()
-        mock_executor.get_operator.return_value = Mock(category=Mock(value="functional"))
+        mock_executor.get_operator.return_value = _StubOperator()
         mock_orchestrator.create_executor.return_value = mock_executor
 
         # Mock successful execution - use "name" column for PyArrow table

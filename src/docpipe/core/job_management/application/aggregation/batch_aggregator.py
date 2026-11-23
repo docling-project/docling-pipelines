@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Batch aggregation logic for node statistics.
 This is the single source of truth for batch aggregation.
@@ -6,7 +9,7 @@ This is the single source of truth for batch aggregation.
 from dataclasses import dataclass
 from typing import Any
 
-from docpipe.core.constants.constants import ExecutionStatus, Metrics
+from docpipe.core.constants.constants import COMPLETED_JOB_STATUSES, ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.job_management.domain.models import NodeStats
 
@@ -121,11 +124,7 @@ def _determine_aggregated_status(*, status_counts: dict[str, int], total_batches
     failed = status_counts[ExecutionStatus.FAILED.value]
 
     if canceled > 0:
-        has_completed_variants = (
-            status_counts[ExecutionStatus.COMPLETED.value]
-            + status_counts[ExecutionStatus.COMPLETED_WITH_WARNINGS.value]
-            + status_counts[ExecutionStatus.COMPLETED_WITH_ERRORS.value]
-        ) > 0
+        has_completed_variants = sum(status_counts[s.value] for s in COMPLETED_JOB_STATUSES) > 0
 
         # Canceled + Skipped only → Skipped (nothing actually executed)
         if (canceled + skipped) == total_batches:
@@ -671,11 +670,7 @@ def _add_progress_field(
         status_parts = []
 
         # Completed count includes COMPLETED, COMPLETED_WITH_ERRORS, and COMPLETED_WITH_WARNINGS
-        completed = (
-            status_counts.get(ExecutionStatus.COMPLETED.value, 0)
-            + status_counts.get(ExecutionStatus.COMPLETED_WITH_ERRORS.value, 0)
-            + status_counts.get(ExecutionStatus.COMPLETED_WITH_WARNINGS.value, 0)
-        )
+        completed = sum(status_counts.get(s.value, 0) for s in COMPLETED_JOB_STATUSES)
         status_parts.append(f"Completed: {completed}")
 
         # Show Running if non-zero

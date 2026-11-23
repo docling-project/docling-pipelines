@@ -5,6 +5,7 @@
 
 import pytest
 
+from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.orchestration.flow_validator import FlowValidator, ValidateStepResults
 from docpipe.integrations.secrets.secret_provider import (
@@ -50,7 +51,7 @@ def test_parse_vault_reference_invalid() -> None:
 
 
 def test_sanitize_vault_refs_for_validation() -> None:
-    """Test dry-run sanitization of vault references."""
+    """Every reference becomes the one validation sentinel, whatever the key; other values are kept."""
     config = {
         "api_key": "vault://hashicorp/llm/openai#key",  # pragma: allowlist secret
         "credentials": "vault://hashicorp/s3/creds#json",
@@ -60,12 +61,16 @@ def test_sanitize_vault_refs_for_validation() -> None:
         },
         "list_val": ["vault://hashicorp/item1#k", "plain"],
     }
+    sentinel = DocpipeConstants.VALIDATION_SECRET_SENTINEL
+
     sanitized = FlowValidator._sanitize_vault_refs_for_validation(config)
-    assert sanitized["api_key"] == "__vault_placeholder__"  # pragma: allowlist secret
-    assert sanitized["credentials"] == {"__vault_mock__": True}
-    assert sanitized["nested"]["token"] == "__vault_placeholder__"
-    assert sanitized["nested"]["normal_val"] == "hello"
-    assert sanitized["list_val"] == ["__vault_placeholder__", "plain"]
+
+    assert sanitized["api_key"] == sentinel  # type: ignore[index]
+    assert sanitized["credentials"] == sentinel  # type: ignore[index]
+    assert sanitized["nested"]["token"] == sentinel  # type: ignore[index]
+    assert sanitized["nested"]["normal_val"] == "hello"  # type: ignore[index]
+    assert sanitized["list_val"] == [sentinel, "plain"]  # type: ignore[index]
+    assert str(config["api_key"]).startswith("vault://")
 
 
 def test_validate_vault_references_alert() -> None:

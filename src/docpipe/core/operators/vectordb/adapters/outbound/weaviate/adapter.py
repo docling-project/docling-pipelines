@@ -29,6 +29,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.weaviate.index_manager im
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     detect_all_vector_dimensions,
@@ -56,6 +57,7 @@ class WeaviateAdapter(VectorStorePort):
     def __init__(self, **adapter_config: Any) -> None:
         # Light construction (same as the OpenSearch and Milvus adapters): read keys, parse provider_config,
         # connect and build the managers. Mapping validation lives in validate_configuration().
+        adapter_config = reveal_value(adapter_config)
         self.collection_name: str = adapter_config.get("collection_name", "")
         self.embeddings_column = adapter_config.get(
             OperatorConstants.Columns.EMBEDDINGS_COLUMN,

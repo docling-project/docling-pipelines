@@ -16,7 +16,7 @@ from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorC
 from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.core.memmap_file_utils import (
     read_embedding_metadata,
@@ -167,10 +167,27 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             if self.validating_flow:
                 adapter_config[DocpipeConstants.VALIDATING_FLOW] = self.validating_flow
 
-            self.adapter: VectorStorePort = VectorStoreFactory.create(self.provider, **adapter_config)
-        except DocpipeException:
-            # Already a docpipe exception with its own status/error code and message: do not wrap it again.
-            raise
+            self.adapter: VectorStorePort
+            self._schema_cls = VectorStoreFactory.get_adapter_class(self.provider).get_config_schema()
+            # While a flow is validated, a reference is replaced by a stand-in. The adapter
+            # connects when it is built, so it is not built then (the attribute stays unset and
+            # validate() reads only the config schema); no server sees the stand-in.
+            if not self._holds_validation_sentinel(config=config):
+                self.adapter = VectorStoreFactory.create(self.provider, **adapter_config)
+        except DocpipeException as e:
+            # Keep the adapter's own status/error code and do not wrap it again. A client library's text can
+            # sit in its message (a connection failure quotes the URI), so it is sanitized; an exception whose
+            # message is already safe is re-raised as it is.
+            safe_message = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
+            if safe_message == str(e):
+                raise
+            raise DocpipeException(
+                message=safe_message,
+                status_code=e.status_code,
+                error_code=e.error_code,
+                message_code=e.message_code,
+                more_info=e.more_info,
+            ) from e
         except Exception as e:
             safe_error = sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config")
             raise DocpipeException(
@@ -184,6 +201,14 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             self.provider,
             extra=self.common_log_arguments,
         )
+
+    @staticmethod
+    def _holds_validation_sentinel(*, config: dict[str, Any]) -> bool:
+        """Return True while a flow is validated and a provider setting is the reference stand-in."""
+        if not config.get(DocpipeConstants.VALIDATING_FLOW):
+            return False
+        provider_config = config.get(OperatorConstants.Config.PROVIDER_CONFIG, {})
+        return DocpipeConstants.VALIDATION_SECRET_SENTINEL in provider_config.values()
 
     def validate(self, errors: list[str], warnings: list[str], available_features: list[str]) -> None:
         """
@@ -200,7 +225,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         try:
             self._validate_config(errors=errors, warnings=warnings, available_features=available_features)
         finally:
-            if self.validating_flow:
+            if self.validating_flow and hasattr(self, "adapter"):
                 try:
                     self.adapter.close()
                 except Exception as e:
@@ -219,8 +244,8 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         # Validate provider_config required fields via the adapter's own Pydantic schema.
         # This keeps VectorDBOperator provider-agnostic: adding a new adapter only requires
         # its config model to declare required fields — no if/elif changes here.
-        schema_cls = self.adapter.get_config_schema()
         try:
+            schema_cls = self.adapter.get_config_schema() if hasattr(self, "adapter") else self._schema_cls
             schema_cls.model_validate(provider_config)
         except ValidationError as exc:
             for error in exc.errors():
@@ -231,12 +256,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                     errors.append(error["msg"])
 
         # Provider-specific mapping/configuration checks (optional hook; default reports nothing).
-        self.adapter.validate_configuration(errors=errors, warnings=warnings)
+        if hasattr(self, "adapter"):
+            self.adapter.validate_configuration(errors=errors, warnings=warnings)
 
         # Reject index settings that cannot work with the vector kinds produced upstream (e.g. BIN_* without
         # a binary vector feature). Only possible when the validator supplied the propagated feature types.
         feature_types: dict[str, str | None] | None = self.config.get(DocpipeConstants.VALIDATION_FEATURE_TYPES)
-        if feature_types is not None and not errors:
+        if feature_types is not None and not errors and hasattr(self, "adapter"):
             try:
                 self.adapter.validate_vector_feature_types(feature_types=feature_types)
             except DocpipeException as exc:
@@ -290,11 +316,13 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=total_unique_docs)
         metadata[NUMBER_OF_BATCHES_KEY] = 0
 
-        if table.num_rows == 0:
-            logger.warning("Empty table provided", extra=self.common_log_arguments)
-            return [table], metadata
-
         try:
+            self._cleanup_soft_deleted_documents()
+
+            if table.num_rows == 0:
+                logger.warning("Empty table provided", extra=self.common_log_arguments)
+                return [table], metadata
+
             return self._transform_internal(
                 table=table,
                 unique_doc_ids=unique_doc_ids,
@@ -303,6 +331,9 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 file_ids=file_ids,
                 metadata=metadata,
             )
+        except FlowExecutionFailedException:
+            metadata[Metrics.External.NODE_STATUS] = ExecutionStatus.FAILED.value
+            raise
         finally:
             try:
                 self.adapter.close()
@@ -884,6 +915,63 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                 sanitize_exception(exc=e, config_key=f"{self.short_name}.provider_config"),
                 extra=self.common_log_arguments,
             )
+
+    def _cleanup_soft_deleted_documents(self) -> None:
+        """Delete chunks for soft-deleted documents from the vector store."""
+        job_id = self.job_id
+        if not job_id:
+            return
+
+        try:
+            from docpipe.core.incremental_metadata import get_incremental_update_service
+
+            incremental_service = get_incremental_update_service()
+            soft_deleted_doc_ids = incremental_service.get_soft_deleted_doc_ids(job_id=job_id)
+            if not soft_deleted_doc_ids:
+                return
+
+            logger.info(
+                "Cleaning up %s soft-deleted documents in vector store",
+                len(soft_deleted_doc_ids),
+                extra=self.common_log_arguments,
+            )
+
+            existing_pks_by_file = self.adapter.get_chunk_ids_for_documents(list(soft_deleted_doc_ids))
+            chunks_to_delete: list[str] = []
+            for file_id_pks in existing_pks_by_file.values():
+                chunks_to_delete.extend(file_id_pks)
+
+            if chunks_to_delete:
+                logger.info(
+                    "Deleting %s chunk(s) for soft-deleted documents from vector store",
+                    len(chunks_to_delete),
+                    extra=self.common_log_arguments,
+                )
+                self.adapter.delete_documents_by_ids(chunks_to_delete)
+
+        except Exception as e:
+            logger.error(
+                "Failed to clean up soft-deleted documents in vector store: %s",
+                e,
+                extra=self.common_log_arguments,
+            )
+            try:
+                from docpipe.core.incremental_metadata import get_incremental_update_service
+
+                incremental_service = get_incremental_update_service()
+                incremental_service.unmark_soft_deleted_docs(job_id=job_id)
+                logger.info(
+                    "Rolled back soft-deleted documents in incremental metadata store for job_id=%s",
+                    job_id,
+                    extra=self.common_log_arguments,
+                )
+            except Exception as rollback_err:
+                logger.error(
+                    "Failed to unmark soft-deleted docs during rollback: %s",
+                    rollback_err,
+                    extra=self.common_log_arguments,
+                )
+            raise FlowExecutionFailedException(f"Failed to clean up soft-deleted documents in vector store: {e}") from e
 
     def _index_and_record_results(
         self,
