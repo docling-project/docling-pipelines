@@ -45,11 +45,23 @@ The default `docker-compose.yml` includes:
 | Service | Port | Description |
 |---------|------|-------------|
 | **docpipe** | 8080 | Main Docling Pipelines application API |
+| **bff** | 3001 (internal) | Backend-For-Frontend proxy service |
 | **postgres** | 5432 | PostgreSQL database |
 | **ollama** | 11434 | Ollama LLM service |
 | **opensearch** | 9200, 9600 | OpenSearch vector database |
 
 ## Configuration
+
+### Configuration File (`docling-pipelines-config.yaml`)
+
+The all-in-one deployment mounts [`docling-pipelines-config.yaml`](./docling-pipelines-config.yaml) into the `docpipe-app` container at `/opt/app-root/src/config/docling-pipelines-config.yaml` (configured via `DOCPIPE_CONFIG_PATH`).
+
+This configuration routes all backend services and asset repositories to writable paths under `./data`:
+- **Flows Repository (`assets_management.flow_repository`)**: Local filesystem at `/opt/app-root/src/data/flows`
+- **Projects Repository (`projects_management.project_repository`)**: Local filesystem at `/opt/app-root/src/data/projects`
+- **Document Sets & Libraries (`documentset_repository`, `documentlibrary_repository`)**: DuckDB at `/opt/app-root/src/data/duckdb/document_sets.duckdb`
+- **Job Management Storage (`job_management.storage`)**: Filesystem at `/opt/app-root/src/data/job_stats_store_data`
+- **Snapshots & Metadata (`flow_definition_snapshot`, `incremental_metadata`)**: Filesystem at `/opt/app-root/src/data`
 
 ### Environment Variables
 
@@ -60,11 +72,15 @@ cp .env.example .env
 # Edit .env with your preferred values
 ```
 
-Key variables:
+Key variables configured in `.env` / `docker-compose.yml`:
 - `POSTGRES_PASSWORD` - PostgreSQL password (default: docpipe_password)
 - `OPENSEARCH_PASSWORD` - OpenSearch admin password (default: MyStrongPass123!)
 - `OPENSEARCH_JAVA_OPTS` - OpenSearch JVM memory (default: -Xms1g -Xmx1g)
 - `DOCPIPE_PORT` - Docling Pipelines API port (default: 8080)
+- `BFF_URL` - Internal Backend-For-Frontend URL (`http://bff:3001`)
+- `DOCPIPE_CONFIG_PATH` - Path to configuration file (`/opt/app-root/src/config/docling-pipelines-config.yaml`)
+- `FLOW_REPOSITORY_BASE_DIR` - Directory for flow definitions (`/opt/app-root/src/data/flows`)
+- `PROJECT_REPOSITORY_BASE_DIR` - Directory for project definitions (`/opt/app-root/src/data/projects`)
 
 ### Ollama Models
 
@@ -99,9 +115,15 @@ Data is persisted in Docker volumes:
 - `ollama-data` - Ollama models (~4GB)
 - `opensearch-data` - OpenSearch indices
 
-Local directories (owned by UID 1000):
-- `./data` - Docling Pipelines application data
+Local directories mounted from the host (owned by UID 1000):
+- `./data` - Docling Pipelines application data:
+  - `./data/flows` - Persisted flow definitions (previously written to ephemeral `~/Documents/pipeline/assets`)
+  - `./data/projects` - Persisted project definitions (previously written to ephemeral `~/Documents/pipeline/projects`)
+  - `./data/duckdb` - Embedded DuckDB databases for document sets and document libraries
+  - `./data/job_stats_store_data` - Job execution statistics and history
 - `./logs` - Application logs
+
+> **Note on Behavior Change:** Flows and projects now persist in `./data/flows` and `./data/projects` on the host bind mount. In earlier configurations, these defaulted to `~/Documents/pipeline/...` in the container's unmounted home directory and were lost when containers were recreated. Data previously saved inside the unmounted container home directory is not carried over automatically.
 
 
 ## Permission Issues
