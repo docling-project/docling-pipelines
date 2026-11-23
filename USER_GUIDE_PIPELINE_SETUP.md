@@ -992,6 +992,7 @@ result = manager.execute()
 - **[Flow Configuration Guide](docs/guides/FLOW_CONFIGURATION_GUIDE.md)** - Creating and configuring flows
 - **[Python API Guide](docs/guides/PYTHON_API_GUIDE.md)** - Programmatic usage
 - **[Advanced Configuration](docs/guides/ADVANCED_CONFIGURATION.md)** - Production deployment
+- **[Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md)** - REST API and UI sign-in (on by default), roles, LDAP/OIDC, and the `DOCPIPE_AUTH_ENABLED=false` opt-out
 - **[Operator Reference](docs/reference/OPERATORS.md)** - Complete operator specifications
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Comprehensive troubleshooting
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and architecture

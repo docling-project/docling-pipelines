@@ -4,6 +4,7 @@
 """Unit tests for synchronous in-process event dispatch."""
 
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -103,3 +104,22 @@ def test_dispatch_propagates_failed_flow_load(*, dispatch_services) -> None:
     with pytest.raises(LookupError, match="flow deleted") as error:
         service.dispatch(event=_event())
     assert error.value is flow_service.get_flow.side_effect
+
+
+def test_dispatch_needs_no_token_or_actor_when_auth_is_enabled(*, dispatch_services, auth_enabled) -> None:
+    """Run the mapped flow in process with no bearer token and no caller identity."""
+    service, _, flow_service, orchestrator = dispatch_services
+
+    service.dispatch(event=_event())
+
+    flow_service.get_flow.assert_called_once_with(flow_id="saved-flow")
+    orchestrator.execute.assert_called_once()
+
+
+def test_event_streaming_does_not_import_api_layer() -> None:
+    """Keep core event streaming independent of the API layer."""
+    package_dir = Path(__file__).resolve().parents[4] / "src" / "docpipe" / "core" / "event_streaming"
+
+    offenders = [path.name for path in package_dir.glob("*.py") if "docpipe.api" in path.read_text(encoding="utf-8")]
+
+    assert offenders == []
