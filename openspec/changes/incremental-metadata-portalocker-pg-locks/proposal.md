@@ -2,18 +2,28 @@
 
 ## Why
 
-The incremental metadata store serialises every operation, including reads, behind one exclusive `filelock` per job, so concurrent micro-batches queue behind each other on read-only calls. The PostgreSQL adapter has no cross-process coordination at all: its upserts and soft-delete updates are read-then-write sequences, its DDL bootstrap is unguarded, and its queries do not target the schema it creates. None of this has produced a reported failure yet; this change hardens both backends before distributed execution depends on them.
+The incremental metadata store has critical correctness and concurrency bugs in PostgreSQL and serialisation bottlenecks in the filesystem backend:
+- The PostgreSQL adapter creates its table in the configured schema (`incremental_metadata`), but queries compile to `FROM inc_update_metadata` without schema qualification. On any standard connection where `search_path` does not include `incremental_metadata`, the first read, write, or clear fails immediately with `UndefinedTable: relation "inc_update_metadata" does not exist`.
+- The PostgreSQL upsert uses non-atomic `session.get()` followed by `session.add()`. When concurrent workers insert the same new keys, they collide and fail with `UniqueViolation` on `inc_update_metadata_pkey`.
+- The PostgreSQL DDL bootstrap (`CREATE SCHEMA IF NOT EXISTS` and `table.create`) is unguarded against concurrent replica startup.
+- The filesystem store serialises all operations, including reads, behind one exclusive `filelock` per job, forcing concurrent micro-batches to queue behind read-only calls. Furthermore, `clear()` deletes `.locks/metadata.lock`, which breaks mutual exclusion across unlinked file inodes on POSIX.
 
 ## What Changes
 
 Layers affected: **backend-only** (storage adapters under `src/docpipe/core/incremental_metadata/`, one dependency). No REST routes, operators, frontend, BFF, or Redux state change.
 
-- Filesystem adapter: replace `filelock.FileLock` with `portalocker`. Read methods take a shared lock, write methods take an exclusive lock. Single-machine execution only.
-- PostgreSQL adapter: every write method runs in one transaction that first takes `pg_advisory_xact_lock` for the job, then performs a single set-based statement (`INSERT ... ON CONFLICT DO UPDATE`, `UPDATE ... RETURNING`, `DELETE`). Reads stay lock-free.
-- PostgreSQL adapter: qualify all queries with the configured schema, and guard schema/table creation with an advisory lock so several replicas can start together.
-- PostgreSQL adapter: honour `lock_timeout` from the store config, and surface a lock timeout as a retryable error with the same retry behaviour as the filesystem adapter.
-- Add `portalocker` to `pyproject.toml` and regenerate `uv.lock` (root and `slim/`).
-- Document that the filesystem backend is not supported across hosts, and that distributed deployments must select `postgresql`.
+The implementation is structured into two phases:
+- **Phase 1: Fix demonstrably broken PostgreSQL operations**
+  - Qualify all PostgreSQL queries with the configured schema using a schema-qualified `Table`.
+  - Rewrite `upsert_records` to use `INSERT ... ON CONFLICT (job_id, id) DO UPDATE`, deduplicating batches by `doc_id` (last wins).
+  - Guard DDL bootstrap with `pg_advisory_xact_lock` so concurrent replicas start without race conditions.
+  - Add integration tests against a live PostgreSQL database (gated on `DOCPIPE_POSTGRES_*` environment variables).
+- **Phase 2: Concurrency hardening & filesystem shared locks**
+  - Filesystem adapter: replace `filelock.FileLock` with `portalocker`. Read methods take a shared lock (`LOCK_SH`), write methods take an exclusive lock (`LOCK_EX`). Single-machine execution only. Never delete `.locks/metadata.lock` in `clear()`. Deduplicate batches by `doc_id` (last wins).
+  - PostgreSQL adapter: wrap multi-step write methods in `pg_advisory_xact_lock` for the job with set-based SQL (`UPDATE ... RETURNING`, `DELETE`).
+  - PostgreSQL adapter: honour `lock_timeout` via `set_config('lock_timeout', :value, true)` and surface a unified `LockTimeoutError(FlowExecutionFailedException)` unwrapping driver errors for retries.
+  - Add `portalocker` to `pyproject.toml` and regenerate `uv.lock` (root and `slim/`).
+  - Document that the filesystem backend is single-host only, and that distributed deployments must select `postgresql`.
 
 ## Capabilities
 

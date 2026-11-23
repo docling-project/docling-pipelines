@@ -23,6 +23,7 @@ Every `IncrementalMetadataStore` backend SHALL implement the same observable con
 #### Scenario: Empty current list marks everything missing
 - **WHEN** `mark_missing_docs_as_deleted` is called with an empty list
 - **THEN** all non-deleted records for the job are marked deleted
+- **AND** callers are expected to guard against unintentional empty source listings before invoking missing-doc diffing
 
 ### Requirement: Filesystem backend uses shared and exclusive file locks
 The filesystem backend SHALL guard each job's parquet file with a `portalocker` lock on a separate per-job lock file. Read methods SHALL take a shared lock and write methods SHALL take an exclusive lock. The lock SHALL NOT be taken on the parquet file itself.
@@ -63,13 +64,13 @@ Every PostgreSQL write method SHALL execute inside one transaction that first ac
 - **WHEN** two workers write to different jobs
 - **THEN** neither waits for the other's advisory lock, except on a hash collision, which affects timing only and never correctness
 
-#### Scenario: Upsert is one statement
-- **WHEN** `upsert_records` runs
-- **THEN** records are written with `INSERT ... ON CONFLICT (job_id, id) DO UPDATE` in batches, ordered by `doc_id`, with no per-record read
+#### Scenario: Concurrent and duplicate keys upsert atomically
+- **WHEN** `upsert_records` is called concurrently by multiple workers, including batches with duplicate or overlapping keys
+- **THEN** all records are upserted atomically without unique-violation errors, and the latest record for each key is stored
 
-#### Scenario: Mark missing is one statement
+#### Scenario: Mark missing updates and returns affected ids atomically
 - **WHEN** `mark_missing_docs_as_deleted` runs
-- **THEN** one `UPDATE ... RETURNING` marks and returns the affected ids, without reading rows into Python
+- **THEN** missing records are marked deleted and their ids returned without data races against concurrent reads
 
 #### Scenario: Lock wait is bounded
 - **WHEN** the advisory lock is not granted within the configured `lock_timeout`
