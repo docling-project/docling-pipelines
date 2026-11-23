@@ -808,13 +808,31 @@ def test_operator_validate_warns_on_plain_text_passwords() -> None:
 def test_operator_validate_no_warning_for_vault_references() -> None:
     from docpipe.core.operators.extract.extract_operator import ExtractOperator
 
+    # FlowValidator replaces every vault:// reference with the sentinel before the operator is built,
+    # and construction resolves any reference that is left, so validate() only ever sees the sentinel.
     operator = ExtractOperator(
-        config=_operator_config(document_passwords={"default": ["vault://org/key"]}),
+        config={
+            **_operator_config(document_passwords={"default": [DocpipeConstants.VALIDATION_SECRET_SENTINEL]}),
+            DocpipeConstants.VALIDATING_FLOW: True,
+        },
     )
     warnings: list[Any] = []
     operator.validate([], warnings, ["content"])
 
     assert not any("plain-text password" in str(w) for w in warnings)
+
+
+@pytest.mark.unit
+def test_operator_declares_password_paths_secret_capable() -> None:
+    """The secret resolver only accepts vault:// references in declared fields."""
+    from docpipe.core.operators.extract.extract_operator import ExtractOperator
+    from docpipe.core.operators.secret_fields import effective_secret_fields, is_covered
+
+    fields = effective_secret_fields(metadata=ExtractOperator.get_metadata())
+
+    assert is_covered(path="document_passwords.rules.0.passwords.0", fields=fields)
+    assert is_covered(path="document_passwords.rules.3.passwords.9", fields=fields)
+    assert is_covered(path="document_passwords.default.0", fields=fields)
 
 
 @pytest.mark.unit

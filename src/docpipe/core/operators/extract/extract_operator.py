@@ -1738,7 +1738,9 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
         }
 
         return {
-            "secret_fields": [],
+            # The resolver only accepts a vault:// reference at an exact path or under a trailing ".*".
+            # Passwords sit at document_passwords.rules.<i>.passwords.<j> and document_passwords.default.<j>.
+            "secret_fields": [f"{OperatorConstants.Config.DOCUMENT_PASSWORDS}.*"],
             "secret_fields_by_provider": ExtractOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: ExtractOperator.category.value,

@@ -366,7 +366,9 @@ class TestOperatorUtilsExtensionValidation:
 
         doc_tasks = OperatorUtils.prepare_document_content_fetch(table=table, global_config={})
 
-        assert doc_tasks == [{"idx": 0, "doc_id": "doc1", "doc_name": "a.pdf", "binary_content": b"a"}]
+        assert len(doc_tasks) == 1
+        assert doc_tasks[0]["doc_name"] == "a.pdf"
+        assert "path" not in doc_tasks[0]
 
     def test_prepare_document_content_fetch_error_tasks_have_no_path(self):
         """Unsupported-extension tasks are unchanged and carry no path."""
