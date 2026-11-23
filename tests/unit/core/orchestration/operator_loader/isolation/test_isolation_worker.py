@@ -483,11 +483,6 @@ class TestWorkerDoesNotLoadDotenv:
 
     @pytest.fixture
     def source_root(self, *, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        """A source root whose ``docpipe`` is a symlink, with a synthetic ``.env`` above it, as ``PYTHONPATH``.
-
-        ``load_dotenv()`` searches upward from ``config.py``'s own path, so the ``.env`` sits next to ``src/``.
-        The real repository ``.env`` is never read or written.
-        """
         root = tmp_path / "dotenv-checkout"
         (root / "src").mkdir(parents=True)
         package = importlib.util.find_spec("docpipe")
@@ -499,7 +494,7 @@ class TestWorkerDoesNotLoadDotenv:
 
     @staticmethod
     def _config_module_path(*, source_root: Path) -> str:
-        """Import ``config.py`` in a fresh interpreter started like a worker without the switch; return its path."""
+        """Return the canary value visible after importing config.py in a subprocess without PYTHON_DOTENV_DISABLED."""
         code = "import docpipe.utils.infrastructure.config as c, json, os; print(json.dumps([c.__file__, dict(os.environ)]))"
         environment = {"PATH": os.environ["PATH"], "PYTHONPATH": str(source_root / "src")}
         result = subprocess.run(  # nosec B603 - fixed argv built from sys.executable, no shell
@@ -510,13 +505,12 @@ class TestWorkerDoesNotLoadDotenv:
         return loaded.get(TestWorkerDoesNotLoadDotenv.CANARY_NAME, "")
 
     def test_the_synthetic_env_file_is_discoverable_without_the_switch(self, *, source_root: Path) -> None:
-        # Control: without it the test below could pass because the canary is never discoverable at all.
         assert self._config_module_path(source_root=source_root) == self.CANARY_VALUE
 
     def test_worker_environment_has_no_dotenv_variable(
         self, *, descriptor: type[UntrustedOperatorDescriptor], source_root: Path
     ) -> None:
-        del source_root  # PYTHONPATH is set by the fixture; the worker inherits it through the allowlist
+        del source_root
         _set_isolation(value="process")
 
         _, metadata = descriptor(config=_merged_config()).transform(_table())
