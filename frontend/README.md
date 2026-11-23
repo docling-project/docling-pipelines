@@ -272,6 +272,8 @@ npm run dev:vite  # Vite dev server on port 3000
 
 ### Environment Variables
 
+Copy `frontend/.env.example` to `frontend/.env` before running `npm run dev`; the BFF refuses to start without `BACKEND_API_URL`. With authentication enabled on the backend, the UI redirects signed-out users to `/ui/login`.
+
 BFF configuration in `server/.env` (copy from `frontend/.env.example`):
 
 ```env
