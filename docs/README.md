@@ -35,13 +35,15 @@ Task-oriented guides to help you accomplish specific goals:
 - **[Telemetry Setup](guides/TELEMETRY_SETUP.md)** - OpenTelemetry distributed tracing and metrics
 - **[OpenLineage Integration](integrations/openlineage/OPENLINEAGE_GUIDE.md)** - Data lineage events for flow and operator runs, viewable in Marquez
 - **[Job Report Generation](guides/JOB_REPORT_GENERATION.md)** - Automated per-run CSV job reports
+- **[Authentication and Authorization](guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md)** - Login methods, roles, group mapping, bootstrap administrator, sessions, and startup validation
 - **[Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)** - Credential management, authentication, ACL, and production hardening
 - **[Unified LLM Architecture](guides/UNIFIED_LLM_ARCHITECTURE_GUIDE.md)** - LLM integration patterns
 - **[Document Libraries](guides/USER_GUIDE_DOCUMENT_LIBRARIES.md)** - Managing document collections
 - **[Document Class Utils](guides/DOCUMENT_CLASS_UTILS.md)** - Document schema utilities
 - **[Secrets Guide](guides/SECRETS_GUIDE.md)** - Reference grammar, path policy, audit records, and custom operator rules
 - **[Vault Integration](guides/VAULT_INTEGRATION_GUIDE.md)** - HashiCorp Vault secret resolution via `vault://` URIs
-- **[UI User Guide](guides/UI_USER_GUIDE.md)** - Using the React frontend
+- **[UI User Guide](guides/UI_USER_GUIDE.md)** - Using the React frontend: signing in, roles, and permission-gated actions
+- **[Frontend README](../frontend/README.md)** - Frontend development setup, BFF and `/auth` proxy topology, and testing role-gated components
 
 ### Best Practices
 - **[Logging Best Practices](guides/LOGGING_BEST_PRACTICES.md)** - Security-first logging, sensitive data handling, and NFR Point 12 compliance
@@ -150,6 +152,7 @@ docs/
 - **Set up OAuth2 authentication** → [OAuth2 Authentication Guide](api/OAUTH2_AUTHENTICATION.md)
 - **Create a custom connector** → [Create Connector Guide](guides/CREATE_CONNECTOR_GUIDE.md)
 - **Track data lineage** → [OpenLineage Integration Guide](integrations/openlineage/OPENLINEAGE_GUIDE.md)
+- **Set up login and roles** → [Authentication and Authorization](guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md)
 - **Secure my deployment** → [Security Best Practices](guides/SECURITY_BEST_PRACTICES.md)
 - **Deploy to production** → [Advanced Configuration](guides/ADVANCED_CONFIGURATION.md)
 - **Troubleshoot an issue** → [Troubleshooting Guide](../TROUBLESHOOTING.md)

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for SQLFilterOperator.
 Tests filtering rows from a PyArrow table using SQL WHERE clause criteria.
@@ -1268,6 +1271,31 @@ def test_error_handling_with_json_criteria():
 
         # Error recorded
         assert OperatorConstants.Extraction.ERROR in metadata
+
+
+@pytest.mark.parametrize(
+    "malicious_criterion",
+    [
+        "EXISTS (SELECT 1 FROM read_text('pyproject.toml'))",
+        "EXISTS (SELECT 1 FROM read_csv('pyproject.toml'))",
+    ],
+)
+def test_external_access_disabled_when_auth_enabled(monkeypatch, malicious_criterion):
+    """When DOCPIPE_AUTH_ENABLED=true, DuckDB blocks read_text/read_csv while allowing table queries."""
+    monkeypatch.setenv("DOCPIPE_AUTH_ENABLED", "true")
+    table = make_table()
+
+    # Normal query on input_table still works when auth is enabled
+    safe_op = make_operator({OperatorConstants.Filtering.FILTER_CRITERIA_LIST: ["score > 5"]})
+    safe_tables, safe_meta = safe_op.transform(table)
+    assert safe_meta[Metrics.External.NODE_STATUS] == ExecutionStatus.COMPLETED.value
+    assert safe_tables[0].num_rows == 3
+
+    # External file access via read_text / read_csv is blocked
+    blocked_op = make_operator({OperatorConstants.Filtering.FILTER_CRITERIA_LIST: [malicious_criterion]})
+    _result_tables, blocked_meta = blocked_op.transform(table)
+    assert blocked_meta[Metrics.External.NODE_STATUS] == ExecutionStatus.FAILED.value
+    assert "disabled by configuration" in blocked_meta.get(OperatorConstants.Extraction.ERROR, "").lower()
 
 
 if __name__ == "__main__":

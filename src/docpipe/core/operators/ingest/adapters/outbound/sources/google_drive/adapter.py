@@ -6,6 +6,7 @@
 import json
 from collections import deque
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -600,12 +601,6 @@ class GoogleDriveSourceAdapter(DocumentSourcePort):
             bytes | None: Binary content of the Google Drive file, or None if not found or error occurred
         """
         provider_config = reveal_value(provider_config)
-        try:
-            from io import BytesIO
-        except ImportError:
-            logger.error("Google API client not installed. Install with: pip install google-api-python-client")
-            return None
-
         try:
             service_account_json = provider_config.get("service_account_json")
             service_account_json_path = provider_config.get("service_account_json_path")
