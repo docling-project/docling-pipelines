@@ -559,6 +559,32 @@ describe('VectorDBFeatureMappingTearsheet - failed refresh', () => {
     expect(baseProps.onSave.mock.calls[0]?.[0]).toMatchObject({ resourceName: 'Docs' });
   });
 
+  it('locks the distance metric while a collection change is pending, so a failed refresh saves the stored metric', async () => {
+    const docs = result({
+      stored_resource_metadata: { vector_similarity: 'cosine', dimension_size: 3 },
+    });
+    let rejectRefresh: (reason: Error) => void = () => undefined;
+    mockEnrich
+      .mockResolvedValueOnce(docs)
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRefresh = reject; }));
+    await renderLoaded();
+
+    fireEvent.click(collectionInput());
+    fireEvent.click(screen.getByRole('option', { name: /create new/i }));
+
+    await waitFor(() => { expect(mockEnrich).toHaveBeenCalledTimes(2); });
+    expect(screen.getByRole('combobox', { name: /distance metric/i })).toBeDisabled();
+
+    await act(async () => { rejectRefresh(new Error('connection refused')); });
+    await waitFor(() => { expect(collectionInput()).toHaveValue('Docs'); });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(baseProps.onSave.mock.calls[0]?.[0]).toMatchObject({
+      resourceName: 'Docs',
+      similarityMetric: 'cosine',
+    });
+  });
+
   it('reverts the BM25 checkbox and keeps the mappings when toggling it fails', async () => {
     mockEnrich.mockResolvedValueOnce(loaded).mockResolvedValueOnce(failed);
     await renderLoaded();

@@ -145,6 +145,7 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 #### Scenario: Failed refresh scoped to Weaviate
 - **WHEN** a Weaviate collection change or BM25 toggle fails, either because the response carries `is_docpipe_supported_resource.error` or because the request throws
 - **THEN** the tearsheet restores the last collection and BM25 flag whose enrichment completed, keeps their mappings, and shows the error
+- **AND** while a Weaviate collection change or BM25 toggle is pending, the distance metric control is disabled, so a failed refresh cannot save a metric chosen for a collection that was not applied
 - **AND** when a BM25 toggle supersedes a collection change, the saved distance metric is the one reported for the displayed collection, while a BM25 toggle on a new collection keeps the metric the user chose
 - **AND** for OpenSearch and Milvus a failed refresh keeps the user's selection exactly as before this change, and a sparse toggle leaves the distance metric untouched
 

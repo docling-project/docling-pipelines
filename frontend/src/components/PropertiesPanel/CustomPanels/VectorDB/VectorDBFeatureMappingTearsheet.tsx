@@ -704,6 +704,7 @@ export function VectorDBFeatureMappingTearsheet({
                         label={intl.formatMessage(messages.selectSimilarity, { similarityLabel: similarityLabel.toLowerCase() })}
                         items={effectiveSimilarityOptions.map((v) => similarityMetricLabels[v] ?? v)}
                         selectedItem={similarityMetricLabels[similarityMetric] ?? similarityMetric}
+                        disabled={isWeaviate && loadingMappings}
                         onChange={({ selectedItem }: { selectedItem?: string | null }) => {
                           if (selectedItem) {
                             const value = effectiveSimilarityOptions.find(
