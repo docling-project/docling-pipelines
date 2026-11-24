@@ -1,18 +1,24 @@
 # Tasks: Flow Execution & Authoring MCP Server
 
-- [ ] 1. Package setup
+- [ ] 1. Package setup & transport architecture
   - [ ] 1.1 Create directory `src/docpipe/mcp/`
-  - [ ] 1.2 Add entrypoint `docpipe-mcp = "docpipe.mcp.__main__:main"` to `[project.scripts]` in `pyproject.toml`
+  - [ ] 1.2 Implement process-level stdout redirection in `src/docpipe/mcp/__main__.py` (duplicating fd 1 for transport, redirecting `sys.stdout` and fd 1 to `sys.stderr` before docpipe imports)
+  - [ ] 1.3 Add entrypoint `docling-pipelines-mcp = "docpipe.mcp.__main__:main"` to `[project.scripts]` in `pyproject.toml`
 - [ ] 2. Core tool implementations
-  - [ ] 2.1 Implement `validate_flow` tool with error normalization across manager construction (`FlowInvalidDataException`) and DAG validation (`FlowValidationException`), covering missing `flow_name` and cyclic flows
-  - [ ] 2.2 Implement `create_flow` tool with pre-validation and file output
-  - [ ] 2.3 Implement `run_flow` tool using `DocpipeFlowManager.execute()` with `configure_logging=False`
-  - [ ] 2.4 Implement `get_job_status` tool querying the configured job stats store via domain port/service
-- [ ] 3. Server assembly & transport
-  - [ ] 3.1 Implement `create_server()` in `src/docpipe/mcp/server.py` with stdio transport
-  - [ ] 3.2 Configure server-owned logging to `stderr` only, preventing non-protocol output on `stdout`
-  - [ ] 3.3 Implement CLI entrypoint in `src/docpipe/mcp/__main__.py`
-- [ ] 4. Tests & Verification
-  - [ ] 4.1 Unit tests for tool argument parsing, error normalization (cyclic flow, missing `flow_name`), and validation handling
-  - [ ] 4.2 Transport test asserting `stdout` contains only valid MCP JSON-RPC protocol frames with zero raw log lines
-  - [ ] 4.3 Integration smoke test running a minimal flow through the MCP server
+  - [ ] 2.1 Implement `list_operators` tool querying `OperatorRegistry` for categories, descriptions, and required features
+  - [ ] 2.2 Implement `validate_flow` tool accepting `flow_definition` or `flow_file`, with path containment and constructor error normalization (`FlowInvalidDataException`, `DocpipeException`, `FileNotFoundError`, `json.JSONDecodeError`)
+  - [ ] 2.3 Implement `create_flow` tool registering flow in database asset repository via `FlowService` and optionally exporting to workspace path with `.json` enforcement and overwrite guard
+  - [ ] 2.4 Implement `run_flow` tool launching `DocpipeFlowManager.execute()` in background worker thread with thread-local `SessionInfo`, returning job identifiers immediately
+  - [ ] 2.5 Implement `get_job_status` tool querying the configured `JobStatsStore` port, defaulting to latest run and returning structured node metrics
+- [ ] 3. Security & trust boundaries
+  - [ ] 3.1 Implement workspace root path containment guard (`DOCPIPE_WORKSPACE_ROOT`) rejecting directory traversal and symlink escapes
+  - [ ] 3.2 Enforce `enable_custom_operators=False` by default in MCP server
+  - [ ] 3.3 Implement credential redaction on tool responses and error messages
+- [ ] 4. Server assembly & transport
+  - [ ] 4.1 Assemble `create_server()` in `src/docpipe/mcp/server.py` registering all 5 tools with stdio transport
+  - [ ] 4.2 Configure server-owned logging to `stderr`
+- [ ] 5. Tests & Verification
+  - [ ] 5.1 Unit tests for `list_operators`, `validate_flow` (missing `flow_name`, authoring cycles, valid flow), `create_flow` (DB registration and file export), and `get_job_status`
+  - [ ] 5.2 Security tests verifying path traversal rejection (`..`), non-json extension rejection, and overwrite guard
+  - [ ] 5.3 Concurrency & side-effect tests verifying background thread execution and verifying `validate_flow` writes zero rows to `job_stats`
+  - [ ] 5.4 Transport purity test running a full pipeline with filesystem ingest asserting that `stdout` receives strictly valid JSON-RPC protocol frames and zero raw log lines
