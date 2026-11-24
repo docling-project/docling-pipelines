@@ -1,12 +1,16 @@
 /**
  * @file StorageOutput operator properties panel body.
  *
- * **provider_config** renders structured, per-provider fields.
+ * **provider_config** renders structured, per-provider fields, including credentials.
  * Switching `provider` resets `provider_config` so stale fields from the previous
  * provider are never persisted.
+ *
+ * Flows saved before the separate Credentials field was removed may still carry a
+ * `destination_config.credentials` block. It is moved into `provider_config` when the
+ * panel opens (see `legacyCredentials.ts`).
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import {
   Accordion,
@@ -20,8 +24,6 @@ import type { OperatorFeature, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip, VaultInput } from '@/components/common';
-import { isVaultReference } from '@/utils/vault';
-import { isValidJsonObject, toJsonString } from '@/utils/json';
 import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
 import { TagInput } from '@/components/common/TagInput/TagInput';
 import {
@@ -40,6 +42,7 @@ import {
   type OutputStructureType,
   type WriteMode,
 } from './constants';
+import { migrateLegacyCredentials } from './legacyCredentials';
 import { messages } from './StorageOutput.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
@@ -107,10 +110,7 @@ export function StorageOutputPanelBody({
     ?.valid_values as string[] ?? [];
 
   const providerConfig = (destinationConfig[DESTINATION_CONFIG_KEY.PROVIDER_CONFIG] as Record<string, unknown> | undefined) ?? {};
-  const credentialsRaw = destinationConfig[DESTINATION_CONFIG_KEY.CREDENTIALS];
-  const credentialsStored = (credentialsRaw !== undefined && credentialsRaw !== null)
-    ? (typeof credentialsRaw === 'string' ? credentialsRaw : toJsonString(credentialsRaw))
-    : '';
+  const hasLegacyCredentials = migrateLegacyCredentials(destinationConfig) !== null;
 
   // ── Read saved output_format values ──────────────────────────────────────
 
@@ -217,6 +217,19 @@ export function StorageOutputPanelBody({
 
   useProviderConfigDefaults(controller, nodeAttributes);
 
+  // Move a legacy `credentials` block into provider_config. The current value is read
+  // from the controller so it sees any defaults seeded above.
+  useEffect(() => {
+    if (!hasLegacyCredentials) { return; }
+    const current = controller?.getPropertyValue?.({ name: ATTR.DESTINATION_CONFIG }) as
+      | Record<string, unknown>
+      | undefined;
+    const migrated = migrateLegacyCredentials(current);
+    if (migrated) {
+      controller?.updatePropertyValue?.({ name: ATTR.DESTINATION_CONFIG }, migrated);
+    }
+  }, [controller, hasLegacyCredentials]);
+
   // ── Validation ────────────────────────────────────────────────────────────
   const validate = getRequiredParamValidator(nodeAttributes);
   const modeValidation = validate(ATTR.MODE, mode ?? undefined);
@@ -313,13 +326,13 @@ export function StorageOutputPanelBody({
           invalidText={destConfigValidation.errorMessage}
           onChange={({ selectedItem }: { selectedItem: string | null }) => {
             if (selectedItem) {
-              // Reset provider_config and credentials when provider changes.
+              // Reset provider_config when provider changes. Any legacy credentials
+              // block is dropped because the new object does not carry it over.
               controller?.updatePropertyValue?.(
                 { name: ATTR.DESTINATION_CONFIG },
                 {
                   [DESTINATION_CONFIG_KEY.PROVIDER]: selectedItem,
                   [DESTINATION_CONFIG_KEY.PROVIDER_CONFIG]: {},
-                  [DESTINATION_CONFIG_KEY.CREDENTIALS]: {},
                 }
               );
             }
@@ -936,52 +949,6 @@ export function StorageOutputPanelBody({
               onToggle={(checked: boolean) => { updateProviderConfig(GOOGLE_DRIVE_CONFIG_KEY.CREATE_DIRS, checked); }}
             />
           </div>
-        </div>
-      )}
-
-      {/* ── Credentials (optional, all providers) ───────────────────────── */}
-      {provider && (
-        <div className={common.formField}>
-          <VaultInput
-            id="destination_credentials"
-            labelText={intl.formatMessage(messages.credentials)}
-            labelComponent={
-              <RequiredParamTooltip
-                paramId={DESTINATION_CONFIG_KEY.CREDENTIALS}
-                nodeAttributes={destAttrs}
-                definition={destAttrs[DESTINATION_CONFIG_KEY.CREDENTIALS]?.description ?? ''}
-              >
-                {intl.formatMessage(messages.credentials)}
-              </RequiredParamTooltip>
-            }
-            multiline
-            rows={4}
-            value={credentialsStored}
-            invalid={
-              credentialsStored.trim() !== '' &&
-              !isVaultReference(credentialsStored) &&
-              !isValidJsonObject(credentialsStored)
-            }
-            invalidText={intl.formatMessage(messages.credentialsInvalid)}
-            onChange={(val: string) => {
-              let parsedValue: unknown = val;
-              if (val.trim() === '') {
-                parsedValue = {};
-              } else if (isVaultReference(val)) {
-                parsedValue = val;
-              } else {
-                try {
-                  parsedValue = JSON.parse(val);
-                } catch {
-                  parsedValue = val;
-                }
-              }
-              controller?.updatePropertyValue?.(
-                { name: ATTR.DESTINATION_CONFIG },
-                { ...destinationConfig, [DESTINATION_CONFIG_KEY.CREDENTIALS]: parsedValue }
-              );
-            }}
-          />
         </div>
       )}
 

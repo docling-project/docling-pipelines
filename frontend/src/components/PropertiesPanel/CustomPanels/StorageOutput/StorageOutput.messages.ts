@@ -49,14 +49,6 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.StorageOutput.selectProvider',
     defaultMessage: 'Select provider',
   },
-  credentials: {
-    id: 'src.components.PropertiesPanel.CustomPanels.StorageOutput.credentials',
-    defaultMessage: 'Credentials',
-  },
-  credentialsInvalid: {
-    id: 'src.components.PropertiesPanel.CustomPanels.StorageOutput.credentialsInvalid',
-    defaultMessage: 'Credentials must be a valid JSON object or a vault:// reference.',
-  },
   rootPath: {
     id: 'src.components.PropertiesPanel.CustomPanels.StorageOutput.rootPath',
     defaultMessage: 'Root path',

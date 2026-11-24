@@ -572,8 +572,6 @@
   "src.components.PropertiesPanel.CustomPanels.StorageOutput.contentFormat": "Content format",
   "src.components.PropertiesPanel.CustomPanels.StorageOutput.contentTypeMap": "Content type map",
   "src.components.PropertiesPanel.CustomPanels.StorageOutput.createDirs": "Create intermediate directories",
-  "src.components.PropertiesPanel.CustomPanels.StorageOutput.credentials": "Credentials",
-  "src.components.PropertiesPanel.CustomPanels.StorageOutput.credentialsInvalid": "Credentials must be a valid JSON object or a vault:// reference.",
   "src.components.PropertiesPanel.CustomPanels.StorageOutput.destinationConfigTitle": "Destination configuration",
   "src.components.PropertiesPanel.CustomPanels.StorageOutput.endpointUrl": "Endpoint URL",
   "src.components.PropertiesPanel.CustomPanels.StorageOutput.folderPath": "Folder path",
