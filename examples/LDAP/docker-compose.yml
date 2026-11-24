@@ -8,8 +8,8 @@ services:
       - "1389:389"
       - "1636:636"
     environment:
-      - LDAP_ORGANIZATION=${LDAP_ORGANIZATION:-ABCInc}
-      - LDAP_DOMAIN=${LDAP_DOMAIN:-abc.com}
+      - LDAP_ORGANIZATION=${LDAP_ORGANIZATION}
+      - LDAP_DOMAIN=${LDAP_DOMAIN}
       - LDAP_ADMIN_PASSWORD=${LDAP_ADMIN_PASSWORD}
     user: root
     volumes:

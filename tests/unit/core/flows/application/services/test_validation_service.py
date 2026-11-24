@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for ValidationService."""
 
 from unittest.mock import patch
@@ -162,6 +165,37 @@ class TestValidationService:
         # Assert
         assert result["status"] == "SUCCEEDED"
         mock_converter.transform_elyra_to_internal.assert_called_once()
+
+    def test_validate_flow_formats_conversion_errors(self):
+        """Test FlowValidationException from the conversion step gets a structured response."""
+        # Arrange
+        service = ValidationService()
+        elyra_flow_def = {
+            "doc_type": "pipeline",
+            "version": "3.0",
+            "pipelines": [
+                {
+                    "id": "test-pipeline",
+                    "nodes": [{"id": "node1", "type": "execution_node", "op": "execute-notebook-node"}],
+                }
+            ],
+        }
+
+        # Act
+        with patch("docpipe.utils.orchestration.elyra_converter.ElyraConverter") as mock_converter_class:
+            # Mock converter to return an invalid {"flow": ...} wrapper
+            mock_converter = mock_converter_class.return_value
+            mock_converter.transform_elyra_to_internal.return_value = {"flow": None}
+
+            result = service.validate_flow(flow_definition=elyra_flow_def, is_elyra=True)
+
+        # Assert
+        assert result["status"] == "FAILED"
+        assert result["message"] == "Flow validation failed."
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["message_code"] == "INVALID_FLOW_WRAPPER"
+        assert result["errors"][0]["code"] == "flow_validation_failed"
+        assert result["warnings"] == []
 
     def test_validate_flow_handles_unexpected_exception(self):
         """Test validate_flow catches and returns unexpected exceptions as FAILED."""

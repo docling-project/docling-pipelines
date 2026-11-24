@@ -123,6 +123,8 @@ export function CommonPropertiesPanel({
   const nodeFeatureMap: NodeFeatureMap = appData.nodeFeatureMap ?? {};
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   const featuresLoading: boolean = appData.featuresLoading === true;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  const isReadOnly: boolean = appData.readOnly === true;
   const currentNodeFeatures = nodeFeatureMap[currentNodeId] ?? { input_features: {}, output_features: {} };
 
   const metadata = getOperatorLabel(operatorName);
@@ -165,15 +167,14 @@ export function CommonPropertiesPanel({
     [operatorMetadata, operatorName]
   );
 
-  // Disable the Save button whenever at least one required attribute is missing a value.
+  // Disable the Save button whenever readOnly or at least one required attribute is missing a value.
   const updateSaveButton = useCallback((): void => {
-
     const propertyValues = (controller?.getPropertyValues?.() ?? {}) as Record<string, unknown>;
 
-    const shouldDisable = hasAnyRequiredParamMissing(nodeAttributes, propertyValues);
+    const shouldDisable = isReadOnly || hasAnyRequiredParamMissing(nodeAttributes, propertyValues);
 
     controller?.setSaveButtonDisable?.(shouldDisable);
-  }, [controller, nodeAttributes]);
+  }, [controller, nodeAttributes, isReadOnly]);
 
   useEffect(() => {
     updateSaveButton();
@@ -215,7 +216,7 @@ export function CommonPropertiesPanel({
           onChange={handleLabelChange}
           onBlur={handleLabelBlur}
         />
-        {!isEditingLabel && (
+        {!isEditingLabel && !isReadOnly && (
           <IconButton
             label={intl.formatMessage(messages.editDisplayName)}
             autoAlign
@@ -247,7 +248,12 @@ export function CommonPropertiesPanel({
           <TabPanel>
             <div className={styles.tabContent}>
               {ConfigureComponent ? (
-                <ConfigureComponent key={currentNodeId} controller={controller} />
+                <fieldset
+                  disabled={isReadOnly}
+                  style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
+                >
+                  <ConfigureComponent key={currentNodeId} controller={controller} />
+                </fieldset>
               ) : (
                 <p className={styles.configurationLabel}>
                   {intl.formatMessage(messages.configurationPlaceholder)}

@@ -118,6 +118,8 @@ docling-pipelines-api
 uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
 ```
 
+Authentication is enabled by default for both the REST API and the bundled UI. The API refuses to start until `JWT_SECRET_KEY` is set (at least 32 random characters), and the UI redirects to `/ui/login` until you sign in with a configured login method such as LDAP or the bootstrap administrator. To run without authentication on a local, trusted machine, set `DOCPIPE_AUTH_ENABLED=false` before starting the API. See the [Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
 Interactive OpenAPI documentation is available at `http://localhost:8080/api/v1/docs`.
 
 ### 4. Documentation MCP Server

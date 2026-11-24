@@ -21,6 +21,8 @@ uvicorn docpipe.api.main:app --reload --host 0.0.0.0 --port 8080
 uv run uvicorn docpipe.api.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
+Authentication is on by default: the server refuses to start until `JWT_SECRET_KEY` is set (at least 32 random characters). Set `DOCPIPE_AUTH_ENABLED=false` to run without authentication on a local, trusted machine. See the [Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
 Once running, the following URLs are available:
 
 | URL | Description |
@@ -33,16 +35,22 @@ Once running, the following URLs are available:
 
 ## Authentication
 
-Two authentication paths are supported. Both produce a short-lived JWT that must be
-included as `Authorization: Bearer <token>` on every protected endpoint.
+Two authentication paths are supported (plus an optional bootstrap administrator login). Both produce a short-lived JWT
+that is sent as the `docpipe_access_token` session cookie by browsers, or as `Authorization: Bearer <token>` by scripts,
+on every protected endpoint. See the
+[Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
 
 | Path | Mechanism | Relevant config |
 |------|-----------|-----------------|
 | LDAP | `POST /auth/login` with `username`/`password` | `LDAPConfig` via environment variables |
 | OAuth2 / OIDC | Authorization Code flow with PKCE | See [OAuth2 Authentication](OAUTH2_AUTHENTICATION.md) |
 
+**Prerequisite:** set `JWT_SECRET_KEY` (at least 32 random characters, not a placeholder) before starting the server. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+
+**Bootstrap administrator:** when neither LDAP nor OIDC is configured, set `DOCPIPE_AUTH_BOOTSTRAP_USERNAME` and `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH` (a bcrypt hash; set both or neither) to enable a local `admin` login. It uses the same `POST /auth/login` endpoint and stays active alongside LDAP or OIDC. See [Bootstrap administrator](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md#bootstrap-administrator) for how to generate the hash.
+
 ```bash
-# Obtain a JWT via LDAP login
+# Obtain a JWT via LDAP or bootstrap administrator login
 curl -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "password": "<your-password>"}'
@@ -174,13 +182,27 @@ See [ACL Document Retrieval](ACL_DOCUMENT_RETRIEVAL.md) for full details on ACL 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DS_LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed CORS origins |
+| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed CORS origins; a `*` entry logs a security warning at startup |
+| `DOCPIPE_AUTH_ENABLED` | `true` | Require a session on `/api/v1/*`; set `false` only for a local, trusted setup |
+| `JWT_SECRET_KEY` | — | JWT signing secret; required when auth is enabled (at least 32 characters, not a placeholder) |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Token and session cookie lifetime in minutes |
+| `DOCPIPE_AUTH_DEFAULT_ROLE` | `viewer` | Role of an authenticated user that matches no mapped group |
+| `DOCPIPE_AUTH_ROLE_MAPPING_VIEWER` / `_EDITOR` / `_ADMIN` | — | Groups per role, separated by `;` |
+| `DOCPIPE_AUTH_COOKIE_NAME` | `docpipe_access_token` | Session cookie name |
+| `DOCPIPE_AUTH_COOKIE_SECURE` | `false` | Always set `Secure` on the session cookie |
+| `DOCPIPE_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` and `X-Forwarded-Proto` from trusted reverse proxies |
+| `DOCPIPE_TRUSTED_PROXY_COUNT` | `1` | Number of trusted proxy hops appended to `X-Forwarded-For` |
+
+> **Token validity:** Roles are embedded in the 30-minute JWT (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`) without server-side revocation. Role changes and copied tokens remain effective until the token expires.
+| `DOCPIPE_AUTH_BOOTSTRAP_USERNAME` / `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH` | — | Break-glass `admin` login; set both or neither |
 | `PROJECT_REPOSITORY_BASE_DIR` | — | Override project storage directory (takes precedence over `docling-pipelines-config.yaml`) |
 | `DOCPIPE_POSTGRES_*` | — | PostgreSQL backend for job stats (see [Environment Variables](../../USER_GUIDE_PIPELINE_SETUP.md)) |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama host used by `GET /providers/ollama/models` |
 | `WATSONX_API_BASE_URL` | — | WatsonX base URL used by `GET /providers/watsonx/models` (required — no default) |
 
-Authentication-specific variables are documented in [OAuth2 Authentication](OAUTH2_AUTHENTICATION.md).
+Authentication variables, roles and startup validation are documented in the
+[Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md). OIDC variables are
+documented in [OAuth2 Authentication](OAUTH2_AUTHENTICATION.md).
 
 ## Security
 
