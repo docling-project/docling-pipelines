@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for OAuth2 provider implementations."""
 
 from datetime import UTC, datetime
@@ -325,11 +328,13 @@ async def test_google_extract_user_returns_user():
     config = _make_config(oauth2_provider="google")
     provider = GoogleOAuth2Provider(config)
 
-    provider.validate_id_token = AsyncMock(return_value={"email": "alice@example.com", "name": "Alice"})
+    provider.validate_id_token = AsyncMock(
+        return_value={"sub": "google-sub", "email": "alice@example.com", "name": "Alice"}
+    )
 
     user = await provider.extract_user_from_token({"id_token": "tok"})
     assert isinstance(user, User)
-    assert user.username == "alice@example.com"
+    assert user.username == "oidc:google:google-sub"
     assert user.email == "alice@example.com"
 
 
@@ -357,7 +362,7 @@ async def test_azure_extract_user_returns_user_with_preferred_username():
     )
 
     user = await provider.extract_user_from_token({"id_token": "tok"})
-    assert user.username == "bob@corp.com"
+    assert user.username == "oidc:azure:bob@corp.com"
     assert user.full_name == "Bob"
 
 
@@ -384,7 +389,7 @@ async def test_generic_extract_user_from_id_token():
     )
 
     user = await provider.extract_user_from_token({"id_token": "tok"})
-    assert user.username == "carol"
+    assert user.username == "oidc:generic:carol"
     assert user.email == "carol@example.com"
 
 
@@ -395,4 +400,4 @@ async def test_generic_extract_user_falls_back_to_access_token():
     provider.get_user_info = AsyncMock(return_value={"sub": "user-sub", "email": "", "name": ""})
 
     user = await provider.extract_user_from_token({"access_token": "access-tok"})
-    assert user.username == "user-sub"
+    assert user.username == "oidc:generic:user-sub"

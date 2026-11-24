@@ -65,4 +65,18 @@ export const messages = defineMessages({
     id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.runAgain',
     defaultMessage: 'Run Again',
   },
+
+  // ── Permission & ownership tooltips ────────────────────────────────────────
+  stopDisabledPermission: {
+    id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.stopDisabledPermission',
+    defaultMessage: 'You do not have permission to stop this job run',
+  },
+  stopDisabledOwnership: {
+    id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.stopDisabledOwnership',
+    defaultMessage: 'Only the user who started the run or an administrator can stop it',
+  },
+  runAgainDisabledPermission: {
+    id: 'src.components.ReadOnlyCanvas.RunStatusTopPanel.runAgainDisabledPermission',
+    defaultMessage: 'You do not have permission to run flows',
+  },
 });

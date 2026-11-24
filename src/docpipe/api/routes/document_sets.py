@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Document set management API routes."""
 
 # Import to trigger adapter registration
@@ -6,6 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request
 
 import docpipe.core.assets.document_sets.adapters.duckdb  # noqa: F401
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_document_set_service
 from docpipe.api.dto.document_set_dto import (
     DocumentSetCreateRequest,
@@ -94,6 +99,7 @@ PaginationDep = Annotated[tuple[int, int], Depends(get_pagination_params)]
 
 @document_sets_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=DocumentSetResponse,
     status_code=201,
     operation_id="create_document_set",
@@ -261,6 +267,7 @@ async def list_document_sets(
 
 @document_sets_router.patch(
     "/{document_set_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=DocumentSetResponse,
     operation_id="update_document_set",
     summary="Update document set metadata",
@@ -310,6 +317,7 @@ async def update_document_set(
 
 @document_sets_router.delete(
     "/{document_set_id}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_document_set",
     summary="Delete a document set",

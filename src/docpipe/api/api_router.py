@@ -1,11 +1,15 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Centralized API router configuration.
 
 This module aggregates all API routers and provides a single entry point
 for including them in the FastAPI application.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from docpipe.api.auth.dependencies import require_session
 from docpipe.api.routes.custom_operators import custom_operators_router
 from docpipe.api.routes.document_classes import document_classes_router
 from docpipe.api.routes.document_libraries import document_libraries_router
@@ -20,7 +24,7 @@ from docpipe.api.routes.providers import providers_router
 from docpipe.api.routes.validation import validation_router
 
 # Create main API router with /api/v1 prefix
-api_router = APIRouter(prefix="/api/v1")
+api_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_session)])
 
 # Include all sub-routers with their specific prefixes
 api_router.include_router(projects_router)
