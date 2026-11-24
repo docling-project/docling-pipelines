@@ -11,7 +11,7 @@ Current state, verified in the code:
 - `mark_missing_docs_as_deleted` selects the non-deleted ids and then updates them as two statements in one transaction with no per-job lock. No write method takes a per-job advisory lock, `lock_timeout` is not applied, and driver lock errors are wrapped into a generic `FlowExecutionFailedException`.
 - Callers: `IngestSourceOperator` reads processed docs once per run; `IncrementalUpdateService.save_metadata_for_incremental_update` upserts after each micro-batch (the only per-batch concurrent write); `process_ingested_docs` marks missing docs once per run from the orchestrator; `VectorDBOperator` calls `unmark_soft_deleted_docs` job-wide only as a rollback when vector-store cleanup fails; the orchestrator purges once at flow completion. The service wraps store errors in `FlowExecutionFailedException` with `from exc`.
 - Existing Postgres patterns to reuse: `pg_advisory_xact_lock(hashtext(:key))` in `ededup_storage/adapters/postgres_store.py`, `storage/postgres/postgres_table_storage.py`, and the bootstrap in `postgres_incremental_store.py`.
-- `filelock` is still used by four other modules (`json_job_stats_store`, the ededup filesystem store, `local_project_repository`, `pyarrow_handler`), so it stays a dependency until a separate follow-up.
+- `filelock` is also used across `json_job_stats_store`, `ededup_storage` filesystem store, `local_project_repository`, and `pyarrow_handler`. All of these will be migrated to `portalocker` to standardize file locking and eliminate the direct `filelock` dependency and its litellm pin override.
 
 Layering: store changes are in `adapters/stores/`, plus a shared retry-predicate module there. `LockTimeoutError` is defined in `docpipe/exceptions/docpipe_exceptions.py` and added to its `__all__`, so adapters and callers import it from `docpipe.exceptions`. The port in `domain/ports/incremental_metadata_store.py` and `IncrementalUpdateService` do not change.
 
@@ -36,8 +36,8 @@ single host only          multi-replica safe
 - Identical observable behaviour across both backends (see the spec's contract requirement).
 
 **Non-Goals:**
-- A shared `LockPort` or a common lock helper. The two backends use unrelated mechanisms. A shared file-lock helper belongs to the follow-up that migrates the other four modules.
-- Changing the port or the service.
+- A shared `LockPort` or a common lock helper. The two backends use unrelated mechanisms.
+- Changing the domain ports or services.
 - Windows support for the filesystem backend.
 - Making `mark_soft_deleted_docs` (mark then read) atomic. See Risks.
 - Row-level versioning or optimistic concurrency.
@@ -102,8 +102,13 @@ Note: with the default `lock_timeout=30s`, `upsert_records` makes up to 6 attemp
 ### D7. Code conventions for the new helpers
 The SQLSTATE-to-`LockTimeoutError` mapping and the lock-key builder do not read instance state, so they are `@staticmethod`s. `_locked` and `_write_transaction` use instance state and stay instance methods. New log statements use `%s` formatting, with no f-strings and no non-ASCII characters.
 
-### D8. Dependency
-Add `portalocker` to `[project.dependencies]` in both `pyproject.toml` and `slim/pyproject.toml`, pinned like its neighbours (the resolver currently proposes `4.4.2`). Run `uv lock` and `uv pip install -e ".[dev]"`, and commit `pyproject.toml` and `uv.lock` together. The `filelock` pin and the litellm override are untouched.
+### D8. Repository-wide portalocker migration
+- **JsonJobStatsStore**: Replace `FileLock` with `portalocker.Lock`. Reads (`get_job_stats`, `get_node_stats`, `get_all_node_stats`, `find_node_stats`) acquire shared locks (`portalocker.LOCK_SH`); writes (`store_job_stats`, `store_node_stats`, `delete_job_stats`, `atomic_update_job_stats`) acquire exclusive locks (`portalocker.LOCK_EX`). Lock timeouts map to existing `JobStatsStoreReadException` / `JobStatsStoreWriteException` as before.
+- **FilesystemEdedupStore**: Replace `FileLock` on `hashes_<scope>.parquet.lock` with `portalocker.Lock(..., flags=portalocker.LOCK_EX, timeout=self._lock_timeout)`.
+- **LocalProjectRepository**: Replace `FileLock` on `<project_id>.json.lock` with `portalocker.Lock(..., flags=portalocker.LOCK_EX, timeout=30.0)`.
+- **CpdParquetTableHandler**: Replace `FileLock` on `<path>.lock` with `portalocker.Lock(..., flags=portalocker.LOCK_SH)` for `read_table` and `portalocker.LOCK_EX` for `save_table` / `delete_file`.
+- **Logging**: Remove `"filelock"` suppression from `src/docpipe/utils/infrastructure/logging.py`.
+- **Dependency & Lockfile**: Add `portalocker` to `[project.dependencies]` in both `pyproject.toml` and `slim/pyproject.toml`. Remove direct `filelock==4.2.12` from `dependencies` and `override-dependencies` in both files. Run `uv lock` (root and `slim/`) and `uv pip install -e ".[dev]"`.
 
 ## Risks / Trade-offs
 
