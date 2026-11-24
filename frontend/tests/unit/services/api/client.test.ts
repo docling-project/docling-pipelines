@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { apiClient } from '@/services/api/client';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { apiClient, resetAuthRedirectLatch, stripUiBasename } from '@/services/api/client';
+import { server } from '../../../mocks/server';
+import { http, HttpResponse } from 'msw';
+import { waitFor } from '@testing-library/react';
+
+const mockAssign = vi.fn();
+const originalLocation = window.location;
 
 describe('apiClient', () => {
   it('has Content-Type: application/json header', () => {
@@ -18,5 +24,169 @@ describe('apiClient', () => {
     expect(typeof apiClient.post).toBe('function');
     expect(typeof apiClient.put).toBe('function');
     expect(typeof apiClient.delete).toBe('function');
+  });
+});
+
+describe('apiClient additional requirements', () => {
+  beforeEach(() => {
+    mockAssign.mockClear();
+    resetAuthRedirectLatch();
+
+    // Safely mock window.location in JSDOM
+    delete (window as any).location;
+    window.location = {
+      ...originalLocation,
+      assign: mockAssign,
+    } as any;
+
+    window.history.pushState({}, '', '/ui/flows?project_id=123');
+  });
+
+  afterEach(() => {
+    (window as any).location = originalLocation;
+  });
+
+  it('sends credentials with every request (withCredentials: true)', () => {
+    expect(apiClient.defaults.withCredentials).toBe(true);
+  });
+
+  it('attaches X-Requested-With: XMLHttpRequest to state-changing requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.post('http://localhost:3000/api/test-post', ({ request }) => {
+        capturedHeader = request.headers.get('X-Requested-With');
+        return HttpResponse.json({ ok: true });
+      })
+    );
+
+    await apiClient.post('http://localhost:3000/api/test-post', {});
+    expect(capturedHeader).toBe('XMLHttpRequest');
+  });
+
+  it('skips 401 redirect for login endpoint', async () => {
+    server.use(
+      http.post('http://localhost:3000/auth/login', () => {
+        return new HttpResponse(null, { status: 401 });
+      })
+    );
+
+    try {
+      await apiClient.post('http://localhost:3000/auth/login', {});
+    } catch {
+      // expected
+    }
+
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it('handles 403 response by pushing error toast and keeping session', async () => {
+    const { store } = await import('@/store');
+
+    server.use(
+      http.delete('http://localhost:3000/api/flows/123', () => {
+        return new HttpResponse(null, { status: 403 });
+      })
+    );
+
+    try {
+      await apiClient.delete('http://localhost:3000/api/flows/123');
+    } catch {
+      // expected
+    }
+
+    const notifications = store.getState().notifications.active;
+    const permissionDeniedNotification = notifications.find((n) => n.subtitle === 'You do not have permission to perform this action');
+    expect(permissionDeniedNotification).toBeDefined();
+  });
+
+  it('concurrent 401s on other endpoints clear auth state and trigger single redirect', async () => {
+    const { store } = await import('@/store');
+
+    server.use(
+      http.get('http://localhost:3000/api/flows', () => {
+        return new HttpResponse(null, { status: 401 });
+      })
+    );
+
+    // Call concurrent 401s
+    await Promise.allSettled([
+      apiClient.get('http://localhost:3000/api/flows'),
+      apiClient.get('http://localhost:3000/api/flows'),
+      apiClient.get('http://localhost:3000/api/flows'),
+    ]);
+
+    // Latch should trigger navigate EXACTLY once
+    expect(mockAssign).toHaveBeenCalledTimes(1);
+    expect(mockAssign).toHaveBeenCalledWith('/ui/login?return_to=%2Fflows%3Fproject_id%3D123');
+
+    // Wait for the async logout thunk to finish clearing the state
+    await waitFor(() => {
+      expect(store.getState().auth.status).toBe('unauthenticated');
+    });
+  });
+
+  it('preserves leading slash in return_to when 401 occurs at bare /ui basename with query string', async () => {
+    // Reset the redirect latch via a successful /auth/me response first
+    server.use(
+      http.get('http://localhost:3000/auth/me', () => {
+        return HttpResponse.json({ username: 'alice', email: 'a@x.io', full_name: 'Alice', roles: ['viewer'] });
+      }),
+      http.get('http://localhost:3000/api/flows', () => {
+        return new HttpResponse(null, { status: 401 });
+      })
+    );
+    await apiClient.get('http://localhost:3000/auth/me');
+
+    window.location.pathname = '/ui';
+    window.location.search = '?tab=1';
+
+    await expect(apiClient.get('http://localhost:3000/api/flows')).rejects.toThrow();
+
+    expect(mockAssign).toHaveBeenCalledTimes(1);
+    expect(mockAssign).toHaveBeenCalledWith('/ui/login?return_to=%2F%3Ftab%3D1');
+  });
+
+  it('skips 401 redirect for /auth/logout and /auth/config endpoints', async () => {
+    server.use(
+      http.post('http://localhost:3000/auth/logout', () => new HttpResponse(null, { status: 401 })),
+      http.get('http://localhost:3000/auth/config', () => new HttpResponse(null, { status: 401 }))
+    );
+
+    await expect(apiClient.post('http://localhost:3000/auth/logout', {})).rejects.toThrow();
+    await expect(apiClient.get('http://localhost:3000/auth/config')).rejects.toThrow();
+
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it('skips 401 redirect when already on /ui/login to prevent redirect loops', async () => {
+    server.use(
+      http.get('http://localhost:3000/api/flows', () => new HttpResponse(null, { status: 401 }))
+    );
+
+    window.location.pathname = '/ui/login';
+    window.location.search = '?return_to=%2Fprojects';
+
+    await expect(apiClient.get('http://localhost:3000/api/flows')).rejects.toThrow();
+
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it('does not strip /ui prefix from paths like /uix/foo', async () => {
+    expect(stripUiBasename('/uix/foo')).toBe('/uix/foo');
+    expect(stripUiBasename('/ui')).toBe('/');
+    expect(stripUiBasename('/ui/')).toBe('/');
+    expect(stripUiBasename('/ui/projects')).toBe('/projects');
+
+    server.use(
+      http.get('http://localhost:3000/api/flows', () => new HttpResponse(null, { status: 401 }))
+    );
+
+    window.location.pathname = '/uix/foo';
+    window.location.search = '';
+
+    await expect(apiClient.get('http://localhost:3000/api/flows')).rejects.toThrow();
+
+    expect(mockAssign).toHaveBeenCalledTimes(1);
+    expect(mockAssign).toHaveBeenCalledWith('/ui/login?return_to=%2Fuix%2Ffoo');
   });
 });

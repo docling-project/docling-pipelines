@@ -4,6 +4,7 @@
 # ubi10/nodejs-22 matches the base used by the main Dockerfile's frontend-builder
 # stage — consistent Node version and OS libraries across both build artefacts.
 FROM registry.access.redhat.com/ubi10/nodejs-22 AS builder
+USER root
 WORKDIR /frontend
 # Copy only what npm needs to install dependencies — maximises layer cache.
 COPY frontend/package*.json ./
@@ -27,6 +28,9 @@ COPY --from=builder --chown=1001:0 /frontend/bff/server.cjs ./server.cjs
 
 EXPOSE 3001
 ENV BFF_PORT=3001
+# The BFF binds to 127.0.0.1 by default. Listen on all interfaces in the image
+# so the Compose `bff` service and the Kubernetes probes (pod address) reach it.
+ENV BFF_HOST=0.0.0.0
 # BACKEND_API_URL has no default — it must be injected by the orchestrator
 # (docker-compose: http://docpipe:8080, k8s sidecar: http://localhost:8080).
 # Leaving it unset surfaces misconfiguration early rather than silently

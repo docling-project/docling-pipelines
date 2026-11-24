@@ -10,6 +10,7 @@ to REST API standard error format as defined in error_dto.py.
 import logging
 import traceback
 import uuid
+from collections.abc import Mapping
 
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
@@ -50,6 +51,7 @@ def create_error_response(
     trace_id: str,
     more_info: str | None = None,
     target: ErrorTarget | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """Create REST API standard error response.
 
@@ -60,6 +62,7 @@ def create_error_response(
         trace_id: Trace ID for debugging (required)
         more_info: Optional URL to error documentation
         target: Optional target information
+        headers: Optional response headers (for example ``Retry-After``)
 
     Returns:
         JSONResponse: REST API standard error response
@@ -90,6 +93,7 @@ def create_error_response(
     return JSONResponse(
         status_code=status_code,
         content=error_response.model_dump(exclude_none=True),
+        headers=dict(headers) if headers else None,
     )
 
 
@@ -133,6 +137,7 @@ def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSO
         message=str(exc.detail),
         trace_id=trace_id,
         target=target,
+        headers=exc.headers,
     )
 
 
@@ -222,10 +227,14 @@ def docpipe_exception_handler(request: Request, exc: DocpipeException) -> JSONRe
     # This takes precedence over the domain error code so the response body
     # matches the REST API contract (e.g. 425 → "too_early").
     status_code_error_map: dict[int, str] = {
+        403: "forbidden",
         425: "too_early",
     }
     domain_error_code = str(exc.error_code.value) if exc.error_code else None
-    api_error_code = status_code_error_map.get(exc.status_code) or domain_error_code or "internal_error"
+    if exc.status_code == 425:
+        api_error_code = "too_early"
+    else:
+        api_error_code = domain_error_code or status_code_error_map.get(exc.status_code) or "internal_error"
 
     # FlowValidationException carries a structured errors list — unpack each
     # alert as a separate ErrorDetail so the caller gets actionable per-error detail.

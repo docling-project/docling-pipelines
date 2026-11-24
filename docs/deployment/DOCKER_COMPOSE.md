@@ -16,6 +16,17 @@ Set `OPENSEARCH_PASSWORD` in each terminal before running Docker Compose command
 export OPENSEARCH_PASSWORD='MyStrongPass@123' # pragma: allowlist secret
 ```
 
+Authentication is on by default, so also set a signing secret of at least 32 random characters:
+
+```bash
+export JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+```
+
+Sign-in needs at least one login method: LDAP, an OIDC provider, or the bootstrap administrator
+(`DOCPIPE_AUTH_BOOTSTRAP_USERNAME` and `DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH`, a bcrypt hash that you supply; no
+default is shipped). See the [Authentication and Authorization Guide](../guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+To run without authentication on a local, trusted machine, set `DOCPIPE_AUTH_ENABLED=false` instead.
+
 ## Step 1: Verify Configuration
 
 ```bash
@@ -31,7 +42,13 @@ docker compose -f docker/docker-compose.yml build
 or, for a GPU build, use:
 
 ```bash
-# docker compose -f docker/docker-compose.yml build --build-arg COMPUTE_BACKEND=gpu
+# docker compose -f docker/docker-compose.yml build --build-arg BUILD_PROFILE=gpu
+```
+
+For pipelines that use Docling Serve for extraction and chunking, build the slim image.
+
+```bash
+docker compose -f docker/docker-compose.yml build --build-arg BUILD_PROFILE=slim
 ```
 
 ## Step 3: Start Application
