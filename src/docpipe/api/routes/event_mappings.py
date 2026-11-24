@@ -1,9 +1,14 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """REST API for event routing mappings."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Response
 
+from docpipe.api.auth.guards import require_role
+from docpipe.api.auth.roles import Role
 from docpipe.api.dependencies import get_event_mapping_service, get_flow_service
 from docpipe.api.dto.event_mapping_dto import (
     EventMappingDTO,
@@ -24,6 +29,7 @@ RoutingKeyPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 
 @event_mappings_router.post(
     "",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=EventMappingDTO,
     status_code=201,
     operation_id="create_event_mapping",
@@ -62,6 +68,7 @@ def get_event_mapping(*, key: RoutingKeyPath, mapping_service: EventMappingServi
 
 @event_mappings_router.put(
     "/{key}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     response_model=EventMappingDTO,
     operation_id="update_event_mapping",
     summary="Update the flow assigned to an event routing key",
@@ -87,6 +94,7 @@ def update_event_mapping(
 
 @event_mappings_router.delete(
     "/{key}",
+    dependencies=[Depends(require_role(Role.EDITOR))],
     status_code=204,
     operation_id="delete_event_mapping",
     summary="Delete an event routing key",

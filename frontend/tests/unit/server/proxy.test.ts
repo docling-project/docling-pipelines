@@ -13,6 +13,8 @@ const logger = {
   isErrorEnabled: () => false,
 } as unknown as Parameters<typeof handleProxyError>[0]['logger'];
 
+const req = { headers: {} } as unknown as Parameters<typeof proxyRequest>[0]['req'];
+
 const createRes = () => {
   const json = vi.fn();
   const status = vi.fn(() => ({ json }));
@@ -31,7 +33,7 @@ describe('proxyRequest', () => {
   it('prefixes the path with BACKEND_API_URL and uses no-body headers when body is undefined', async () => {
     const spy = vi.spyOn(axios, 'request').mockResolvedValue({ status: 200, data: {} } as AxiosResponse);
 
-    await proxyRequest({ method: 'GET', path: ['api', 'v1', 'flows'] });
+    await proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'flows'] });
 
     expect(spy).toHaveBeenCalledWith({
       method: 'GET',
@@ -45,7 +47,7 @@ describe('proxyRequest', () => {
   it('uses JSON body headers when a body is provided', async () => {
     const spy = vi.spyOn(axios, 'request').mockResolvedValue({ status: 201, data: {} } as AxiosResponse);
 
-    await proxyRequest({ method: 'POST', path: ['api', 'v1', 'flows'], body: { name: 'a' } });
+    await proxyRequest({ req, method: 'POST', path: ['api', 'v1', 'flows'], body: { name: 'a' } });
 
     expect(spy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -55,10 +57,31 @@ describe('proxyRequest', () => {
     );
   });
 
+  it('forwards credential and context headers from the browser request, and no others', async () => {
+    const spy = vi.spyOn(axios, 'request').mockResolvedValue({ status: 200, data: {} } as AxiosResponse);
+    const browserReq = {
+      headers: { cookie: 'session=1', authorization: 'Bearer t', 'x-requested-with': 'XMLHttpRequest', 'x-forwarded-for': '1.2.3.4' },
+    } as unknown as typeof req;
+
+    await proxyRequest({ req: browserReq, method: 'POST', path: ['api', 'v1', 'flows'], body: {} });
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Cookie: 'session=1',
+          Authorization: 'Bearer t',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      }),
+    );
+  });
+
   it('allows overriding Accept and responseType for streamed downloads', async () => {
     const spy = vi.spyOn(axios, 'request').mockResolvedValue({ status: 200, data: {} } as AxiosResponse);
 
-    await proxyRequest({ method: 'GET', path: ['report'], accept: 'text/csv', responseType: 'stream' });
+    await proxyRequest({ req, method: 'GET', path: ['report'], accept: 'text/csv', responseType: 'stream' });
 
     expect(spy).toHaveBeenCalledWith(
       expect.objectContaining({ headers: { Accept: 'text/csv' }, responseType: 'stream' }),
@@ -66,9 +89,9 @@ describe('proxyRequest', () => {
   });
 
   describe('URL construction', () => {
-    const urlOf = async (options: Parameters<typeof proxyRequest>[0]) => {
+    const urlOf = async (options: Omit<Parameters<typeof proxyRequest>[0], 'req'>) => {
       const spy = vi.spyOn(axios, 'request').mockResolvedValue({ status: 200, data: {} } as AxiosResponse);
-      await proxyRequest(options);
+      await proxyRequest({ req, ...options });
       return (spy.mock.calls[0]?.[0] as { url: string }).url;
     };
 
@@ -87,7 +110,7 @@ describe('proxyRequest', () => {
     it.each(['.', '..', ''])('rejects the unsafe path segment "%s" without calling the backend', async (segment) => {
       const spy = vi.spyOn(axios, 'request').mockResolvedValue({ status: 200, data: {} } as AxiosResponse);
 
-      await expect(proxyRequest({ method: 'GET', path: ['api', 'v1', 'flows', segment] })).rejects.toBeInstanceOf(
+      await expect(proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'flows', segment] })).rejects.toBeInstanceOf(
         InvalidPathSegmentError,
       );
       expect(spy).not.toHaveBeenCalled();

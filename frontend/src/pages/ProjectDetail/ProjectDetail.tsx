@@ -19,8 +19,9 @@ import {
   selectFlowsArray,
   selectFlowLoading,
 } from '@/selectors';
-import { useAppDispatch, useAppSelector, useTheme, useNotify } from '@/hooks';
+import { useAppDispatch, useAppSelector, useTheme, useNotify, usePermissionReason } from '@/hooks';
 import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
+import { PermissionButtonElement } from '@/components/common/PermissionTooltip';
 import { ROUTES, generateRoute } from '@/config';
 import { messages } from './ProjectDetail.messages';
 import styles from './ProjectDetail.module.scss';
@@ -51,6 +52,7 @@ export function ProjectDetail(): React.JSX.Element | null {
   const dispatch = useAppDispatch();
   const notify = useNotify();
   const { addEntry, removeEntry } = useRecentlyVisited();
+  const { canEdit, createReason } = usePermissionReason();
 
   // ── Project from store ───────────────────────────────────────────────────
   const project = useAppSelector(makeSelectProject(projectId));
@@ -320,6 +322,8 @@ export function ProjectDetail(): React.JSX.Element | null {
                 onClick: handleCreateFlow,
                 renderIcon: Add,
                 kind: 'tertiary',
+                disabled: !canEdit,
+                ...(!canEdit && { as: PermissionButtonElement, permissionReason: createReason }),
               }}
             />
           )}
