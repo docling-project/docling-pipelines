@@ -16,6 +16,10 @@ The server SHALL provide a `validate_flow` tool that validates a flow definition
 - **WHEN** an agent calls `validate_flow` with missing required features, cyclic dependencies, or missing ingest root
 - **THEN** the tool SHALL return `{"valid": false, "errors": [...], "warnings": [...]}` detailing the exact validation failure
 
+#### Scenario: Compilation errors during construction are normalized
+- **WHEN** an agent calls `validate_flow` with a flow missing `flow_name` or containing authoring-level cycles that fail compilation during manager construction
+- **THEN** the tool SHALL catch the compilation exception and return `{"valid": false, "errors": [...], "warnings": []}` rather than terminating or raising an uncaught exception
+
 ### Requirement: Create and Save Flow to Workspace via MCP
 The server SHALL provide a `create_flow` tool that validates and saves a flow JSON file to disk.
 
@@ -44,3 +48,10 @@ The server SHALL provide a `get_job_status` tool to query the execution status a
 #### Scenario: Read status of completed or running job
 - **WHEN** an agent calls `get_job_status` with a valid `job_id`
 - **THEN** the tool SHALL return the execution status, node completion states, and timestamps from the job store
+
+### Requirement: Pure Stdio Transport Channel
+The server SHALL ensure that `stdout` is reserved exclusively for MCP JSON-RPC protocol frames.
+
+#### Scenario: Suppress core logging on stdout
+- **WHEN** the server invokes `DocpipeFlowManager` for validation or execution
+- **THEN** `configure_logging=False` SHALL be passed and all server logging SHALL be emitted to `stderr`, leaving `stdout` free of raw log messages
