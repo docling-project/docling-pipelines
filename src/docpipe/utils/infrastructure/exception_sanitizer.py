@@ -28,7 +28,18 @@ _MAX_CHAIN_DEPTH: Final[int] = 10
 
 _HTTP_MODULES: Final[frozenset[str]] = frozenset({"requests", "urllib3", "httpx", "aiohttp", "http", "httpcore"})
 _DATABASE_MODULES: Final[frozenset[str]] = frozenset(
-    {"sqlalchemy", "psycopg", "psycopg2", "asyncpg", "duckdb", "pymilvus", "opensearchpy", "opensearch", "sqlite3"}
+    {
+        "sqlalchemy",
+        "psycopg",
+        "psycopg2",
+        "asyncpg",
+        "duckdb",
+        "_duckdb",  # duckdb >= 1.4 reports its exception classes under the native module
+        "pymilvus",
+        "opensearchpy",
+        "opensearch",
+        "sqlite3",
+    }
 )
 _CLIENT_MODULES: Final[frozenset[str]] = frozenset(
     {
