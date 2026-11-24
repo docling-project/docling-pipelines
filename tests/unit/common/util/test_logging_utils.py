@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for logging utilities.
 Tests for logger configuration and formatting.
@@ -5,6 +8,7 @@ Tests for logger configuration and formatting.
 
 import logging
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -182,6 +186,56 @@ class TestGetLogger:
         """Test getting logger with None level uses INFO."""
         logger = get_logger(level=None)
         assert logger.level == logging.INFO
+
+
+class TestSetupLoggingFileHandler:
+    """Test the file handler added by setup_logging."""
+
+    @pytest.fixture
+    def clean_root(self, tmp_path, monkeypatch):
+        """Empty docpipe root logger in a temp dir; restored afterwards."""
+        monkeypatch.setenv("DS_LOG_JSON", "False")
+        monkeypatch.chdir(tmp_path)
+        root = logging.getLogger("docpipe")
+        original_handlers = root.handlers[:]
+        original_level = root.level
+        root.handlers = []
+        yield root
+        for handler in root.handlers:
+            handler.close()
+        root.handlers = original_handlers
+        root.setLevel(original_level)
+
+    @staticmethod
+    def _file_handlers(root: logging.Logger) -> list[logging.FileHandler]:
+        return [h for h in root.handlers if isinstance(h, logging.FileHandler)]
+
+    def test_file_handler_is_added_once_for_the_same_relative_path(self, clean_root):
+        """Test same relative path twice gives one handler (#717)."""
+        setup_logging(level="info", file="x.log")
+        setup_logging(level="info", file="x.log")
+
+        assert len(self._file_handlers(clean_root)) == 1
+
+    def test_absolute_then_relative_path_gives_one_handler(self, clean_root, tmp_path):
+        """Test absolute and relative paths to the same file share a handler."""
+        setup_logging(level="info", file=str(tmp_path / "x.log"))
+        setup_logging(level="info", file="x.log")
+
+        handlers = self._file_handlers(clean_root)
+        assert len(handlers) == 1
+        assert Path(handlers[0].baseFilename).resolve() == (tmp_path / "x.log").resolve()
+
+    def test_log_line_is_not_duplicated_in_file(self, clean_root, tmp_path):
+        """Test each record is written to the log file only once."""
+        setup_logging(level="info", file="x.log")
+        setup_logging(level="info", file="x.log")
+
+        get_logger("docpipe.test.file_once").info("hello")
+        for handler in self._file_handlers(clean_root):
+            handler.flush()
+
+        assert (tmp_path / "x.log").read_text().count("hello") == 1
 
 
 class TestConditionalFormatter:
