@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import asyncio
 import gzip
 import io
@@ -381,6 +384,45 @@ class TestFilesystemSourceAdapter:
         )
 
         assert content == b"hello file uri"
+
+    @pytest.mark.parametrize("name", ["Invoice #123.pdf", "what?.pdf", "50%25 off.pdf", "100%#2.pdf"])
+    @pytest.mark.parametrize("single_file", [False, True])
+    def test_source_url_round_trips_reserved_url_characters(self, tmp_path, name, single_file):
+        """A source_url built by fetch_documents must read back the same file."""
+        from docpipe.utils.operators.binary_content_fetcher import get_binary_content
+
+        file_path = tmp_path / name
+        file_path.write_bytes(b"original bytes")
+        config = FilesystemSourceConfig(
+            paths=[str(file_path if single_file else tmp_path)],
+            recursive=False,
+            max_file_size_mb=None,
+            follow_symlinks=False,
+        )
+        adapter = FilesystemSourceAdapter()
+
+        docs = asyncio.run(collect_async(adapter.fetch_documents(config)))
+
+        assert [doc.name for doc in docs] == [name]
+        source_url = docs[0].source_url
+        assert adapter.fetch_binary_content(source_id=source_url, provider_config={}) == b"original bytes"
+        assert get_binary_content(doc_metadata={"path": source_url}, global_config={}) == b"original bytes"
+
+    @pytest.mark.parametrize("name", ["plain name é.pdf", "100% done.pdf"])
+    def test_source_url_unchanged_for_names_that_already_read_back(self, tmp_path, name):
+        """Names that unquote leaves alone keep the raw file:// URL, so their document ids stay stable."""
+        file_path = tmp_path / name
+        file_path.write_bytes(b"x")
+        config = FilesystemSourceConfig(
+            paths=[str(tmp_path)],
+            recursive=False,
+            max_file_size_mb=None,
+            follow_symlinks=False,
+        )
+
+        docs = asyncio.run(collect_async(FilesystemSourceAdapter().fetch_documents(config)))
+
+        assert docs[0].source_url == f"file://{file_path.absolute()}"
 
     def test_test_connection_variants(self, tmp_path):
         adapter = FilesystemSourceAdapter()
