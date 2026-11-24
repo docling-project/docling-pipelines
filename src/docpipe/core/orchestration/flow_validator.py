@@ -293,8 +293,10 @@ class FlowValidator:
         ),
         FindingKind.DESTINATION_NOT_PERMITTED: (
             "VAULT_DESTINATION_NOT_PERMITTED",
-            "Config key '{key}' is a literal destination whose host is not in secrets.vault.allowed_destinations, "
-            "while the node reads credentials from Vault.",
+            (
+                "Config key '{key}' is a literal destination whose host is not in secrets.vault.allowed_destinations, "
+                "while the node reads credentials from Vault."
+            ),
         ),
     }
 

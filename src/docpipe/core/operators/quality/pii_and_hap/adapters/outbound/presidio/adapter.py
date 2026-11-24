@@ -136,9 +136,11 @@ class PresidioPIIAdapter(PIIDetectionPort):
         except Exception as exc:
             return PresidioPIIAdapter._validation_result(
                 errors=[
-                    f"Failed to initialise Presidio AnalyzerEngine (language='{self._config.language}', "
-                    f"spacy_model='{self._config.spacy_model}'): {exc}. Make sure the spaCy model is installed: "
-                    f"python -m spacy download {self._config.spacy_model}"
+                    (
+                        f"Failed to initialise Presidio AnalyzerEngine (language='{self._config.language}', "
+                        f"spacy_model='{self._config.spacy_model}'): {exc}. Make sure the spaCy model is installed: "
+                        f"python -m spacy download {self._config.spacy_model}"
+                    )
                 ]
             )
         return PresidioPIIAdapter._validation_result(errors=[])
