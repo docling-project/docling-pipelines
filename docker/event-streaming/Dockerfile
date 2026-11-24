@@ -8,10 +8,9 @@ RUN pip install --no-cache-dir uv
 
 # Cache dependencies separately from backend source changes.
 COPY pyproject.toml uv.lock ./
+COPY slim/pyproject.toml slim/uv.lock ./slim/
 ARG BUILD_PROFILE=cpu
-# Use CPU dependencies by default, or select GPU support with BUILD_PROFILE=gpu.
-# Install the pinned torch and torchvision versions separately using CPU wheels.
-# This avoids CUDA dependencies while keeping pyproject.toml and uv.lock unchanged.
+# Select CPU-only wheels, locked GPU dependencies, or the slim dependency set with Kafka support.
 RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
     case "$BUILD_PROFILE" in \
         gpu) \
@@ -30,7 +29,12 @@ RUN uv venv --python /usr/bin/python3.12 /opt/docpipe-venv && \
                 --format requirements.txt --output-file requirements-cpu.txt && \
             uv pip install --python /opt/docpipe-venv/bin/python \
                 --no-cache --torch-backend=cpu -r requirements-cpu.txt ;; \
-        *) echo "BUILD_PROFILE must be cpu or gpu" >&2; exit 1 ;; \
+        slim) \
+            uv export --project slim --locked --no-dev --extra event-streaming --no-emit-project \
+                --format pylock.toml --output-file pylock.toml && \
+            uv pip install --python /opt/docpipe-venv/bin/python \
+                --no-cache --require-hashes -r pylock.toml ;; \
+        *) echo "BUILD_PROFILE must be cpu, gpu, or slim" >&2; exit 1 ;; \
     esac
 
 # Run the API and serve the built UI as a non-root user.
