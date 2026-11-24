@@ -2,28 +2,24 @@
 
 ## Why
 
-The incremental metadata store has critical correctness and concurrency bugs in PostgreSQL and serialisation bottlenecks in the filesystem backend:
-- The PostgreSQL adapter creates its table in the configured schema (`incremental_metadata`), but queries compile to `FROM inc_update_metadata` without schema qualification. On any standard connection where `search_path` does not include `incremental_metadata`, the first read, write, or clear fails immediately with `UndefinedTable: relation "inc_update_metadata" does not exist`.
-- The PostgreSQL upsert uses non-atomic `session.get()` followed by `session.add()`. When concurrent workers insert the same new keys, they collide and fail with `UniqueViolation` on `inc_update_metadata_pkey`.
-- The PostgreSQL DDL bootstrap (`CREATE SCHEMA IF NOT EXISTS` and `table.create`) is unguarded against concurrent replica startup.
-- The filesystem store serialises all operations, including reads, behind one exclusive `filelock` per job, forcing concurrent micro-batches to queue behind read-only calls. Furthermore, `clear()` deletes `.locks/metadata.lock`, which breaks mutual exclusion across unlinked file inodes on POSIX.
+The incremental metadata store has concurrency gaps in both backends:
+
+- The filesystem store serialises all operations, including reads, behind one exclusive `filelock` per job, so concurrent micro-batches queue behind read-only calls.
+- Filesystem `clear()` deletes `.locks/metadata.lock`, which breaks mutual exclusion across unlinked file inodes on POSIX.
+- Filesystem `upsert_records` does not deduplicate a batch by `doc_id`, so the two backends differ when a batch repeats a key.
+- PostgreSQL compound writes are unserialised per job. `mark_missing_docs_as_deleted` reads ids and then updates them in separate statements, so it can race with concurrent upserts, unmarks and purges.
+- The PostgreSQL adapter does not honour `lock_timeout`, and there is no unified timeout error across backends.
 
 ## What Changes
 
 Layers affected: **backend-only** (storage adapters under `src/docpipe/core/incremental_metadata/`, one dependency). No REST routes, operators, frontend, BFF, or Redux state change.
 
-The implementation is structured into two phases:
-- **Phase 1: Fix demonstrably broken PostgreSQL operations**
-  - Qualify all PostgreSQL queries with the configured schema using a schema-qualified `Table`.
-  - Rewrite `upsert_records` to use `INSERT ... ON CONFLICT (job_id, id) DO UPDATE`, deduplicating batches by `doc_id` (last wins).
-  - Guard DDL bootstrap with `pg_advisory_xact_lock` so concurrent replicas start without race conditions.
-  - Add integration tests against a live PostgreSQL database (gated on `DOCPIPE_POSTGRES_*` environment variables).
-- **Phase 2: Concurrency hardening & filesystem shared locks**
-  - Filesystem adapter: replace `filelock.FileLock` with `portalocker`. Read methods take a shared lock (`LOCK_SH`), write methods take an exclusive lock (`LOCK_EX`). Single-machine execution only. Never delete `.locks/metadata.lock` in `clear()`. Deduplicate batches by `doc_id` (last wins).
-  - PostgreSQL adapter: wrap multi-step write methods in `pg_advisory_xact_lock` for the job with set-based SQL (`UPDATE ... RETURNING`, `DELETE`).
-  - PostgreSQL adapter: honour `lock_timeout` via `set_config('lock_timeout', :value, true)` and surface a unified `LockTimeoutError(FlowExecutionFailedException)` unwrapping driver errors for retries.
-  - Add `portalocker` to `pyproject.toml` and regenerate `uv.lock` (root and `slim/`).
-  - Document that the filesystem backend is single-host only, and that distributed deployments must select `postgresql`.
+- Filesystem adapter: replace `filelock.FileLock` with `portalocker`. Read methods take a shared lock (`LOCK_SH`), write methods take an exclusive lock (`LOCK_EX`). Single-machine execution only. Never delete `.locks/metadata.lock` in `clear()`. Deduplicate batches by `doc_id` (last wins).
+- PostgreSQL adapter: wrap each write method in a transaction that takes `pg_advisory_xact_lock` for the job, and make the multi-step writes set-based (`UPDATE ... RETURNING`, `DELETE`).
+- PostgreSQL adapter: read a new optional `lock_timeout` config key (seconds, default `30.0`, same key and default as the filesystem backend, whose code default changes from `120.0` to `30.0`), apply it with `set_config('lock_timeout', :value, true)`, and raise a unified `LockTimeoutError(FlowExecutionFailedException)` that unwraps driver errors, so `upsert_records` can retry.
+- Define `LockTimeoutError` in `docpipe.exceptions` and share one retry predicate between both stores.
+- Add `portalocker` to `pyproject.toml` and regenerate `uv.lock` (root and `slim/`).
+- Document the deployment rule: distributed execution requires `postgresql`; on a single machine either `postgresql` or `filesystem` (`portalocker`) is supported, and the filesystem backend is single-host only.
 
 ## Capabilities
 
@@ -35,10 +31,10 @@ The implementation is structured into two phases:
 
 ## Impact
 
-- Code: `filesystem_incremental_store.py`, `postgres_incremental_store.py`, `models.py` (schema handling), `docs/guides/ADVANCED_CONFIGURATION.md`.
+- Code: `filesystem_incremental_store.py`, `postgres_incremental_store.py`, a small shared retry-predicate module under `adapters/stores/`, `src/docpipe/exceptions/docpipe_exceptions.py` (`LockTimeoutError`), `docs/guides/ADVANCED_CONFIGURATION.md`.
 - Dependencies: new `portalocker`; `filelock` stays because four other modules still use it.
-- Tests: `tests/unit/core/incremental_metadata/` (filesystem and Postgres store tests).
-- Runtime: no config key changes. `lock_timeout` keeps its meaning for both backends.
+- Tests: `tests/unit/core/incremental_metadata/` (filesystem and Postgres store tests) and `tests/integration/test_postgres_incremental_metadata.py`.
+- Runtime: one new optional config key, `lock_timeout` for the `postgresql` backend. The filesystem backend's `lock_timeout` keeps its meaning. `IncrementalUpdateService` and the port are unchanged.
 
 ## Non-goals
 
@@ -47,3 +43,5 @@ The implementation is structured into two phases:
 - Preventing overlapping runs of the same `job_id`. Within one run, ingest, the missing-doc diff and the purge are single-node, and only batch writes are concurrent. Locks keep the store consistent but do not give exactly-once processing across overlapping runs (see design, Risks). No existing guard against overlapping runs was found.
 - Alembic migrations for the incremental metadata table.
 - Supporting the filesystem backend on NFS or object-store mounts.
+- Windows support for the filesystem backend. The project targets Linux and macOS.
+- An atomic mark-then-read in `IncrementalUpdateService.mark_soft_deleted_docs`. The two store calls run once per run on the orchestrator, before batch writes, so no concurrent writer interleaves within a run.
