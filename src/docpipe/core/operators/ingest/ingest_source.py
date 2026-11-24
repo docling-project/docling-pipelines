@@ -8,7 +8,9 @@ import hashlib
 import importlib
 import itertools
 import json
+import os
 import pathlib
+import re
 from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import pyarrow as pa
@@ -17,7 +19,9 @@ from langchain_core.documents import Document
 from docpipe.core.constants.constants import (
     AttributeDataTypes,
     DocpipeConstants,
+    EnvironmentVariables,
     Metrics,
+    is_auth_enabled,
 )
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.event_streaming.models import InputEvent
@@ -31,6 +35,7 @@ from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
 from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
+from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
 
 if TYPE_CHECKING:
@@ -448,6 +453,9 @@ class IngestSourceOperator(AbstractOperator):
         if not self.provider:
             raise ValueError(ValidationCodeMessages.INGEST_PROVIDER_MISSING.value)
 
+        if self.provider == "filesystem" and is_auth_enabled():
+            self._build_adapter_config(self.provider)
+
         incremental_service = get_incremental_update_service()
         job_id_for_tracking: str = self.context_id or self.job_id or ""
 
@@ -457,6 +465,7 @@ class IngestSourceOperator(AbstractOperator):
 
         # Initialize metadata
         metadata: dict[str, Any] = self.create_base_metadata(total_docs_count=0)
+        metadata[Metrics.Internal.ALL_DOC_IDS] = []
 
         # Process documents
         doc_data: list[dict[str, Any]] = self.process_documents(metadata)
@@ -495,6 +504,7 @@ class IngestSourceOperator(AbstractOperator):
             len(doc_data) + metadata[Metrics.External.SKIPPED_DOCS_COUNT] + metadata[Metrics.External.FAILED_DOCS_COUNT]
         )
         metadata[Metrics.External.PROCESSED_DOCS] = len(doc_data)
+        metadata[Metrics.Internal.ALL_DOC_IDS] = list(dict.fromkeys(metadata.get(Metrics.Internal.ALL_DOC_IDS, [])))
 
         # Determine node status using common utility
         metadata[Metrics.External.NODE_STATUS] = OperatorUtils.determine_execution_status(
@@ -751,8 +761,30 @@ class IngestSourceOperator(AbstractOperator):
             adapter.bind_file_reference(provider_config=event_config, file_reference=self.input_event.file_reference)
             config = type(config).model_validate(event_config)
 
+        if provider == "filesystem" and is_auth_enabled():
+            self._validate_filesystem_paths(getattr(config, "paths", []))
+
         # Return both adapter and config to avoid creating adapter twice
         return adapter, config
+
+    @staticmethod
+    def _get_allowed_ingest_roots() -> list[pathlib.Path]:
+        """Resolve allowed root directories for filesystem ingestion when auth is enabled."""
+        raw = os.environ.get(EnvironmentVariables.DOCPIPE_INGEST_ALLOWED_PATHS, "")
+        entries = [part.strip() for part in re.split(r"[,;]", raw) if part.strip()] if raw else []
+        if not entries:
+            return [pathlib.Path(get_data_path()).expanduser().resolve()]
+        return [pathlib.Path(entry).expanduser().resolve() for entry in entries]
+
+    @staticmethod
+    def _validate_filesystem_paths(paths: list[str]) -> None:
+        """Ensure every filesystem ingest path resolves inside an allowed root directory."""
+        allowed_roots = IngestSourceOperator._get_allowed_ingest_roots()
+        for raw_path in paths:
+            resolved = pathlib.Path(raw_path).expanduser().resolve()
+            if not any(resolved.is_relative_to(root) for root in allowed_roots):
+                msg = f"Filesystem ingest path '{raw_path}' is outside the allowed root directories."
+                raise ValueError(msg)
 
     @staticmethod
     def _extract_file_extension(*, doc_metadata: dict[str, Any], doc_name: str) -> str:
@@ -817,6 +849,8 @@ class IngestSourceOperator(AbstractOperator):
                 return None
 
             doc_id: str = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()
+            if Metrics.Internal.ALL_DOC_IDS in metadata:
+                metadata[Metrics.Internal.ALL_DOC_IDS].append(doc_id)
             modified_time = self._parse_modified_time(doc.metadata.get("last_modified", 0))
 
             if self.previously_processed_docs_dict and is_doc_previously_processed(

@@ -8,6 +8,5 @@ Document Libraries are collections of Document Sets with aggregate metadata trac
 
 Package Structure:
     domain/: Pure Python domain models
-    adapters/: Persistence notes (DuckDBAssetRepository[DocumentLibrary] is used directly)
     application/: Business logic and service layer
 """

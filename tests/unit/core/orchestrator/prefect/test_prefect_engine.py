@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for PrefectEngine.
 
@@ -460,6 +463,13 @@ class TestFlowImpl:
             "output_edges": [],
         }
 
+    @staticmethod
+    def _incremental_svc():
+        svc = Mock()
+        # __flow_impl calls len() on the soft-deleted doc ids
+        svc.get_soft_deleted_doc_ids.return_value = []
+        return svc
+
     def _data_access(self):
         da = Mock()
         table = Mock()
@@ -513,7 +523,7 @@ class TestFlowImpl:
         inner_task_mock = Mock()
         inner_task_mock.submit.return_value = future
 
-        incremental_svc = Mock()
+        incremental_svc = self._incremental_svc()
 
         op = self._op_def()
 
@@ -562,7 +572,8 @@ class TestFlowImpl:
         with (
             patch("docpipe.core.orchestration.prefect.prefect_engine.get_session_info", return_value=Mock()),
             patch(
-                "docpipe.core.orchestration.prefect.prefect_engine.get_incremental_update_service", return_value=Mock()
+                "docpipe.core.orchestration.prefect.prefect_engine.get_incremental_update_service",
+                return_value=self._incremental_svc(),
             ),
             patch.object(engine, "_PrefectEngine__create_task", return_value=inner_task_mock),
             patch(
@@ -595,7 +606,8 @@ class TestFlowImpl:
         with (
             patch("docpipe.core.orchestration.prefect.prefect_engine.get_session_info", return_value=Mock()),
             patch(
-                "docpipe.core.orchestration.prefect.prefect_engine.get_incremental_update_service", return_value=Mock()
+                "docpipe.core.orchestration.prefect.prefect_engine.get_incremental_update_service",
+                return_value=self._incremental_svc(),
             ),
             patch.object(engine, "_PrefectEngine__create_task", return_value=inner_task_mock),
             patch(

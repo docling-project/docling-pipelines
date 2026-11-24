@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docpipe.core.constants.constants import DoclingClientConstants
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.docling.client import DoclingServeClient
@@ -419,3 +420,212 @@ class TestDoclingServeClient:
         )
         mock_get_result.assert_called_once_with(task_id="test-task-123")
         assert result["document"] == "processed"
+
+
+class TestCheckStatusRetries:
+    """Regression tests for #656: only a 404 status check is retried."""
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_check_status_does_not_retry_non_404_error(self, mock_call_rest_json, mock_sleep):
+        """A non-404 error is raised after a single request, without backoff."""
+        error = DocpipeException(
+            message="Internal server error",
+            status_code=500,
+            error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+        )
+        mock_call_rest_json.side_effect = error
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException) as exc_info:
+            client._check_status(endpoint="/v1/status/poll/task-1")
+
+        assert exc_info.value is error
+        assert mock_call_rest_json.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_poll_status_does_not_retry_non_404_error(self, mock_call_rest_json, mock_sleep):
+        """poll_status surfaces a non-404 status error after one request."""
+        mock_call_rest_json.side_effect = DocpipeException(
+            message="Unauthorized",
+            status_code=401,
+            error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+        )
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException, match="Unauthorized"):
+            client.poll_status(task_id="task-1")
+
+        assert mock_call_rest_json.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("docpipe.integrations.docling.client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_poll_status_connection_error_retried_only_by_poll_loop(self, mock_call_rest_json, mock_sleep):
+        """A connection error is retried by the poll loop alone, with the poll interval."""
+        mock_call_rest_json.side_effect = [
+            DocpipeException(message="Connection refused", status_code=503, error_code=ErrorCode.CONNECTION_ERROR),
+            {"task_status": "SUCCESS"},
+        ]
+
+        client = DoclingServeClient(base_url="http://localhost:5001", poll_interval=7)
+        status = client.poll_status(task_id="task-1")
+
+        assert status["task_status"] == "SUCCESS"
+        assert mock_call_rest_json.call_count == 2
+        # One sleep from the poll loop; the 404 backoff (1 s) must not run.
+        assert [c.args for c in mock_sleep.call_args_list] == [(7,)]
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_check_status_retries_404_then_succeeds(self, mock_call_rest_json, mock_sleep):
+        """A 404 is retried with backoff and the later response is returned."""
+        not_found = DocpipeException(message="Not found", status_code=404, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR)
+        mock_call_rest_json.side_effect = [not_found, not_found, {"task_status": "SUCCESS"}]
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        result = client._check_status(endpoint="/v1/status/poll/task-1")
+
+        assert result == {"task_status": "SUCCESS"}
+        assert mock_call_rest_json.call_count == 3
+        base = DoclingClientConstants.STATUS_404_BACKOFF_BASE
+        assert [c.args for c in mock_sleep.call_args_list] == [(base,), (base * 2.0,)]
+
+    @patch("docpipe.integrations.base_llm_client.time.sleep")
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_json")
+    def test_check_status_raises_original_404_after_retries(self, mock_call_rest_json, mock_sleep):
+        """After the last 404 attempt the original exception is raised."""
+        not_found = DocpipeException(message="Not found", status_code=404, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR)
+        mock_call_rest_json.side_effect = not_found
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException) as exc_info:
+            client._check_status(endpoint="/v1/status/poll/task-1")
+
+        assert exc_info.value is not_found
+        assert mock_call_rest_json.call_count == 3
+
+
+class TestFormatCompatibilityErrorDetection:
+    """Regression tests for #656: only real format errors get the format hint."""
+
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_multipart")
+    def test_unrelated_message_containing_format_is_not_enhanced(self, mock_call_rest_multipart):
+        """A 400 whose message merely contains "format" (as in "information") is raised unchanged."""
+        error = DocpipeException(
+            message="Missing information in request",
+            status_code=400,
+            error_code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+        )
+        mock_call_rest_multipart.side_effect = error
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException) as exc_info:
+            client.submit_document(binary_content=b"data")
+
+        assert exc_info.value is error
+        assert "rejected the requested output formats" not in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Invalid format: doctagz",
+            "Unknown format 'foo'",
+            "to_formats: value is not a valid enumeration member",
+            "Output type is not supported",
+            "Unsupported output type",
+        ],
+    )
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_multipart")
+    def test_format_error_phrases_are_enhanced(self, mock_call_rest_multipart, message):
+        """Messages with a format-error phrase still get the upgrade hint."""
+        mock_call_rest_multipart.side_effect = DocpipeException(
+            message=message, status_code=400, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR
+        )
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException, match="rejected the requested output formats") as exc_info:
+            client.submit_document(binary_content=b"data", options={"additional_formats": ["doctags"]})
+
+        assert exc_info.value.status_code == 400
+        assert "['md', 'doctags']" in str(exc_info.value)
+
+    @patch("docpipe.integrations.docling.client.RestClient.call_rest_multipart")
+    def test_status_422_is_enhanced(self, mock_call_rest_multipart):
+        """A 422 is treated as a format error regardless of its message."""
+        mock_call_rest_multipart.side_effect = DocpipeException(
+            message="Unprocessable entity", status_code=422, error_code=ErrorCode.EXTERNAL_SERVICE_ERROR
+        )
+
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        with pytest.raises(DocpipeException, match="rejected the requested output formats"):
+            client.submit_document(binary_content=b"data")
+
+
+class TestBuildOptionsFormats:
+    """Regression tests for #656: to_formats and additional_formats are merged without mutation."""
+
+    def test_additional_formats_kept_with_explicit_to_formats(self):
+        """additional_formats are appended to an explicit to_formats list."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        options = client._build_options({"additional_formats": ["json"], "to_formats": ["doctags"]})
+
+        assert options["to_formats"] == ["md", "doctags", "json"]
+
+    @pytest.mark.parametrize(
+        ("options", "expected"),
+        [
+            ({"additional_formats": "json"}, ["md", "json"]),
+            ({"to_formats": "doctags"}, ["md", "doctags"]),
+            ({"to_formats": ("md", "doctags"), "additional_formats": ("json",)}, ["md", "doctags", "json"]),
+        ],
+        ids=["additional-string", "to-formats-string", "tuples"],
+    )
+    def test_single_string_is_one_format(self, options, expected):
+        """A single string is one format, not split into characters."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+
+        assert client._build_options(options)["to_formats"] == expected
+
+    @pytest.mark.parametrize("key", ["to_formats", "additional_formats"])
+    def test_non_list_format_option_is_rejected(self, key):
+        """A format option that is not a string or a list raises a clear ValueError."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+
+        with pytest.raises(ValueError, match=f"'{key}' must be a string or a list of strings, got int"):
+            client._build_options({key: 5})
+
+    def test_additional_formats_appended_to_default(self):
+        """Without to_formats, additional_formats are appended to the default md."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        options = client._build_options({"additional_formats": ["json", "doctags"]})
+
+        assert options["to_formats"] == ["md", "json", "doctags"]
+        assert "additional_formats" not in options
+
+    def test_formats_deduplicated_in_order(self):
+        """Duplicates and empty entries are dropped; first occurrence order is kept."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        options = client._build_options(
+            {"to_formats": ["doctags", "md", "doctags"], "additional_formats": ["md", "", "json", "doctags"]}
+        )
+
+        assert options["to_formats"] == ["doctags", "md", "json"]
+
+    def test_caller_options_not_mutated(self):
+        """The caller's dict and lists are unchanged, so reusing them gives the same result."""
+        client = DoclingServeClient(base_url="http://localhost:5001")
+        to_formats = ["doctags"]
+        additional_formats = ["json"]
+        caller_options = {"to_formats": to_formats, "additional_formats": additional_formats, "do_ocr": False}
+
+        first = client._build_options(caller_options)
+        second = client._build_options(caller_options)
+
+        assert to_formats == ["doctags"]
+        assert additional_formats == ["json"]
+        assert caller_options == {"to_formats": ["doctags"], "additional_formats": ["json"], "do_ocr": False}
+        assert first == second
+        assert first["to_formats"] is not to_formats

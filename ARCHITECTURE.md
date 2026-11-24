@@ -3251,11 +3251,11 @@ The Document Set operator follows hexagonal architecture (ports and adapters pat
    ┌───────────┼───────────────────┐
    │           │                   │
    ▼           ▼                   ▼
-┌──────────┐ ┌──────────────┐ ┌──────────────────┐
-│ Repo-    │ │ Data Store   │ │ Attachment Repo  │
-│ sitory   │ │ Factory      │ │ Factory          │
-│ Factory  │ │              │ │                  │
-└────┬─────┘ └──────┬───────┘ └────────┬─────────┘
+┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
+│ Asset        │ │ Data Store   │ │ Attachment Repo  │
+│ Repository   │ │ Factory      │ │ Factory          │
+│ Factory      │ │              │ │                  │
+└──────┬───────┘ └──────┬───────┘ └────────┬─────────┘
      │               │                  │
      ▼               ▼                  ▼
 ┌──────────┐ ┌──────────────┐ ┌──────────────────┐
@@ -4402,7 +4402,7 @@ The storage layer provides a clean, interface-based abstraction for data persist
   - `create_table_storage(storage_type, **config)`: Creates TableStoragePort instances
 - Supported types:
   - Key-value: "filesystem", "duckdb"
-  - Table: "duckdb"
+  - Table: "duckdb", "postgres"
 - Validates storage types and provides clear error messages
 
 #### DuckDB Implementations
@@ -4452,7 +4452,7 @@ Hexagonal architecture implementation for flow management:
 
 - **Flow**: Core entity representing pipeline definitions
 - **FlowMetadata**: Flow metadata and configuration
-- **FlowRepository (Port)**: Interface for flow persistence
+- Persistence contract: the generic `AssetRepository[Flow]` port (`core/assets/common/`)
 
 **Application Layer** (`application/services/`):
 
@@ -4460,12 +4460,12 @@ Hexagonal architecture implementation for flow management:
   - Flow creation, retrieval, updates, and deletion
   - Flow validation and configuration management
 
-**Adapter Layer** (`adapters/repositories/`):
+**Persistence** (`core/assets/common/`):
 
-- **StorageFlowRepository**: Generic repository using KeyValueStoragePort interface
-  - Works with any storage backend (DuckDB, filesystem)
-  - Stores flows in 'flows' collection with flow_id as key
-  - Exception wrapping with FlowNotFoundException, FlowStorageException
+- Generic asset repositories created by `AssetRepositoryFactory.create_repository(asset_type=Flow)`:
+  - **LocalAssetRepository[Flow]**: JSON files on the local filesystem (default)
+  - **DuckDBAssetRepository[Flow]**: DuckDB `flows` collection via `KeyValueStoragePort`
+  - **PostgresAssetRepository[Flow]**: PostgreSQL `<schema>.asset_records` table (`collection = 'flows'`)
 
 #### Document Sets (`assets/document_sets/`)
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for telemetry service resilience and error handling."""
 
 from unittest.mock import MagicMock, patch
@@ -204,6 +207,24 @@ class TestTelemetryResilience:
 
             # Should log debug message
             mock_logger.debug.assert_called()
+
+    def test_record_exception_sets_error_status_on_given_span(self):
+        """A span passed by the caller gets the exception event and an ERROR status (#672)."""
+        from opentelemetry.trace import StatusCode
+
+        service = get_telemetry_service()
+        service.initialize(config=TelemetryConfig(enabled=True))
+        service._enabled = True  # Force enabled
+        mock_span = MagicMock()
+        error = ValueError("test error")
+
+        service.record_exception(error, span=mock_span)
+
+        mock_span.record_exception.assert_called_once_with(error)
+        mock_span.set_status.assert_called_once()
+        status = mock_span.set_status.call_args.args[0]
+        assert status.status_code == StatusCode.ERROR
+        assert status.description == "test error"
 
     def test_shutdown_handles_exception_gracefully(self):
         """Test that shutdown handles exceptions without propagating them."""

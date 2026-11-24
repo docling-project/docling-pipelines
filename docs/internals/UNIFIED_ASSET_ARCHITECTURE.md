@@ -144,10 +144,11 @@
   │     (env > YAML > defaults)      │
   │  2. Looks up the class in        │
   │     get_available_repository_    │
-  │     types(): local, duckdb       │
-  │  3. Builds DuckDBAssetRepository │
-  │     [T] (collection from the     │
-  │     asset type) or LocalAsset    │
+  │     types(): local, duckdb,      │
+  │     postgres                     │
+  │  3. Builds LocalAssetRepository  │
+  │     [T], DuckDBAssetRepository   │
+  │     [T], or PostgresAsset        │
   │     Repository[T]                │
   │                                  │
   │  New backends: add a Repository  │

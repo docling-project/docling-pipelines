@@ -8,9 +8,9 @@ const logger = log4js.getLogger('document-class.controller');
  * Fetch document classes from backend API
  * BFF controller that proxies requests to the Python FastAPI backend
  */
-const fetchDocumentClasses = async (_req: Request, res: Response): Promise<void> => {
+const fetchDocumentClasses = async (req: Request, res: Response): Promise<void> => {
   try {
-    const response = await proxyRequest({ method: 'GET', path: ['api', 'v1', 'document_classes'] });
+    const response = await proxyRequest({ req, method: 'GET', path: ['api', 'v1', 'document_classes'] });
 
     res.json(response.data);
   } catch (err) {
