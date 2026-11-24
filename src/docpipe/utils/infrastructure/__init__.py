@@ -19,7 +19,7 @@ from .performance import (
     log_elapsed_time,
     reclaim_memory,
 )
-from .retry import retry_with_exponential_backoff, should_retry_on_result
+from .retry import retry_with_exponential_backoff, should_retry_on_lock_timeout, should_retry_on_result
 from .telemetry_service import TelemetryConfig, get_telemetry_service
 
 __all__ = [
@@ -39,6 +39,7 @@ __all__ = [
     "retry_with_exponential_backoff",
     "run_with_session_info",
     "setup_logging",
+    "should_retry_on_lock_timeout",
     "should_retry_on_result",
     "submit_task_with_context_propagation",
 ]

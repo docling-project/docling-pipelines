@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """LocalProjectRepository — filesystem-based project persistence adapter.
 
 Stores each project as a single JSON file under the configured base directory:
@@ -10,14 +13,14 @@ This adapter is used when DOCPIPE_STORAGE_BACKEND is not set or is set to
 the default local filesystem mode. Swap it for a different adapter
 (e.g. PostgresProjectRepository) without touching any application or domain code.
 
-File writes are protected by a per-project filelock to prevent data corruption
+File writes are protected by a per-project lock to prevent data corruption
 under concurrent API requests.
 """
 
 import json
 from pathlib import Path
 
-from filelock import FileLock
+import portalocker
 
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.core.projects.domain.ports.project_repository import ProjectRepository
@@ -60,7 +63,11 @@ class LocalProjectRepository(ProjectRepository):
     def save(self, *, project: Project) -> Project:
         """Write project to disk as JSON. Acquires a file-level lock."""
         path = self._file_path(project.project_id)
-        with FileLock(self._lock_path(project.project_id)):
+        with portalocker.Lock(
+            self._lock_path(project.project_id),
+            flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+            timeout=30.0,
+        ):
             path.write_text(json.dumps(project.to_dict(), indent=2), encoding="utf-8")
         logger.info("Saved project %s (%s)", project.project_id, project.name)
         return project

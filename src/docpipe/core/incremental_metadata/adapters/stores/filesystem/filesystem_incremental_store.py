@@ -10,18 +10,19 @@ offering efficient columnar storage and fast query performance.
 Features:
 - One parquet file per job_id for isolation
 - Efficient columnar storage with PyArrow
-- Thread-safe operations with file locking
+- Thread-safe and cross-process operations with portalocker shared/exclusive file locking
 - Atomic writes with temporary files
 """
 
-import shutil
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import portalocker
 import pyarrow as pa
 import pyarrow.compute as pc  # type: ignore[import-untyped]
 import pyarrow.parquet as pq
-from filelock import FileLock, Timeout
 
 from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_factory import (
     register_incremental_update_store,
@@ -30,30 +31,12 @@ from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataRecord,
     IncrementalMetadataStore,
 )
-from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
+from docpipe.exceptions import FlowExecutionFailedException, JobStatsStoreInitializationException, LockTimeoutError
 from docpipe.utils.infrastructure.filesystem import get_data_path
 from docpipe.utils.infrastructure.logging import get_logger
-from docpipe.utils.infrastructure.retry import retry_with_exponential_backoff
+from docpipe.utils.infrastructure.retry import retry_with_exponential_backoff, should_retry_on_lock_timeout
 
 logger = get_logger("INCREMENTAL_METADATA_FILESYSTEM")
-
-
-def _should_retry_on_lock_timeout(result, exception):
-    """
-    Retry logic for file lock timeout errors.
-
-    Args:
-        result: The result from the function call
-        exception: Any exception that occurred
-
-    Returns:
-        Tuple of (should_retry: bool, error_message: str)
-    """
-    if isinstance(exception, Timeout):
-        return True, f"File lock timeout: {exception!s}"
-    if isinstance(exception, FlowExecutionFailedException) and "Failed to acquire write lock" in str(exception):
-        return True, f"Failed to acquire write lock: {exception!s}"
-    return False, ""
 
 
 @register_incremental_update_store
@@ -94,9 +77,24 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         Args:
             config: Configuration dict. Recognised keys:
                     - base_dir: base directory for parquet files
-                    - lock_timeout: seconds to wait for file lock (default 120.0)
+                    - lock_timeout: seconds to wait for file lock (default 30.0)
+
+        Raises:
+            JobStatsStoreInitializationException: If lock_timeout is not a positive number
         """
         self.config = config or {}
+
+        # Validate lock_timeout (seconds, positive number)
+        raw_lock_timeout = self.config.get("lock_timeout", 30.0)
+        if (
+            isinstance(raw_lock_timeout, bool)
+            or not isinstance(raw_lock_timeout, (int, float))
+            or raw_lock_timeout <= 0
+        ):
+            raise JobStatsStoreInitializationException(
+                message=f"Invalid lock_timeout: {raw_lock_timeout!r}. Must be a positive number of seconds.",
+                store_type="filesystem",
+            )
 
         # Resolve base_dir:  config dict > default data path
         if self.config.get("base_dir") is not None:
@@ -110,7 +108,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
             resolved.mkdir(parents=True, exist_ok=True)
 
         self._base_dir = resolved
-        self._lock_timeout: float = self.config.get("lock_timeout", 120.0)
+        self._lock_timeout: float = float(raw_lock_timeout)
 
         logger.info(
             "FilesystemIncrementalMetadataStore initialized: base_dir=%s, config_keys=%s",
@@ -132,9 +130,30 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         lock_dir.mkdir(parents=True, exist_ok=True)
         return lock_dir / "metadata.lock"
 
+    @contextmanager
+    def _locked(self, *, job_id: str, exclusive: bool = False) -> Generator[None, None, None]:
+        """Acquire a shared or exclusive file lock for the given job.
+
+        Args:
+            job_id: The job identifier.
+            exclusive: If True, acquire LOCK_EX (write); otherwise LOCK_SH (read).
+        """
+        lock_path = self._get_lock_path(job_id=job_id)
+        flags = (
+            (portalocker.LOCK_EX | portalocker.LOCK_NB) if exclusive else (portalocker.LOCK_SH | portalocker.LOCK_NB)
+        )
+        lock_mode = "write" if exclusive else "read"
+        try:
+            with portalocker.Lock(str(lock_path), flags=flags, timeout=self._lock_timeout):
+                yield
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as exc:
+            raise LockTimeoutError(
+                f"Failed to acquire {lock_mode} lock for job_id={job_id} within {self._lock_timeout}s"
+            ) from exc
+
     def _read_table(self, *, job_id: str) -> pa.Table | None:
         """
-        Read parquet table for job with file locking.
+        Read parquet table for job.
 
         Args:
             job_id: Job identifier
@@ -156,7 +175,7 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
 
     def _write_table(self, *, job_id: str, table: pa.Table) -> None:
         """
-        Write parquet table for job atomically with file locking.
+        Write parquet table for job atomically.
 
         Uses temporary file and atomic rename for crash safety.
 
@@ -201,227 +220,187 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
 
     def get_processed_docs(self, *, job_id: str) -> dict[str, Any]:
         """Retrieve processed document IDs with modification times and job run IDs (non-deleted only)."""
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=False):
+            table = self._read_table(job_id=job_id)
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                table = self._read_table(job_id=job_id)
+            if table is None or table.num_rows == 0:
+                return {}
 
-                if table is None or table.num_rows == 0:
-                    return {}
+            # Filter for non-deleted documents
+            mask = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
+            filtered_table = table.filter(mask)
 
-                # Filter for non-deleted documents
-                mask = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
-                filtered_table = table.filter(mask)
+            # Build result dictionary
+            result = {}
+            for i in range(filtered_table.num_rows):
+                doc_id = filtered_table["id"][i].as_py()
+                modified_time = filtered_table["modified_time"][i].as_py()
+                job_run_id = filtered_table["job_run_id"][i].as_py()
+                result[doc_id] = {"modified_time": modified_time, "job_run_id": job_run_id}
 
-                # Build result dictionary
-                result = {}
-                for i in range(filtered_table.num_rows):
-                    doc_id = filtered_table["id"][i].as_py()
-                    modified_time = filtered_table["modified_time"][i].as_py()
-                    job_run_id = filtered_table["job_run_id"][i].as_py()
-                    result[doc_id] = {"modified_time": modified_time, "job_run_id": job_run_id}
-
-                logger.debug("Retrieved %s processed docs for job_id=%s", len(result), job_id)
-                return result
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire read lock for job_id={job_id}") from exc
+            logger.debug("Retrieved %s processed docs for job_id=%s", len(result), job_id)
+            return result
 
     @retry_with_exponential_backoff(
-        max_retries=5, initial_delay=1, max_delay=30, retry_logic=_should_retry_on_lock_timeout
+        max_retries=5, initial_delay=1, max_delay=30, retry_logic=should_retry_on_lock_timeout
     )
     def upsert_records(self, *, job_id: str, job_run_id: str, records: list[IncrementalMetadataRecord]) -> None:
         """Insert or update incremental metadata records with retry on lock timeout."""
         if not records:
             return
 
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        # Deduplicate records by doc_id (last wins)
+        deduped_records: dict[str, IncrementalMetadataRecord] = {r.doc_id: r for r in records}
+        unique_records = list(deduped_records.values())
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                existing_table = self._read_table(job_id=job_id)
-                new_table = self._records_to_table(records=records)
+        with self._locked(job_id=job_id, exclusive=True):
+            existing_table = self._read_table(job_id=job_id)
+            new_table = self._records_to_table(records=unique_records)
 
-                if existing_table is None or existing_table.num_rows == 0:
-                    # No existing data, just write new records
-                    self._write_table(job_id=job_id, table=new_table)
-                    logger.info("Inserted %s new records for job_id=%s", len(records), job_id)
-                    return
+            if existing_table is None or existing_table.num_rows == 0:
+                # No existing data, just write new records
+                self._write_table(job_id=job_id, table=new_table)
+                logger.info("Inserted %s new records for job_id=%s", len(unique_records), job_id)
+                return
 
-                # Get doc_ids from new records
-                new_doc_ids = {r.doc_id for r in records}
+            # Get doc_ids from new records
+            new_doc_ids = set(deduped_records.keys())
 
-                # Filter out existing records that will be updated
-                mask = pc.invert(pc.is_in(existing_table["id"], pa.array(list(new_doc_ids), type=pa.string())))  # type: ignore[attr-defined]
-                filtered_existing = existing_table.filter(mask)
+            # Filter out existing records that will be updated
+            mask = pc.invert(pc.is_in(existing_table["id"], pa.array(list(new_doc_ids), type=pa.string())))  # type: ignore[attr-defined]
+            filtered_existing = existing_table.filter(mask)
 
-                # Concatenate filtered existing with new records
-                combined_table = pa.concat_tables([filtered_existing, new_table])
+            # Concatenate filtered existing with new records
+            combined_table = pa.concat_tables([filtered_existing, new_table])
 
-                self._write_table(job_id=job_id, table=combined_table)
-                logger.info(
-                    "Upserted %s records for job_id=%s (total: %s)", len(records), job_id, combined_table.num_rows
-                )
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+            self._write_table(job_id=job_id, table=combined_table)
+            logger.info(
+                "Upserted %s records for job_id=%s (total: %s)", len(unique_records), job_id, combined_table.num_rows
+            )
 
     def get_soft_deleted_doc_ids(self, *, job_id: str) -> set[str]:
         """Retrieve document IDs marked as soft-deleted."""
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=False):
+            table = self._read_table(job_id=job_id)
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                table = self._read_table(job_id=job_id)
+            if table is None or table.num_rows == 0:
+                return set()
 
-                if table is None or table.num_rows == 0:
-                    return set()
+            # Filter for deleted documents
+            mask = pc.equal(table["deleted"], True)  # type: ignore[attr-defined]
+            deleted_table = table.filter(mask)
 
-                # Filter for deleted documents
-                mask = pc.equal(table["deleted"], True)  # type: ignore[attr-defined]
-                deleted_table = table.filter(mask)
-
-                result = set(deleted_table["id"].to_pylist())
-                logger.debug("Retrieved %s soft-deleted docs for job_id=%s", len(result), job_id)
-                return result
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire read lock for job_id={job_id}") from exc
+            result = set(deleted_table["id"].to_pylist())
+            logger.debug("Retrieved %s soft-deleted docs for job_id=%s", len(result), job_id)
+            return result
 
     def mark_missing_docs_as_deleted(self, *, job_id: str, doc_ids: list[str]) -> set[str]:
         """Mark documents as soft-deleted if not in provided list."""
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=True):
+            table = self._read_table(job_id=job_id)
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                table = self._read_table(job_id=job_id)
+            if table is None or table.num_rows == 0:
+                return set()
 
-                if table is None or table.num_rows == 0:
-                    return set()
+            current_doc_ids = set(doc_ids)
 
-                current_doc_ids = set(doc_ids)
+            # Find documents not in current list and not already deleted
+            mask_not_deleted = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
+            mask_not_in_current = pc.invert(pc.is_in(table["id"], pa.array(list(current_doc_ids), type=pa.string())))  # type: ignore[attr-defined]
+            mask_to_delete = pc.and_(mask_not_deleted, mask_not_in_current)  # type: ignore[attr-defined]
 
-                # Find documents not in current list and not already deleted
-                mask_not_deleted = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
-                mask_not_in_current = pc.invert(
-                    pc.is_in(table["id"], pa.array(list(current_doc_ids), type=pa.string()))
-                )  # type: ignore[attr-defined]
-                mask_to_delete = pc.and_(mask_not_deleted, mask_not_in_current)  # type: ignore[attr-defined]
+            # Get doc_ids to mark as deleted
+            to_delete_table = table.filter(mask_to_delete)
+            deleted_ids = set(to_delete_table["id"].to_pylist())
 
-                # Get doc_ids to mark as deleted
-                to_delete_table = table.filter(mask_to_delete)
-                deleted_ids = set(to_delete_table["id"].to_pylist())
+            if not deleted_ids:
+                return set()
 
-                if not deleted_ids:
-                    return set()
+            # Update deleted flag
+            deleted_column = pc.if_else(mask_to_delete, pa.array([True] * table.num_rows), table["deleted"])  # type: ignore[attr-defined]
 
-                # Update deleted flag
-                deleted_column = pc.if_else(mask_to_delete, pa.array([True] * table.num_rows), table["deleted"])  # type: ignore[attr-defined]
+            updated_table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted_column)
 
-                updated_table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted_column)
-
-                self._write_table(job_id=job_id, table=updated_table)
-                logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
-                return deleted_ids
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+            self._write_table(job_id=job_id, table=updated_table)
+            logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
+            return deleted_ids
 
     def unmark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str] | None = None) -> None:
         """Unmark soft-deleted documents, setting deleted flag back to False."""
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=True):
+            table = self._read_table(job_id=job_id)
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                table = self._read_table(job_id=job_id)
+            if table is None or table.num_rows == 0:
+                return
 
-                if table is None or table.num_rows == 0:
+            if doc_ids is not None:
+                if not doc_ids:
                     return
+                mask_in_target = pc.is_in(table["id"], pa.array(doc_ids, type=pa.string()))  # type: ignore[attr-defined]
+                mask_unmark = pc.and_(table["deleted"], mask_in_target)  # type: ignore[attr-defined]
+            else:
+                mask_unmark = pc.equal(table["deleted"], True)  # type: ignore[attr-defined]
 
-                if doc_ids is not None:
-                    if not doc_ids:
-                        return
-                    mask_in_target = pc.is_in(table["id"], pa.array(doc_ids, type=pa.string()))  # type: ignore[attr-defined]
-                    mask_unmark = pc.and_(table["deleted"], mask_in_target)  # type: ignore[attr-defined]
-                else:
-                    mask_unmark = pc.equal(table["deleted"], True)  # type: ignore[attr-defined]
+            # Check if there are any records to unmark
+            to_unmark_table = table.filter(mask_unmark)
+            if to_unmark_table.num_rows == 0:
+                return
 
-                # Check if there are any records to unmark
-                to_unmark_table = table.filter(mask_unmark)
-                if to_unmark_table.num_rows == 0:
-                    return
+            deleted_column = pc.if_else(mask_unmark, pa.array([False] * table.num_rows), table["deleted"])  # type: ignore[attr-defined]
+            updated_table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted_column)
 
-                deleted_column = pc.if_else(mask_unmark, pa.array([False] * table.num_rows), table["deleted"])  # type: ignore[attr-defined]
-                updated_table = table.set_column(table.schema.get_field_index("deleted"), "deleted", deleted_column)
-
-                self._write_table(job_id=job_id, table=updated_table)
-                logger.info("Unmarked %s soft-deleted docs for job_id=%s", to_unmark_table.num_rows, job_id)
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+            self._write_table(job_id=job_id, table=updated_table)
+            logger.info("Unmarked %s soft-deleted docs for job_id=%s", to_unmark_table.num_rows, job_id)
 
     def purge_soft_deleted_docs(self, *, job_id: str) -> None:
         """Permanently delete all soft-deleted records for a given job."""
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=True):
+            table = self._read_table(job_id=job_id)
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                table = self._read_table(job_id=job_id)
+            if table is None or table.num_rows == 0:
+                return
 
-                if table is None or table.num_rows == 0:
-                    return
+            # Filter out deleted documents (keep only non-deleted)
+            mask = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
+            filtered_table = table.filter(mask)
 
-                # Filter out deleted documents (keep only non-deleted)
-                mask = pc.equal(table["deleted"], False)  # type: ignore[attr-defined]
-                filtered_table = table.filter(mask)
-
-                if filtered_table.num_rows == 0:
-                    # All records were deleted, remove file
-                    parquet_path = self._get_parquet_path(job_id=job_id)
-                    if parquet_path.exists():
-                        parquet_path.unlink()
-                    logger.info("Purged all soft-deleted records (no remaining records) for job_id=%s", job_id)
-                elif filtered_table.num_rows < table.num_rows:
-                    purged_count = table.num_rows - filtered_table.num_rows
-                    self._write_table(job_id=job_id, table=filtered_table)
-                    logger.info("Purged %s soft-deleted records for job_id=%s", purged_count, job_id)
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+            if filtered_table.num_rows == 0:
+                # All records were deleted, remove file
+                parquet_path = self._get_parquet_path(job_id=job_id)
+                if parquet_path.exists():
+                    parquet_path.unlink()
+                logger.info("Purged all soft-deleted records (no remaining records) for job_id=%s", job_id)
+            elif filtered_table.num_rows < table.num_rows:
+                purged_count = table.num_rows - filtered_table.num_rows
+                self._write_table(job_id=job_id, table=filtered_table)
+                logger.info("Purged %s soft-deleted records for job_id=%s", purged_count, job_id)
 
     def delete_docs(self, *, job_id: str, doc_ids: list[str]) -> None:
         """Permanently delete metadata records for specified documents."""
         if not doc_ids:
             return
 
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=True):
+            table = self._read_table(job_id=job_id)
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                table = self._read_table(job_id=job_id)
+            if table is None or table.num_rows == 0:
+                return
 
-                if table is None or table.num_rows == 0:
-                    return
+            # Filter out documents to delete
+            mask = pc.invert(pc.is_in(table["id"], pa.array(doc_ids, type=pa.string())))  # type: ignore[attr-defined]
+            filtered_table = table.filter(mask)
 
-                # Filter out documents to delete
-                mask = pc.invert(pc.is_in(table["id"], pa.array(doc_ids, type=pa.string())))  # type: ignore[attr-defined]
-                filtered_table = table.filter(mask)
-
-                if filtered_table.num_rows == 0:
-                    # All records deleted, remove file
-                    parquet_path = self._get_parquet_path(job_id=job_id)
-                    if parquet_path.exists():
-                        parquet_path.unlink()
-                    logger.info("Deleted all records for job_id=%s", job_id)
-                else:
-                    self._write_table(job_id=job_id, table=filtered_table)
-                    logger.info(
-                        "Deleted %s docs for job_id=%s (remaining: %s)", len(doc_ids), job_id, filtered_table.num_rows
-                    )
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire write lock for job_id={job_id}") from exc
+            if filtered_table.num_rows == 0:
+                # All records deleted, remove file
+                parquet_path = self._get_parquet_path(job_id=job_id)
+                if parquet_path.exists():
+                    parquet_path.unlink()
+                logger.info("Deleted all records for job_id=%s", job_id)
+            else:
+                self._write_table(job_id=job_id, table=filtered_table)
+                logger.info(
+                    "Deleted %s docs for job_id=%s (remaining: %s)", len(doc_ids), job_id, filtered_table.num_rows
+                )
 
     def clear(self, *, job_id: str) -> None:
         """Clear all incremental metadata for a specific job."""
@@ -430,27 +409,9 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         if not job_dir.exists():
             return
 
-        lock = FileLock(str(self._get_lock_path(job_id=job_id)), timeout=self._lock_timeout)
+        with self._locked(job_id=job_id, exclusive=True):
+            parquet_path = self._get_parquet_path(job_id=job_id)
+            if parquet_path.exists():
+                parquet_path.unlink()
 
-        try:
-            with lock.acquire(timeout=self._lock_timeout):
-                # Remove parquet file
-                parquet_path = self._get_parquet_path(job_id=job_id)
-                if parquet_path.exists():
-                    parquet_path.unlink()
-
-            # Remove locks directory AFTER releasing the lock
-            locks_dir = job_dir / ".locks"
-            if locks_dir.exists():
-                shutil.rmtree(locks_dir)
-
-            # Remove job directory if empty
-            if job_dir.exists():
-                remaining = list(job_dir.iterdir())
-                if not remaining:
-                    job_dir.rmdir()
-
-            logger.info("Cleared all metadata for job_id=%s", job_id)
-
-        except Timeout as exc:
-            raise FlowExecutionFailedException(f"Failed to acquire clear lock for job_id={job_id}") from exc
+        logger.info("Cleared all metadata for job_id=%s", job_id)

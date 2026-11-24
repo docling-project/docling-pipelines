@@ -231,6 +231,17 @@ The `postgres` backend covers asset metadata and attachment references. The docu
 
 Docling Pipelines supports incremental processing to avoid reprocessing unchanged input data. Incremental metadata stores processing state such as file identity and modification information so ingest operators can determine whether an item is new, changed, or already processed.
 
+### Deployment Modes and Backend Selection
+
+The choice of incremental metadata backend depends on your deployment topology:
+
+| Deployment Mode | Supported Backend | Description |
+|---|---|---|
+| **Distributed execution** (workers on multiple hosts / pods) | `postgresql` only | Multi-replica safe using transaction-scoped PostgreSQL advisory locks (`pg_advisory_xact_lock`) and bounded lock timeouts. |
+| **Single machine** (threads and processes on one host) | `postgresql` or `filesystem` | Single-host POSIX concurrency using `portalocker` shared/exclusive file locks. |
+
+> **Important:** The `filesystem` backend is strictly limited to a single host's local POSIX filesystem. It is **unsupported on NFS, FUSE, or network/object-store mounts** because POSIX file-locking semantics (`flock`/`fcntl`) are unreliable or non-functional across network file systems.
+
 ### Configuration
 
 Use the `incremental_metadata` section in `docling-pipelines-config.yaml`:
@@ -241,62 +252,45 @@ incremental_metadata:
     type: "filesystem"  # Options: filesystem, postgresql
     config:
       base_dir: "./data"
-      lock_timeout: 30.0
+      lock_timeout: 30.0  # Optional, default: 30.0 seconds
 ```
 
 This configuration is the single source of truth for incremental metadata backend selection and runtime settings.
 
 ### Storage Backends
 
-#### JSON
+#### Filesystem Backend
 
-JSON storage is the default backend. It is file-based, easy to inspect, and suitable for development or smaller single-host deployments.
+The `filesystem` backend stores metadata records as Parquet files partitioned by job ID (`<base_dir>/<job_id>/inc_update_metadata/data.parquet`). Concurrency is managed via `portalocker` using a dedicated lock file (`.locks/metadata.lock`):
 
-```yaml
-incremental_metadata:
-  storage:
-    type: "json"
-    config:
-      base_dir: "./data/incremental_metadata"
-      lock_timeout: 30.0
-```
-
-Use JSON when:
-
-- you want a simple file-based backend
-- you are running locally or on a single host
-- you want metadata files that are easy to inspect during debugging
-
-#### Parquet
-
-Parquet storage uses a columnar file format and is better suited to larger datasets or analytics-oriented workflows.
+- **Shared read locks (`LOCK_SH`)**: Concurrent readers (`get_processed_docs`, `get_soft_deleted_doc_ids`) run simultaneously without blocking one another.
+- **Exclusive write locks (`LOCK_EX`)**: Write operations (`upsert_records`, `mark_missing_docs_as_deleted`, `purge_soft_deleted_docs`, `delete_docs`, `clear`) acquire an exclusive lock, ensuring atomic updates and safe temporary file replacement.
+- **Lock file retention**: The `.locks/metadata.lock` file is permanent and is retained even when `clear()` removes data files, preserving POSIX file-locking coordination across processes.
 
 ```yaml
 incremental_metadata:
   storage:
-    type: "parquet"
+    type: "filesystem"
     config:
       base_dir: "./data/incremental_metadata"
-      lock_timeout: 30.0
+      lock_timeout: 30.0  # Optional float in seconds, default: 30.0
 ```
 
-Use Parquet when:
+#### PostgreSQL Backend
 
-- you need more efficient columnar storage than JSON
-- you want better compression for larger metadata volumes
-- you are operating on a shared filesystem but do not need a database backend
+The `postgresql` backend stores incremental records in a relational table with compound primary key `(job_id, id)`. It provides robust, multi-replica-safe concurrency for distributed workers:
 
-#### PostgreSQL
-
-PostgreSQL is the recommended backend for production deployments that require stronger concurrency behavior and durable centralized storage.
+- **Per-job write serialisation**: Write transactions set `lock_timeout` and acquire `pg_advisory_xact_lock(hashtext('<schema>.inc_update_metadata:<job_id>'))` to prevent race conditions during compound operations like diffing or batch updates.
+- **Lock wait bounds**: The `lock_timeout` setting (in seconds, default `30.0`) bounds advisory lock and row lock acquisition. Timeouts roll back the transaction cleanly and raise `LockTimeoutError`.
+- **Set-based SQL**: Batch upserts use chunked `INSERT ... ON CONFLICT (job_id, id) DO UPDATE`, and missing document deletion uses set-based `UPDATE ... WHERE id <> ALL(:ids) RETURNING id`.
+- **Lock-free reads**: Read methods execute MVCC queries without acquiring advisory locks.
 
 ```yaml
 incremental_metadata:
   storage:
     type: "postgresql"
     config:
-      base_dir: "./data"
-      lock_timeout: 30.0
+      lock_timeout: 30.0  # Optional float in seconds, default: 30.0
       postgres:
         host: "${POSTGRES_HOST:-localhost}"
         port: 5432
@@ -304,25 +298,33 @@ incremental_metadata:
         user: "${POSTGRES_USER:-docpipe_user}"
         password: "${POSTGRES_PASSWORD}"
         schema: "incremental_metadata"
-  ```
+```
 
-Use PostgreSQL when:
+### Lock Timeout and Error Handling
 
-- multiple workers need to access incremental metadata concurrently
-- submitters and workers do not share a reliable local filesystem path
-- you need durable centralized state for distributed or production execution
+Both backends use a unified timeout model:
+
+- `lock_timeout` is configured as a positive number of seconds (default `30.0`).
+- If a lock cannot be acquired within `lock_timeout`, the store raises `LockTimeoutError` (a subclass of `FlowExecutionFailedException`).
+- `upsert_records` automatically retries with exponential backoff (5 retries with backoff delays of 1s, 2s, 4s, 8s, 16s) before raising the final error.
+- At the service layer (`IncrementalUpdateService`), any unhandled store error is surfaced as `FlowExecutionFailedException` with `LockTimeoutError` preserved as `__cause__`.
+
+### Operational Guidance: Empty Source Listings
+
+When `mark_missing_docs_as_deleted` is called with an empty list of current document IDs, all existing non-deleted records for that job are marked as soft-deleted.
+
+If a data source returns an empty listing unexpectedly (for example, due to a transient network glitch, an unmounted directory, or an overly restrictive filter), running missing-doc detection would unintentionally soft-delete all previously indexed documents. Pipeline authors and orchestrators should validate source listings before invoking incremental diffing to guard against unintentional bulk deletion.
 
 ### Environment Variables for Sensitive Data
 
-Use environment variable substitution in `docling-pipelines-config.yaml` for credentials and deployment-specific values.
+Use environment variable substitution in `docling-pipelines-config.yaml` for credentials and deployment-specific values:
 
 ```yaml
 incremental_metadata:
   storage:
     type: "postgresql"
     config:
-      base_dir: "${DATA_DIR:-./data}"
-      lock_timeout: "${LOCK_TIMEOUT:-30.0}"
+      lock_timeout: "${INCR_META_LOCK_TIMEOUT:-30.0}"
       postgres:
         host: "${INCR_META_DB_HOST:-localhost}"
         port: "${INCR_META_DB_PORT:-5432}"

@@ -64,7 +64,7 @@ Lock-file creation and retention: the existing `_get_lock_path` calls `mkdir(par
 Alternatives: `fasteners.InterProcessReaderWriterLock` (extra dependency, POSIX-only); keep `filelock` (no shared mode).
 
 ### D3. Unified LockTimeoutError and retry predicate
-Define `LockTimeoutError(FlowExecutionFailedException)` in `docpipe/exceptions/docpipe_exceptions.py` and export it. Both stores raise it on lock acquisition timeout. One shared predicate, in `adapters/stores/lock_retry.py`, returns a retry for `LockTimeoutError` only. It no longer matches `filelock.Timeout` or the `"Failed to acquire write lock"` message substring. `upsert_records` keeps its retry policy (5 retries, 1s initial, 30s max) on the filesystem store and gains it on the PostgreSQL store.
+Define `LockTimeoutError(FlowExecutionFailedException)` in `docpipe/exceptions/docpipe_exceptions.py` and export it. Both stores raise it on lock acquisition timeout. One shared predicate, `should_retry_on_lock_timeout` in `utils/infrastructure/retry.py`, returns a retry for `LockTimeoutError` only. It no longer matches `filelock.Timeout` or the `"Failed to acquire write lock"` message substring. `upsert_records` keeps its retry policy (5 retries, 1s initial, 30s max) on the filesystem store and gains it on the PostgreSQL store.
 
 When retries are exhausted, `retry_with_exponential_backoff` re-raises the original `LockTimeoutError`. `IncrementalUpdateService` wraps it in `FlowExecutionFailedException` with `from exc`, so callers see the generic error and the cause chain keeps `LockTimeoutError`. The service is not changed.
 

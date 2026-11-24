@@ -1,15 +1,19 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for retry helper functions and decorator behaviour."""
 
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowExecutionFailedException, LockTimeoutError
 from docpipe.utils.infrastructure.retry import (
     _DEFAULT_ERROR_MESSAGE,
     _parse_retry_result,
     _raise_on_exhaustion,
     retry_with_exponential_backoff,
+    should_retry_on_lock_timeout,
 )
 
 # ---------------------------------------------------------------------------
@@ -164,3 +168,27 @@ class TestRetryDecoratorIntegration:
 
         assert result == "ok"
         assert call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# should_retry_on_lock_timeout
+# ---------------------------------------------------------------------------
+
+
+class TestShouldRetryOnLockTimeout:
+    def test_lock_timeout_error_triggers_retry(self):
+        exc = LockTimeoutError("Lock timeout for job_123")
+        should_retry, msg = should_retry_on_lock_timeout(result=None, exception=exc)
+        assert should_retry is True
+        assert "Lock timeout for job_123" in msg
+
+    def test_other_flow_execution_failure_does_not_retry(self):
+        exc = FlowExecutionFailedException("Generic execution failure")
+        should_retry, msg = should_retry_on_lock_timeout(result=None, exception=exc)
+        assert should_retry is False
+        assert msg == ""
+
+    def test_no_exception_does_not_retry(self):
+        should_retry, msg = should_retry_on_lock_timeout(result="ok", exception=None)
+        assert should_retry is False
+        assert msg == ""

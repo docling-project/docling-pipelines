@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for PyArrow table handler utilities.
 Tests for reading, writing, and transforming Parquet tables.
@@ -174,7 +177,7 @@ class TestCpdParquetTableHandler:
             # Should not raise, but log error
             handler.save_table(path=invalid_path, table=sample_table)
 
-    def test_concurrent_access_with_filelock(self, handler, sample_table, temp_parquet_file):
+    def test_concurrent_access_with_lock(self, handler, sample_table, temp_parquet_file):
         """Test that file locking prevents concurrent access issues."""
         handler.save_table(path=temp_parquet_file, table=sample_table)
 
