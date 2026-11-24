@@ -45,6 +45,12 @@ or, for a GPU build, use:
 # docker compose -f docker/docker-compose.yml build --build-arg BUILD_PROFILE=gpu
 ```
 
+For pipelines that use Docling Serve for extraction and chunking, build the slim image.
+
+```bash
+docker compose -f docker/docker-compose.yml build --build-arg BUILD_PROFILE=slim
+```
+
 ## Step 3: Start Application
 
 ```bash
