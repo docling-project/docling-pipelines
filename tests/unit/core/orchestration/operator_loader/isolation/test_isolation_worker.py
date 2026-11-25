@@ -493,19 +493,32 @@ class TestWorkerDoesNotLoadDotenv:
         return root
 
     @staticmethod
-    def _config_module_path(*, source_root: Path) -> str:
-        """Return the canary value visible after importing config.py in a subprocess without PYTHON_DOTENV_DISABLED."""
-        code = "import docpipe.utils.infrastructure.config as c, json, os; print(json.dumps([c.__file__, dict(os.environ)]))"
+    def _config_module_path(*, source_root: Path, tmp_path: Path) -> str:
+        """Return the canary value visible after importing config.py in a subprocess without PYTHON_DOTENV_DISABLED.
+
+        Mirrors the real worker: a script file (so ``__main__.__file__`` exists and python-dotenv walks up from
+        ``config.py`` instead of using the cwd) run from an empty directory that holds no ``.env``.
+        """
+        script = tmp_path / "probe.py"
+        script.write_text(
+            "import docpipe.utils.infrastructure.config as c, json, os\n"
+            "print(json.dumps([c.__file__, dict(os.environ)]))\n",
+            encoding="utf-8",
+        )
+        empty_cwd = tmp_path / "empty-cwd"
+        empty_cwd.mkdir()
         environment = {"PATH": os.environ["PATH"], "PYTHONPATH": str(source_root / "src")}
         result = subprocess.run(  # nosec B603 - fixed argv built from sys.executable, no shell
-            [sys.executable, "-c", code], env=environment, cwd=source_root, capture_output=True, text=True, check=True
+            [sys.executable, str(script)], env=environment, cwd=empty_cwd, capture_output=True, text=True, check=True
         )
         path, loaded = json.loads(result.stdout.splitlines()[-1])
         assert path.startswith(str(source_root))
         return loaded.get(TestWorkerDoesNotLoadDotenv.CANARY_NAME, "")
 
-    def test_the_synthetic_env_file_is_discoverable_without_the_switch(self, *, source_root: Path) -> None:
-        assert self._config_module_path(source_root=source_root) == self.CANARY_VALUE
+    def test_the_synthetic_env_file_is_discoverable_without_the_switch(
+        self, *, source_root: Path, tmp_path: Path
+    ) -> None:
+        assert self._config_module_path(source_root=source_root, tmp_path=tmp_path) == self.CANARY_VALUE
 
     def test_worker_environment_has_no_dotenv_variable(
         self, *, descriptor: type[UntrustedOperatorDescriptor], source_root: Path
