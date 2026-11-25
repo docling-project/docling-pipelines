@@ -7,7 +7,7 @@ AI coding assistants and autonomous agents need a standardized, programmatic way
 - **New Package**: `src/docpipe/mcp/` exposing a standard Model Context Protocol (MCP) server over stdio.
 - **New CLI Entrypoint**: `docling-pipelines-mcp = "docpipe.mcp.__main__:main"` in `[project.scripts]`.
 - **Core MCP Tools**:
-  1. `list_operators`: Discovers available operators, categories, and required input features directly from `OperatorRegistry`.
+  1. `list_operators`: Discovers available operators, categories, and required input features from `get_docpipe_operators()` / `DOCPIPE_OPERATORS` and `OperatorFactory`.
   2. `validate_flow`: Validates flow JSON DAG connectivity, operator configs, and feature propagation in memory or from a file.
   3. `create_flow`: Validates and registers the flow definition in the database asset repository via `FlowService` (making it immediately visible in the Web UI Canvas and REST API), and optionally exports a `.json` copy to the workspace.
   4. `run_flow`: Launches flow execution asynchronously via `DocpipeFlowManager` in a worker thread, returning job identifiers immediately.
@@ -16,12 +16,12 @@ AI coding assistants and autonomous agents need a standardized, programmatic way
 ## Scope & Dependencies
 - **UI and API Integration**: `create_flow` registers flows in the database-backed `FlowRepository`, ensuring created flows appear in the UI canvas and are accessible via REST API.
 - **Operator Discovery**: `list_operators` is integrated directly into this server so agents have a self-contained authoring workflow without requiring a second server.
-- **Dependencies**: The `mcp>=1.0,<2.0` package is already a direct dependency in `[project.dependencies]` (`pyproject.toml`). No optional dependency group or `uv lock` update is required.
+- **Dependencies**: The `mcp` package is in `[project.dependencies]` (`pyproject.toml`). The implementation will ensure a minimum version of `mcp>=1.30.0,<2.0` matching the stdio server APIs used, with `uv lock` updated per project rules when the dependency specification is touched.
 
 ## Capabilities
 ### New Capabilities
 - `backend/flow-execution-mcp`: Exposes operator discovery, flow authoring, validation, database registration, and pipeline execution as MCP tools.
 
 ## Impact
-- Non-breaking addition: Uses existing `DocpipeFlowManager`, `FlowValidator`, `FlowService`, `OperatorRegistry`, and `JobStatsStore` port under the hood.
+- Non-breaking addition: Uses existing `DocpipeFlowManager`, `FlowValidator`, `FlowService`, `get_docpipe_operators()`, `OperatorFactory`, and `JobStatsStore` port under the hood.
 - Fully compatible with both DuckDB and PostgreSQL job stats and asset backends.

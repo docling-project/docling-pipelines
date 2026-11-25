@@ -14,9 +14,9 @@ The MCP server runs as a standalone Python process over stdio, wrapping existing
                   │
   ┌───────────────┼───────────────┬────────────────┐
   ▼               ▼               ▼                ▼
-[Operator   [FlowValidator] [FlowService]  [DocpipeFlowManager]
- Registry]                        │                │
-                                  ▼                ▼
+[get_docpipe_ [FlowValidator] [FlowService]  [DocpipeFlowManager]
+ operators()]                     │                │
+[OperatorFactory]                 ▼                ▼
                             [FlowRepository] [FlowExecutor]
                              (DuckDB / PG)         │
                                                    ▼
@@ -28,45 +28,68 @@ The MCP server runs as a standalone Python process over stdio, wrapping existing
 ### D1: Use `DocpipeFlowManager` as the Core Execution Bridge
 `DocpipeFlowManager` already implements authoring format compilation, DAG validation via `FlowValidator`, and pipeline execution via `FlowExecutor`. Reusing it avoids duplicating orchestration logic.
 
-### D2: Stdio Transport with Process-Level File Descriptor Redirection
-MCP stdio transport requires `stdout` to carry JSON-RPC protocol frames exclusively. Multiple components in the codebase and third-party libraries write to stdout (`audit.py:129`, filesystem adapter `print()` calls, Docling, PyTorch, tqdm).
+### D2: Stdio Transport Wiring & Process-Level File Descriptor Redirection
+MCP stdio transport requires `stdout` to carry JSON-RPC protocol frames exclusively. Core audit handlers (`audit.py:129`), filesystem ingest adapter `print()` calls, and third-party C/Python libraries (PyTorch, Docling, tqdm) write to stdout.
 
-To ensure complete transport purity:
-1. In `src/docpipe/mcp/__main__.py`, duplicate OS file descriptor `1` (`os.dup(1)`) exclusively for the MCP JSON-RPC transport stream.
-2. Redirect `sys.stdout` and OS file descriptor `1` (`os.dup2(sys.stderr.fileno(), 1)`) to `sys.stderr` *before* importing any `docpipe` or third-party modules.
-3. This process-level redirection is strictly contained within the standalone MCP server process and has zero impact on the existing CLI (`docling-pipelines`) or REST API (`docling-pipelines-api`).
+In `mcp>=1.30.0`, `stdio_server(stdin=None, stdout: AsyncFile | None = None)` defaults to `sys.stdout` unless an explicit output stream is provided. If `sys.stdout` is redirected to `sys.stderr` before `stdio_server` initializes without explicit wiring, JSON-RPC protocol frames would be misrouted to `stderr`.
+
+To guarantee complete transport purity:
+1. **OS File Descriptor Duplication**: In `src/docpipe/mcp/__main__.py`, duplicate OS file descriptor `1`:
+   ```python
+   orig_stdout_fd = os.dup(1)
+   ```
+2. **Process-Level Redirection**: Redirect both OS file descriptor `1` and `sys.stdout` to `sys.stderr`:
+   ```python
+   os.dup2(sys.stderr.fileno(), 1)
+   sys.stdout = sys.stderr
+   ```
+3. **Strict Ordering**: Steps 1 and 2 MUST execute before importing any `docpipe` or third-party modules. Because `docpipe/__init__.py` is lazy, this ensures no module-level initializers or loggers bind to raw `stdout`.
+4. **Transport Stream Wiring**: Wrap the duplicated file descriptor via `anyio.wrap_file(os.fdopen(orig_stdout_fd, "wb", buffering=0))` and pass it explicitly to `stdio_server(stdout=mcp_stdout)`.
 
 ### D3: Support Inline Flow Definitions and File Paths
-`validate_flow` and `run_flow` accept either an inline JSON dictionary (`flow_definition`) or a file path (`flow_file`). Exactly one must be supplied.
+`validate_flow` and `run_flow` accept either an inline JSON dictionary (`flow_definition`) or a file path (`flow_file`). Exactly one must be supplied; providing both or neither returns a validation error.
 
 ### D4: Error Normalization Across Constructor and DAG Validation
-`DocpipeFlowManager.validate()` internally catches `FlowValidationException` and generic `Exception`, returning `{"valid": false, "errors": [...], "warnings": [...]}`. However, `DocpipeFlowManager.__init__` compiles the flow during object construction and can raise `FlowInvalidDataException` (e.g. missing `flow_name`, authoring-level cycles), `DocpipeException` (invalid arguments), `FileNotFoundError`, or `json.JSONDecodeError`.
+`DocpipeFlowManager.validate()` internally catches `FlowValidationException` and generic `Exception`, returning `{"valid": false, "errors": [...], "warnings": [...]}`. However, `DocpipeFlowManager.__init__` compiles authoring format during construction and can raise `FlowInvalidDataException` (e.g. missing `flow_name`, authoring cycles), `DocpipeException` (invalid arguments), `FileNotFoundError`, or `json.JSONDecodeError`.
 
 The `validate_flow` tool wrapper guards manager construction, catching all constructor exceptions and normalizing them into `{ "valid": false, "errors": [str(e)], "warnings": [] }` without raising uncaught exceptions.
 
 ### D5: Filesystem Trust Boundary & Security
-To prevent unauthorized filesystem reads, arbitrary file overwrites, and code injection:
-1. **Workspace Root Restriction**: A configured `DOCPIPE_WORKSPACE_ROOT` (defaults to current working directory). All path inputs (`path`, `flow_file`) must resolve strictly within this root (`resolved.is_relative_to(workspace_root)`). Paths attempting directory traversal (`..`) or symlink escapes outside the root are rejected.
-2. **File Extension**: Files written by `create_flow` must enforce a `.json` extension.
-3. **Overwrite Protection**: `overwrite` defaults to `false`. If the target file exists and `overwrite=false`, the operation safely returns an error.
-4. **Custom Operators Disabled**: The server explicitly passes `enable_custom_operators=False` by default, requiring explicit opt-in via `DOCPIPE_MCP_ENABLE_CUSTOM_OPERATORS=true`.
-5. **Secret Redaction**: Error messages and tool outputs pass through credential sanitization to ensure sensitive fields (`password`, `token`, `secret`, `api_key`) are never leaked.
+To prevent unauthorized filesystem access, arbitrary file overwrites, and code injection:
+1. **Workspace Root Restriction**: A configured `DOCPIPE_WORKSPACE_ROOT` environment variable. If unset, it defaults to `Path.cwd().resolve()`. If the resolved root is root `/` or `$HOME` / `~`, the server refuses to start or refuses path-based tools to avoid exposing the entire host filesystem.
+2. **Path Confinement**: All file paths (`path`, `flow_file`) and paths declared inside an inline `flow_definition` (e.g., `ingest_source` `connection_params.paths`, output paths) must resolve strictly within the workspace root (`resolved.is_relative_to(workspace_root)`). Directory traversal (`..`) and symlink escapes are rejected.
+3. **File Extension**: Files written by `create_flow` must enforce a `.json` extension.
+4. **Overwrite Protection**: `overwrite` defaults to `false`. If the target file exists and `overwrite=false`, the operation returns an error.
+5. **Custom Operators Disabled by Default**: The server enforces `DOCPIPE_ENABLE_CUSTOM_OPERATORS=false` by default, rejecting custom operator references unless explicitly opted in.
+6. **Secret Redaction**: Redaction is driven by declared credential fields from `src/docpipe/core/operators/secret_fields.py` (`SECRET_FIELDS`, `effective_secret_fields()`, `SECRET_FIELD_ALIASES`, and `json_schema_extra={"sensitive": True}`), with generic key-name pattern matching (`password`, `*_key`, `*_secret`, `*_token`, `credentials*`) as a fallback.
 
-### D6: Asynchronous Execution & Concurrency Model for `run_flow`
-Pipeline executions can take minutes. Running synchronously inside an async MCP handler would freeze the server, blocking keepalives and cancellation requests. Furthermore, `SessionInfo` is thread-local (AGENTS.md Rule 9).
+### D6: Asynchronous Execution, Concurrency, and Lifecycle for `run_flow`
+Pipeline executions can take minutes. Running synchronously inside an async MCP handler would freeze the server, blocking keepalives and cancellation requests.
 
-Model:
-1. `run_flow` spawns `DocpipeFlowManager.execute()` in a dedicated background worker thread.
-2. The worker thread initializes its own thread-local `SessionInfo` via `create_session_info()`.
-3. The tool immediately returns `{ "job_id": str, "job_run_id": str, "flow_id": str, "status": "SUBMITTED" }`.
-4. The agent polls for progress and final metrics using `get_job_status`.
-5. An optional `wait: bool = false` (with `timeout_seconds: int = 60`) allows agents desiring a synchronous wait to block up to the timeout while keeping the async event loop responsive.
+Lifecycle and concurrency details:
+1. **Background Worker Execution**: `run_flow` spawns `DocpipeFlowManager.execute()` in a background worker thread.
+2. **ContextVar Context Preservation**: `SessionInfo` uses `session_info_var: ContextVar[SessionInfo | None]`. Workers running in background threads are executed via `contextvars.copy_context().run(...)` (or invoke `create_session_info()` inside the worker) to ensure clean context initialization.
+3. **Event Loop Offloading**: All synchronous tools (`validate_flow`, `create_flow`, `list_operators`, `get_job_status`) are executed off the async event loop using `anyio.to_thread.run_sync`.
+4. **Polling Race Prevention**: `run_flow` synchronously registers the run with `status="Starting"` in an in-memory run registry and creates the initial job record before spawning the worker thread and returning `job_id`/`job_run_id`. `get_job_status` consults the run registry first, then the `JobStatsStore` port, ensuring agents never receive `found: false` immediately after submission.
+5. **Status Vocabulary**: Strictly uses `ExecutionStatus` enum values from `src/docpipe/core/constants/constants.py` (`Queued`, `Pending`, `Starting`, `Running`, `Completed`, `CompletedWithErrors`, `CompletedWithWarnings`, `Failed`, `Canceled`). `CompletedWithErrors` and `CompletedWithWarnings` are never collapsed into `Completed`.
+6. **Concurrency Cap**: Maximum concurrent runs are bounded by a semaphore (`DOCPIPE_MCP_MAX_CONCURRENT_RUNS`, default 4).
+7. **Graceful Shutdown**: On server shutdown, the server waits up to `DOCPIPE_MCP_SHUTDOWN_TIMEOUT_SECONDS` (default 30s) for active workers to complete or marks them `Canceled`.
+8. **Failed Step Source**: `failed_step: str | None = None` is derived from `node_stats` where a node has `node.status == ExecutionStatus.FAILED` or `failed_docs > 0` (or `None` if all nodes completed).
 
-### D7: Database Registration for UI and API Compatibility
-`create_flow` validates the flow and persists it to the database-backed `FlowRepository` using `FlowService`. This ensures that flows created via MCP immediately appear in the Web UI Canvas and are accessible via REST API routes (`/flows`). If an optional `path` parameter is supplied, it also exports a formatted `.json` file to the workspace.
+### D7: Database Registration & Partial Failure Semantics for `create_flow`
+`create_flow` validates and registers flows in the database-backed `FlowRepository` via `FlowService`:
+1. **Actor Context**: Passes `SYSTEM_ACTOR` (`ActorContext(username="<system>", roles=frozenset({"admin"}), is_system=True)`), explicitly bypassing REST authentication for local stdio agent invocations.
+2. **Format**: Stored with `is_elyra=False` (authoring format).
+3. **Container / Project ID**: Accepts optional `container_id: str | None = None` (UUID of project/space); defaults to `None` for global/unassigned flows.
+4. **Duplicate Flow Handling**: `FlowService.create_flow` raises `FlowAlreadyExistsException` if a flow with that name already exists. When `overwrite=false`, returns an error response. When `overwrite=true`, updates the existing flow via `FlowService.update_flow(...)`.
+5. **Partial Failure Rollback**:
+   - The flow definition is pre-validated in memory before making changes.
+   - If `path` is specified, the file is exported to the workspace.
+   - The flow is then registered in the database repository.
+   - If database registration fails (e.g., storage error, duplicate name), any exported workspace file is immediately unlinked (`os.unlink(path)`) so no partial state remains, and the error is returned to the agent.
 
 ### D8: Integrated Operator Discovery (`list_operators`)
-To provide a self-contained authoring workflow, the server provides a `list_operators` tool directly querying `OperatorRegistry`. It returns the operator's short name, category, one-line summary, and required input features.
+To provide a self-contained authoring workflow, the server provides a `list_operators` tool querying `get_docpipe_operators()` and resolving metadata via `OperatorFactory`. It returns each operator's short name, category, description, and required input features.
 
 ## Tool Specifications
 
@@ -88,18 +111,19 @@ To provide a self-contained authoring workflow, the server provides a `list_oper
 ### `validate_flow`
 - **Arguments**:
   - `flow_definition` (object, optional): Flow JSON dictionary.
-  - `flow_file` (string, optional): Path to flow file on disk.
+  - `flow_file` (string, optional): Path to flow file on disk within workspace root.
   - *Contract*: Exactly one of `flow_definition` or `flow_file` must be provided.
-- **Behavior**: Validates file path containment if provided. Normalizes constructor exceptions (`FlowInvalidDataException`, `DocpipeException`, `FileNotFoundError`, `json.JSONDecodeError`) and invokes `manager.validate()`.
+- **Behavior**: Validates file path containment and inline path containment against `DOCPIPE_WORKSPACE_ROOT`. Normalizes constructor exceptions (`FlowInvalidDataException`, `DocpipeException`, `FileNotFoundError`, `json.JSONDecodeError`) and invokes `manager.validate()`.
 - **Response**: `{ "valid": bool, "errors": list[str], "warnings": list[str] }`.
-- **Side Effects**: Side-effect-free (writes zero rows to `job_stats` or flow databases).
+- **Side Effects**: Side-effect-free (writes zero rows to `job_stats` or `flows` repositories).
 
 ### `create_flow`
 - **Arguments**:
   - `flow_definition` (object, required): Flow JSON dictionary.
+  - `container_id` (string, optional): Target project/container UUID. Defaults to null.
   - `path` (string, optional): Destination `.json` path within workspace root.
-  - `overwrite` (boolean, optional, default false): Whether to overwrite an existing file if `path` is provided.
-- **Behavior**: Pre-validates flow; registers flow in database asset repository via `FlowService`; if `path` is given, verifies containment and writes formatted JSON.
+  - `overwrite` (boolean, optional, default false): Whether to overwrite an existing file or database flow.
+- **Behavior**: Pre-validates flow; if `path` is specified, verifies path containment and writes formatted JSON; registers flow in database via `FlowService` with `SYSTEM_ACTOR`; if DB registration fails, rolls back the exported file.
 - **Response**:
   ```json
   {
@@ -118,14 +142,14 @@ To provide a self-contained authoring workflow, the server provides a `list_oper
   - `wait` (boolean, optional, default false): Whether to wait up to `timeout_seconds`.
   - `timeout_seconds` (integer, optional, default 60): Timeout when `wait=true`.
   - *Contract*: Exactly one of `flow_definition` or `flow_file` must be provided.
-- **Behavior**: Instantiates `DocpipeFlowManager(..., configure_logging=False)`. Launches execution in a background thread with fresh `SessionInfo`.
+- **Behavior**: Validates paths; instantiates `DocpipeFlowManager(..., configure_logging=False)`; registers run synchronously with `status="Starting"`; spawns worker thread with `ContextVar` context preservation.
 - **Response**:
   ```json
   {
     "job_id": "string",
     "job_run_id": "string",
     "flow_id": "string",
-    "status": "SUBMITTED | RUNNING | COMPLETED | FAILED",
+    "status": "Starting | Running | Completed | CompletedWithErrors | CompletedWithWarnings | Failed | Canceled",
     "execution_time_seconds": null,
     "total_documents_processed": null,
     "failed_documents_count": null,
@@ -137,17 +161,17 @@ To provide a self-contained authoring workflow, the server provides a `list_oper
 - **Arguments**:
   - `job_id` (string, required): Job identifier.
   - `job_run_id` (string, optional): Specific job run identifier. Defaults to latest run for the job if omitted.
-- **Behavior**: Queries configured `JobStatsStore` port.
+- **Behavior**: Queries in-memory run registry, then configured `JobStatsStore` port.
 - **Response**:
   ```json
   {
     "found": true,
     "job_id": "string",
     "job_run_id": "string",
-    "status": "PENDING | RUNNING | COMPLETED | FAILED",
+    "status": "Starting | Running | Completed | CompletedWithErrors | CompletedWithWarnings | Failed | Canceled",
     "node_states": {
       "node_a": {
-        "status": "COMPLETED",
+        "status": "Completed",
         "records_in": 10,
         "records_out": 10,
         "execution_time_ms": 120.5
