@@ -107,9 +107,11 @@ export function extractVectorDBNodeResult(
         selected_resource_schema: p.selected_resource_schema ?? {},
         feature_mappings: p.feature_mappings ?? [],
         is_docpipe_supported_resource: p.is_docpipe_supported_resource ?? {},
-        stored_resource_metadata: p.stored_resource_metadata ?? {
-          vector_similarity: null,
-          dimension_size: null,
+        stored_resource_metadata: {
+          vector_similarity: p.stored_resource_metadata?.vector_similarity ?? null,
+          dimension_size: p.stored_resource_metadata?.dimension_size ?? null,
+          // Absent from older backends and from providers that do not report it (e.g. Weaviate).
+          index_type: p.stored_resource_metadata?.index_type ?? null,
         },
         available_features: p.available_features ?? {},
       };

@@ -74,5 +74,53 @@ describe('vectordb-enrichment', () => {
       expect(result).not.toBeNull();
       expect(result?.available_resources).toEqual(['idx-1']);
     });
+
+    describe('stored_resource_metadata.index_type', () => {
+      const buildResponse = (stored: unknown) => ({
+        pipelines: [{
+          nodes: [{
+            id: 'node-1',
+            parameters: {
+              available_resources: ['idx-1'],
+              feature_mappings: [],
+              available_features: {},
+              selected_resource_schema: {},
+              is_docpipe_supported_resource: {},
+              stored_resource_metadata: stored,
+            },
+          }],
+        }],
+      });
+
+      it('passes through a stored index_type', () => {
+        const result = extractVectorDBNodeResult(
+          buildResponse({ vector_similarity: 'L2', dimension_size: 4, index_type: 'IVF_FLAT' }) as any,
+          'node-1'
+        );
+        expect(result?.stored_resource_metadata?.index_type).toBe('IVF_FLAT');
+        expect(result?.stored_resource_metadata?.vector_similarity).toBe('L2');
+      });
+
+      it('defaults index_type to null when absent', () => {
+        const result = extractVectorDBNodeResult(
+          buildResponse({ vector_similarity: null, dimension_size: null }) as any,
+          'node-1'
+        );
+        expect(result?.stored_resource_metadata?.index_type).toBeNull();
+      });
+
+      it('keeps index_type null when explicitly null', () => {
+        const result = extractVectorDBNodeResult(
+          buildResponse({ vector_similarity: null, dimension_size: null, index_type: null }) as any,
+          'node-1'
+        );
+        expect(result?.stored_resource_metadata?.index_type).toBeNull();
+      });
+
+      it('tolerates stored_resource_metadata being null', () => {
+        const result = extractVectorDBNodeResult(buildResponse(null) as any, 'node-1');
+        expect(result?.stored_resource_metadata?.index_type).toBeNull();
+      });
+    });
   });
 });

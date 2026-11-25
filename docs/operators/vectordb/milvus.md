@@ -105,9 +105,21 @@ Connection and index-specific parameters are configured inside the `provider_con
 | `database` | string | No | `"default"` | Database name (not used for `lite`) |
 | `secure` | boolean | No | false | Enable TLS/SSL (not used for `lite`) |
 | `vector_mode` | string | No | inferred | `dense`, `sparse`, `binary` or `gpu`. When omitted: `sparse` if `add_sparse_vector` is true, otherwise inferred from `index_type` (`BIN_*` gives `binary`, `GPU_*` gives `gpu`, else `dense`) |
-| `index_type` | string | No | `"HNSW"` | Index type (HNSW, IVF_FLAT, `GPU_CAGRA`, `BIN_FLAT`, `BIN_IVF_FLAT`, etc.; only `FLAT` is supported for `lite`). Must belong to the `vector_mode` |
+| `index_type` | string | No | `"HNSW"` (`"FLAT"` for `lite`) | Index type (HNSW, IVF_FLAT, `GPU_CAGRA`, `BIN_FLAT`, `BIN_IVF_FLAT`, etc.). Sparse index types are not accepted. Must belong to the `vector_mode`. `lite` supports only `FLAT` and uses it when this is not set |
 | `metric_type` | string | No | `"L2"` | Similarity metric: L2, IP, COSINE for dense vectors; L2, IP for GPU indexes; HAMMING, JACCARD for binary vectors. A `BIN_*` `index_type` requires a binary metric, so the default `L2` is rejected |
 | `index_parameters` | object | No | {} | Custom index-specific parameters |
+
+#### Index selection metadata
+
+`GET /api/v1/operators/metadata` returns, under `providers.milvus.applicability`, which index types, metric types and feature types apply together, so a client does not have to duplicate these rules:
+
+| Family | `index_type` values | `metric_type` values | Feature type |
+|---|---|---|---|
+| `cpu_dense` | `FLAT`, `IVF_FLAT`, `IVF_SQ8`, `IVF_PQ`, `HNSW`, `DISKANN`, `AUTOINDEX` | `L2`, `IP`, `COSINE` | `vector` |
+| `gpu` | `GPU_CAGRA`, `GPU_IVF_FLAT`, `GPU_IVF_PQ`, `GPU_BRUTE_FORCE` | `L2`, `IP` | `vector` |
+| `binary` | `BIN_FLAT`, `BIN_IVF_FLAT` | `HAMMING`, `JACCARD` | `vector_binary` |
+
+The same block lists the Milvus Lite subset (`FLAT` only, which is also the Lite default). For an existing collection, flow enrichment returns the stored index type as `stored_resource_metadata.index_type` (`null` when it cannot be read).
 | `add_sparse_vector` | boolean | No | false | Backward-compatible alias for `vector_mode: "sparse"` (BM25 hybrid search, not supported for `lite`). Combining it with another `vector_mode` is rejected |
 
 ### Index Parameters
@@ -208,7 +220,7 @@ Enable hybrid search by setting `add_sparse_vector: true` in `provider_config`. 
 ```
 
 **Note**: In hybrid mode:
-- Sparse vectors use SPARSE_INVERTED_INDEX with BM25 (hardcoded, not user-configurable)
+- Sparse vectors use SPARSE_INVERTED_INDEX with BM25 (hardcoded, not user-configurable; `SPARSE_INVERTED_INDEX` and `SPARSE_WAND` are rejected as an `index_type`)
 - Dense vectors use user-specified index_type and metric_type
 - Content field has `enable_analyzer: true` for BM25 text analysis
 

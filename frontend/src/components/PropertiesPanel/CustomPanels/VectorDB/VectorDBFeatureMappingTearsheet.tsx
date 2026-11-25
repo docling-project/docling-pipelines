@@ -8,6 +8,8 @@
  * Existing-resource behaviour:
  * - Similarity and engine dropdowns are read-only when an existing resource is
  *   selected and `stored_resource_metadata` carries those values.
+ * - The index type / algorithm is read-only when `stored_resource_metadata.index_type`
+ *   is known, and hidden (left unchanged in the saved config) when it is not.
  * - An info notification explains the read-only constraint to the user.
  * - The "Create new" name input is hidden when an existing resource is selected.
  * - New resource name validation: must start with a letter or underscore;
@@ -32,13 +34,17 @@ import {
 import { ErrorEmptyState } from '@carbon/ibm-products';
 import { Tearsheet } from '@carbon/ibm-products';
 import type { FeatureMappingRow, FeatureMappingItem, VectorDBEnrichmentResult } from '@/types';
-import { isMilvusGpuMode } from '@/utils/vectordb';
+import {
+  VECTOR_FEATURE_TYPES,
+  getMilvusDefaultIndexType,
+  getMilvusIndexTypeOptions,
+  getMilvusMetricOptions,
+  getOpenSearchAlgorithmOptions,
+  type VectorDBApplicability,
+} from '@/utils/vectordb';
 import { enrichFlowFeaturesForNode } from './vectordb-enrichment';
 import {
   DEFAULT_COLUMN_MAPPINGS,
-  MILVUS_BINARY_METRIC_VALUES,
-  MILVUS_DENSE_METRIC_VALUES,
-  MILVUS_GPU_METRIC_VALUES,
   VECTORDB_LABELS,
   VECTORDB_PROVIDERS,
   omitProviderConfigKeys,
@@ -61,6 +67,10 @@ interface VectorDBFeatureMappingTearsheetProps {
     resourceName: string;
     similarityMetric: string;
     engine: string;
+    /** Index type / algorithm to persist; undefined leaves the saved value untouched. */
+    indexType?: string;
+    /** True when the index type changed and non-empty `index_parameters` must be removed. */
+    clearIndexParameters?: boolean;
     featureMappings: FeatureMappingRow[];
     addSparseVector: boolean;
   }) => void;
@@ -87,6 +97,20 @@ interface VectorDBFeatureMappingTearsheetProps {
   engineOptions: string[];
   /** Saved engine from provider_config — pre-fills dropdown on re-open. */
   savedEngine: string;
+  /** Valid index type / algorithm values from metadata; falls back to the provider defaults. */
+  indexTypeValidValues?: string[];
+  /** Default index type / algorithm from metadata; falls back to the provider default. */
+  indexTypeDefault?: string;
+  /** `applicability` block of the operator metadata for the active provider. */
+  applicability?: VectorDBApplicability;
+}
+
+/** Where the current index type came from; a `saved` value is never silently replaced. */
+type IndexTypeOrigin = 'saved' | 'auto' | 'user';
+
+/** True for a non-empty plain object (used for `index_parameters`). */
+function isNonEmptyObject(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && Object.keys(value).length > 0;
 }
 
 /**
@@ -157,6 +181,9 @@ export function VectorDBFeatureMappingTearsheet({
   engineOptions,
   savedEngine,
   addSparseVector,
+  indexTypeValidValues,
+  indexTypeDefault,
+  applicability,
 }: VectorDBFeatureMappingTearsheetProps): React.JSX.Element {
   const intl = useIntl();
   const portalTarget = useThemeElement();
@@ -164,8 +191,16 @@ export function VectorDBFeatureMappingTearsheet({
     resourceLabel,
     resourceNameKey,
     similarityLabel,
+    indexTypeLabel,
     hasEngine,
   } = providerCfg;
+  // Undefined (not the metadata default) when the flow never set one, so a saved value
+  // can be told apart from an automatic default.
+  const rawSavedIndexType = parsedProviderConfig[providerCfg.indexTypeKey];
+  const savedIndexType =
+    typeof rawSavedIndexType === 'string' && rawSavedIndexType !== '' ? rawSavedIndexType : undefined;
+  const validIndexTypes = indexTypeValidValues ?? providerCfg.defaultIndexTypeValues;
+  const metadataIndexTypeDefault = indexTypeDefault ?? providerCfg.defaultIndexType;
 
   const similarityMetricLabels: Record<string, string> = {
     l2: intl.formatMessage(messages.metricL2),
@@ -211,6 +246,8 @@ export function VectorDBFeatureMappingTearsheet({
   const [resourceNameEdited, setResourceNameEdited] = useState<boolean>(true);
   const [similarityMetric, setSimilarityMetric] = useState<string>(savedVectorSimilarity);
   const [engine, setEngine] = useState<string>(savedEngine);
+  const [indexType, setIndexType] = useState<string>(savedIndexType ?? '');
+  const [indexTypeOrigin, setIndexTypeOrigin] = useState<IndexTypeOrigin>(savedIndexType ? 'saved' : 'auto');
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [tableRows, setTableRows] = useState<FeatureMappingItem[]>([]);
@@ -257,6 +294,8 @@ export function VectorDBFeatureMappingTearsheet({
         setResourceNameEdited(true);
         setSimilarityMetric(storedMeta?.vector_similarity ?? savedVectorSimilarity);
         setEngine(savedEngine);
+        setIndexType(savedIndexType ?? '');
+        setIndexTypeOrigin(savedIndexType ? 'saved' : 'auto');
         setSubmitted(false);
         setIsAddModalOpen(false);
         setSparseVectorEnabled(addSparseVector);
@@ -279,7 +318,10 @@ export function VectorDBFeatureMappingTearsheet({
 
   const availableResources = enrichmentResult?.available_resources ?? [];
   const storedMeta = enrichmentResult?.stored_resource_metadata;
-  const availableFeatures = enrichmentResult?.available_features ?? {};
+  const availableFeatures = useMemo(
+    () => enrichmentResult?.available_features ?? {},
+    [enrichmentResult]
+  );
 
   const isCreateNew = selectedResource === CREATE_NEW;
 
@@ -291,35 +333,90 @@ export function VectorDBFeatureMappingTearsheet({
   // already knows those values (they were set at index/collection creation time).
   const isConfigReadOnly = !isCreateNew && Boolean(storedMeta?.vector_similarity);
 
+  // ── Index type / algorithm ──
+  // Feature types decide which index families apply. Available features are included so the
+  // options stay stable while rows are added or removed.
+  const featureTypes = useMemo(() => {
+    const types = new Set<string>();
+    tableRows.forEach((r) => {
+      const type = availableFeatures[r.feature]?.type;
+      if (type) { types.add(type); }
+    });
+    Object.values(availableFeatures).forEach((f) => {
+      if (f?.type) { types.add(f.type); }
+    });
+    return [...types];
+  }, [availableFeatures, tableRows]);
+
+  const mappedFeatureTypes = useMemo(
+    () => new Set(tableRows.map((r) => availableFeatures[r.feature]?.type)),
+    [availableFeatures, tableRows]
+  );
+  const hasMixedVectorFeatures =
+    !hasEngine &&
+    mappedFeatureTypes.has(VECTOR_FEATURE_TYPES.DENSE) &&
+    mappedFeatureTypes.has(VECTOR_FEATURE_TYPES.BINARY);
+
+  const authType = parsedProviderConfig.auth_type as string | undefined;
+  const vectorMode = parsedProviderConfig.vector_mode as string | undefined;
+
+  const indexTypeOptions = useMemo(
+    () =>
+      hasEngine
+        ? getOpenSearchAlgorithmOptions(engine, applicability, validIndexTypes)
+        : getMilvusIndexTypeOptions({
+            applicability, authType, featureTypes, vectorMode, validValues: validIndexTypes,
+          }),
+    [applicability, authType, engine, featureTypes, hasEngine, validIndexTypes, vectorMode]
+  );
+
+  const defaultIndexType = hasEngine
+    ? (indexTypeOptions.includes(metadataIndexTypeDefault) ? metadataIndexTypeDefault : (indexTypeOptions[0] ?? ''))
+    : getMilvusDefaultIndexType(indexTypeOptions, metadataIndexTypeDefault, authType, applicability);
+
+  // A saved value is kept even when it is not offered (shown as invalid, never dropped);
+  // an auto or user-chosen value that is no longer offered is replaced (see fallback below).
+  const keepsCurrentIndexType =
+    indexType !== '' && (indexTypeOrigin === 'saved' || indexTypeOptions.includes(indexType));
+  // Before any user choice the metadata default is preselected; once the user has chosen a value that a
+  // context change makes unavailable, the selection resets to the first offered option.
+  const fallbackIndexType = indexTypeOrigin === 'user' ? (indexTypeOptions[0] ?? '') : defaultIndexType;
+  const newResourceIndexType = keepsCurrentIndexType ? indexType : fallbackIndexType;
+  const storedIndexType = storedMeta?.index_type ?? null;
+  const effectiveIndexType = isCreateNew ? newResourceIndexType : (storedIndexType ?? '');
+  const isIndexTypeInvalid =
+    isCreateNew && effectiveIndexType !== '' && !indexTypeOptions.includes(effectiveIndexType);
+
   const effectiveSimilarityOptions = useMemo(() => {
     if (provider !== VECTORDB_PROVIDERS.MILVUS) {
       return vectorSimilarityOptions;
     }
-    const hasBinary = tableRows.some((r) => availableFeatures[r.feature]?.type === 'vector_binary')
-      || Object.values(availableFeatures).some((f) => f?.type === 'vector_binary');
-    const hasDense = tableRows.some((r) => availableFeatures[r.feature]?.type === 'vector')
-      || Object.values(availableFeatures).some((f) => f?.type === 'vector');
+    return getMilvusMetricOptions({
+      applicability,
+      // An unoffered (invalid) index type must not drive the metrics; fall back to provider_config.
+      indexType: effectiveIndexType && !isIndexTypeInvalid ? effectiveIndexType : undefined,
+      providerConfig: parsedProviderConfig,
+      featureTypes,
+      sparseEnabled: sparseVectorEnabled,
+      validValues: vectorSimilarityOptions,
+    });
+  }, [
+    applicability, effectiveIndexType, featureTypes, isIndexTypeInvalid, parsedProviderConfig,
+    provider, sparseVectorEnabled, vectorSimilarityOptions,
+  ]);
 
-    if (hasBinary && !hasDense) {
-      const base: string[] = [...MILVUS_BINARY_METRIC_VALUES];
-      if (sparseVectorEnabled && !base.includes('BM25')) {
-        base.push('BM25');
-      }
-      return base.filter((v) => vectorSimilarityOptions.includes(v));
-    }
-    // GPU indexes accept only L2/IP; BM25 is excluded because GPU mode rejects sparse vectors.
-    if (isMilvusGpuMode(parsedProviderConfig)) {
-      return MILVUS_GPU_METRIC_VALUES.filter((v) => vectorSimilarityOptions.includes(v));
-    }
-    if (hasDense && !hasBinary) {
-      const base: string[] = [...MILVUS_DENSE_METRIC_VALUES];
-      if (sparseVectorEnabled && !base.includes('BM25')) {
-        base.push('BM25');
-      }
-      return base.filter((v) => vectorSimilarityOptions.includes(v));
-    }
-    return vectorSimilarityOptions;
-  }, [availableFeatures, parsedProviderConfig, provider, sparseVectorEnabled, tableRows, vectorSimilarityOptions]);
+  // index_parameters belong to the previous index type; changing the type invalidates them.
+  const baselineIndexType = savedIndexType ?? metadataIndexTypeDefault;
+  const indexTypeChangedByUser =
+    isCreateNew && indexTypeOrigin === 'user' && effectiveIndexType !== baselineIndexType;
+  const hasIndexParameters = isNonEmptyObject(parsedProviderConfig.index_parameters);
+  const clearIndexParameters = indexTypeChangedByUser && hasIndexParameters;
+
+  const indexTypeLabelByKey: Record<string, string> = {
+    algorithm: intl.formatMessage(messages.algorithmLabel),
+    index_type: intl.formatMessage(messages.indexTypeLabel),
+  };
+  const localizedIndexTypeLabel = indexTypeLabelByKey[providerCfg.indexTypeKey] ?? indexTypeLabel;
 
   useEffect(() => {
     if (isCreateNew && effectiveSimilarityOptions.length > 0 && !effectiveSimilarityOptions.includes(similarityMetric)) {
@@ -362,6 +459,8 @@ export function VectorDBFeatureMappingTearsheet({
           : savedVectorSimilarity;
         setSimilarityMetric(nextSimilarity);
         setEngine(savedEngine);
+        setIndexType(savedIndexType ?? '');
+        setIndexTypeOrigin(savedIndexType ? 'saved' : 'auto');
         // Always drive rows from the API response when the user switches resource —
         // passing currentFeatureMappings would bleed saved column values from a previously
         // configured resource into the new selection (including switching to "Create new").
@@ -379,6 +478,20 @@ export function VectorDBFeatureMappingTearsheet({
     };
 
     void fetchOnResourceChange();
+  };
+
+  /**
+   * Change the engine and reset the algorithm when the new engine does not allow it
+   * (an invalid saved value is also replaced here because the user is actively editing).
+   */
+  const handleEngineChange = (nextEngine: string): void => {
+    setEngine(nextEngine);
+    if (!hasEngine) { return; }
+    const nextOptions = getOpenSearchAlgorithmOptions(nextEngine, applicability, validIndexTypes);
+    if (effectiveIndexType !== '' && !nextOptions.includes(effectiveIndexType)) {
+      setIndexType('');
+      setIndexTypeOrigin('auto');
+    }
   };
 
   const handleNewNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -450,6 +563,7 @@ export function VectorDBFeatureMappingTearsheet({
     !loadingMappings &&
     Boolean(effectiveResourceName) &&
     (!isCreateNew || !newNameError) &&
+    !isIndexTypeInvalid &&
     !isUnsupported;
 
   const handleSave = (): void => {
@@ -468,6 +582,9 @@ export function VectorDBFeatureMappingTearsheet({
       resourceName: effectiveResourceName,
       similarityMetric,
       engine,
+      // Existing resources keep their saved value; only a new resource writes the selection.
+      ...(isCreateNew && effectiveIndexType ? { indexType: effectiveIndexType } : {}),
+      ...(clearIndexParameters ? { clearIndexParameters: true } : {}),
       featureMappings: mappings,
       addSparseVector: sparseVectorEnabled,
     });
@@ -519,6 +636,28 @@ export function VectorDBFeatureMappingTearsheet({
                 kind="error"
                 title={intl.formatMessage(messages.errorTitle)}
                 subtitle={loadError}
+                lowContrast
+                hideCloseButton
+              />
+            )}
+
+            {/* Parameters reset notice — index_parameters belong to the previous index type */}
+            {clearIndexParameters && (
+              <InlineNotification
+                kind="warning"
+                title={intl.formatMessage(messages.indexParametersResetNotice, {
+                  indexTypeLabel: localizedIndexTypeLabel.toLowerCase(),
+                })}
+                lowContrast
+                hideCloseButton
+              />
+            )}
+
+            {/* Mixed dense + binary collection: only one field uses the selected index */}
+            {hasMixedVectorFeatures && !isUnsupported && (
+              <InlineNotification
+                kind="info"
+                title={intl.formatMessage(messages.mixedVectorFeaturesNotice)}
                 lowContrast
                 hideCloseButton
               />
@@ -629,13 +768,51 @@ export function VectorDBFeatureMappingTearsheet({
                               const value = engineOptions.find(
                                 (v) => (engineOptionLabels[v] ?? v) === selectedItem
                               );
-                              if (value) { setEngine(value); }
+                              if (value) { handleEngineChange(value); }
                             }
                           }}
                         />
                       )}
                     </>
                   )}
+
+                  {/* Index type / algorithm:
+                      - new resource → editable Dropdown (invalid state for an unoffered saved value)
+                      - existing resource with a stored value → disabled TextInput
+                      - existing resource with no stored value → hidden, saved value left unchanged */}
+                  {loadingMappings && !isCreateNew ? (
+                    <TextInputSkeleton hideLabel />
+                  ) : isCreateNew ? (
+                    <Dropdown
+                      id="index-type-select"
+                      titleText={localizedIndexTypeLabel}
+                      label={intl.formatMessage(messages.selectIndexType, {
+                        indexTypeLabel: localizedIndexTypeLabel.toLowerCase(),
+                      })}
+                      items={indexTypeOptions.includes(effectiveIndexType) || effectiveIndexType === ''
+                        ? indexTypeOptions
+                        : [effectiveIndexType, ...indexTypeOptions]}
+                      selectedItem={effectiveIndexType || null}
+                      invalid={isIndexTypeInvalid}
+                      invalidText={intl.formatMessage(messages.indexTypeInvalid, {
+                        value: effectiveIndexType,
+                        indexTypeLabel: localizedIndexTypeLabel.toLowerCase(),
+                      })}
+                      onChange={({ selectedItem }: { selectedItem?: string | null }) => {
+                        if (selectedItem) {
+                          setIndexType(selectedItem);
+                          setIndexTypeOrigin('user');
+                        }
+                      }}
+                    />
+                  ) : storedIndexType ? (
+                    <TextInput
+                      id="index-type-readonly"
+                      labelText={localizedIndexTypeLabel}
+                      value={storedIndexType}
+                      disabled
+                    />
+                  ) : null}
                 </>
               )}
             </div>

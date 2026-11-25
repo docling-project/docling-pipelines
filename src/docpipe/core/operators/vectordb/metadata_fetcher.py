@@ -339,5 +339,6 @@ class VectorDBMetadataFetcher:
             OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: {
                 "vector_similarity": None,
                 "dimension_size": None,
+                "index_type": None,
             },
         }

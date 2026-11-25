@@ -98,7 +98,11 @@ class MilvusResourceMetadata:
 
             collection_name: str = provider_config.get(OperatorConstants.VectorDB.COLLECTION_NAME, "")
             selected_resource_schema: dict[str, Any] = {}
-            stored_resource_metadata: dict[str, Any] = {"vector_similarity": None, "dimension_size": None}
+            stored_resource_metadata: dict[str, Any] = {
+                "vector_similarity": None,
+                "dimension_size": None,
+                "index_type": None,
+            }
 
             if collection_name and collection_name in available_resources:
                 desc = client.describe_collection(collection_name)
@@ -238,20 +242,22 @@ class MilvusResourceMetadata:
 
     @staticmethod
     def _stored_metadata(schema: dict[str, Any]) -> dict[str, Any]:
-        """Derive vector_similarity and dimension_size from the FLOAT_VECTOR field.
+        """Derive vector_similarity, dimension_size and index_type from the vector field.
 
         Scans schema for the first field that carries a 'dimension' key (set by
-        _collection_columns for FLOAT_VECTOR fields) and reads metric_type from
-        its index_info.
+        _collection_columns for FLOAT_VECTOR and BINARY_VECTOR fields) and reads
+        metric_type and index_type from its index_info. ``index_type`` is None
+        when the field has no readable index.
         """
         for field_meta in schema.values():
             if "dimension" in field_meta:
-                metric_type = field_meta.get("index_info", {}).get("metric_type")
+                index_info = field_meta.get("index_info", {})
                 return {
-                    "vector_similarity": metric_type,
+                    "vector_similarity": index_info.get("metric_type"),
                     "dimension_size": field_meta["dimension"],
+                    "index_type": index_info.get("index_type"),
                 }
-        return {"vector_similarity": None, "dimension_size": None}
+        return {"vector_similarity": None, "dimension_size": None, "index_type": None}
 
     @staticmethod
     def _is_supported(

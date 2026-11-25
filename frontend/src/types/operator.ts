@@ -131,6 +131,8 @@ export interface VectorDBEnrichmentResult {
   stored_resource_metadata: {
     vector_similarity: string | null;
     dimension_size: number | null;
+    /** Index algorithm of an existing resource (Milvus `index_type`, OpenSearch `algorithm`); null when unknown. */
+    index_type: string | null;
   };
   available_features: Record<string, FeatureAttributes>;
 }

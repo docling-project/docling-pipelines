@@ -2093,8 +2093,9 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 2. **Milvus** (`provider: "milvus"`)
    - **Index Types**:
      - Dense: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX
-     - Sparse: SPARSE_INVERTED_INDEX, SPARSE_WAND
+     - GPU: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE
      - Binary: BIN_FLAT, BIN_IVF_FLAT (1-bit quantized binary vectors)
+     - The sparse (BM25) field always uses a fixed `SPARSE_INVERTED_INDEX` and is not configurable; `SPARSE_INVERTED_INDEX` and `SPARSE_WAND` are rejected as an `index_type`
    - **Metric Types**:
      - Dense: L2 (Euclidean), IP (Inner Product), COSINE
      - Sparse: BM25 (required for sparse mode)
@@ -2305,7 +2306,7 @@ The VectorDBOperator supports multiple embedding columns with different dimensio
 - `database`: Database name (default: "default")
 - `secure` : Required for IBM watsonx.data MilvusDB for https connection and is set to true in this case.
 - `vector_mode`: `dense` (default), `sparse`, `binary` or `gpu`. If omitted, it is `sparse` when `add_sparse_vector: true`, otherwise inferred from `index_type` (`BIN_*` gives `binary`, `GPU_*` gives `gpu`, anything else `dense`). An `index_type` that does not belong to the mode is rejected
-- `index_type`: Index algorithm (HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX for dense; GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for `gpu` mode; SPARSE_INVERTED_INDEX, SPARSE_WAND for sparse; BIN_FLAT, BIN_IVF_FLAT for binary vectors). GPU types are sent to the Milvus server as configured. Milvus Lite supports only FLAT
+- `index_type`: Index algorithm (HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX for dense; GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for `gpu` mode; BIN_FLAT, BIN_IVF_FLAT for binary vectors). Sparse index types are not accepted because the sparse field uses a fixed index. GPU types are sent to the Milvus server as configured. Milvus Lite supports only FLAT and uses it when `index_type` is not set; other deployments default to HNSW. The operator metadata (`GET /api/v1/operators/metadata`) lists which index types, metrics and feature types apply together under `providers.milvus.applicability`, and the OpenSearch `engine` to `algorithm` map under `providers.opensearch.applicability`
 - `metric_type`: Distance metric (L2, IP, COSINE for dense; L2 and IP only for `gpu` mode; HAMMING, JACCARD for binary, required for `BIN_*` index types; BM25 required for sparse mode)
 - `index_parameters`: Index-specific parameters (e.g., M and efConstruction for HNSW). For `GPU_CAGRA`, `graph_degree` must be less than or equal to `intermediate_graph_degree`
 - `add_sparse_vector`: Kept for backward compatibility. `true` is equivalent to `vector_mode: "sparse"`; combining it with another `vector_mode` is rejected

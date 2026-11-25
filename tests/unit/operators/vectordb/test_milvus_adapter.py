@@ -111,8 +111,10 @@ class TestMilvusAdapterGetConfigSchema:
             "HNSW",
             "DISKANN",
             "AUTOINDEX",
-            "SPARSE_INVERTED_INDEX",
-            "SPARSE_WAND",
+            "GPU_CAGRA",
+            "GPU_IVF_FLAT",
+            "GPU_IVF_PQ",
+            "GPU_BRUTE_FORCE",
             "BIN_FLAT",
             "BIN_IVF_FLAT",
         ],
@@ -120,6 +122,15 @@ class TestMilvusAdapterGetConfigSchema:
     def test_index_type_valid(self, value):
         cfg = self.Config(collection_name="col", index_type=value)
         assert cfg.index_type == value
+
+    @pytest.mark.parametrize("value", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
+    def test_sparse_index_type_rejected(self, value):
+        """The sparse field uses a fixed index, so sparse types are not user-selectable."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            self.Config(collection_name="col", index_type=value)
+        assert "index_type" in str(exc_info.value)
 
     def test_index_type_invalid_raises(self):
         from pydantic import ValidationError
@@ -181,8 +192,21 @@ class TestMilvusAdapterGetConfigSchema:
         )
 
         schema = self.Config.model_json_schema()
-        assert set(schema["properties"]["index_type"]["enum"]) == set(MilvusIndexTypes.ALL_TYPES)
+        selectable_index_types = (
+            MilvusIndexTypes.ALL_DENSE_TYPES + MilvusIndexTypes.ALL_GPU_TYPES + MilvusIndexTypes.ALL_BINARY_TYPES
+        )
+        assert set(schema["properties"]["index_type"]["enum"]) == set(selectable_index_types)
+        assert set(schema["properties"]["index_type"]["enum"]).isdisjoint(MilvusIndexTypes.ALL_SPARSE_TYPES)
         assert set(schema["properties"]["metric_type"]["enum"]) == set(MilvusMetricTypes.ALL_TYPES)
+
+    def test_index_type_valid_values_in_operator_metadata(self):
+        """Operator metadata lists the 13 selectable Milvus index types and no sparse type."""
+        from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
+
+        providers = VectorDBOperator.get_metadata()["attributes"]["provider_config"]["providers"]
+        valid_values = providers["milvus"]["properties"]["index_type"]["valid_values"]
+        assert len(valid_values) == 13
+        assert set(valid_values).isdisjoint({"SPARSE_INVERTED_INDEX", "SPARSE_WAND"})
 
 
 class TestMilvusAdapterRefreshIndex:
@@ -335,6 +359,60 @@ class TestMilvusAdapterValidatesBeforeConnecting:
         error, mock_client_cls = self._build_expecting_error(config)
         assert message in str(error)
         mock_client_cls.assert_not_called()
+
+
+class TestMilvusAdapterLiteDefaultIndexType:
+    """An unset index_type resolves to FLAT on Milvus Lite and stays HNSW elsewhere."""
+
+    @staticmethod
+    def _build(extra_config):
+        """Build the adapter with a real index manager constructor over a mocked client; return its index type."""
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.adapter import MilvusAdapter
+
+        base = "docpipe.core.operators.vectordb.adapters.outbound.milvus"
+        with (
+            patch(f"{base}.adapter.MilvusClient") as mock_client_cls,
+            patch(f"{base}.batch_processor.MilvusBatchProcessor.__init__", return_value=None),
+        ):
+            mock_client_cls.return_value.get_client.return_value = MagicMock()
+            adapter = MilvusAdapter(collection_name="c", **extra_config)
+        return adapter.index_manager.index_type, adapter.vector_mode
+
+    def test_lite_without_index_type_uses_flat(self):
+        index_type, vector_mode = self._build({"auth_type": "lite", "uri": "./demo.db"})
+        assert index_type == "FLAT"
+        assert vector_mode == "dense"
+
+    def test_lite_with_explicit_flat_is_unchanged(self):
+        index_type, _ = self._build({"auth_type": "lite", "uri": "./demo.db", "index_type": "FLAT"})
+        assert index_type == "FLAT"
+
+    def test_lite_with_explicit_hnsw_is_rejected_naming_flat(self):
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.adapter import MilvusAdapter
+
+        base = "docpipe.core.operators.vectordb.adapters.outbound.milvus"
+        with (
+            patch(f"{base}.adapter.MilvusClient") as mock_client_cls,
+            pytest.raises(DocpipeException) as exc_info,
+        ):
+            MilvusAdapter(collection_name="c", auth_type="lite", uri="./demo.db", index_type="HNSW")
+        message = str(exc_info.value)
+        assert "HNSW" in message
+        assert "FLAT" in message
+        assert "Milvus Lite" in message
+        mock_client_cls.assert_not_called()
+
+    @pytest.mark.parametrize("auth_type", [None, "standalone", "grpc", "uri", "token"])
+    def test_non_lite_without_index_type_uses_hnsw(self, auth_type):
+        extra_config = {} if auth_type is None else {"auth_type": auth_type}
+        index_type, _ = self._build(extra_config)
+        assert index_type == "HNSW"
+
+    def test_lite_with_sparse_mode_resolves_dense_field_to_flat(self):
+        """In sparse mode the dense field of a hybrid collection also defaults to FLAT on Lite."""
+        index_type, vector_mode = self._build({"auth_type": "lite", "uri": "./demo.db", "add_sparse_vector": True})
+        assert index_type == "FLAT"
+        assert vector_mode == "sparse"
 
 
 class TestMilvusAdapterIndexDocuments:
