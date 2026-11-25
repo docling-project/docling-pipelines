@@ -595,3 +595,67 @@ class TestRegisteredAdapterConstructorFailure:
         assert exc_info.value.__context__ is None
         assert isinstance(exc_info.value.__cause__, SanitizedCause)
         assert _SENTINEL not in caplog.text
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_constructor_configuration_error_keeps_status_and_hides_cause(self, cause: str, caplog) -> None:
+        """A constructor that wraps its failure in its own ConfigurationError must not keep the original chain."""
+        from docpipe.core.operators.acl.adapters.outbound.factories.acl_adapter_factory import (
+            _ACL_ADAPTER_REGISTRY,
+            ACLAdapterFactory,
+        )
+        from docpipe.exceptions.error_codes import ErrorCode
+        from tests.unit.operators.acl.test_acl_adapter_factory import MockACLAdapter
+
+        inner = _SENSITIVE_CAUSES[cause]()
+
+        class WrappingAdapter(MockACLAdapter):
+            def __init__(self) -> None:
+                try:
+                    raise inner
+                except Exception as exc:
+                    raise ConfigurationError(
+                        "Adapter credentials are invalid", error_code=ErrorCode.INVALID_CONFIGURATION, status_code=422
+                    ) from exc
+
+        saved = dict(_ACL_ADAPTER_REGISTRY)
+        try:
+            ACLAdapterFactory.register_adapter(provider="sharepoint", adapter_class=WrappingAdapter)
+            with caplog.at_level("DEBUG"):
+                with pytest.raises(ConfigurationError) as exc_info:
+                    _operator(fail_on_error=True).transform(_table(ids=["a"]))
+        finally:
+            _ACL_ADAPTER_REGISTRY.clear()
+            _ACL_ADAPTER_REGISTRY.update(saved)
+
+        assert "Adapter credentials are invalid" in str(exc_info.value)
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.error_code == ErrorCode.INVALID_CONFIGURATION
+        _assert_traceback_is_clean(error=exc_info.value)
+        assert exc_info.value.__context__ is None
+        assert isinstance(exc_info.value.__cause__, SanitizedCause)
+        assert _SENTINEL not in caplog.text
+
+    def test_constructor_configuration_error_without_sensitive_cause_is_unchanged(self) -> None:
+        """A ConfigurationError with no sensitive link is re-raised as the same object."""
+        from docpipe.core.operators.acl.adapters.outbound.factories.acl_adapter_factory import (
+            _ACL_ADAPTER_REGISTRY,
+            ACLAdapterFactory,
+        )
+        from tests.unit.operators.acl.test_acl_adapter_factory import MockACLAdapter
+
+        original = ConfigurationError("plain configuration problem", status_code=422)
+
+        class PlainAdapter(MockACLAdapter):
+            def __init__(self) -> None:
+                raise original
+
+        saved = dict(_ACL_ADAPTER_REGISTRY)
+        try:
+            ACLAdapterFactory.register_adapter(provider="sharepoint", adapter_class=PlainAdapter)
+            with pytest.raises(ConfigurationError) as exc_info:
+                ACLAdapterFactory.create_adapter(provider="sharepoint")
+        finally:
+            _ACL_ADAPTER_REGISTRY.clear()
+            _ACL_ADAPTER_REGISTRY.update(saved)
+
+        assert exc_info.value is original
