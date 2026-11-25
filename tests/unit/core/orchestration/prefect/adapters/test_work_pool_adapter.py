@@ -593,6 +593,26 @@ class TestExecuteBatches:
             adapter.execute_batches(batches=[_batch()], op_flow=[], global_config={}, job_run_id="jr1")
         adapter.prefect_engine.logger.info.assert_called()
 
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_submits_the_resolved_custom_operator_setting(self, enabled):
+        # Workers build their own orchestrator; the submitter's resolved setting
+        # travels in the global config so an explicit opt-in or opt-out survives (#575).
+        adapter = _build_adapter()
+        adapter.prefect_engine.orchestrator.enable_custom_operators = enabled
+        global_config = {"job_id": "job-1"}
+
+        async_mock = AsyncMock(return_value=([], 1))
+        with (
+            patch.object(adapter, "_execute_pipelined_batches_async", async_mock),
+            patch.object(adapter, "_cleanup_batch_storage"),
+        ):
+            adapter.execute_batches(batches=[_batch()], op_flow=[], global_config=global_config, job_run_id="jr1")
+
+        assert async_mock.await_args is not None
+        submitted = async_mock.await_args.kwargs["global_config"]
+        assert submitted == {"job_id": "job-1", "enable_custom_operators": enabled}
+        assert global_config == {"job_id": "job-1"}
+
 
 # ---------------------------------------------------------------------------
 # _cancel_single_run (async)

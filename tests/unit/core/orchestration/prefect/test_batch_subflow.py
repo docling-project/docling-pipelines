@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for batch_subflow.py — covers _load_batch, _deserialize_batch_data,
 and the top-level batch_subflow function.
@@ -341,3 +344,69 @@ class TestBatchSubflowIntegration:
                             op_flow=[],
                             global_config={"job_id": "job-1"},
                         )
+
+
+class TestBatchSubflowCustomOperatorSetting:
+    """The worker orchestrator uses the submitter's resolved custom-operator setting (#575)."""
+
+    @staticmethod
+    def _worker_setting(*, global_config: dict) -> bool:
+        """Run batch_subflow and return the setting its worker orchestrator resolves."""
+        from docpipe.core.orchestration.operator_factory import OperatorFactory
+
+        resolved = []
+
+        def build_orchestrator(**kwargs):
+            # AbstractOrchestrator resolves the argument the same way.
+            resolved.append(
+                OperatorFactory.resolve_enable_custom_operators(
+                    enable_custom_operators=kwargs.get("enable_custom_operators")
+                )
+            )
+            orchestrator = MagicMock()
+            orchestrator.flow_engine = MagicMock()
+            return orchestrator
+
+        batch_transfer = {"type": "inline", "data": {"columns": ["id"], "data": [{"id": 1}]}}
+        with (
+            patch("docpipe.core.orchestration.prefect.batch_subflow.get_default_factory", return_value=MagicMock()),
+            patch(
+                "docpipe.core.orchestration.prefect.batch_subflow.PythonOrchestrator",
+                side_effect=build_orchestrator,
+            ),
+            patch("docpipe.core.orchestration.prefect.batch_subflow.set_session_info"),
+        ):
+            from docpipe.core.orchestration.prefect.batch_subflow import batch_subflow
+
+            batch_subflow(
+                job_run_id="jr-custom-ops",
+                batch_id="b-custom-ops",
+                batch_num=0,
+                batch_transfer=batch_transfer,
+                op_flow=[],
+                global_config=global_config,
+            )
+        return resolved[0]
+
+    @pytest.mark.parametrize("worker_env", [None, "false"])
+    def test_explicit_opt_in_survives_a_worker_without_the_flag(self, monkeypatch, worker_env):
+        if worker_env is None:
+            monkeypatch.delenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", raising=False)
+        else:
+            monkeypatch.setenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", worker_env)
+
+        assert self._worker_setting(global_config={"job_id": "job-1", "enable_custom_operators": True}) is True
+
+    def test_explicit_opt_out_stays_disabled_when_the_worker_enables_them(self, monkeypatch):
+        monkeypatch.setenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", "true")
+
+        assert self._worker_setting(global_config={"job_id": "job-1", "enable_custom_operators": False}) is False
+
+    @pytest.mark.parametrize(("worker_env", "expected"), [("true", True), (None, False)])
+    def test_without_a_submitted_setting_the_worker_environment_decides(self, monkeypatch, worker_env, expected):
+        if worker_env is None:
+            monkeypatch.delenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", raising=False)
+        else:
+            monkeypatch.setenv("DOCPIPE_ENABLE_CUSTOM_OPERATORS", worker_env)
+
+        assert self._worker_setting(global_config={"job_id": "job-1"}) is expected

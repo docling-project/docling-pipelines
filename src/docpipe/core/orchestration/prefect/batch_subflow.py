@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Standalone Batch Subflow - Entry point for Prefect workers in distributed batch processing.
 
@@ -68,7 +71,10 @@ def batch_subflow(
     storage_type = batch_transfer.get("type", "inline")
 
     logger.info(
-        f"Starting batch subflow: batch_num={batch_num}, operators={len(op_flow)}, storage={storage_type}",
+        "Starting batch subflow: batch_num=%s, operators=%s, storage=%s",
+        batch_num,
+        len(op_flow),
+        storage_type,
         extra=common_log_arguments,
     )
 
@@ -77,7 +83,10 @@ def batch_subflow(
         batch_table = _load_batch(batch_transfer=batch_transfer, batch_num=batch_num)
 
         logger.info(
-            f"Loaded batch: rows={len(batch_table)}, columns={batch_table.num_columns}", extra=common_log_arguments
+            "Loaded batch: rows=%s, columns=%s",
+            len(batch_table),
+            batch_table.num_columns,
+            extra=common_log_arguments,
         )
 
         # 2. Create DataAccess for the batch
@@ -108,6 +117,8 @@ def batch_subflow(
             job_stats_service=job_stats_service,
             job_run_manager=job_run_manager,
             observer=observer,
+            # The submitter's resolved setting; None (an older submitter) falls back to the environment.
+            enable_custom_operators=batch_config.get(DocpipeConstants.ENABLE_CUSTOM_OPERATORS),
         )
         orchestrator.initialize(job_id=job_id, job_run_id=job_run_id)
 
@@ -143,12 +154,10 @@ def batch_subflow(
             op_flow=op_flow, data_access=batch_data_access, global_config=batch_config
         )
 
-        logger.info(f"Completed batch subflow: batch_num={batch_num}", extra=common_log_arguments)
+        logger.info("Completed batch subflow: batch_num=%s", batch_num, extra=common_log_arguments)
 
     except Exception as e:
-        logger.error(
-            f"Batch subflow failed: batch_num={batch_num}, error={e!s}", extra=common_log_arguments, exc_info=True
-        )
+        logger.exception("Batch subflow failed: batch_num=%s, error=%s", batch_num, e, extra=common_log_arguments)
         raise FlowExecutionFailedException(f"Batch {batch_num} failed: {e!s}") from e
 
 
@@ -178,7 +187,7 @@ def _load_batch(*, batch_transfer: dict, batch_num: int) -> pa.Table:
             bucket = batch_transfer["bucket"]
             key = batch_transfer["key"]
             s3_uri = batch_transfer.get("ref", f"s3://{bucket}/{key}")
-            logger.info(f"Loading batch {batch_num} from S3: {s3_uri}")
+            logger.info("Loading batch %s from S3: %s", batch_num, s3_uri)
 
             # Build S3FileSystem with credentials from transfer descriptor
             from pyarrow.fs import S3FileSystem
@@ -197,11 +206,11 @@ def _load_batch(*, batch_transfer: dict, batch_num: int) -> pa.Table:
 
         if storage_type == "local":
             ref = batch_transfer["ref"]
-            logger.info(f"Loading batch {batch_num} from local: {ref}")
+            logger.info("Loading batch %s from local: %s", batch_num, ref)
             return pq.read_table(ref)
 
         if storage_type == "inline":
-            logger.info(f"Loading batch {batch_num} from inline parameters")
+            logger.info("Loading batch %s from inline parameters", batch_num)
             return _deserialize_batch_data(batch_data=batch_transfer["data"])
 
         raise FlowExecutionFailedException(
@@ -250,5 +259,5 @@ def _deserialize_batch_data(*, batch_data: dict) -> pa.Table:
         return pa.Table.from_arrays(arrays, names=columns)
 
     except Exception as e:
-        logger.error(f"Failed to deserialize batch data: {e!s}", exc_info=True)
+        logger.exception("Failed to deserialize batch data: %s", e)
         raise FlowExecutionFailedException(f"Batch data deserialization failed: {e!s}") from e
