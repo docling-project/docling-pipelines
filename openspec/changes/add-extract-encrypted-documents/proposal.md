@@ -18,7 +18,7 @@ Passing a password through Docling's PDF backend options would not solve this: D
 ## Non-goals
 
 - Passing passwords to Docling through format or backend options.
-- Protecting the extracted output. A password-protected source does not make its output protected: extracted text and entities are written to intermediate storage like those of any other document, and are not re-encrypted.
+- Protecting the extracted output. A password-protected source does not make its output protected: extracted text and entities are written to intermediate storage like those of any other document, and are not re-encrypted. A flow that cannot accept that can use `in-memory` storage so that extracted content is not persisted.
 - Storing passwords or decrypted bytes in the `pyarrow.Table`, row metadata, operator metrics, job stats, parquet or DuckDB.
 - Password-protected archives (tracked in #150), iWork documents, legacy binary Office formats (`.doc`, `.xls`, `.ppt`), images and audio.
 - Decrypting documents for `document_classifier`, or for `extract_operator` runs that reuse content pre-fetched by `document_classifier`.
