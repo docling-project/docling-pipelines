@@ -2343,7 +2343,7 @@ When `add_sparse_vector: true` is set:
   - `embeddings` → `vector` (dense embeddings)
   - `sparse_embeddings` → `sparse_vector` (BM25-generated)
   - `content` → `text` (source text for BM25)
-- Index type auto-set to `SPARSE_INVERTED_INDEX` if not specified
+- The sparse field always uses a fixed `SPARSE_INVERTED_INDEX`; `index_type` is not set for it and applies only to dense fields
 - See [`sample_flows/vectordb/milvus_integration.json`](../../sample_flows/vectordb/milvus_integration.json) for complete example
 
 **Notes:**

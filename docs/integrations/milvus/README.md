@@ -8,7 +8,7 @@ The Milvus adapter provides vector database capabilities for the docpipe project
 
 - **Milvus Lite (container-free)**: Run locally without Docker, Podman, or Kubernetes — data persists to a local `.db` file
 - **Dual Deployment Support**: Works with standalone Milvus and wx.data in addition to Lite
-- **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX, SPARSE_INVERTED_INDEX, SPARSE_WAND
+- **Multiple Index Types**: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX, plus GPU and binary index types (the sparse field always uses a fixed `SPARSE_INVERTED_INDEX`)
 - **GPU Indexes**: GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE via `vector_mode: "gpu"` (standalone/remote Milvus built with GPU support)
 - **Flexible Similarity Metrics**: L2, Inner Product (IP), COSINE, BM25 (only for sparse vectors); GPU indexes support L2 and IP only
 - **Dense and Sparse Vectors**: Support for both dense embeddings and BM25 sparse vectors
@@ -466,8 +466,7 @@ Docling Pipelines provides two example pipeline flows demonstrating different Mi
     "secure": false,
     "username": "root",
     "password": "<YOUR_PASSWORD>",
-    "metric_type": "BM25",
-    "index_type": "SPARSE_INVERTED_INDEX"
+    "metric_type": "BM25"
   }
 }
 ```
@@ -562,7 +561,6 @@ Sparse vectors are automatically generated from text content using Milvus's buil
   },
   "provider_config": {
     "auth_type": "standalone",
-    "index_type": "SPARSE_INVERTED_INDEX",
     "metric_type": "BM25"
   }
 }
@@ -571,7 +569,7 @@ Sparse vectors are automatically generated from text content using Milvus's buil
 **Key Differences:**
 - **Embeddings operator still required** - Pipeline includes both dense and sparse vectors
 - **Content field required** - Must map content column to Milvus text field for BM25 function
-- **Auto-set index type** - Automatically set to SPARSE_INVERTED_INDEX in sparse mode
+- **Fixed sparse index** - The sparse field always uses SPARSE_INVERTED_INDEX; do not set it as `index_type` (it is rejected)
 - **Required metric** - Must use BM25 (validated and enforced)
 - **No dimension parameter** - Sparse vectors have variable dimensions
 - **Dual vector storage** - Stores both dense embeddings and BM25-generated sparse vectors
@@ -655,7 +653,6 @@ For a complete working example, see [`sample_flows/vectordb/milvus_integration.j
       "username": "root",
       "password": "<YOUR_PASSWORD>",
       "database": "default",
-      "index_type": "SPARSE_INVERTED_INDEX",
       "metric_type": "BM25"
     }
   }

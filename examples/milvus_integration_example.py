@@ -414,7 +414,6 @@ def example_7_sparse_vectors():
             OperatorConstants.Config.PROVIDER_CONFIG: {
                 **config.get(OperatorConstants.Config.PROVIDER_CONFIG, {}),
                 OperatorConstants.VectorDB.ADD_SPARSE_VECTOR: True,
-                OperatorConstants.VectorDB.INDEX_TYPE: "SPARSE_INVERTED_INDEX",
                 OperatorConstants.VectorDB.METRIC_TYPE: "BM25",
             },
             OperatorConstants.Config.AVAILABLE_FEATURES: {
