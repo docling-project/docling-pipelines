@@ -131,8 +131,12 @@ Documents that fail with `password_required`, `password_incorrect` or `decryptio
 - **THEN** the later run SHALL extract the document
 
 #### Scenario: Not counted against a retry limit
-- **WHEN** the engine limits how many times a failing document is retried automatically, and a document fails with `password_required`, `password_incorrect` or `decryption_unavailable`
-- **THEN** those failures SHALL NOT count toward that limit
+- **WHEN** the engine limits how many times a failing document is retried automatically (for example `max_retry_attempts`), and a document fails with `password_required`, `password_incorrect` or `decryption_unavailable`
+- **THEN** those failures SHALL NOT count toward that limit, and the document SHALL remain eligible for reprocessing on every later incremental run until a working password is configured, without the document changing and without `force_ingest`
+
+#### Scenario: Failure after successful decryption
+- **WHEN** a document is decrypted successfully and then fails in the operator's extraction or in a later operator for a reason other than the three password failure reasons
+- **THEN** the failure SHALL be handled like the failure of any unprotected document, including counting toward an engine-level retry limit
 
 #### Scenario: Other non-recoverable failures unchanged
 - **WHEN** a document that is not encrypted fails extraction with an error that was classified as non-recoverable before this change
@@ -145,6 +149,18 @@ Password values and decrypted bytes SHALL NOT appear in the output `pyarrow.Tabl
 #### Scenario: Passwords absent from outputs
 - **WHEN** the operator runs with `document_passwords` configured and decrypts, or fails to decrypt, one or more documents
 - **THEN** no configured password value SHALL appear in the output table, the returned metadata, the failed-document reasons or the operator's log output
+
+### Requirement: Extracted Output Is Not Re-Encrypted
+
+Decrypting a source document SHALL NOT change how its extracted content is stored. Extracted text and entities SHALL be written to intermediate storage exactly as for an unprotected document and SHALL NOT be re-encrypted with the document password. Protecting intermediate storage is outside this capability. A flow whose author does not accept unencrypted intermediate output can configure `in-memory` storage so that extracted content is not persisted.
+
+#### Scenario: Extracted content of a decrypted document
+- **WHEN** an encrypted document is decrypted and extracted in a flow that uses persistent intermediate storage
+- **THEN** its extracted text and entities SHALL be stored in the clear, like those of an unencrypted document
+
+#### Scenario: In-memory storage
+- **WHEN** a flow sets `global_config.storage` to `in-memory`
+- **THEN** the extracted content of decrypted documents SHALL NOT be written to persistent intermediate storage
 
 ### Requirement: Sensitive Attribute Metadata
 
