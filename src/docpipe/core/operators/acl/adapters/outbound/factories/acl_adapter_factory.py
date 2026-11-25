@@ -14,7 +14,7 @@ from typing import Any, Callable
 from docpipe.core.operators.acl.ports.outbound.acl_extraction import ACLExtractionPort
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
 from docpipe.exceptions.error_codes import ErrorCode
-from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception, sanitized_cause
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ class ACLAdapterFactory:
 
         adapter_constructor = _ACL_ADAPTER_REGISTRY[provider_lower]
 
+        failure: tuple[str, BaseException] | None = None
         try:
             # Create adapter instance (no parameters - adapters configure themselves)
             adapter = adapter_constructor()
@@ -94,13 +95,17 @@ class ACLAdapterFactory:
             # Re-raise configuration errors as-is
             raise
         except Exception as e:
-            # Sanitized text, no traceback: an adapter constructor may fail on a config ValidationError
+            # Sanitized text, no traceback: an adapter constructor may fail on a config ValidationError. The
+            # wrapper is raised after this block so no __context__ keeps the original reachable (see sanitized_cause).
             sanitized = sanitize_exception(exc=e, config_key=provider_lower)
             logger.error("Failed to create ACL adapter for provider %s: %s", provider, sanitized)
-            raise ConfigurationError(
-                f"Failed to create ACL adapter for provider {provider}: {sanitized}",
-                error_code=ErrorCode.ACL_ADAPTER_INITIALIZATION_FAILED,
-            ) from e
+            failure = (sanitized, sanitized_cause(exc=e, config_key=provider_lower))
+
+        text, cause = failure
+        raise ConfigurationError(
+            f"Failed to create ACL adapter for provider {provider}: {text}",
+            error_code=ErrorCode.ACL_ADAPTER_INITIALIZATION_FAILED,
+        ) from cause
 
     @classmethod
     def register_adapter(cls, *, provider: str, adapter_class: type[ACLExtractionPort]) -> None:

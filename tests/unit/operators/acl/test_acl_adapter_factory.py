@@ -3,6 +3,7 @@
 
 """Unit tests for ACL Adapter Factory."""
 
+import traceback
 from unittest.mock import Mock
 
 import pytest
@@ -228,6 +229,11 @@ class TestACLAdapterFactoryCreation:
         assert "limit" in str(exc_info.value)
         assert sentinel not in str(exc_info.value)
         assert "input_value" not in str(exc_info.value)
+        # The traceback a job handler prints walks the whole cause and context chain
+        printed = "".join(traceback.format_exception(exc_info.value))
+        assert sentinel not in printed
+        assert "input_value" not in printed
+        assert exc_info.value.__context__ is None
         assert caplog.records
         for record in caplog.records:
             assert sentinel not in record.getMessage()

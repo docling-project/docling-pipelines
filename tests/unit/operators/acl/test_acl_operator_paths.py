@@ -561,3 +561,37 @@ class TestValidate:
         operator.validate(errors, [], ["id", "path", "source_id", "metadata"])
 
         assert errors == []
+
+
+class TestRegisteredAdapterConstructorFailure:
+    """A real registered adapter whose constructor rejects its configuration, through the real factory."""
+
+    @pytest.mark.parametrize("cause", sorted(_SENSITIVE_CAUSES))
+    def test_final_traceback_is_clean(self, cause: str, caplog) -> None:
+        from docpipe.core.operators.acl.adapters.outbound.factories.acl_adapter_factory import (
+            _ACL_ADAPTER_REGISTRY,
+            ACLAdapterFactory,
+        )
+        from tests.unit.operators.acl.test_acl_adapter_factory import MockACLAdapter
+
+        error = _SENSITIVE_CAUSES[cause]()
+
+        class RejectingAdapter(MockACLAdapter):
+            def __init__(self) -> None:
+                raise error
+
+        saved = dict(_ACL_ADAPTER_REGISTRY)
+        try:
+            ACLAdapterFactory.register_adapter(provider="sharepoint", adapter_class=RejectingAdapter)
+            with caplog.at_level("DEBUG"):
+                with pytest.raises(ConfigurationError) as exc_info:
+                    _operator(fail_on_error=True).transform(_table(ids=["a"]))
+        finally:
+            _ACL_ADAPTER_REGISTRY.clear()
+            _ACL_ADAPTER_REGISTRY.update(saved)
+
+        # The operator re-raises the factory ConfigurationError unchanged, so the factory must replace the cause
+        _assert_traceback_is_clean(error=exc_info.value)
+        assert exc_info.value.__context__ is None
+        assert isinstance(exc_info.value.__cause__, SanitizedCause)
+        assert _SENTINEL not in caplog.text
