@@ -20,7 +20,7 @@ Layer for every task: [backend].
 
 ## 3. Tests
 
-- [x] 3.1 [backend] `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`: projection cases (BM25 on and off, configured `doc_column`, saved `title -> text`, several qualifying mappings, feature absent, input not mutated) and mapping cases (saved without content, blank content column filled in place, blank feature name does not block the append, blank row beside a real content mapping untouched, `content -> body` preserved, mapping to `text` blocks the append, collection target, repeat is stable, `is_docpipe_supported_resource` unchanged).
+- [x] 3.1 [backend] `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`: projection cases (BM25 on and off, configured `doc_column`, saved `title -> text`, several qualifying mappings, feature absent, input not mutated) and mapping cases (saved without content, blank content column filled in place, blank feature name does not block the append and the completed mappings pass adapter validation, blank row beside a real content mapping untouched, `content -> body` preserved, mapping to `text` blocks the append, collection target, repeat is stable, `is_docpipe_supported_resource` unchanged).
 - [x] 3.2 [backend] `tests/unit/operators/vectordb/test_metadata_fetcher.py`: the router forwards `operator_config` to Weaviate, and the OpenSearch and Milvus projections are unchanged.
 - [x] 3.3 [backend] `tests/unit/core/flows/application/services/test_flow_enrichment_service.py`: the enrichment response for a Weaviate node with BM25 on carries `mandatory_for_vector_db: true` for the content feature and the content row in `feature_mappings`; with BM25 off it does not.
 

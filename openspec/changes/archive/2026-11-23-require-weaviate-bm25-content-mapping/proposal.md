@@ -36,7 +36,7 @@ None.
 
 - `src/docpipe/core/operators/vectordb/metadata_fetcher.py`: the router's `project_mappable_features` accepts the node's operator configuration.
 - `src/docpipe/core/operators/vectordb/adapters/outbound/weaviate/resource_metadata.py`: the Weaviate projection and the mapping resolution.
-- `src/docpipe/core/operators/vectordb/adapters/outbound/weaviate/index_manager.py`: `WeaviateIndexManager.is_content_mapping` ignores a blank feature name or column.
+- `src/docpipe/core/operators/vectordb/adapters/outbound/weaviate/index_manager.py` and `adapter.py`: `WeaviateIndexManager.is_content_mapping` ignores a blank feature name or column, and the property builder skips blank-feature rows.
 - `src/docpipe/core/assets/flows/application/services/flow_enrichment_service.py`: passes the operator configuration to the projection.
 - Tests: `tests/unit/operators/vectordb/test_weaviate_resource_metadata.py`, `test_metadata_fetcher.py`, `tests/unit/core/flows/application/services/test_flow_enrichment_service.py`.
 - No new dependency and no API contract change. The response keys are unchanged.

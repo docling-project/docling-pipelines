@@ -303,7 +303,7 @@ class WeaviateIndexManager:
                 OperatorConstants.Misc.MAPPED_COLUMN_NAME,
                 entry.get("collection_column", entry.get("mapped_column_name")),
             )
-            if not feat_name or not col_name:
+            if not feat_name or not feat_name.strip() or not col_name:
                 continue
 
             if col_name == _PK or feat_name == _SPARSE_FEATURE:

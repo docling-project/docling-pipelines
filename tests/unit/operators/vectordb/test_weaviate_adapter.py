@@ -19,6 +19,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_fa
 )
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.adapter import WeaviateAdapter
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import WeaviateConfig
+from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import WeaviateResourceMetadata
 from docpipe.core.orchestration.flow_validator import FlowValidator
 from docpipe.exceptions.docpipe_exceptions import DocpipeException, FlowValidationException
 from docpipe.utils.operators.vectordb_utils import generate_positional_pk
@@ -223,6 +224,29 @@ def test_sparse_mode_rejects_blank_content_feature_name(base_adapter_config, bla
         adapter = WeaviateAdapter(**cfg)
     errors, _ = _validate_hook(adapter)
     assert "A mapping for the content feature is required when add_sparse_vector is true" in errors
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_enriched_mappings_with_blank_feature_row_pass_validation(base_adapter_config, blank):
+    """Completion keeps a blank-feature `-> text` row and appends `content -> text`; the adapter must accept it."""
+    saved = [
+        {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+        {"feature_name": blank, "mapped_column_name": "text"},
+    ]
+    completed = WeaviateResourceMetadata._complete_content_mapping(
+        feature_mappings=saved,
+        operator_config={"add_sparse_vector": True},
+        available_features={"content": {"type": "string"}},
+        props={},
+    )
+    assert completed[-1] == {"feature_name": "content", "mapped_column_name": "text"}
+
+    cfg = dict(base_adapter_config)
+    cfg["add_sparse_vector"] = True
+    cfg["feature_mappings"] = completed
+    with patch(CONNECT_PATH, return_value=MagicMock()):
+        adapter = WeaviateAdapter(**cfg)
+    assert _validate_hook(adapter) == ([], [])
 
 
 def test_invalid_property_names_and_primary_key_rules(base_adapter_config):

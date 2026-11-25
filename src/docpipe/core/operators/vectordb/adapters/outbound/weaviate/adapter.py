@@ -208,6 +208,9 @@ class WeaviateAdapter(VectorStorePort):
                 entry.get("collection_column", entry.get("mapped_column_name")),
             )
             feat_name = entry.get(OperatorConstants.Misc.FEATURE_NAME, entry.get("feature_name"))
+            # A row without a feature name writes nothing, so it must not count toward duplicate targets.
+            if not feat_name or not feat_name.strip():
+                continue
             if col_name and col_name != _PK and feat_name != _SPARSE_FEATURE:
                 property_names.append(col_name)
 

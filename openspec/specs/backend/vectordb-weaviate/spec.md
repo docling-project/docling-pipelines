@@ -56,6 +56,10 @@ For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, 
 - **WHEN** the only mapping whose target column is `text` or `content` has an empty or whitespace-only feature name, and `add_sparse_vector` is true
 - **THEN** that mapping is not treated as the content mapping, because it writes nothing: enrichment appends the content mapping as above
 
+#### Scenario: Blank feature row does not collide with the appended mapping
+- **WHEN** saved mappings contain a row with an empty or whitespace-only feature name mapped to `text`, and enrichment appends `content -> text`
+- **THEN** run-time validation accepts the completed mappings, because a row without a feature name writes nothing and does not count as a duplicate target
+
 #### Scenario: No duplicate on repeated enrichment
 - **WHEN** enrichment is repeated with the mappings it previously returned as the saved mappings
 - **THEN** the returned `feature_mappings` is identical

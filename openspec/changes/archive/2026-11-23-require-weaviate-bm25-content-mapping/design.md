@@ -71,11 +71,11 @@ A mapping with an empty or whitespace-only target column writes no property, so 
 - Projection: a blank content row does not count as a saved content mapping, so the `doc_column` feature is the one marked mandatory.
 - Completion: step 2 of D3 no longer treats a blank row as blocking. If the content feature has a blank-column row and no other mapping carries content, that row is replaced in place by the content mapping (same position, same target rule), and any further blank rows of the content feature are dropped so no second mapping appears. A non-blank mapping of the content feature, or any non-blank content-carrying mapping, still blocks the change, so `content -> body` stays as written.
 
-The write path already skips mappings with an empty feature or column when it builds properties, so no change to how it builds properties is needed.
+The write path already skips mappings with an empty feature or column. Such an inert row must also not count toward duplicate target names, or completion (which keeps the row and appends `content -> text`) would produce mappings that fail validation. The adapter's duplicate-name check and the index manager's property builder therefore skip rows with a blank feature name, as the write path does.
 
 ### D6. Layer boundaries
 
-Almost all changes are in the adapter's read-only metadata module, the metadata router, and the application service that calls it. No port, domain model, DTO or route changes. The only write-side change is the blank-feature and blank-column guard in `WeaviateIndexManager.is_content_mapping` (D5), a static predicate in `index_manager.py` that the adapter's run-time validation also uses. How `adapter.py`, `index_manager.py` and `batch_processor.py` build and write properties is untouched.
+Almost all changes are in the adapter's read-only metadata module, the metadata router, and the application service that calls it. No port, domain model, DTO or route changes. The write-side changes are small: the blank-feature and blank-column guard in `WeaviateIndexManager.is_content_mapping` (D5), which run-time validation also uses. The remaining write-side change is skipping blank-feature rows in the adapter's duplicate-name check and the index manager's property builder (D5). Writing of other properties is untouched.
 
 ## Alternatives considered
 
@@ -96,7 +96,7 @@ Almost all changes are in the adapter's read-only metadata module, the metadata 
 Behavior is asserted on the returned contract, not on internals:
 
 - Projection: flag set only with BM25 on, the mandatory feature copied, input mapping and its values unchanged, the configured `doc_column`, a saved `title -> text` locking `title` and leaving `content` unchanged, several qualifying mappings, the content feature absent, OpenSearch and Milvus unchanged.
-- Blank column or feature name: `is_content_mapping` is false for an empty or whitespace column or feature name; the guard rejects `content -> ""` and `"" -> text`; a blank feature name mapped to `text` does not block the append; completion fills it in place and keeps the other rows; a blank row next to a real content mapping is left alone.
+- Blank column or feature name: `is_content_mapping` is false for an empty or whitespace column or feature name; the guard rejects `content -> ""` and `"" -> text`; a blank feature name mapped to `text` does not block the append, and the completed mappings pass adapter validation; completion fills it in place and keeps the other rows; a blank row next to a real content mapping is left alone.
 - Mappings: saved mappings without content get one appended row; `content -> body` is preserved; a mapping to `text` or `content` blocks the append; the live-schema target is used when the collection has a searchable content property; repeating the call with its own output is stable; BM25 off returns saved mappings unchanged.
 - Enrichment response: for a Weaviate node with BM25 on, the node's `available_features` and the metadata `feature_mappings` carry both the flag and the content row.
 - Validation: the existing adapter test for the missing content mapping keeps passing.
