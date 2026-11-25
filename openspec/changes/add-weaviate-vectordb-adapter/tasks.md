@@ -10,14 +10,14 @@ Delivery order follows the proposal's Rollout: groups 1-6 are the API PR, groups
 
 ## 2. Configuration model and client
 
-- [x] 2.1 [backend] Create the `adapters/outbound/weaviate/` package with an `__init__.py` that exports nothing. Implement `config.py` (`ADAPTER_NAME`, `WeaviateConfig`, `format_config_errors`) per design D3 and D15:
+- [x] 2.1 [backend] Create the `adapters/outbound/weaviate/` package with an `__init__.py` that exports nothing. Implement `config.py` (`ADAPTER_NAME`, `WeaviateConfig`) per design D3 and D15:
   - field validator messages for `collection_name`;
   - a `model_validator` for cloud → `cluster_url`, `auth_type` → its credentials, credentials over plaintext (an on-prem connection with `auth_type != "none"` requires `secure` and the resolved `grpc_secure` to both be true), and credential references resolvable through `resolve_env_var` with the result discarded;
   - the sensitive flag (via `json_schema_extra`) on the API key, bearer token, and password fields;
-  - `format_config_errors` built only from error location and message, never from input values.
+  - error rendering through the shared `format_pydantic_errors` (`docpipe.utils.infrastructure.exception_sanitizer`), which uses only error location and message and never input values; `WeaviateConfig` has no private renderer.
 
   `config.py` must not import `weaviate`. Verify `ruff` and `mypy` are clean on the module and that importing it loads no `weaviate` module.
-- [x] 2.2 [backend] Add `tests/unit/operators/vectordb/test_weaviate_config.py` covering: defaults (including `add_sparse_vector: false`); every validation message; Literal enum values; JSON-schema enums; no `pattern` expected in published metadata; ignored extra keys; `model_validate` yielding `collection_name is not provided` for a missing name; every credential field flagged sensitive in the published schema; `$VAR` and `${VAR}` resolvable; an unset `${VAR}` becoming a configuration error that names the variable and never a value; `format_config_errors` output never containing an input value; and the plaintext-credentials matrix: `api_key`, `bearer_token`, and `client_password` each rejected with `secure=false` and with `secure=true` plus `grpc_secure=false`, accepted with both secure, accepted with `secure=true` and `grpc_secure` unset, `auth_type="none"` accepted over plaintext, and `cloud` with auth accepted. Use `monkeypatch.setenv` for credential values. Verify with `pytest tests/unit/operators/vectordb/test_weaviate_config.py`.
+- [x] 2.2 [backend] Add `tests/unit/operators/vectordb/test_weaviate_config.py` covering: defaults (including `add_sparse_vector: false`); every validation message; Literal enum values; JSON-schema enums; no `pattern` expected in published metadata; ignored extra keys; `model_validate` yielding `collection_name is not provided` for a missing name; every credential field flagged sensitive in the published schema; `$VAR` and `${VAR}` resolvable; an unset `${VAR}` becoming a configuration error that names the field and neither the variable nor a value; `format_pydantic_errors` output never containing an input value; and the plaintext-credentials matrix: `api_key`, `bearer_token`, and `client_password` each rejected with `secure=false` and with `secure=true` plus `grpc_secure=false`, accepted with both secure, accepted with `secure=true` and `grpc_secure` unset, `auth_type="none"` accepted over plaintext, and `cloud` with auth accepted. Use `monkeypatch.setenv` for credential values. Verify with `pytest tests/unit/operators/vectordb/test_weaviate_config.py`.
 - [x] 2.3 [backend] Implement `client.py` (`WeaviateClient`) per design D4:
   - on-prem and cloud connect, `Auth.*` selection, and `AdditionalConfig(Timeout(...))`;
   - `resolve_env_var` on every credential;
@@ -42,7 +42,7 @@ Delivery order follows the proposal's Rollout: groups 1-6 are the API PR, groups
 ## 5. Adapter, registration, and enrichment
 
 - [x] 5.1 [backend] Implement `adapter.py` (`@register_vector_store WeaviateAdapter`). In `__init__`, before `WeaviateClient.connect`, run in this order (design D7):
-  1. validate `provider_config` with `WeaviateConfig`, reporting failures through `format_config_errors` and re-raising Pydantic errors `from None` (design D15);
+  1. validate `provider_config` with `WeaviateConfig`, reporting failures through `format_pydantic_errors` and re-raising Pydantic errors `from None` (design D15);
   2. if `add_sparse_vector` is true, require a mapping for the content feature (design D14);
   3. warn once on `schema_template_path` without reading it;
   4. drop any `allowed_users` mapping with one warning, and warn once if `allowed_users` is upstream but unmapped (design D13);

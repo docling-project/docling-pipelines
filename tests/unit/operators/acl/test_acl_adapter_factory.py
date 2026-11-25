@@ -6,6 +6,7 @@
 from unittest.mock import Mock
 
 import pytest
+from pydantic import BaseModel
 
 from docpipe.core.operators.acl.adapters.outbound.factories.acl_adapter_factory import (
     _ACL_ADAPTER_REGISTRY,
@@ -204,6 +205,34 @@ class TestACLAdapterFactoryCreation:
             ACLAdapterFactory.create_adapter(provider="failing_provider", connection_params={}, credentials={})
 
         assert "Failed to create ACL adapter" in str(exc_info.value)
+
+    def test_create_adapter_initialization_failure_omits_rejected_input(self, caplog):
+        """A ValidationError raised by an adapter constructor must not echo the rejected input."""
+        sentinel = "SENTINEL_FACTORY_2b9e"
+
+        class _Settings(BaseModel):
+            limit: int
+
+        _ACL_ADAPTER_REGISTRY.clear()
+
+        class RejectingAdapter(MockACLAdapter):
+            def __init__(self):
+                _Settings(limit=sentinel)  # type: ignore[arg-type]
+
+        ACLAdapterFactory.register_adapter(provider="rejecting_provider", adapter_class=RejectingAdapter)
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(ConfigurationError) as exc_info:
+                ACLAdapterFactory.create_adapter(provider="rejecting_provider")
+
+        assert "limit" in str(exc_info.value)
+        assert sentinel not in str(exc_info.value)
+        assert "input_value" not in str(exc_info.value)
+        assert caplog.records
+        for record in caplog.records:
+            assert sentinel not in record.getMessage()
+            assert record.exc_info is None
+            assert sentinel not in (record.exc_text or "")
 
 
 class TestACLAdapterFactoryQuery:

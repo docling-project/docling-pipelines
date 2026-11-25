@@ -78,7 +78,7 @@ The Weaviate provider SHALL support four authentication methods: none, API key, 
 
 #### Scenario: Unset environment variable
 - **WHEN** the API key is configured as `${WEAVIATE_API_KEY}` and that variable is not set
-- **THEN** validation rejects the configuration with a message that names `WEAVIATE_API_KEY` and contains no credential value
+- **THEN** validation rejects the configuration with a message that names the field (`api_key`) and contains neither the variable name nor any credential value
 
 #### Scenario: Literal all-caps credential
 - **WHEN** a literal credential consists only of upper-case letters and underscores and an environment variable of that exact name exists

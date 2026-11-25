@@ -426,3 +426,28 @@ class TestGetToken:
         with patch("msal.ConfidentialClientApplication", side_effect=ValueError("bad authority")):
             with pytest.raises(ExternalServiceError, match="Microsoft Graph authentication failed: bad authority"):
                 await SharePointACLAdapter()._get_token(config=_config())
+
+
+_SENTINEL = "SENTINEL_SP_ADAPTER_7f3a"
+
+
+class TestRejectedConfigIsNotEchoed:
+    """A per-request config ValidationError carries the rejected input; the adapter must not echo it."""
+
+    async def test_extract_acl_log_and_message_omit_the_rejected_input(self, caplog: pytest.LogCaptureFixture) -> None:
+        request = _request(connection_params={"max_concurrent_requests": _SENTINEL})
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(ExternalServiceError) as exc_info:
+                await SharePointACLAdapter().extract_acl(request=request)
+
+        assert "max_concurrent_requests" in str(exc_info.value)
+        assert _SENTINEL not in str(exc_info.value)
+        assert "input_value" not in str(exc_info.value)
+        assert caplog.records
+        for record in caplog.records:
+            assert _SENTINEL not in record.getMessage()
+            assert "input_value" not in record.getMessage()
+            # No traceback: its final line would print the ValidationError text with the input
+            assert record.exc_info is None
+            assert _SENTINEL not in (record.exc_text or "")

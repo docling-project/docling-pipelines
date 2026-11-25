@@ -11,6 +11,7 @@ from typing import Any, Callable
 from docpipe.core.operators.acl.ports.outbound.acl_extraction import ACLExtractionPort
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +91,11 @@ class ACLAdapterFactory:
             # Re-raise configuration errors as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to create ACL adapter for provider {provider}: {e}", exc_info=True)
+            # Sanitized text, no traceback: an adapter constructor may fail on a config ValidationError
+            sanitized = sanitize_exception(exc=e, config_key=provider_lower)
+            logger.error("Failed to create ACL adapter for provider %s: %s", provider, sanitized)
             raise ConfigurationError(
-                f"Failed to create ACL adapter for provider {provider}: {e}",
+                f"Failed to create ACL adapter for provider {provider}: {sanitized}",
                 error_code=ErrorCode.ACL_ADAPTER_INITIALIZATION_FAILED,
             ) from e
 
