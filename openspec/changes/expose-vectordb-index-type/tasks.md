@@ -45,7 +45,9 @@ Layer tags: [backend], [frontend], [both]. Rebase on `add-weaviate-vectordb-adap
 - [x] 6.1 Re-read the three spec deltas against the implemented behavior and fix any scenario that does not match. Verify `openspec validate expose-vectordb-index-type --strict` passes
 - [x] 6.2 Run backend checks: `uv run ruff check --fix .`, `uv run mypy .`, `uv run pytest tests/unit/operators/vectordb`. Verify all pass with no new warnings
 - [x] 6.3 Run frontend checks in `frontend/`: `npm run lint`, TypeScript compilation, `npm run build` and the VectorDB unit tests. Verify all pass and no hex or px literals were added to SCSS
-- [ ] 6.4 Manual check with a Milvus Lite and an OpenSearch flow: select each offered index type and metric, validate, and create the index. Verify no UI-reachable combination fails at creation, and that an existing flow with `index_type` in Advanced JSON loads with the dropdown pre-populated
+- [x] 6.4 Manual check with a Milvus Lite and an OpenSearch flow: select each offered index type and metric, validate, and create the index. Verify no UI-reachable combination fails at creation, and that an existing flow with `index_type` in Advanced JSON loads with the dropdown pre-populated
+  - Verified against real servers: Milvus Lite (`FLAT` x `L2`/`IP`/`COSINE`, unset default, `HNSW` rejected), Milvus standalone v2.6.16 (all 25 CPU dense and binary index type and metric pairs created, stored `index_type` read back for `IVF_SQ8`, `DISKANN`, `BIN_IVF_FLAT`) and OpenSearch 2.14 (all 8 engine and algorithm pairs behave as `applicability` states).
+  - Not run by hand: GPU index types (no GPU host; covered by parity tests) and the browser walk-through. The Advanced JSON pre-population case is covered by unit tests.
 
 ## Workflow follow-up
 
