@@ -24,6 +24,20 @@ from docpipe.utils.infrastructure.logging import get_logger
 logger = get_logger(__name__)
 
 
+class _TaskNotFoundRetry(Exception):
+    """
+    Internal signal that a status check got a 404 and should be retried.
+
+    Only this exception is retried by the backoff decorator on the status check,
+    so every other error surfaces on the first attempt. It carries the original
+    DocpipeException, which is raised to the caller once the retries are used up.
+    """
+
+    def __init__(self, original: DocpipeException) -> None:
+        super().__init__(str(original))
+        self.original = original
+
+
 class DoclingServeErrorHandler:
     """
     Extensible error handler for docling-serve exceptions.
@@ -47,6 +61,7 @@ class DoclingServeErrorHandler:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
+        """Register the built-in handlers."""
         self.register(self._is_format_compatibility_error, self._enhance_format_compatibility_error)
 
     def register(
@@ -75,13 +90,15 @@ class DoclingServeErrorHandler:
 
     @staticmethod
     def _is_format_compatibility_error(exception: DocpipeException) -> bool:
+        """Return True for a 422 or a message with a specific format-error phrase."""
         if exception.status_code == 422:
             return True
         msg = str(exception).lower()
+        # Match specific phrases only: a bare "format" would also match words
+        # such as "information" and misreport unrelated errors as format errors.
         return any(
             indicator in msg
             for indicator in (
-                "format",
                 "to_formats",
                 "unsupported",
                 "invalid format",
@@ -93,6 +110,7 @@ class DoclingServeErrorHandler:
     def _enhance_format_compatibility_error(
         self, exception: DocpipeException, context: dict[str, Any]
     ) -> DocpipeException:
+        """Return an exception that explains the rejected formats and how to fix it."""
         requested_formats = context.get("requested_formats", [])
         message = (
             f"The docling-serve instance at {self.base_url} rejected the requested output formats. "
@@ -165,6 +183,33 @@ class DoclingServeClient:
 
         logger.info("Initialized DoclingServeClient with base_url=%s", self.base_url)
 
+    @staticmethod
+    def _as_format_list(*, value: Any, key: str) -> list[str]:
+        """
+        Return a format option as a new list.
+
+        A single string is treated as one format, so "json" does not turn into
+        the characters "j", "s", "o", "n".
+
+        Args:
+            value: The option value (None, a string, or a list or tuple of strings)
+            key: Option name, used in the error message
+
+        Returns:
+            A new list of formats (empty for None)
+
+        Raises:
+            ValueError: If the value is neither None, a string, nor a list or tuple
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list | tuple):
+            return list(value)
+        msg = f"'{key}' must be a string or a list of strings, got {type(value).__name__}"
+        raise ValueError(msg)
+
     def _build_options(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         Build options dictionary with safe defaults for the docling-serve v1 API.
@@ -192,27 +237,27 @@ class DoclingServeClient:
         }
 
         if options:
-            # Work on a copy so we never mutate the caller's dict (processing_options on the adapter
-            # is reused across every document — mutating it would lose additional_formats after the first call)
+            # Work on a copy so we never mutate the caller's dict or its lists (processing_options on
+            # the adapter is reused across every document — mutating it would change later calls)
             opts = dict(options)
 
-            # Pull out additional_formats and append to to_formats before merging the rest
+            # Pull out the format keys before the general update
             additional_formats = opts.pop("additional_formats", None)
-            if additional_formats:
-                to_formats_list: list[str] = default_options["to_formats"]  # type: ignore[assignment]
-                for fmt in additional_formats:
-                    if fmt and fmt not in to_formats_list:
-                        to_formats_list.append(fmt)
-
-            # Pull out any explicit to_formats override before the general update
             user_to_formats = opts.pop("to_formats", None)
             default_options.update(opts)
 
-            if user_to_formats:
-                # Ensure "md" is always present
-                if "md" not in user_to_formats:
-                    user_to_formats.insert(0, "md")
-                default_options["to_formats"] = user_to_formats
+            # Start from the explicit to_formats (or the default), ensure "md" is present,
+            # then append additional_formats; drop duplicates and empty entries, keep order
+            base_formats = self._as_format_list(value=user_to_formats, key="to_formats") or list(
+                default_options["to_formats"]
+            )
+            if "md" not in base_formats:
+                base_formats.insert(0, "md")
+            to_formats_list: list[str] = []
+            for fmt in [*base_formats, *self._as_format_list(value=additional_formats, key="additional_formats")]:
+                if fmt and fmt not in to_formats_list:
+                    to_formats_list.append(fmt)
+            default_options["to_formats"] = to_formats_list
 
         # Strip None values — requests serialises None as the string "None" which the server rejects
         return {k: v for k, v in default_options.items() if v is not None}
@@ -446,12 +491,6 @@ class DoclingServeClient:
             timeout=timeout,
         )
 
-    @retry_with_backoff(
-        max_retries=DoclingClientConstants.STATUS_404_MAX_RETRIES,
-        initial_delay=DoclingClientConstants.STATUS_404_BACKOFF_BASE,
-        backoff_factor=2.0,
-        exceptions=(DocpipeException,),
-    )
     def _check_status(self, *, endpoint: str) -> dict[str, Any]:
         """
         Check task status via HTTP request with retry logic for 404 errors.
@@ -459,7 +498,9 @@ class DoclingServeClient:
         Retries on 404 errors to handle:
         - Pod restarts/terminations during HPA scaling
         - Load balancer routing issues during pod lifecycle events
-        - Transient network issues
+
+        Every other error is raised on the first attempt. Connection errors are
+        retried by the poll loop in _poll_for_completion, not here.
 
         Args:
             endpoint: Status endpoint path
@@ -471,6 +512,32 @@ class DoclingServeClient:
             DocpipeException: For HTTP errors (after retries for 404)
         """
         try:
+            return self._check_status_retrying_404(endpoint=endpoint)
+        except _TaskNotFoundRetry as retry:
+            # Retries used up: raise the original 404 error, not the internal signal
+            raise retry.original from None
+
+    @retry_with_backoff(
+        max_retries=DoclingClientConstants.STATUS_404_MAX_RETRIES,
+        initial_delay=DoclingClientConstants.STATUS_404_BACKOFF_BASE,
+        backoff_factor=2.0,
+        exceptions=(_TaskNotFoundRetry,),
+    )
+    def _check_status_retrying_404(self, *, endpoint: str) -> dict[str, Any]:
+        """
+        Run one status request; turn a 404 into the retry signal for the decorator.
+
+        Args:
+            endpoint: Status endpoint path
+
+        Returns:
+            Status response dictionary
+
+        Raises:
+            _TaskNotFoundRetry: For a 404 (retried by the decorator)
+            DocpipeException: For any other HTTP or network error (not retried)
+        """
+        try:
             return self.rest_client.call_rest_json(
                 method=RestMethod.GET,
                 url=endpoint,
@@ -478,14 +545,13 @@ class DoclingServeClient:
             )
         except DocpipeException as e:
             # Only retry on 404 errors (task not found during pod transitions)
-            if e.status_code == 404:
-                logger.warning(
-                    "Task not found (404) at %s. This may occur during pod restarts or HPA scaling. Retrying...",
-                    endpoint,
-                )
-                raise  # Let decorator handle retry
-            # For other errors, raise immediately without retry
-            raise
+            if e.status_code != 404:
+                raise
+            logger.warning(
+                "Task not found (404) at %s. This may occur during pod restarts or HPA scaling. Retrying...",
+                endpoint,
+            )
+            raise _TaskNotFoundRetry(e) from e
 
     def get_result(self, *, task_id: str) -> dict[str, Any]:
         """
