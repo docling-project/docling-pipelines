@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """SharePoint ACL adapter tests against canned Microsoft Graph responses.
 
 The adapter's own code (permission parsing, group pagination, inheritance walk, URL

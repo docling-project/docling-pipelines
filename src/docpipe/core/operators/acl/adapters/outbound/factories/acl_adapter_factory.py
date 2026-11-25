@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating ACL extraction adapters.
 
 This module provides a factory pattern for creating ACL extraction adapters
@@ -84,7 +87,7 @@ class ACLAdapterFactory:
             # Create adapter instance (no parameters - adapters configure themselves)
             adapter = adapter_constructor()
 
-            logger.info(f"Created ACL adapter for provider: {provider}")
+            logger.info("Created ACL adapter for provider: %s", provider)
             return adapter
 
         except ConfigurationError:
@@ -116,10 +119,10 @@ class ACLAdapterFactory:
         provider_lower = provider.lower()
 
         if provider_lower in _ACL_ADAPTER_REGISTRY:
-            logger.warning(f"Overwriting existing ACL adapter registration for provider: {provider}")
+            logger.warning("Overwriting existing ACL adapter registration for provider: %s", provider)
 
         _ACL_ADAPTER_REGISTRY[provider_lower] = adapter_class
-        logger.info(f"Registered ACL adapter for provider: {provider}")
+        logger.info("Registered ACL adapter for provider: %s", provider)
 
     @classmethod
     def get_registered_providers(cls) -> list[str]:
@@ -162,6 +165,7 @@ def register_acl_adapter(provider: str) -> Callable[[type[ACLExtractionPort]], t
     """
 
     def decorator(adapter_class: type[ACLExtractionPort]) -> type[ACLExtractionPort]:
+        """Register the decorated adapter class and return it unchanged."""
         ACLAdapterFactory.register_adapter(provider=provider, adapter_class=adapter_class)
         return adapter_class
 
