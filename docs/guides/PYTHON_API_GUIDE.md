@@ -397,7 +397,7 @@ print(f"Job ID: {metadata.get('job_id')}")
 print(f"Job Run ID: {metadata.get('job_run_id')}")
 print(f"Flow ID: {metadata.get('flow_id')}")
 print(f"Flow Name: {metadata.get('flow_name')}")
-print(f"Description: {metadata.get('description')}")
+print(f"Description: {metadata.get('flow_description')}")
 print(f"Number of Operators: {metadata.get('num_operators')}")
 print(f"Flow File: {metadata.get('flow_file')}")
 ```
