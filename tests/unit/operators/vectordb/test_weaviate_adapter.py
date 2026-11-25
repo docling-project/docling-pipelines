@@ -210,6 +210,21 @@ def test_sparse_mode_rejects_blank_content_column(base_adapter_config, blank):
     assert "A mapping for the content feature is required when add_sparse_vector is true" in errors
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_sparse_mode_rejects_blank_content_feature_name(base_adapter_config, blank):
+    """A mapping with an empty or whitespace feature name is never written, so it does not satisfy sparse mode."""
+    cfg = dict(base_adapter_config)
+    cfg["add_sparse_vector"] = True
+    cfg["feature_mappings"] = [
+        {"feature_name": "doc_id_hash", "mapped_column_name": "pk"},
+        {"feature_name": blank, "mapped_column_name": "text"},
+    ]
+    with patch(CONNECT_PATH, return_value=MagicMock()):
+        adapter = WeaviateAdapter(**cfg)
+    errors, _ = _validate_hook(adapter)
+    assert "A mapping for the content feature is required when add_sparse_vector is true" in errors
+
+
 def test_invalid_property_names_and_primary_key_rules(base_adapter_config):
     """Reserved property name, primary key mapped away from pk, or another feature mapped to pk are reported."""
     cases = [

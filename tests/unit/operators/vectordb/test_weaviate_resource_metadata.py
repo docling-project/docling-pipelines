@@ -738,6 +738,12 @@ class TestBm25ContentMappingCompletion:
         ]
         assert _complete(saved) is saved
 
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_blank_feature_name_mapped_to_text_does_not_block_append(self, blank: str):
+        saved = [PK, {"feature_name": blank, "mapped_column_name": "text"}]
+        result = _complete(saved)
+        assert result == [*saved, {"feature_name": "content", "mapped_column_name": "text"}]
+
     def test_repeat_is_stable(self):
         first = _complete([PK])
         assert _complete(first) == first

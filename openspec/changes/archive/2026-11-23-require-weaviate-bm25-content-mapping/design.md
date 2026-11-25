@@ -65,17 +65,17 @@ The saved-mapping completion in D3 serves clients that read `feature_mappings` f
 
 ### D5. Blank target columns
 
-A mapping with an empty or whitespace-only target column writes no property, so BM25 would match nothing. `WeaviateIndexManager.is_content_mapping` returns false for such a mapping. This one predicate is shared by the adapter's run-time guard, the projection (D2) and the completion helper (D3), so the three stay equivalent:
+A mapping with an empty or whitespace-only target column writes no property, so BM25 would match nothing. The same holds for an empty or whitespace-only feature name: the write path skips such a mapping. `WeaviateIndexManager.is_content_mapping` returns false for both. This one predicate is shared by the adapter's run-time guard, the projection (D2) and the completion helper (D3), so the three stay equivalent:
 
 - Run time: `content -> ""` no longer satisfies the guard, so validation reports the existing "mapping for the content feature is required" message. No new message, no new code path.
 - Projection: a blank content row does not count as a saved content mapping, so the `doc_column` feature is the one marked mandatory.
 - Completion: step 2 of D3 no longer treats a blank row as blocking. If the content feature has a blank-column row and no other mapping carries content, that row is replaced in place by the content mapping (same position, same target rule), and any further blank rows of the content feature are dropped so no second mapping appears. A non-blank mapping of the content feature, or any non-blank content-carrying mapping, still blocks the change, so `content -> body` stays as written.
 
-The write path already skips mappings with an empty feature or column when it builds properties, so no write-path change is needed.
+The write path already skips mappings with an empty feature or column when it builds properties, so no change to how it builds properties is needed.
 
 ### D6. Layer boundaries
 
-All changes are in the adapter's read-only metadata module, the metadata router, and the application service that calls it. No port, domain model, DTO or route changes. The write path (`adapter.py`, `index_manager.py`, `batch_processor.py`) is untouched.
+Almost all changes are in the adapter's read-only metadata module, the metadata router, and the application service that calls it. No port, domain model, DTO or route changes. The only write-side change is the blank-feature and blank-column guard in `WeaviateIndexManager.is_content_mapping` (D5), a static predicate in `index_manager.py` that the adapter's run-time validation also uses. How `adapter.py`, `index_manager.py` and `batch_processor.py` build and write properties is untouched.
 
 ## Alternatives considered
 
@@ -96,7 +96,7 @@ All changes are in the adapter's read-only metadata module, the metadata router,
 Behavior is asserted on the returned contract, not on internals:
 
 - Projection: flag set only with BM25 on, the mandatory feature copied, input mapping and its values unchanged, the configured `doc_column`, a saved `title -> text` locking `title` and leaving `content` unchanged, several qualifying mappings, the content feature absent, OpenSearch and Milvus unchanged.
-- Blank column: `is_content_mapping` is false for an empty or whitespace column; the guard rejects `content -> ""`; completion fills it in place and keeps the other rows; a blank row next to a real content mapping is left alone.
+- Blank column or feature name: `is_content_mapping` is false for an empty or whitespace column or feature name; the guard rejects `content -> ""` and `"" -> text`; a blank feature name mapped to `text` does not block the append; completion fills it in place and keeps the other rows; a blank row next to a real content mapping is left alone.
 - Mappings: saved mappings without content get one appended row; `content -> body` is preserved; a mapping to `text` or `content` blocks the append; the live-schema target is used when the collection has a searchable content property; repeating the call with its own output is stable; BM25 off returns saved mappings unchanged.
 - Enrichment response: for a Weaviate node with BM25 on, the node's `available_features` and the metadata `feature_mappings` carry both the flag and the content row.
 - Validation: the existing adapter test for the missing content mapping keeps passing.

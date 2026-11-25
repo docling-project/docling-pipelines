@@ -6,7 +6,7 @@ The Weaviate provider of the `vectordb` operator. This delta adds how flow enric
 ## Requirements
 
 ### Requirement: Weaviate enrichment advertises the content mapping required by sparse mode
-For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, flow enrichment SHALL mark the feature that supplies the BM25 text as mandatory for the vector database and SHALL return a mapping for it. A content mapping counts only when it has a non-empty target column. With `add_sparse_vector` false or absent, enrichment SHALL return feature metadata and mappings unchanged, and upstream feature metadata SHALL NOT be modified.
+For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, flow enrichment SHALL mark the feature that supplies the BM25 text as mandatory for the vector database and SHALL return a mapping for it. A content mapping counts only when it has a non-empty feature name and a non-empty target column. With `add_sparse_vector` false or absent, enrichment SHALL return feature metadata and mappings unchanged, and upstream feature metadata SHALL NOT be modified.
 
 #### Scenario: Content marked mandatory in sparse mode
 - **WHEN** a Weaviate node with `add_sparse_vector` true and no saved content mapping is enriched, and the `doc_column` feature (`content` by default) is among the upstream features
@@ -52,6 +52,10 @@ For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, 
 - **WHEN** the only mapping that names `content` or `text` has an empty target column
 - **THEN** that mapping is not treated as the content mapping: enrichment fills or appends one as above, and the feature is still marked mandatory
 
+#### Scenario: Blank feature name does not count as a content mapping
+- **WHEN** the only mapping whose target column is `text` or `content` has an empty or whitespace-only feature name, and `add_sparse_vector` is true
+- **THEN** that mapping is not treated as the content mapping, because it writes nothing: enrichment appends the content mapping as above
+
 #### Scenario: No duplicate on repeated enrichment
 - **WHEN** enrichment is repeated with the mappings it previously returned as the saved mappings
 - **THEN** the returned `feature_mappings` is identical
@@ -66,4 +70,8 @@ For a `vectordb` node with `provider: "weaviate"` and `add_sparse_vector` true, 
 
 #### Scenario: Run-time validation rejects a blank content column
 - **WHEN** a flow with `add_sparse_vector` true is validated or run without enrichment and its only content mapping has an empty or whitespace-only target column
+- **THEN** validation rejects it with the same message, because that mapping writes nothing and BM25 would match nothing
+
+#### Scenario: Run-time validation rejects a blank content feature name
+- **WHEN** a flow with `add_sparse_vector` true is validated or run without enrichment and its only mapping to `text` or `content` has an empty or whitespace-only feature name
 - **THEN** validation rejects it with the same message, because that mapping writes nothing and BM25 would match nothing
