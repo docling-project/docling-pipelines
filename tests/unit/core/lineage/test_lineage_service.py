@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for LineageService."""
 
 from unittest.mock import MagicMock
@@ -119,7 +122,7 @@ class TestEmitFlowComplete:
         assert call_kwargs["event_type"] == LineageEventType.COMPLETE
         assert len(call_kwargs["outputs"]) == 1
         assert call_kwargs["outputs"][0].namespace == "inmemory://"
-        assert call_kwargs["outputs"][0].name == "test-flow/output"
+        assert call_kwargs["outputs"][0].name == "test-flow.output"
 
     def test_publishes_complete_event_with_sink_dataset(
         self, service: LineageService, mock_publisher: MagicMock, sample_table: pa.Table
@@ -226,15 +229,15 @@ class TestEmitNodeStart:
         service.emit_node_start(context=context)
         call_kwargs = mock_publisher.publish.call_args[1]
         assert call_kwargs["event_type"] == LineageEventType.START
-        # job name is stable: flow_name/node_name
-        assert call_kwargs["job"].name == "test-flow/chunker"
+        # job name is stable: flow_name.node_name
+        assert call_kwargs["job"].name == "test-flow.chunker"
         # operator and operatorCategory surfaced in jobType facet
         jt = call_kwargs["job"].facets["jobType"]
         assert jt["operator"] == "chunker"
         assert jt["operatorCategory"] == "Functional"
-        # input dataset chains from predecessor output: flow_name/predecessor/output
+        # input dataset chains from predecessor output: flow_name.predecessor.output
         assert len(call_kwargs["inputs"]) == 1
-        assert call_kwargs["inputs"][0].name == "test-flow/extract/output"
+        assert call_kwargs["inputs"][0].name == "test-flow.extract.output"
         assert call_kwargs["inputs"][0].facets["schema"]["fields"][0]["name"] == "id"
 
     def test_node_start_no_predecessors(self, service: LineageService, mock_publisher: MagicMock) -> None:
@@ -249,7 +252,7 @@ class TestEmitNodeStart:
         )
         service.emit_node_start(context=context)
         call_kwargs = mock_publisher.publish.call_args[1]
-        assert call_kwargs["job"].name == "test-flow/ingest_source"
+        assert call_kwargs["job"].name == "test-flow.ingest_source"
         assert call_kwargs["job"].facets["jobType"]["operator"] == "ingest_source"
         assert call_kwargs["job"].facets["jobType"]["operatorCategory"] == "Ingest"
         assert call_kwargs["inputs"] == []
@@ -307,7 +310,7 @@ class TestEmitNodeComplete:
         assert len(call_kwargs["outputs"]) == 1
         # in-memory dataset
         assert call_kwargs["outputs"][0].namespace == "inmemory://"
-        assert call_kwargs["outputs"][0].name == "test-flow/chunker/output"
+        assert call_kwargs["outputs"][0].name == "test-flow.chunker.output"
         assert call_kwargs["outputs"][0].facets["outputStatistics"]["rowCount"] == 2
         # operator surfaced in job facet
         jt = call_kwargs["job"].facets["jobType"]
@@ -355,7 +358,7 @@ class TestEmitNodeComplete:
         outputs = mock_publisher.publish.call_args[1]["outputs"]
         assert [(o.namespace, o.name) for o in outputs] == [
             ("docpipe://document_set", "my_set"),
-            ("inmemory://", "test-flow/store_in_document_set/output"),
+            ("inmemory://", "test-flow.store_in_document_set.output"),
         ]
 
     def test_downstream_start_input_matches_sink_pass_through_output(
@@ -548,7 +551,7 @@ class TestEmitNodeFail:
         assert call_kwargs["event_type"] == LineageEventType.FAIL
         assert len(call_kwargs["inputs"]) == 1
         # no predecessors on this context → fallback input name
-        assert call_kwargs["inputs"][0].name == "test-flow/chunker/input"
+        assert call_kwargs["inputs"][0].name == "test-flow.chunker.input"
 
     def test_no_inputs_when_no_summary(self, service: LineageService, mock_publisher: MagicMock) -> None:
         context = NodeFailContext(

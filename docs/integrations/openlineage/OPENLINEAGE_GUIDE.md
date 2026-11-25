@@ -109,7 +109,7 @@ Ingest sources and storage sinks (for example a vector database or a document se
 | `document_set` | `docpipe://document_set` | `document_set_name` |
 | Any other provider | `{type}://{host}[:{port}]` when a host is set, otherwise `{type}://source` or `{type}://destination` | With a host: `index_name`, else `collection_name`, else `unknown`. Without a host: the first of `paths` or `path`, else `source` / `output` |
 
-Between operators, datasets live in the `inmemory://` namespace with the name `{flow_name}/{node_name}/output`. A node whose output is stored by a sink and also feeds a downstream node emits both datasets, so the graph edge to the next node is kept.
+Between operators, datasets live in the `inmemory://` namespace with the name `{flow_name}.{node_name}.output`. A node whose output is stored by a sink and also feeds a downstream node emits both datasets, so the graph edge to the next node is kept.
 
 How values are resolved:
 
