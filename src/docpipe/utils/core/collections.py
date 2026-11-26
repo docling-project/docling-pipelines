@@ -1,10 +1,10 @@
 """Collection utility functions for list and dictionary operations."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 
-def batch_list(*, input_list: list, batch_size=20):
+def batch_list[T](*, input_list: list[T], batch_size: int = 20) -> list[list[T]]:
     """
     Split a list into batches of specified size.
 
@@ -14,34 +14,41 @@ def batch_list(*, input_list: list, batch_size=20):
 
     Returns:
         List of batches, where each batch is a list
+
+    Raises:
+        ValueError: If batch_size is not greater than zero.
     """
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
     return [input_list[i : i + batch_size] for i in range(0, len(input_list), batch_size)]
 
 
-def process_in_batches(
+def process_in_batches[T, R](
     *,
-    processor: Callable[..., list | None],
-    input_list: list,
+    processor: Callable[..., list[R] | None],
+    input_list: Iterable[T],
     batch_size: int = 100,
-    **kwargs,
-) -> list:
+    **kwargs: Any,
+) -> list[R]:
     """
     Processes a list of items in batches using a custom processor function.
 
-    The processor function is responsible for handling each batch and mutating
-    a shared result_response dictionary. Additional keyword arguments can be
-    passed to the processor via **kwargs.
+    The processor returns a list of results for each batch, or None when the
+    batch produces no results. Additional keyword arguments are forwarded to it.
 
     Args:
-        processor (Callable[..., None]): A function that accepts a batch (list),
-            a result_response dictionary, and any additional keyword arguments.
-            It is responsible for processing the batch and updating the result in-place.
-        input_list (list): The full list of input items to process in batches.
-        batch_size (int, optional): The number of items per batch. Defaults to 100.
-        **kwargs: Additional keyword arguments to be passed to the processor function.
+        processor: A function that receives each batch, its one-based batch_number,
+            its zero-based start_index_offset, and any additional keyword arguments.
+            It returns a list of results or None.
+        input_list: The input items to process in batches.
+        batch_size: The number of items per batch; must be greater than zero.
+        **kwargs: Additional keyword arguments passed to the processor.
 
     Returns:
-        dict: The final accumulated result_response dictionary after processing all batches.
+        The processor results concatenated in batch order.
+
+    Raises:
+        ValueError: If batch_size is not greater than zero.
     """
     result_responses = []
     input_list = list(input_list) if not isinstance(input_list, list) else input_list
