@@ -22,6 +22,14 @@ from docpipe.integrations.rest_client import (
     RestClientConfig,
     RestMethod,
     sanitize_sensitive_data,
+    sanitize_url,
+    sanitize_urls_in_text,
+)
+
+FAKE_TEMPAUTH = "FAKE-TEMPAUTH-VALUE-0123456789"
+DOWNLOAD_URL = (
+    "https://tenant-my.sharepoint.com/personal/user_example_com/_layouts/15/download.aspx"
+    f"?UniqueId=de35d52f-620f-41eb-b5d7-2b3b38350814&Translate=false&tempauth={FAKE_TEMPAUTH}&ApiVersion=2.0"
 )
 
 
@@ -127,6 +135,120 @@ class TestSanitizeSensitiveData:
         assert "secret" not in result
         assert "xyz789" not in result
         assert "***REDACTED***" in result
+
+
+class TestSanitizeUrl:
+    """Test sanitize_url() and sanitize_urls_in_text() functions."""
+
+    def test_tempauth_is_redacted_and_other_parts_are_kept(self):
+        """The Microsoft Graph download URL keeps host, path and non-sensitive params."""
+        result = sanitize_url(DOWNLOAD_URL)
+
+        assert FAKE_TEMPAUTH not in result
+        assert "tempauth=***REDACTED***" in result
+        assert result.startswith(
+            "https://tenant-my.sharepoint.com/personal/user_example_com/_layouts/15/download.aspx?"
+        )
+        assert "UniqueId=de35d52f-620f-41eb-b5d7-2b3b38350814" in result
+        assert "Translate=false" in result
+        assert "ApiVersion=2.0" in result
+
+    def test_parameter_order_is_preserved(self):
+        """Redaction does not reorder the query string."""
+        result = sanitize_url(DOWNLOAD_URL)
+
+        assert (
+            result.index("UniqueId") < result.index("Translate") < result.index("tempauth") < result.index("ApiVersion")
+        )
+
+    @pytest.mark.parametrize(
+        "param",
+        [
+            "tempauth",
+            "TempAuth",
+            "access_token",
+            "token",
+            "sig",
+            "X-Amz-Signature",
+            "X-Amz-Credential",
+            "api_key",
+            "apikey",
+        ],
+    )
+    def test_credential_parameter_names_are_redacted(self, param):
+        """Common credential parameter names are redacted regardless of case or separators."""
+        result = sanitize_url(f"https://example.com/file?id=1&{param}=SECRETVALUE")
+
+        assert "SECRETVALUE" not in result
+        assert f"{param}=***REDACTED***" in result
+        assert "id=1" in result
+
+    @pytest.mark.parametrize("param", ["UniqueId", "Translate", "ApiVersion", "page", "name", "format"])
+    def test_non_sensitive_parameters_are_kept(self, param):
+        """Parameters that are not credentials are left unchanged."""
+        url = f"https://example.com/file?{param}=value"
+
+        assert sanitize_url(url) == url
+
+    def test_url_without_query_is_unchanged(self):
+        """A URL without a query string is returned as is."""
+        url = "https://graph.microsoft.com/v1.0/drives/abc/root/children"
+
+        assert sanitize_url(url) == url
+
+    def test_relative_path_with_query(self):
+        """A path without scheme or host is sanitized too."""
+        assert sanitize_url("/download?tempauth=SECRETVALUE&a=1") == "/download?tempauth=***REDACTED***&a=1"
+
+    def test_userinfo_is_dropped(self):
+        """Embedded user:password credentials are removed from the URL."""
+        result = sanitize_url("https://user:hunter2@example.com/path?a=1")  # pragma: allowlist secret
+
+        assert "hunter2" not in result
+        assert "user" not in result
+        assert result == "https://example.com/path?a=1"
+
+    def test_fragment_credentials_are_redacted(self):
+        """Credentials in the URL fragment are redacted."""
+        result = sanitize_url("https://example.com/cb#access_token=SECRETVALUE&state=xyz")
+
+        assert "SECRETVALUE" not in result
+        assert "state=xyz" in result
+
+    def test_valueless_parameter_is_kept(self):
+        """A parameter without a value has nothing to redact."""
+        assert sanitize_url("https://example.com/f?token") == "https://example.com/f?token"
+
+    def test_custom_redact_value(self):
+        """The substitute string can be changed."""
+        assert sanitize_url("https://example.com/f?tempauth=SECRETVALUE", redact_value="<hidden>").endswith(
+            "tempauth=<hidden>"
+        )
+
+    def test_unparseable_url_fails_closed(self):
+        """A URL that cannot be parsed is replaced entirely."""
+        assert sanitize_url("http://[invalid/f?tempauth=SECRETVALUE") == "***REDACTED***"
+
+    def test_urls_in_text_are_redacted(self):
+        """Every URL in free text such as an exception message is sanitized."""
+        text = f"403 Client Error: Forbidden for url: {DOWNLOAD_URL} (retrying {DOWNLOAD_URL})"
+        result = sanitize_urls_in_text(text)
+
+        assert FAKE_TEMPAUTH not in result
+        assert result.count("tempauth=***REDACTED***") == 2
+        assert result.startswith("403 Client Error: Forbidden for url: https://tenant-my.sharepoint.com/")
+
+    def test_request_path_in_urllib3_message_is_redacted(self):
+        """urllib3 style messages report the path and query without a host."""
+        text = "Max retries exceeded with url: /download.aspx?tempauth=SECRETVALUE&a=1 (Caused by X)"
+        result = sanitize_urls_in_text(text)
+
+        assert "SECRETVALUE" not in result
+        assert "with url: /download.aspx?tempauth=***REDACTED***&a=1" in result
+
+    def test_text_without_urls_is_unchanged(self):
+        """Text that holds no URL is returned unchanged."""
+        assert sanitize_urls_in_text("Connection error") == "Connection error"
 
 
 class TestRestClientConfig:
@@ -663,6 +785,115 @@ class TestErrorHandling:
         all_str = " ".join(all_calls)
         assert "secret_token_123" not in all_str
         assert "secret_key" not in all_str
+
+
+class TestUrlCredentialsAreNotLeaked:
+    """Pre-authenticated URLs (for example Microsoft Graph ``tempauth``) must not reach logs or errors."""
+
+    @staticmethod
+    def _logged_text(mock_logger) -> str:
+        """Render every call made on the mocked logger, including the %s arguments."""
+        calls = []
+        for level in ("debug", "info", "warning", "error", "exception"):
+            calls.extend(getattr(mock_logger, level).call_args_list)
+        return " ".join(str(call) for call in calls)
+
+    @patch("requests.Session.request")
+    @patch("docpipe.integrations.rest_client.logger")
+    def test_request_log_masks_tempauth(self, mock_logger, mock_request):
+        """The 'Making GET request' log line does not contain the tempauth value."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_request.return_value = mock_response
+        client = RestClient(RestClientConfig())
+
+        client.call_rest(method=RestMethod.GET, url=DOWNLOAD_URL)
+
+        logged = self._logged_text(mock_logger)
+        assert FAKE_TEMPAUTH not in logged
+        assert "tempauth=***REDACTED***" in logged
+        assert "download.aspx" in logged
+        # The real URL must still be requested
+        assert mock_request.call_args.kwargs["url"] == DOWNLOAD_URL
+
+    @patch("requests.Session.request")
+    @patch("docpipe.integrations.rest_client.logger")
+    def test_http_error_masks_tempauth(self, mock_logger, mock_request):
+        """An HTTPError that echoes the URL is masked in the log, the raised error and its cause."""
+        error_response = Mock()
+        error_response.status_code = 403
+        error_response.headers = {}
+        error_response.raise_for_status.side_effect = HTTPError(
+            f"403 Client Error: Forbidden for url: {DOWNLOAD_URL}", response=error_response
+        )
+        mock_request.return_value = error_response
+        config = RestClientConfig(retry_max_attempts=1)
+        client = RestClient(config)
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            client.call_rest(method=RestMethod.GET, url=DOWNLOAD_URL)
+
+        assert exc_info.value.error_code == ErrorCode.HTTP_ERROR
+        assert exc_info.value.status_code == 403
+        assert FAKE_TEMPAUTH not in str(exc_info.value)
+        assert FAKE_TEMPAUTH not in str(exc_info.value.__cause__)
+        assert FAKE_TEMPAUTH not in self._logged_text(mock_logger)
+        assert "tempauth=***REDACTED***" in str(exc_info.value)
+
+    @patch("requests.Session.request")
+    @patch("docpipe.integrations.rest_client.logger")
+    def test_connection_error_masks_tempauth(self, mock_logger, mock_request):
+        """A connection error that echoes the request path is masked."""
+        mock_request.side_effect = ConnectionError(
+            "HTTPSConnectionPool(host='tenant-my.sharepoint.com', port=443): Max retries exceeded "
+            f"with url: /personal/user_example_com/_layouts/15/download.aspx?tempauth={FAKE_TEMPAUTH}&ApiVersion=2.0"
+        )
+        config = RestClientConfig(retry_max_attempts=1)
+        client = RestClient(config)
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            client.call_rest(method=RestMethod.GET, url=DOWNLOAD_URL)
+
+        assert exc_info.value.error_code == ErrorCode.CONNECTION_ERROR
+        assert FAKE_TEMPAUTH not in str(exc_info.value)
+        assert FAKE_TEMPAUTH not in str(exc_info.value.__cause__)
+        assert FAKE_TEMPAUTH not in self._logged_text(mock_logger)
+        assert "ApiVersion=2.0" in str(exc_info.value)
+
+    @patch.object(RestClient, "_call_rest_method_impl")
+    @patch("docpipe.integrations.rest_client.logger")
+    def test_unexpected_status_masks_tempauth_in_response_body(self, mock_logger, mock_call_rest_method):
+        """A response body that echoes the URL is masked in the log and the raised error."""
+        mock_response = Mock()
+        mock_response.status_code = 410
+        mock_response.text = f"The link has expired: {DOWNLOAD_URL}"
+        mock_response.headers = {}
+        mock_call_rest_method.return_value = mock_response
+        client = RestClient(RestClientConfig())
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            client.call_rest(method=RestMethod.GET, url=DOWNLOAD_URL)
+
+        assert "410" in str(exc_info.value)
+        assert FAKE_TEMPAUTH not in str(exc_info.value)
+        assert FAKE_TEMPAUTH not in self._logged_text(mock_logger)
+
+    @patch("requests.Session.request")
+    @patch("docpipe.integrations.rest_client.logger")
+    def test_request_log_masks_tempauth_with_params(self, mock_logger, mock_request):
+        """The branch that logs query params masks the tempauth in the URL too."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_request.return_value = mock_response
+        client = RestClient(RestClientConfig())
+
+        client.call_rest(method=RestMethod.GET, url=DOWNLOAD_URL, query_params={"page": 1})
+
+        logged = self._logged_text(mock_logger)
+        assert FAKE_TEMPAUTH not in logged
+        assert "tempauth=***REDACTED***" in logged
 
 
 class TestMethodConfig:
