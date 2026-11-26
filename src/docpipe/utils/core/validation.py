@@ -361,7 +361,8 @@ def validate_flow_definition(value: dict[str, Any] | None) -> dict[str, Any] | N
     if has_flow_name:
         # Authoring format - validate structure
         _validate_authoring_format(value)
-    elif has_doc_type:
+    else:
+        # Only 'doc_type' is present (checked above) - Elyra format
         _validate_elyra_format(value)
 
     return value
