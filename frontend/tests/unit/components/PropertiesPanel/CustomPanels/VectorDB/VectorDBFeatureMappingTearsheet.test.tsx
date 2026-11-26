@@ -1507,4 +1507,152 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
     });
     expect(screen.queryByText(/Euclidean distance/i)).toBeNull();
   });
+
+  // ── Milvus GPU mode similarity metric filtering ───────────────────────────
+
+  const denseEnrichment = {
+    available_resources: [],
+    selected_resource_schema: {},
+    feature_mappings: [],
+    available_features: {
+      dense_emb: {
+        name: 'dense_emb',
+        type: 'vector',
+        description: 'Dense vector embeddings',
+        available_for_filter: false,
+        available_for_vector_db: true,
+        mandatory_for_vector_db: true,
+        node_id: 'node-1',
+        tags: [],
+      },
+    },
+    stored_resource_metadata: null,
+    is_docpipe_supported_resource: null,
+  } as unknown as import('@/types').VectorDBEnrichmentResult;
+
+  const renderMilvusDense = (
+    parsedProviderConfig: Record<string, unknown>,
+    savedVectorSimilarity: string,
+    addSparseVector = false
+  ) =>
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        parsedProviderConfig={parsedProviderConfig}
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity={savedVectorSimilarity}
+        addSparseVector={addSparseVector}
+      />
+    );
+
+  const openMetricOptions = async (): Promise<string[]> => {
+    await waitFor(() => expect(document.getElementById('similarity-metric-select')).toBeInTheDocument());
+    const trigger = document.querySelector('#similarity-metric-select button') as HTMLButtonElement;
+    fireEvent.click(trigger);
+    await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
+    return Array.from(document.querySelectorAll('[role="option"]')).map((el) => el.textContent ?? '');
+  };
+
+  it('offers only L2 and IP when vector_mode is gpu', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusDense({ vector_mode: 'gpu' }, 'L2');
+
+    const options = await openMetricOptions();
+    expect(options).toHaveLength(2);
+    expect(options.some((o) => /Euclidean/i.test(o))).toBe(true);
+    expect(options.some((o) => /Inner product/i.test(o))).toBe(true);
+    expect(options.some((o) => /Cosine/i.test(o))).toBe(false);
+    expect(options.some((o) => /BM25/i.test(o))).toBe(false);
+  });
+
+  it('offers only L2 and IP when index_type is GPU_CAGRA and vector_mode is unset', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusDense({ index_type: 'GPU_CAGRA' }, 'L2');
+
+    const options = await openMetricOptions();
+    expect(options).toHaveLength(2);
+    expect(options.some((o) => /Cosine/i.test(o))).toBe(false);
+  });
+
+  it('excludes BM25 in gpu mode even when sparse vectors are enabled', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusDense({ vector_mode: 'gpu' }, 'L2', true);
+
+    const options = await openMetricOptions();
+    expect(options.some((o) => /BM25/i.test(o))).toBe(false);
+  });
+
+  it('resets a saved COSINE metric to L2 when gpu mode is active', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusDense({ vector_mode: 'gpu' }, 'COSINE');
+
+    await waitFor(() => {
+      expect(screen.getByText(/Euclidean distance/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Cosine similarity/i)).toBeNull();
+  });
+
+  it('keeps COSINE available when vector_mode is dense even with a GPU index_type', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusDense({ vector_mode: 'dense', index_type: 'GPU_CAGRA' }, 'L2');
+
+    const options = await openMetricOptions();
+    expect(options.some((o) => /Cosine/i.test(o))).toBe(true);
+  });
+
+  it('offers only L2 and IP in gpu mode with mixed dense, binary and sparse features', async () => {
+    const feature = (name: string, type: string) => ({
+      name,
+      type,
+      description: name,
+      available_for_filter: false,
+      available_for_vector_db: true,
+      mandatory_for_vector_db: true,
+      node_id: 'node-1',
+      tags: [],
+    });
+    mockEnrich.mockResolvedValue({
+      ...denseEnrichment,
+      available_features: {
+        dense_emb: feature('dense_emb', 'vector'),
+        binary_emb: feature('binary_emb', 'vector_binary'),
+        sparse_emb: feature('sparse_emb', 'vector_sparse'),
+      },
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+    renderMilvusDense({ vector_mode: 'gpu' }, 'L2', true);
+
+    const options = await openMetricOptions();
+    expect(options).toHaveLength(2);
+    expect(options.some((o) => /Euclidean/i.test(o))).toBe(true);
+    expect(options.some((o) => /Inner product/i.test(o))).toBe(true);
+    expect(options.some((o) => /Cosine|BM25|Hamming|Jaccard/i.test(o))).toBe(false);
+  });
+
+  it('keeps binary metrics in gpu mode when only vector_binary features are present', async () => {
+    mockEnrich.mockResolvedValue({
+      ...denseEnrichment,
+      available_features: {
+        binary_emb: {
+          name: 'binary_emb',
+          type: 'vector_binary',
+          description: 'Binary vector embeddings',
+          available_for_filter: false,
+          available_for_vector_db: true,
+          mandatory_for_vector_db: true,
+          node_id: 'node-1',
+          tags: [],
+        },
+      },
+    } as unknown as import('@/types').VectorDBEnrichmentResult);
+    renderMilvusDense({ vector_mode: 'gpu' }, 'HAMMING');
+
+    await waitFor(() => {
+      expect(screen.getByText(/Hamming distance/i)).toBeInTheDocument();
+    });
+  });
 });

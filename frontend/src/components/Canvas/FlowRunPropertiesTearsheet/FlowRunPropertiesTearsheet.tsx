@@ -25,6 +25,7 @@ interface FlowRunPropertiesTearsheetProps {
   open: boolean;
   onClose: () => void;
   onSave?: (properties: FlowRunProperties) => void;
+  readOnly?: boolean;
 }
 
 /**
@@ -42,6 +43,7 @@ export function FlowRunPropertiesTearsheet({
   open,
   onClose,
   onSave,
+  readOnly = false,
 }: FlowRunPropertiesTearsheetProps): React.JSX.Element {
   const intl = useIntl();
   const storageOptions: StorageOption[] = [
@@ -92,9 +94,9 @@ export function FlowRunPropertiesTearsheet({
       onClose={onClose}
       title={intl.formatMessage(messages.title)}
       size="md"
-      primaryActionLabel={intl.formatMessage(messages.primaryAction)}
+      primaryActionLabel={readOnly ? undefined : intl.formatMessage(messages.primaryAction)}
       secondaryActionLabel={intl.formatMessage(messages.secondaryAction)}
-      onPrimaryAction={handleSave}
+      onPrimaryAction={readOnly ? undefined : handleSave}
       onSecondaryAction={handleCancel}
     >
       <div className={styles.propertiesContainer}>
@@ -109,6 +111,7 @@ export function FlowRunPropertiesTearsheet({
               labelText={intl.formatMessage(messages.toggleIncrementalProcessing)}
               labelA={intl.formatMessage(messages.toggleOff)}
               labelB={intl.formatMessage(messages.toggleOn)}
+              disabled={readOnly}
               toggled={localProperties.enableIncrementalProcessing}
               onToggle={(checked) => {
                 updateLocalProperty(FLOW_PROPERTY_KEYS.ENABLE_INCREMENTAL_PROCESSING as keyof FlowRunProperties, checked);
@@ -123,6 +126,7 @@ export function FlowRunPropertiesTearsheet({
                 labelText={intl.formatMessage(messages.toggleRetainRecords)}
                 labelA={intl.formatMessage(messages.toggleOff)}
                 labelB={intl.formatMessage(messages.toggleOn)}
+                disabled={readOnly}
                 toggled={localProperties.retainRecordsForDeletedDocuments}
                 onToggle={(checked) => {
                   updateLocalProperty(FLOW_PROPERTY_KEYS.RETAIN_RECORDS_FOR_DELETED_DOCUMENTS as keyof FlowRunProperties, checked);
@@ -139,6 +143,7 @@ export function FlowRunPropertiesTearsheet({
               labelText={intl.formatMessage(messages.toggleValidateFlow)}
               labelA={intl.formatMessage(messages.toggleOff)}
               labelB={intl.formatMessage(messages.toggleOn)}
+              disabled={readOnly}
               toggled={localProperties.validateFlow}
               onToggle={(checked) => {
                 updateLocalProperty(FLOW_PROPERTY_KEYS.VALIDATE_FLOW as keyof FlowRunProperties, checked);
@@ -153,6 +158,7 @@ export function FlowRunPropertiesTearsheet({
             titleText={intl.formatMessage(messages.intermediateStorageTitle)}
             label={intl.formatMessage(messages.intermediateStorageLabel)}
             items={storageOptions}
+            disabled={readOnly}
             selectedItem={storageOptions.find(
               (opt) => opt.id === localProperties.intermediateDataStorage
             )}

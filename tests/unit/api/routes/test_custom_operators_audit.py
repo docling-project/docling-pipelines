@@ -422,7 +422,7 @@ class TestUnauthenticatedRequests:
     """A 401 is raised by the router dependency before the handler, so it is not audited here."""
 
     def test_missing_token_is_not_audited(
-        self, *, service: CustomOperatorService, audit_records: Any, monkeypatch: pytest.MonkeyPatch
+        self, *, service: CustomOperatorService, audit_records: Any, monkeypatch: pytest.MonkeyPatch, auth_enabled: None
     ) -> None:
         monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
         unauth = TestClient(_build_app(service=service), raise_server_exceptions=False)
@@ -431,10 +431,10 @@ class TestUnauthenticatedRequests:
         assert audit_records.refresh() == []
 
     def test_caller_comes_from_the_token(
-        self, *, service: CustomOperatorService, audit_records: Any, monkeypatch: pytest.MonkeyPatch
+        self, *, service: CustomOperatorService, audit_records: Any, monkeypatch: pytest.MonkeyPatch, auth_enabled: None
     ) -> None:
         monkeypatch.setenv("JWT_SECRET_KEY", _JWT_SECRET)
-        token = create_access_token({"username": "bob"}, JWTConfig(jwt_secret_key=_JWT_SECRET))
+        token = create_access_token({"username": "bob", "roles": ["admin"]}, JWTConfig(jwt_secret_key=_JWT_SECRET))
         authed = TestClient(_build_app(service=service), raise_server_exceptions=False)
 
         response = authed.post(

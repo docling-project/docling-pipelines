@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for IngestSourceOperator validation functionality."""
 
 from typing import Any
@@ -202,3 +205,92 @@ class TestIngestSourceOperatorValidation:
 
         # Should catch validation errors for Google Drive too
         assert len(errors) > 0, "Expected validation error for incomplete Google Drive config"
+
+    def test_filesystem_path_outside_allowed_roots_rejected_when_auth_enabled(self, monkeypatch, tmp_path):
+        """When DOCPIPE_AUTH_ENABLED=true, filesystem paths outside allowed roots fail validation and execution."""
+        allowed_root = tmp_path / "allowed"
+        allowed_root.mkdir()
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+
+        monkeypatch.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DOCPIPE_INGEST_ALLOWED_PATHS", str(allowed_root))
+
+        operator = IngestSourceOperator(
+            {
+                "provider": "filesystem",
+                "provider_config": {"paths": [str(outside_dir)]},
+            }
+        )
+        errors: list[str] = []
+        operator.validate(errors=errors, warnings=[], available_features=[])
+        assert len(errors) == 1
+        assert "outside the allowed root directories" in errors[0]
+
+        with pytest.raises(ValueError, match="outside the allowed root directories"):
+            operator.transform(None)
+
+    def test_filesystem_path_traversal_rejected_when_auth_enabled(self, monkeypatch, tmp_path):
+        """Path traversal escaping the allowed root is rejected when auth is enabled."""
+        allowed_root = tmp_path / "allowed"
+        allowed_root.mkdir()
+        (tmp_path / "outside").mkdir()
+        traversal_path = f"{allowed_root}/../outside"
+
+        monkeypatch.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DOCPIPE_INGEST_ALLOWED_PATHS", str(allowed_root))
+
+        operator = IngestSourceOperator(
+            {
+                "provider": "filesystem",
+                "provider_config": {"paths": [traversal_path]},
+            }
+        )
+        errors: list[str] = []
+        operator.validate(errors=errors, warnings=[], available_features=[])
+        assert len(errors) == 1
+        assert "outside the allowed root directories" in errors[0]
+
+    @pytest.mark.parametrize("sep", [",", ";"])
+    def test_filesystem_path_inside_allowed_roots_accepted_when_auth_enabled(self, monkeypatch, tmp_path, sep):
+        """Filesystem paths inside comma- or semicolon-separated DOCPIPE_INGEST_ALLOWED_PATHS pass validation."""
+        root_a = tmp_path / "root_a"
+        root_b = tmp_path / "root_b"
+        nested = root_b / "sub"
+        root_a.mkdir()
+        nested.mkdir(parents=True)
+
+        monkeypatch.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DOCPIPE_INGEST_ALLOWED_PATHS", f"{root_a}{sep}{root_b}")
+
+        operator = IngestSourceOperator(
+            {
+                "provider": "filesystem",
+                "provider_config": {"paths": [str(nested)]},
+            }
+        )
+        errors: list[str] = []
+        operator.validate(errors=errors, warnings=[], available_features=[])
+        assert errors == []
+
+    def test_filesystem_path_defaults_to_data_path_when_auth_enabled(self, monkeypatch, tmp_path):
+        """When DOCPIPE_INGEST_ALLOWED_PATHS is unset, get_data_path() is the default allowed root."""
+        data_root = tmp_path / "data"
+        inside = data_root / "docs"
+        inside.mkdir(parents=True)
+        outside = tmp_path / "other"
+        outside.mkdir()
+
+        monkeypatch.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        monkeypatch.delenv("DOCPIPE_INGEST_ALLOWED_PATHS", raising=False)
+        monkeypatch.setenv("DOCPIPE_DATA_PATH", str(data_root))
+
+        valid_op = IngestSourceOperator({"provider": "filesystem", "provider_config": {"paths": [str(inside)]}})
+        errors: list[str] = []
+        valid_op.validate(errors=errors, warnings=[], available_features=[])
+        assert errors == []
+
+        invalid_op = IngestSourceOperator({"provider": "filesystem", "provider_config": {"paths": [str(outside)]}})
+        invalid_op.validate(errors=errors, warnings=[], available_features=[])
+        assert len(errors) == 1
+        assert "outside the allowed root directories" in errors[0]

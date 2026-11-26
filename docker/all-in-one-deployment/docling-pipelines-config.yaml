@@ -1,0 +1,55 @@
+# Container-specific configuration for the all-in-one deployment.
+# Mounted into docpipe-app and selected via DOCPIPE_CONFIG_PATH.
+#
+# Document sets and document libraries are stored in DuckDB on the ./data bind
+# mount (/opt/app-root/src/data in the container), so they are writable by the
+# non-root docpipe user and survive container re-creation.
+assets_management:
+  flow_repository:
+    type: local
+    config:
+      base_dir: /opt/app-root/src/data/flows
+
+  documentset_repository:
+    type: duckdb
+    config:
+      database_path: /opt/app-root/src/data/duckdb/document_sets.duckdb
+
+  documentlibrary_repository:
+    type: duckdb
+    config:
+      database_path: /opt/app-root/src/data/duckdb/document_sets.duckdb
+
+projects_management:
+  project_repository:
+    type: local
+    config:
+      base_dir: /opt/app-root/src/data/projects
+
+job_management:
+  framework:
+    type: default
+    config: {}
+  storage:
+    type: filesystem
+    config:
+      base_dir: /opt/app-root/src/data/job_stats_store_data
+
+job_run_report:
+  storage:
+    type: filesystem
+    config: {}
+
+incremental_metadata:
+  storage:
+    type: filesystem
+    config:
+      base_dir: /opt/app-root/src/data
+      lock_timeout: 30.0
+
+flow_definition_snapshot:
+  storage:
+    type: filesystem
+    config:
+      base_dir: /opt/app-root/src/data
+      lock_timeout: 30.0

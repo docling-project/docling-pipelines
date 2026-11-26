@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Validation utility functions."""
 
 from datetime import UTC, datetime
@@ -462,7 +465,7 @@ def validate_database_path(path: str, base_dir: str | None = None) -> str:
     if base_dir:
         try:
             base_path = Path(base_dir).resolve()
-            if not str(resolved_path).startswith(str(base_path)):
+            if not resolved_path.is_relative_to(base_path):
                 msg = f"Database path must be within {base_dir}"
                 raise ValueError(msg)
         except (OSError, RuntimeError) as e:
