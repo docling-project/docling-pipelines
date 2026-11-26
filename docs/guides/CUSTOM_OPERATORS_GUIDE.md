@@ -910,7 +910,7 @@ You can also explicitly register packages in flow configuration:
 from docpipe.lib.docpipe_flow_manager import DocpipeFlowManager
 
 manager = DocpipeFlowManager(flow_file="flow.json")
-manager.register_custom_operators(paths=["my_custom_operators"])
+manager.register_custom_operators(package_names=["my_custom_operators"])
 result = manager.execute()
 ```
 
@@ -1032,7 +1032,7 @@ uppercase_operator = "operators.uppercase_operator:UppercaseOperator"
 
 ```python
 # When registering with DocpipeFlowManager
-manager.register_custom_operators(packages=["my_custom_operators"])
+manager.register_custom_operators(package_names=["my_custom_operators"])
 
 # Entry point value must start with "my_custom_operators"
 ```
@@ -1106,11 +1106,10 @@ docling-pipelines --list-operators
 3. **Test operator loading directly**:
    ```python
    from docpipe.core.orchestration.operator_factory import OperatorFactory
-   factory = OperatorFactory()
-   factory.register_custom_operators(packages=["my_custom_operators"])
+   factory = OperatorFactory("python", ["my_custom_operators"], enable_custom_operators=True)
 
-   # Try to get your operator
-   operator = factory.get_operator("my_operator_id")
+   # Try to get your operator (None if it was not loaded)
+   operator = factory.get_operator(operator_name="my_operator_id")
    ```
 
 4. **Enable debug logging**:
