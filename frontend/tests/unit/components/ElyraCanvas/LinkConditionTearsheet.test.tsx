@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { LinkConditionTearsheet } from '@/components/ElyraCanvas/LinkConditionTearsheet';
+import { LinkConditionTearsheet } from '@/components/ElyraCanvas';
 
 const BASE_PROPS = {
   open: true,

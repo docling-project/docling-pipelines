@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { ChunkerPanelBody } from '@/components/PropertiesPanel/CustomPanels/Chunker/Chunker';
+import { ChunkerPanelBody } from '@/components/PropertiesPanel/CustomPanels/Chunker';
 
 const makeController = (overrides: Record<string, unknown> = {}) => ({
   getAppData: vi.fn(() => ({ operatorMetadata: {} })),

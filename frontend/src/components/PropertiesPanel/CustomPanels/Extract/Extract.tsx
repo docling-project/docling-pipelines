@@ -7,7 +7,7 @@
 import React, { useCallback, useState } from 'react';
 import { useIntl, type MessageDescriptor } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
-import { RequiredParamTooltip, VaultInput } from '@/components/common';
+import { RequiredParamTooltip, TagInput, VaultInput } from '@/components/common';
 import {
   Accordion,
   AccordionItem,
@@ -50,7 +50,6 @@ import {
 import { messages } from './Extract.messages';
 import styles from './Extract.module.scss';
 import common from '../../CommonPropertiesPanel.module.scss';
-import { TagInput } from '@/components/common/TagInput/TagInput';
 import { isValidJsonObject } from '@/utils/json';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
 

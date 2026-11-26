@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import { ListInput } from '@/components/common/ListInput/ListInput';
+import { ListInput } from '@/components/common/ListInput';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 
 function renderListInput(props: Partial<Parameters<typeof ListInput>[0]> = {}) {

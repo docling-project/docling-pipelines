@@ -40,8 +40,11 @@ import { useIntl } from 'react-intl';
 import { Button, DefinitionTooltip, FormLabel } from '@carbon/react';
 import { Add, Maximize, TrashCan } from '@carbon/icons-react';
 import { NodeOperator } from '@/constants/operators';
-import { SharedDataTable } from '@/components/common/SharedDataTable';
-import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
+import {
+  SharedDataTable,
+  type SharedDataTableHeader,
+  type SharedDataTableRow,
+} from '@/components/common';
 import type { ElyraController, FeatureAttributes, OperatorFeature } from '@/types';
 import {
   type Condition,

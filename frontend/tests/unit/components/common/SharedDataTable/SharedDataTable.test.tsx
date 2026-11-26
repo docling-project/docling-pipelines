@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { SharedDataTable } from '@/components/common/SharedDataTable/SharedDataTable';
+import { SharedDataTable } from '@/components/common/SharedDataTable';
 
 const headers = [
   { key: 'name', header: 'Name' },

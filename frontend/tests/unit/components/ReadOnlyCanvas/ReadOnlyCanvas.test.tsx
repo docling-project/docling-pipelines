@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { ReadOnlyCanvas } from '@/components/ReadOnlyCanvas/ReadOnlyCanvas';
+import { ReadOnlyCanvas } from '@/components/ReadOnlyCanvas';
 import { buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
 import { jobRunStatusResponseFixture, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
 import type { PipelineFlowDef } from '@elyra/canvas';

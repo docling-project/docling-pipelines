@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, act, waitFor, fireEvent } from '@testing-library/react';
-import { ProjectsCard } from '@/components/cards/ProjectsCard';
+import { ProjectsCard } from '@/components/cards';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { authStateFixture } from '../../../mocks/fixtures/store.fixture';
 import { server } from '../../../mocks/server';

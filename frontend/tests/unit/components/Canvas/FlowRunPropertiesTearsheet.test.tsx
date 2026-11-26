@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowRunPropertiesTearsheet } from '@/components/Canvas/FlowRunPropertiesTearsheet/FlowRunPropertiesTearsheet';
+import { FlowRunPropertiesTearsheet } from '@/components/Canvas/FlowRunPropertiesTearsheet';
 import { buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
 
 describe('FlowRunPropertiesTearsheet', () => {

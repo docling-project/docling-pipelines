@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowRunsTable } from '@/components/FlowDetail/FlowRunsTable/FlowRunsTable';
-import type { RunRow, RunStatus } from '@/components/FlowDetail/FlowRunsTable/FlowRunsTable';
+import { FlowRunsTable } from '@/components/FlowDetail/FlowRunsTable';
+import type { RunRow, RunStatus } from '@/components/FlowDetail/FlowRunsTable';
 import { PERMISSION_SCENARIOS, authPreloadedState } from '../../../mocks/fixtures/permission.fixture';
 
 function run(status: RunStatus, userId: string | null): RunRow {

@@ -28,11 +28,10 @@ import {
   SUPPORTED_FILE_EXTENSIONS,
 } from './constants';
 import { messages } from './IngestSource.messages';
-import { ProviderFieldsForm } from '../shared/ProviderFieldsForm';
-import { JsonTextArea } from '@/components/common/JsonTextArea/JsonTextArea';
+import { ProviderFieldsForm } from '../shared';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
-import { RequiredParamTooltip } from '@/components/common';
+import { JsonTextArea, RequiredParamTooltip } from '@/components/common';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
 
 /** Maps generic (non-brand) backend provider keys to translated display labels. */

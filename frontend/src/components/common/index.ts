@@ -19,7 +19,7 @@ export { ToastContainer } from './ToastContainer';
 export { NotificationHistory } from './NotificationHistory';
 export { FlowInfoPanel } from './FlowInfoPanel';
 export type { FlowPanelData } from './FlowInfoPanel';
-export { RequiredParamTooltip } from './RequiredParamTooltip/RequiredParamTooltip';
+export { RequiredParamTooltip } from './RequiredParamTooltip';
 export { VaultInput } from './VaultInput';
 export type { VaultInputProps } from './VaultInput';
 export { PermissionTooltip, PermissionButtonElement } from './PermissionTooltip';

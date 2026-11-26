@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@carbon/react';
 import { ArrowRight } from '@carbon/icons-react';
-import { PermissionTooltip } from '@/components/common/PermissionTooltip';
+import { PermissionTooltip } from '@/components/common';
 import styles from './TileContent.module.scss';
 
 interface TileContentProps {

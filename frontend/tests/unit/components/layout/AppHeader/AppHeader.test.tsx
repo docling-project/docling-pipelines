@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { AppHeader } from '@/components/layout/AppHeader/AppHeader';
+import { AppHeader } from '@/components/layout/AppHeader';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { server } from '../../../../mocks/server';
 

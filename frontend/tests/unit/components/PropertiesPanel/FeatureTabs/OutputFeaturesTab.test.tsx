@@ -6,7 +6,7 @@ import { screen, fireEvent, act } from '@testing-library/react';
 vi.setConfig({ testTimeout: 15000 });
 
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { OutputFeaturesTab } from '@/components/PropertiesPanel/FeatureTabs/OutputFeaturesTab';
+import { OutputFeaturesTab } from '@/components/PropertiesPanel/FeatureTabs';
 import type { FeatureAttributes } from '@/types';
 
 const SAMPLE_OUTPUT: Record<string, FeatureAttributes> = {

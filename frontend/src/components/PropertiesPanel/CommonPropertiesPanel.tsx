@@ -31,29 +31,30 @@ import { useIntl } from 'react-intl';
 import { NodeOperator } from '@/constants/operators';
 import { getOperatorLabel } from '@/constants/operatorLabels';
 import { getIconForOperator } from '@/utils/paletteEnhancer';
-import { AnnotationFilterPanelBody } from './CustomPanels/AnnotationFilter/AnnotationFilter';
-import { BranchingPanelBody } from './CustomPanels/Branching/Branching';
-import { ChunkerPanelBody } from './CustomPanels/Chunker/Chunker';
-import { DocumentClassifierPanelBody } from './CustomPanels/DocumentClassifier/DocumentClassifier';
-import { DocumentSetPanelBody } from './CustomPanels/DocumentSet/DocumentSet';
-import { EdedupPanelBody } from './CustomPanels/Ededup/Ededup';
-import { EmbeddingsPanelBody } from './CustomPanels/Embeddings/Embeddings';
-import { EntityCurationPanelBody } from './CustomPanels/EntityCuration/EntityCuration';
-import { ExtractPanelBody } from './CustomPanels/Extract/Extract';
-import { IngestSourcePanelBody } from './CustomPanels/IngestSource/IngestSource';
-import { MergingPanelBody } from './CustomPanels/Merging/Merging';
-import { MlEnrichmentPanelBody } from './CustomPanels/MlEnrichment/MlEnrichment';
-import { PiiAndHapPanelBody } from './CustomPanels/PiiAndHap/PiiAndHap';
-import { ReadabilityPanelBody } from './CustomPanels/Readability/Readability';
-import { RedactionPanelBody } from './CustomPanels/Redaction/Redaction';
-import { LanguageDetectPanelBody } from './CustomPanels/LanguageDetect/LanguageDetect';
-import { ACLPanelBody } from './CustomPanels/ACL/ACL';
-import { VectorDBPanelBody } from './CustomPanels/VectorDB/VectorDB';
-import { DocQualityPanelBody } from './CustomPanels/DocQuality/DocQuality';
-import { NoopPanelBody } from './CustomPanels/Noop/Noop';
-import { StorageOutputPanelBody } from './CustomPanels/StorageOutput/StorageOutput';
-import { InputFeaturesTab } from './FeatureTabs/InputFeaturesTab';
-import { OutputFeaturesTab } from './FeatureTabs/OutputFeaturesTab';
+import {
+  ACLPanelBody,
+  AnnotationFilterPanelBody,
+  BranchingPanelBody,
+  ChunkerPanelBody,
+  DocQualityPanelBody,
+  DocumentClassifierPanelBody,
+  DocumentSetPanelBody,
+  EdedupPanelBody,
+  EmbeddingsPanelBody,
+  EntityCurationPanelBody,
+  ExtractPanelBody,
+  IngestSourcePanelBody,
+  LanguageDetectPanelBody,
+  MergingPanelBody,
+  MlEnrichmentPanelBody,
+  NoopPanelBody,
+  PiiAndHapPanelBody,
+  ReadabilityPanelBody,
+  RedactionPanelBody,
+  StorageOutputPanelBody,
+  VectorDBPanelBody,
+} from './CustomPanels';
+import { InputFeaturesTab, OutputFeaturesTab } from './FeatureTabs';
 import type { NodeFeatureMap } from '@/utils/fetchNodeFeatures';
 import type { FeatureAttributes } from '@/types';
 import styles from './CommonPropertiesPanel.module.scss';

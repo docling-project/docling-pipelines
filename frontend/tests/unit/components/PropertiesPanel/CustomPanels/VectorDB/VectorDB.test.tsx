@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { VectorDBPanelBody } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDB';
+import { VectorDBPanelBody } from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 
 const makeController = (overrides: Record<string, unknown> = {}) => ({
   getAppData: vi.fn(() => ({

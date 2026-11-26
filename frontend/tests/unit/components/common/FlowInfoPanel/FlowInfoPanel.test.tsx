@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
-import { FlowInfoPanel } from '@/components/common/FlowInfoPanel/FlowInfoPanel';
-import type { FlowPanelData } from '@/components/common/FlowInfoPanel/FlowInfoPanel';
+import { FlowInfoPanel } from '@/components/common/FlowInfoPanel';
+import type { FlowPanelData } from '@/components/common/FlowInfoPanel';
 import { authStateFixture } from '../../../../mocks/fixtures/store.fixture';
 import { PERMISSION_SCENARIOS, authPreloadedState } from '../../../../mocks/fixtures/permission.fixture';
 

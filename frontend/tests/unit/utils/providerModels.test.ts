@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { filterModelsForEmbeddingsPanel } from '@/utils/providerModels';
-import { EMBEDDINGS_PROVIDER } from '@/components/PropertiesPanel/CustomPanels/Embeddings/constants';
+import { EMBEDDINGS_PROVIDER } from '@/components/PropertiesPanel/CustomPanels/Embeddings';
 import type { ModelInfo } from '@/types';
 
 const embeddingModel: ModelInfo = {

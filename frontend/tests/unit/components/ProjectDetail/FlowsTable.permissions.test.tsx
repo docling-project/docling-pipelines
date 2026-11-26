@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowsTable } from '@/components/ProjectDetail/FlowsTable/FlowsTable';
+import { FlowsTable } from '@/components/ProjectDetail/FlowsTable';
 import type { FlowRow } from '@/types';
 import { PERMISSION_SCENARIOS, authPreloadedState } from '../../../mocks/fixtures/permission.fixture';
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { CreateFlowTearsheet } from '@/components/ProjectDetail/CreateFlowTearsheet/CreateFlowTearsheet';
+import { CreateFlowTearsheet } from '@/components/ProjectDetail/CreateFlowTearsheet';
 
 function renderTearsheet(props: Partial<Parameters<typeof CreateFlowTearsheet>[0]> = {}) {
   const defaults = {

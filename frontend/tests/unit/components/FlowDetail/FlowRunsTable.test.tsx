@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { FlowRunsTable } from '@/components/FlowDetail/FlowRunsTable/FlowRunsTable';
-import type { RunRow } from '@/components/FlowDetail/FlowRunsTable/FlowRunsTable';
+import { FlowRunsTable } from '@/components/FlowDetail/FlowRunsTable';
+import type { RunRow } from '@/components/FlowDetail/FlowRunsTable';
 
 const SAMPLE_RUNS: RunRow[] = [
   { run_id: 'run-1', start_time: '8/1/2024, 9:00 AM', start_time_epoch: 1722500000, status: 'run',             duration: '00:01:30', duration_seconds: 90  },

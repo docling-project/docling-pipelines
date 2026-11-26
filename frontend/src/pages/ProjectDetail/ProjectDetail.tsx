@@ -21,7 +21,7 @@ import {
 } from '@/selectors';
 import { useAppDispatch, useAppSelector, useTheme, useNotify, usePermissionReason } from '@/hooks';
 import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
-import { PermissionButtonElement } from '@/components/common/PermissionTooltip';
+import { PermissionButtonElement } from '@/components/common';
 import { ROUTES, generateRoute } from '@/config';
 import { messages } from './ProjectDetail.messages';
 import styles from './ProjectDetail.module.scss';

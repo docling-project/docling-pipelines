@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import React from 'react';
-import { Loading } from '@/components/common/Loading/Loading';
+import { Loading } from '@/components/common/Loading';
 
 describe('Loading', () => {
   it('renders full-screen variant by default', () => {

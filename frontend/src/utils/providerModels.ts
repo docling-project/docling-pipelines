@@ -6,8 +6,7 @@
  */
 
 import type { ModelInfo } from '@/types';
-import { EMBEDDINGS_PROVIDER } from '@/components/PropertiesPanel/CustomPanels/Embeddings/constants';
-import type { EmbeddingsProvider } from '@/components/PropertiesPanel/CustomPanels/Embeddings/constants';
+import { EMBEDDINGS_PROVIDER, type EmbeddingsProvider } from '@/components/PropertiesPanel';
 
 /**
  * Filter raw provider models for use in the Embeddings properties panel.

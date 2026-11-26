@@ -4,7 +4,7 @@ import { Routes, Route } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { renderWithProviders } from '../../../../utils/renderWithProviders';
 import { server } from '../../../../mocks/server';
-import { ProtectedRoute } from '@/components/common/ProtectedRoute/ProtectedRoute';
+import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 
 describe('ProtectedRoute', () => {
   it('authenticated → renders children', () => {

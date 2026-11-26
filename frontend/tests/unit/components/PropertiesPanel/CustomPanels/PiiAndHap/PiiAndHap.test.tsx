@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { PiiAndHapPanelBody } from '@/components/PropertiesPanel/CustomPanels/PiiAndHap/PiiAndHap';
+import { PiiAndHapPanelBody } from '@/components/PropertiesPanel/CustomPanels/PiiAndHap';
 
 const makeController = (overrides: Record<string, unknown> = {}) => ({
   getAppData: vi.fn(() => ({ operatorMetadata: {} })),

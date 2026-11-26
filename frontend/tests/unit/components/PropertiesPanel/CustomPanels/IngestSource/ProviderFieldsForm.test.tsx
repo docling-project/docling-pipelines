@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { ProviderFieldsForm } from '@/components/PropertiesPanel/CustomPanels/shared/ProviderFieldsForm';
+import { ProviderFieldsForm } from '@/components/PropertiesPanel/CustomPanels/shared';
 
 describe('ProviderFieldsForm', () => {
   it('renders without crashing with empty properties', () => {

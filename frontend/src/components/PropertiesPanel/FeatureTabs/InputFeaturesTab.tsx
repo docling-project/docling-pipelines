@@ -11,8 +11,11 @@ import { Button } from '@carbon/react';
 import { NoDataEmptyState, Tearsheet } from '@carbon/ibm-products';
 import { Maximize } from '@carbon/icons-react';
 import { useIntl } from 'react-intl';
-import { SharedDataTable } from '@/components/common/SharedDataTable';
-import type { SharedDataTableHeader, SharedDataTableRow } from '@/components/common/SharedDataTable';
+import {
+  SharedDataTable,
+  type SharedDataTableHeader,
+  type SharedDataTableRow,
+} from '@/components/common';
 import type { FeatureAttributes } from '@/types';
 import styles from './FeaturesTab.module.scss';
 import { messages } from './InputFeaturesTab.messages';

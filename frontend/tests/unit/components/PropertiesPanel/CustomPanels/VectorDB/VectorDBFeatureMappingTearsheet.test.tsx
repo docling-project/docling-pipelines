@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../../../utils/renderWithProviders';
-import { VectorDBFeatureMappingTearsheet } from '@/components/PropertiesPanel/CustomPanels/VectorDB/VectorDBFeatureMappingTearsheet';
-import { getProviderConfig } from '@/components/PropertiesPanel/CustomPanels/VectorDB/constants';
+import {
+  VectorDBFeatureMappingTearsheet,
+  getProviderConfig,
+} from '@/components/PropertiesPanel/CustomPanels/VectorDB';
 import { enrichFlowFeaturesForNode } from '@/components/PropertiesPanel/CustomPanels/VectorDB/vectordb-enrichment';
 
 // Mock the enrichment API so tearsheet open does not fire a real HTTP call.
