@@ -47,8 +47,8 @@ The `huggingface` extra SHALL accept the CPU-only build of the pinned `torch` ve
 - **THEN** the CPU-only `torch` build remains installed and no CUDA library packages are added
 
 ### Requirement: Missing Hugging Face package names the extra
-When a `huggingface` provider needs a package that is not installed (`torch` or `transformers` for HAP, `sentence-transformers` for local embeddings), the startup error SHALL name that package and `docling-pipelines-slim[huggingface]`, and SHALL state that the CPU-only `torch` build can be used. It SHALL NOT tell the user to `pip install` the single package.
+When a `huggingface` provider needs a module that is not installed (`torch` or `transformers` for HAP, `sentence_transformers` for local embeddings), the startup error SHALL name that module as Python imports it, give install commands for both `docling-pipelines[huggingface]` and `docling-pipelines-slim[huggingface]`, and state that the CPU-only `torch` build can be used. It SHALL NOT tell the user to `pip install` the single package.
 
 #### Scenario: Local embeddings without sentence-transformers
 - **WHEN** an `embeddings` node uses the local `huggingface` provider in an environment where `sentence-transformers` is not installed
-- **THEN** startup fails with an error naming `sentence-transformers` and `docling-pipelines-slim[huggingface]`, and the error does not say `pip install sentence-transformers`
+- **THEN** startup fails with an error naming `sentence_transformers`, `docling-pipelines[huggingface]` and `docling-pipelines-slim[huggingface]`, and the error does not say `pip install sentence-transformers`
