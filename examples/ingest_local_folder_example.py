@@ -28,7 +28,7 @@ def main() -> None:  # pragma: no cover
     operator: IngestSourceOperator = IngestSourceOperator(
         {
             "provider": "filesystem",
-            "connection_params": {"paths": ["tests/fixtures/invoices"]},
+            "provider_config": {"paths": ["tests/fixtures/invoices"]},
             "include_filter": "pdf,txt",
         }
     )
@@ -42,9 +42,13 @@ def main() -> None:  # pragma: no cover
     metadata: dict[str, Any]
     table_list, metadata = operator.transform(input_table)
 
+    row_count = table_list[0].num_rows
+    if metadata.get("node_status") != "Completed" or row_count == 0:
+        raise RuntimeError(f"Local folder ingest failed: rows={row_count}, metadata={metadata}")
+
     # 4. Inspect and print the results after the operator is completed
     print(">>> completed the operator", operator)
-    print(f"\noutput table has {table_list[0].num_rows} rows")
+    print(f"\noutput table has {row_count} rows")
 
     table: pa.Table = table_list[0]
     print(f"output metadata : {metadata}")

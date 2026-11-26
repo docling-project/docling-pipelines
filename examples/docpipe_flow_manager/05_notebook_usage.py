@@ -7,8 +7,8 @@ in a Jupyter notebook environment.
 Prerequisites:
 - Virtual environment activated: source .venv/bin/activate
 - PYTHONPATH set: export PYTHONPATH="$(pwd)/src:${PYTHONPATH}"
-- Ollama running (for LLM operations): http://localhost:11434
-- OpenSearch running (for vector storage): http://localhost:9200
+- External services such as Ollama or OpenSearch are needed only by notebook flows that use them;
+  this script only prints the usage pattern
 
 Setup (from repository root):
     python3.12 -m venv .venv
