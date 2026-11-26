@@ -209,11 +209,18 @@ class WorkPoolAdapter(BatchExecutionPort):
             DocpipeConstants.CONTINUE_ON_BATCH_FAILURE_DEFAULT,
         )
 
+        # A worker builds its own orchestrator, which would resolve the custom-operator
+        # setting from its own environment and lose an explicit opt-in or opt-out.
+        worker_global_config = {
+            **global_config,
+            DocpipeConstants.ENABLE_CUSTOM_OPERATORS: self.prefect_engine.orchestrator.enable_custom_operators,
+        }
+
         failed_info, completed_count = asyncio.run(
             self._execute_pipelined_batches_async(
                 batches=batches,
                 op_flow=op_flow,
-                global_config=global_config,
+                global_config=worker_global_config,
                 job_run_id=job_run_id,
                 continue_on_batch_failure=continue_on_batch_failure,
             )
