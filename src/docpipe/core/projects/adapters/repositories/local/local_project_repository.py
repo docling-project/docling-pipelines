@@ -24,11 +24,13 @@ import portalocker
 
 from docpipe.core.projects.domain.models.project import Project
 from docpipe.core.projects.domain.ports.project_repository import ProjectRepository
+from docpipe.exceptions import LockTimeoutError
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
 
 _DEFAULT_PROJECTS_PATH = Path.home() / "Documents" / "pipeline" / "projects"
+_LOCK_TIMEOUT_SECONDS = 30.0
 
 
 class LocalProjectRepository(ProjectRepository):
@@ -63,12 +65,17 @@ class LocalProjectRepository(ProjectRepository):
     def save(self, *, project: Project) -> Project:
         """Write project to disk as JSON. Acquires a file-level lock."""
         path = self._file_path(project.project_id)
-        with portalocker.Lock(
-            self._lock_path(project.project_id),
-            flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
-            timeout=30.0,
-        ):
-            path.write_text(json.dumps(project.to_dict(), indent=2), encoding="utf-8")
+        try:
+            with portalocker.Lock(
+                self._lock_path(project.project_id),
+                flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+                timeout=_LOCK_TIMEOUT_SECONDS,
+            ):
+                path.write_text(json.dumps(project.to_dict(), indent=2), encoding="utf-8")
+        except portalocker.exceptions.LockException as exc:
+            raise LockTimeoutError(
+                f"Timed out acquiring lock to save project {project.project_id} (timeout={_LOCK_TIMEOUT_SECONDS}s)"
+            ) from exc
         logger.info("Saved project %s (%s)", project.project_id, project.name)
         return project
 

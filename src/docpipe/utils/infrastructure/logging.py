@@ -340,6 +340,7 @@ def configure_third_party_loggers(*, log_level: int | str, handler: logging.Hand
         "websockets",
         "graphviz",
         "huggingface_hub",
+        "portalocker",
     ]
 
     for logger_name in third_party_loggers:

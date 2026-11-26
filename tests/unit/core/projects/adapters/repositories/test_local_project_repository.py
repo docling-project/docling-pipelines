@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for LocalProjectRepository.
 
 These tests use a real temporary directory — no mocking — to verify
@@ -6,12 +9,15 @@ the JSON file-per-project storage behaviour end-to-end.
 
 import json
 
+import portalocker
 import pytest
 
+from docpipe.core.projects.adapters.repositories.local import local_project_repository
 from docpipe.core.projects.adapters.repositories.local.local_project_repository import (
     LocalProjectRepository,
 )
 from docpipe.core.projects.domain.models.project import Project
+from docpipe.exceptions import LockTimeoutError
 
 
 @pytest.fixture
@@ -83,6 +89,23 @@ class TestLocalProjectRepositorySave:
 
         raw = json.loads((tmp_path / "ow-001.json").read_text())
         assert raw["name"] == "Updated Name"
+
+    def test_save_raises_lock_timeout_error_when_lock_held(self, repo, tmp_path, monkeypatch):
+        """A lock timeout surfaces as LockTimeoutError, not a raw portalocker exception."""
+        monkeypatch.setattr(local_project_repository, "_LOCK_TIMEOUT_SECONDS", 0.2)
+        project = Project(project_id="lk-001", name="Locked")
+
+        with portalocker.Lock(
+            str(tmp_path / "lk-001.json") + ".lock",
+            flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+            timeout=1.0,
+        ):
+            with pytest.raises(LockTimeoutError) as exc_info:
+                repo.save(project=project)
+
+        assert "lk-001" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, portalocker.exceptions.LockException)
+        assert not (tmp_path / "lk-001.json").exists()
 
 
 class TestLocalProjectRepositoryGet:

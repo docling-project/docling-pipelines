@@ -179,12 +179,39 @@ def test_concurrent_mark_missing_against_upsert(database: tuple[str, str]) -> No
         f_mark = executor.submit(_mark_missing_worker)
         f_upserts = [executor.submit(_upsert_worker, w) for w in range(3)]
 
-        f_mark.result()
+        marked_deleted = f_mark.result()
         for f in f_upserts:
             f.result()
 
+    keep_ids = {f"doc-{i}" for i in range(15)}
+    contested_ids = {f"doc-{i}" for i in range(15, 30)}
+    all_ids = {f"doc-{i}" for i in range(30)}
+    initially_present_contested_ids = {f"doc-{i}" for i in range(15, 20)}
+
     processed = store.get_processed_docs(job_id=job_id)
-    assert len(processed) >= 15
+    soft_deleted = store.get_soft_deleted_doc_ids(job_id=job_id)
+
+    # mark_missing always sees the seeded doc-15..19 as live, and can never touch the keep-list.
+    assert initially_present_contested_ids <= marked_deleted <= contested_ids
+
+    # Only mark_missing soft-deletes, so every soft-deleted doc must have been reported by it.
+    assert soft_deleted <= marked_deleted
+    assert soft_deleted.isdisjoint(keep_ids)
+
+    # No lost or phantom records: every doc is exactly one of live or soft-deleted.
+    assert set(processed).isdisjoint(soft_deleted)
+    assert set(processed) | soft_deleted == all_ids
+
+    # No torn records: each live doc carries metadata written entirely by one writer.
+    for doc_id, meta in processed.items():
+        index = int(doc_id.removeprefix("doc-"))
+        if index < 10:
+            # Never touched by any upsert worker.
+            assert meta == {"modified_time": 1000, "job_run_id": "run-init"}
+        else:
+            worker_id = meta["modified_time"] - 2000
+            assert worker_id in range(3)
+            assert meta["job_run_id"] == f"run-{worker_id}"
 
 
 def test_lock_timeout_rolls_back_partial_batch(database: tuple[str, str], monkeypatch: pytest.MonkeyPatch) -> None:

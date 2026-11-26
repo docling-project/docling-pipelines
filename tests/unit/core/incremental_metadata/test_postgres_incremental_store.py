@@ -149,6 +149,20 @@ class TestInit:
         s = _make_store(config={"lock_timeout": 10.5})
         assert s._lock_timeout_ms == 10500
 
+    def test_init_sub_millisecond_lock_timeout_is_clamped_to_one_ms(self):
+        """A sub-ms timeout must not truncate to 0 (PostgreSQL treats 0 as no timeout)."""
+        s = _make_store(config={"lock_timeout": 0.0005})
+        assert s._lock_timeout_ms == 1
+
+    def test_init_lock_timeout_rounds_up_to_next_ms(self):
+        s = _make_store(config={"lock_timeout": 0.0011})
+        assert s._lock_timeout_ms == 2
+
+    @pytest.mark.parametrize("invalid_timeout", [float("inf"), float("nan")])
+    def test_init_rejects_non_finite_lock_timeout(self, invalid_timeout):
+        with pytest.raises(JobStatsStoreInitializationException, match="finite positive number"):
+            _make_store(config={"lock_timeout": invalid_timeout})
+
     def test_init_rejects_zero_lock_timeout(self):
         with pytest.raises(JobStatsStoreInitializationException, match="positive number"):
             _make_store(config={"lock_timeout": 0})

@@ -11,7 +11,7 @@ import pytest
 
 from docpipe.core.incremental_metadata.adapters.stores.filesystem import FilesystemIncrementalMetadataStore
 from docpipe.core.incremental_metadata.domain.models import IncrementalMetadataRecord
-from docpipe.exceptions import FlowExecutionFailedException, LockTimeoutError
+from docpipe.exceptions import FlowExecutionFailedException, JobStatsStoreInitializationException, LockTimeoutError
 
 
 @pytest.fixture
@@ -400,6 +400,24 @@ class TestFilesystemIncrementalMetadataStore:
 
         assert not parquet_path.exists()
         assert lock_path.exists()
+
+    def test_default_lock_timeout_is_30_seconds(self, *, tmp_path):
+        """Test that lock_timeout defaults to 30.0 seconds when not configured."""
+        default_store = FilesystemIncrementalMetadataStore(config={"base_dir": str(tmp_path)})
+        assert default_store._lock_timeout == 30.0
+
+    def test_custom_lock_timeout_is_applied(self, *, tmp_path):
+        """Test that valid int and float lock_timeout values are accepted."""
+        float_store = FilesystemIncrementalMetadataStore(config={"base_dir": str(tmp_path), "lock_timeout": 12.5})
+        int_store = FilesystemIncrementalMetadataStore(config={"base_dir": str(tmp_path), "lock_timeout": 7})
+        assert float_store._lock_timeout == 12.5
+        assert int_store._lock_timeout == 7.0
+
+    @pytest.mark.parametrize("invalid_timeout", [0, -1.0, "30", True, float("inf"), float("nan")])
+    def test_invalid_lock_timeout_is_rejected(self, *, tmp_path, invalid_timeout):
+        """Test that non-positive, non-numeric, bool and non-finite lock_timeout values are rejected."""
+        with pytest.raises(JobStatsStoreInitializationException, match="Invalid lock_timeout"):
+            FilesystemIncrementalMetadataStore(config={"base_dir": str(tmp_path), "lock_timeout": invalid_timeout})
 
     def test_lock_timeout_raises_lock_timeout_error(self, *, tmp_path):
         """Test that lock acquisition timeout raises LockTimeoutError."""

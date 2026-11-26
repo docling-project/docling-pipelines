@@ -1569,7 +1569,7 @@ requires-dist = [
     { name = "passlib", extras = ["bcrypt"], specifier = "==1.7.4" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "polars", specifier = "==2.1.0" },
-    { name = "portalocker", specifier = ">=2.8.2" },
+    { name = "portalocker", specifier = "==4.4.2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.7.0" },
     { name = "prefect", specifier = "==3.9.3" },
     { name = "psycopg2-binary", specifier = "==2.9.13" },

@@ -304,10 +304,12 @@ incremental_metadata:
 
 Both backends use a unified timeout model:
 
-- `lock_timeout` is configured as a positive number of seconds (default `30.0`).
+- `lock_timeout` is configured as a finite positive number of seconds (default `30.0`). Zero, negative, non-numeric, boolean, `inf` and `nan` values are rejected at startup. For PostgreSQL, the value is rounded up to a whole millisecond (minimum 1 ms), because PostgreSQL treats `lock_timeout = 0` as "wait indefinitely".
 - If a lock cannot be acquired within `lock_timeout`, the store raises `LockTimeoutError` (a subclass of `FlowExecutionFailedException`).
 - `upsert_records` automatically retries with exponential backoff (5 retries with backoff delays of 1s, 2s, 4s, 8s, 16s) before raising the final error.
 - At the service layer (`IncrementalUpdateService`), any unhandled store error is surfaced as `FlowExecutionFailedException` with `LockTimeoutError` preserved as `__cause__`.
+
+> **Upgrade note:** The default `lock_timeout` for the `filesystem` backend was reduced from `120.0` to `30.0` seconds. Filesystem write operations hold an exclusive lock while they read, merge and rewrite the Parquet file, so on large datasets a write that previously took between 30 and 120 seconds can now fail with `LockTimeoutError`. If you have such workloads, set `lock_timeout` explicitly, for example `lock_timeout: 120.0`.
 
 ### Operational Guidance: Empty Source Listings
 

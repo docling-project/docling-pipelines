@@ -15,6 +15,7 @@ Features:
 - Separate schema for isolation from job stats
 """
 
+import math
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, cast
@@ -94,13 +95,15 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         if (
             isinstance(raw_lock_timeout, bool)
             or not isinstance(raw_lock_timeout, (int, float))
+            or not math.isfinite(raw_lock_timeout)
             or raw_lock_timeout <= 0
         ):
             raise JobStatsStoreInitializationException(
-                message=f"Invalid lock_timeout: {raw_lock_timeout!r}. Must be a positive number of seconds.",
+                message=f"Invalid lock_timeout: {raw_lock_timeout!r}. Must be a finite positive number of seconds.",
                 store_type="postgres",
             )
-        self._lock_timeout_ms: int = int(raw_lock_timeout * 1000)
+        # Round up and clamp to >= 1 ms: PostgreSQL treats lock_timeout = 0 as "wait forever".
+        self._lock_timeout_ms: int = max(1, math.ceil(raw_lock_timeout * 1000))
 
         # Extract flat postgres config: nested "postgres" key takes precedence
         postgres_config = self.config.get("postgres")

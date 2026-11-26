@@ -14,6 +14,7 @@ Features:
 - Atomic writes with temporary files
 """
 
+import math
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -89,10 +90,11 @@ class FilesystemIncrementalMetadataStore(IncrementalMetadataStore):
         if (
             isinstance(raw_lock_timeout, bool)
             or not isinstance(raw_lock_timeout, (int, float))
+            or not math.isfinite(raw_lock_timeout)
             or raw_lock_timeout <= 0
         ):
             raise JobStatsStoreInitializationException(
-                message=f"Invalid lock_timeout: {raw_lock_timeout!r}. Must be a positive number of seconds.",
+                message=f"Invalid lock_timeout: {raw_lock_timeout!r}. Must be a finite positive number of seconds.",
                 store_type="filesystem",
             )
 
