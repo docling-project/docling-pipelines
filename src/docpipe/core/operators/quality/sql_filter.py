@@ -18,6 +18,7 @@ from docpipe.core.constants.constants import (
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
@@ -436,6 +437,26 @@ class SQLFilterOperator(AbstractOperator):
                 return True
             return list(invalid_columns)
         return False
+
+    @classmethod
+    def propagate_features(
+        cls,
+        *,
+        operator_config: dict[str, Any],
+        result: FeaturePropagationResult,
+        node_id: str,
+        parent_results: list[FeaturePropagationResult],
+    ) -> None:
+        """Drop the features listed in ``features_to_drop`` from downstream propagation.
+
+        Raises:
+            FlowValidationException: If a listed feature is mandatory (``MANDATORY_FEATURES_DROPPED``).
+        """
+        result.drop_features(
+            node_id=node_id,
+            features=operator_config.get(OperatorConstants.Filtering.FILTER_FEATURES_TO_DROP_KEY, []),
+            operator_label="SQLFilter",
+        )
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:

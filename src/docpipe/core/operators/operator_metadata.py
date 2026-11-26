@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Domain layer for operator metadata extraction and management.
 
 This module provides the core functionality for discovering and extracting metadata
@@ -26,6 +29,7 @@ from typing import Any
 from docpipe.core.constants.constants import OrchestratorType
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.models.session_info import get_session_info
+from docpipe.core.operators.abstract_operator import AbstractOperator
 from docpipe.core.orchestration.operator_factory import OperatorFactoryProvider
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -60,6 +64,7 @@ class OperatorMetadata:
         """
         self.session_info = get_session_info()
         self.operator_metadata: dict[str, dict[str, Any]] = {}
+        self._operator_classes: dict[str, type[AbstractOperator]] = {}
         self.orchestrator = orchestrator
 
     @staticmethod
@@ -165,11 +170,27 @@ class OperatorMetadata:
                 logger.debug("Operator '%s' failed to initialize: %s", short_name, e, exc_info=True)
 
         self.operator_metadata.update(refresh_operator_metadata)
+        self._operator_classes = dict(operator_factory.operators)
 
         if failed_operator_list:
             self._log_failed_operators(failed_operator_list=failed_operator_list, operator_factory=operator_factory)
 
         return self.operator_metadata
+
+    def get_operator_class(self, *, short_name: str) -> type[AbstractOperator] | None:
+        """Return the operator class registered under ``short_name``.
+
+        The class comes from the same factory that supplied the cached metadata, so priority and owner
+        resolution and custom-operator settings apply to both identically. The class is returned without
+        being instantiated, which keeps untrusted operators from being imported during validation.
+
+        Args:
+            short_name: Operator short name (e.g., 'extract_operator').
+
+        Returns:
+            The operator class, or None if metadata has not been loaded or the name is unknown.
+        """
+        return self._operator_classes.get(short_name)
 
     def get_features(self, *, short_name: str, purpose: str | None = None) -> dict[str, Any]:
         """Get features from a specific operator, optionally filtered by purpose.

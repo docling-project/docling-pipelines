@@ -139,6 +139,7 @@ from docpipe.core.operators.extract.ports.outbound.text_extraction import TextEx
 from docpipe.core.operators.extract.services.entity_extraction_service import EntityExtractionService
 from docpipe.core.operators.functional.doc_id_hash import DocIdHashOperator
 from docpipe.core.operators.operator_utils import OperatorUtils, format_failed_docs_summary
+from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
 from docpipe.utils.data.transform import TransformUtils
 from docpipe.utils.infrastructure.logging import get_logger
@@ -1606,6 +1607,46 @@ class ExtractOperator(AbstractOperator):  # type: ignore[misc]
             )
         )
         return result
+
+    @classmethod
+    def propagate_features(
+        cls,
+        *,
+        operator_config: dict[str, Any],
+        result: FeaturePropagationResult,
+        node_id: str,
+        parent_results: list[FeaturePropagationResult],
+    ) -> None:
+        """Add or remove the entity features based on ``entity_extraction.provider``."""
+        entity_mode = (operator_config.get(OperatorConstants.Config.ENTITY_EXTRACTION) or {}).get(
+            OperatorConstants.Config.PROVIDER,
+            OperatorConstants.ExtractionModes.ENTITY_MODE_NONE,
+        )
+        if entity_mode == OperatorConstants.ExtractionModes.ENTITY_MODE_NONE:
+            result.feature_metadata.pop("entities", None)
+            result.feature_metadata.pop(OperatorConstants.Columns.DOCUMENT_TYPE, None)
+            return
+
+        if "entities" not in result.feature_metadata:
+            result.add_feature(
+                feature_name="entities",
+                node_id=node_id,
+                description="Extracted entities from document",
+                tags=["entity"],
+                available_for_filter=False,
+                available_for_vector_db=False,
+                type="list",
+            )
+        if OperatorConstants.Columns.DOCUMENT_TYPE not in result.feature_metadata:
+            result.add_feature(
+                feature_name=OperatorConstants.Columns.DOCUMENT_TYPE,
+                node_id=node_id,
+                description="Detected document type",
+                tags=["entity"],
+                available_for_filter=True,
+                available_for_vector_db=False,
+                type=OperatorConstants.Types.TYPE_STRING,
+            )
 
     @staticmethod
     def get_metadata() -> dict[str, Any]:

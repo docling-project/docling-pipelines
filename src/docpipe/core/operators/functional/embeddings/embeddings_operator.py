@@ -30,6 +30,7 @@ from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import AbstractOperator, OperatorCategory
 from docpipe.core.operators.functional.doc_id_hash import DocIdHashOperator
 from docpipe.core.operators.operator_utils import OperatorUtils
+from docpipe.core.orchestration.feature_propagation.models import FeaturePropagationResult
 from docpipe.core.ports.llm_embedding_port import LLMEmbeddingPort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_codes import ErrorCode
@@ -271,6 +272,33 @@ class EmbeddingsOperator(AbstractOperator):  # type: ignore[misc]
     def get_required_features() -> list[str]:
         """Return list of required input features."""
         return []
+
+    @classmethod
+    def propagate_features(
+        cls,
+        *,
+        operator_config: dict[str, Any],
+        result: FeaturePropagationResult,
+        node_id: str,
+        parent_results: list[FeaturePropagationResult],
+    ) -> None:
+        """Type the embeddings feature as ``vector_binary`` when quantization is binary or ubinary."""
+        quantization = str(operator_config.get(OperatorConstants.Config.QUANTIZATION, "none")).lower()
+        embeddings_feature = result.feature_metadata.get(OperatorConstants.Columns.EMBEDDINGS_COLUMN_DEFAULT)
+        if embeddings_feature is not None:
+            if quantization in ("binary", "ubinary"):
+                embeddings_feature.type = OperatorConstants.Types.TYPE_VECTOR_BINARY
+                embeddings_feature.description = "Binary vector embeddings for similarity search"
+            else:
+                embeddings_feature.description = "Dense vector embeddings for similarity search"
+
+    @classmethod
+    def get_global_params(cls, *, operator_config: dict[str, Any]) -> dict[str, Any]:
+        """Publish the node's ``model_id`` as the flow's ``embeddings_model_id``."""
+        model_id = operator_config.get(OperatorConstants.Config.MODEL_ID)
+        if model_id:
+            return {OperatorConstants.Config.EMBEDDINGS_MODEL_ID: model_id}
+        return {}
 
     def _validate_provider(self, *, errors: list[str]) -> None:
         """Validate provider type and value against supported providers."""
