@@ -21,7 +21,7 @@
  *   is carried on the features flowing *into* the node (input_features).
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { getRequiredParamValidator } from '@/utils/requiredParamValidation';
 import { RequiredParamTooltip, VaultInput } from '@/components/common';
@@ -47,10 +47,24 @@ import {
 } from './constants';
 import { messages } from './VectorDB.messages';
 import { clearProviderConfigResource, mergeProviderConfig } from './vectordb-save';
+import {
+  WEAVIATE_FIELD_IDS,
+  buildEnrichmentConfig,
+  changedKeys,
+  firstInvalidField,
+  isAuthenticationField,
+  validateWeaviateConfig,
+  visibleErrors,
+} from './vectordb-weaviate';
+import { WeaviateAuthFields } from './WeaviateAuthFields';
+import { WeaviateConnectionFields } from './WeaviateConnectionFields';
 import { VectorDBSummaryTable } from './VectorDBSummaryTable';
 import { VectorDBFeatureMappingTearsheet } from './VectorDBFeatureMappingTearsheet';
 import common from '../../CommonPropertiesPanel.module.scss';
 import styles from './VectorDB.module.scss';
+
+/** Elements that can take keyboard focus inside a field wrapper. */
+const FOCUSABLE_SELECTOR = 'input, button, select, textarea';
 
 interface VectorDBPanelBodyProps {
   controller: any;
@@ -97,6 +111,13 @@ export function VectorDBPanelBody({
   // dropdown changes. Keeps the selector showing the chosen method even while the
   // relevant fields are still empty (before the user types a value).
   const [opensearchAuthMethod, setOpensearchAuthMethod] = useState<'none' | 'basic' | 'jwt' | 'aws'>('none');
+  // Weaviate field errors are shown once the field is edited or an open attempt is blocked.
+  const [weaviateTouched, setWeaviateTouched] = useState<ReadonlySet<string>>(new Set());
+  const [weaviateOpenAttempted, setWeaviateOpenAttempted] = useState(false);
+  // A new object per blocked attempt re-triggers focus even when the same field stays first.
+  const [weaviateFocusRequest, setWeaviateFocusRequest] = useState<{ id: string } | null>(null);
+  const [connectionOpen, setConnectionOpen] = useState(true);
+  const [authenticationOpen, setAuthenticationOpen] = useState(true);
 
   // ── Operator metadata ──
   const appData = controller?.getAppData?.() ?? {};
@@ -237,27 +258,17 @@ export function VectorDBPanelBody({
   const milvusUri = (parsedSavedConfig.uri as string | undefined) ?? '';
 
   // Keys managed by the structured UI fields (connection, auth, settings accordions)
-  // and by the feature mapping tearsheet (resource name, similarity, engine, algorithm, index type).
-  // All of these are excluded from the advanced JSON textarea so the user never sees duplicates.
-  // resourceSpecificKeys (index_name/collection_name, space_type/metric_type, engine)
-  // are included — they are managed by the tearsheet.
-  // algorithm / index_type are intentionally NOT included here: they are no longer
-  // controlled by a dedicated UI input, so they should surface in the advanced textarea
-  // if the user set them previously, and remain editable via JSON.
-  const tearsheetManagedKeys = cfg.resourceSpecificKeys.filter(
-    (k) => k !== 'algorithm' && k !== 'index_type'
+  // and by the feature mapping tearsheet (resource name, similarity, engine).
+  // These are excluded from the advanced JSON textarea. The provider's advancedOnlyKeys have
+  // no dedicated control and stay editable there.
+  const managedKeys = useMemo(
+    () =>
+      new Set([
+        ...cfg.connectionKeys,
+        ...cfg.resourceSpecificKeys.filter((k) => !cfg.advancedOnlyKeys.includes(k)),
+      ]),
+    [cfg]
   );
-  const OPENSEARCH_MANAGED_KEYS = new Set([
-    'host', 'port', 'use_ssl', 'verify_certs',
-    'username', 'password', 'jwt_token', 'aws_auth', 'aws_region',
-    ...tearsheetManagedKeys,
-  ]);
-  const MILVUS_MANAGED_KEYS = new Set([
-    'host', 'port', 'database', 'secure',
-    'auth_type', 'username', 'password', 'token', 'uri',
-    ...tearsheetManagedKeys,
-  ]);
-  const managedKeys = provider === VECTORDB_PROVIDERS.OPENSEARCH ? OPENSEARCH_MANAGED_KEYS : MILVUS_MANAGED_KEYS;
 
   // Advanced config: only the keys NOT covered by a structured input field.
   const advancedConfig = useMemo(() => {
@@ -296,6 +307,9 @@ export function VectorDBPanelBody({
       }
       return { ...defaults, ...parsedSavedConfig };
     }
+    if (provider === VECTORDB_PROVIDERS.WEAVIATE) {
+      return buildEnrichmentConfig(parsedSavedConfig);
+    }
     return parsedSavedConfig;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, parsedSavedConfig]);
@@ -317,6 +331,31 @@ export function VectorDBPanelBody({
   const showOpenSearchBinaryWarning =
     provider === VECTORDB_PROVIDERS.OPENSEARCH &&
     hasUpstreamBinaryVector;
+
+  // ── Weaviate validation ───────────────────────────────────────────────────
+  const weaviateErrors = useMemo(
+    () => (provider === VECTORDB_PROVIDERS.WEAVIATE ? validateWeaviateConfig(parsedSavedConfig) : {}),
+    [provider, parsedSavedConfig]
+  );
+  const shownWeaviateErrors = visibleErrors(weaviateErrors, weaviateTouched, weaviateOpenAttempted);
+
+  // Focus moves one frame after render so the error text is attached and a re-opened section is focusable.
+  useEffect(() => {
+    if (!weaviateFocusRequest) { return undefined; }
+    const frame = requestAnimationFrame(() => {
+      const field = document.getElementById(weaviateFocusRequest.id);
+      // Some controls carry the id on a wrapper; focus the control inside it.
+      const target = field?.matches(FOCUSABLE_SELECTOR) ? field : field?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      target?.focus();
+    });
+    return () => { cancelAnimationFrame(frame); };
+  }, [weaviateFocusRequest]);
+
+  // Weaviate controls report a complete next provider_config, so type switches are atomic writes.
+  const handleWeaviateConfigChange = (next: Record<string, unknown>): void => {
+    setWeaviateTouched((previous) => new Set([...previous, ...changedKeys(parsedSavedConfig, next)]));
+    controller?.updatePropertyValue?.({ name: ATTR.PROVIDER_CONFIG }, next);
+  };
 
   // ── Required param validation ─────────────────────────────────────────────
   const validate = getRequiredParamValidator(nodeAttributes);
@@ -366,6 +405,17 @@ export function VectorDBPanelBody({
   // ── Open tearsheet: validate config then open immediately ──
   // The tearsheet itself owns the API call and loading state.
   const handleOpenTearsheet = (): void => {
+    const invalidWeaviateField = firstInvalidField(weaviateErrors);
+    if (invalidWeaviateField) {
+      setWeaviateOpenAttempted(true);
+      if (isAuthenticationField(invalidWeaviateField)) {
+        setAuthenticationOpen(true);
+      } else {
+        setConnectionOpen(true);
+      }
+      setWeaviateFocusRequest({ id: WEAVIATE_FIELD_IDS[invalidWeaviateField] });
+      return;
+    }
     if (advancedConfigDraft !== null || (advancedConfig !== '' && !isAdvancedConfigValid)) {
       setProviderConfigError(intl.formatMessage(messages.advancedConfigInvalidError));
       return;
@@ -391,9 +441,9 @@ export function VectorDBPanelBody({
     const mergedConfig = mergeProviderConfig(providerConfig, configPatch);
     controller?.updatePropertyValue?.({ name: ATTR.PROVIDER_CONFIG }, mergedConfig);
     controller?.updatePropertyValue?.({ name: ATTR.FEATURE_MAPPINGS }, data.featureMappings);
-    // Persist add_sparse_vector as a top-level node parameter (Milvus-only).
-    // For other providers it is saved as false so a provider switch produces
-    // a clean state — the backend treats absent/false identically.
+    // Persist add_sparse_vector as a top-level node parameter (Milvus sparse vectors,
+    // Weaviate BM25). Providers without sparse support save false so a provider switch
+    // produces a clean state — the backend treats absent/false identically.
     controller?.updatePropertyValue?.({ name: ATTR.ADD_SPARSE_VECTOR }, data.addSparseVector);
   };
 
@@ -456,6 +506,8 @@ export function VectorDBPanelBody({
               setProviderConfigError(null);
               setAdvancedConfigDraft(null);
               setAdvancedConfigDirty(false);
+              setWeaviateTouched(new Set());
+              setWeaviateOpenAttempted(false);
             }
           }}
           invalid={providerValidation.isInvalid}
@@ -467,7 +519,11 @@ export function VectorDBPanelBody({
       <div className={common.formField}>
         <Accordion className={styles.providerAccordion}>
           {/* Connection Settings Accordion Item */}
-          <AccordionItem title={intl.formatMessage(messages.connectionTitle)} open>
+          <AccordionItem
+            title={intl.formatMessage(messages.connectionTitle)}
+            open={connectionOpen}
+            onHeadingClick={({ isOpen }) => { setConnectionOpen(isOpen); }}
+          >
             {provider === VECTORDB_PROVIDERS.OPENSEARCH && (
               <div className={common.accordionContent}>
                 <div className={common.formField}>
@@ -578,10 +634,22 @@ export function VectorDBPanelBody({
                 )}
               </div>
             )}
+
+            {provider === VECTORDB_PROVIDERS.WEAVIATE && (
+              <WeaviateConnectionFields
+                config={parsedSavedConfig}
+                errors={shownWeaviateErrors}
+                onChange={handleWeaviateConfigChange}
+              />
+            )}
           </AccordionItem>
 
           {/* Authentication Accordion Item */}
-          <AccordionItem title={intl.formatMessage(messages.authenticationTitle)} open>
+          <AccordionItem
+            title={intl.formatMessage(messages.authenticationTitle)}
+            open={authenticationOpen}
+            onHeadingClick={({ isOpen }) => { setAuthenticationOpen(isOpen); }}
+          >
             {provider === VECTORDB_PROVIDERS.OPENSEARCH && (
               <div className={common.accordionContent}>
                 {/* Auth method selector — maps to the three mutually exclusive backend auth paths */}
@@ -772,6 +840,14 @@ export function VectorDBPanelBody({
                   </div>
                 )}
               </div>
+            )}
+
+            {provider === VECTORDB_PROVIDERS.WEAVIATE && (
+              <WeaviateAuthFields
+                config={parsedSavedConfig}
+                errors={shownWeaviateErrors}
+                onChange={handleWeaviateConfigChange}
+              />
             )}
           </AccordionItem>
 

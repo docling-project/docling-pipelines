@@ -225,7 +225,7 @@ The `pk` property, the properties mapped from the `id` and `name` features, and 
 - **THEN** a BM25 query for "invoice" against that property returns the object
 
 ### Requirement: Weaviate sparse (BM25) retrieval mode
-When `add_sparse_vector` is true, the provider SHALL configure keyword (BM25) retrieval over the inverted index of the mapped content property, a text property that is searchable and tokenized by word. The content feature MUST be mapped. The collection SHALL record BM25 parameters k1 = 1.2 and b = 0.75, which are Weaviate's own defaults. A `sparse_embeddings` mapping SHALL be accepted but not stored. Runs without dense vector columns SHALL be allowed when the chunks are provided in memory.
+When `add_sparse_vector` is true, the provider SHALL configure keyword (BM25) retrieval over the inverted index of the mapped content property, a text property that is searchable and tokenized by word. The content feature MUST be mapped. The collection SHALL record BM25 parameters k1 = 1.2 and b = 0.75, which are Weaviate's own defaults. Runs without dense vector columns SHALL be allowed when the chunks are provided in memory.
 
 #### Scenario: Top-level flag is authoritative
 - **WHEN** `add_sparse_vector` is set only inside `provider_config` and not at the operator's top level
@@ -249,7 +249,7 @@ When `add_sparse_vector` is true, the provider SHALL configure keyword (BM25) re
 
 #### Scenario: Sparse mapping not stored
 - **WHEN** the mappings include `sparse_embeddings` mapped to `sparse_embeddings`
-- **THEN** the collection has no `sparse_embeddings` property and no written object carries one
+- **THEN** the collection has no `sparse_embeddings` property, no written object carries one, and enrichment does not return `sparse_embeddings` as an available feature or mapping row (Weaviate's mappable-feature projection excludes `vector_sparse`)
 
 ### Requirement: Existing Weaviate collection validation
 When the collection already exists, the provider SHALL verify vector columns, property types, identity-property tokenization, and that the content property is searchable and word-tokenized, whether or not `add_sparse_vector` is set. A run with no dense vector columns SHALL skip only the vector checks. Missing properties SHALL be added only when no check failed.

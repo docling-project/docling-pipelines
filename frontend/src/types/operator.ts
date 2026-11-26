@@ -127,7 +127,16 @@ export interface VectorDBEnrichmentResult {
   available_resources: string[];
   selected_resource_schema: Record<string, unknown>;
   feature_mappings: FeatureMappingRow[];
-  is_docpipe_supported_resource: { supported?: boolean; resource_name?: string };
+  is_docpipe_supported_resource: {
+    supported?: boolean;
+    resource_name?: string;
+    /** Why the resource is unsupported, when the provider reports it. */
+    reason?: string;
+    /** Redacted reason when the deployment was unreachable or rejected the request. */
+    error?: string;
+    /** True when the resource could be supported once sparse (BM25) retrieval is enabled. */
+    sparse_eligible?: boolean;
+  };
   stored_resource_metadata: {
     vector_similarity: string | null;
     dimension_size: number | null;

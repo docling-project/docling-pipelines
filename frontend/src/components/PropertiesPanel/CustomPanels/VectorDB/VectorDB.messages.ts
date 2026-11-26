@@ -1,4 +1,6 @@
 import { defineMessages } from 'react-intl';
+import type { MessageDescriptor } from 'react-intl';
+import type { WeaviateFieldError } from './vectordb-weaviate';
 
 export const messages = defineMessages({
   featureMappingTitle: {
@@ -167,4 +169,101 @@ export const messages = defineMessages({
     defaultMessage:
       'OpenSearch does not support binary vectors. Use a provider that supports binary vectors (such as Milvus), or set Quantization to "None" in the upstream Embeddings operator.',
   },
+  weaviateConnectionType: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateConnectionType',
+    defaultMessage: 'Connection type',
+  },
+  weaviateSelectConnectionType: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateSelectConnectionType',
+    defaultMessage: 'Select connection type',
+  },
+  weaviateConnectionOnPrem: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateConnectionOnPrem',
+    defaultMessage: 'On-premises',
+  },
+  weaviateConnectionCloud: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateConnectionCloud',
+    defaultMessage: 'Weaviate Cloud',
+  },
+  weaviateClusterUrl: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateClusterUrl',
+    defaultMessage: 'Cluster URL',
+  },
+  weaviateHttpPort: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateHttpPort',
+    defaultMessage: 'HTTP port',
+  },
+  weaviateHttpTls: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateHttpTls',
+    defaultMessage: 'HTTP TLS',
+  },
+  weaviateGrpcHost: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateGrpcHost',
+    defaultMessage: 'gRPC host',
+  },
+  weaviateGrpcHostHelper: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateGrpcHostHelper',
+    defaultMessage: 'Leave empty to use the host above',
+  },
+  weaviateGrpcPort: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateGrpcPort',
+    defaultMessage: 'gRPC port',
+  },
+  weaviateGrpcTls: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateGrpcTls',
+    defaultMessage: 'gRPC TLS',
+  },
+  weaviateSelectGrpcTls: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateSelectGrpcTls',
+    defaultMessage: 'Select gRPC TLS setting',
+  },
+  weaviateGrpcTlsInherit: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateGrpcTlsInherit',
+    defaultMessage: 'Same as HTTP',
+  },
+  weaviateTlsAlertTitle: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateTlsAlertTitle',
+    defaultMessage: 'TLS required',
+  },
+  weaviateTlsAlert: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateTlsAlert',
+    defaultMessage:
+      'Both HTTP and gRPC must use TLS when authentication is configured. Credentials must not be sent over an unencrypted connection.',
+  },
+  weaviateAuthApiKey: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateAuthApiKey',
+    defaultMessage: 'API key',
+  },
+  weaviateAuthBearerToken: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateAuthBearerToken',
+    defaultMessage: 'Bearer token',
+  },
+  weaviateAuthClientPassword: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateAuthClientPassword',
+    defaultMessage: 'Username and password',
+  },
+  weaviateErrorRequired: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateErrorRequired',
+    defaultMessage: 'This field is required',
+  },
+  weaviateErrorPortRange: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateErrorPortRange',
+    defaultMessage: 'Enter a port from 1 to 65535',
+  },
+  weaviateErrorVaultIncomplete: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateErrorVaultIncomplete',
+    defaultMessage: 'Enter a Vault provider and path after vault://',
+  },
+  weaviateErrorTlsRequired: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.weaviateErrorTlsRequired',
+    defaultMessage: 'TLS must be on when authentication is configured',
+  },
 });
+
+/** Localized message for each Weaviate field validation code. */
+export const weaviateErrorMessages: Record<WeaviateFieldError, MessageDescriptor> = {
+  required: messages.weaviateErrorRequired,
+  port_range: messages.weaviateErrorPortRange,
+  vault_reference_incomplete: messages.weaviateErrorVaultIncomplete,
+  tls_required: messages.weaviateErrorTlsRequired,
+};

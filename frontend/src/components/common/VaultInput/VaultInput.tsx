@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { DefinitionTooltip, PasswordInput, Tag, TextArea, TextInput, Toggle } from '@carbon/react';
 import { useIntl } from 'react-intl';
-import { isVaultReference } from '@/utils/vault';
+import { VAULT_PREFIX, isVaultReference } from '@/utils/vault';
 import { messages } from './VaultInput.messages';
 import styles from './VaultInput.module.scss';
-
-const VAULT_PREFIX = 'vault://';
 
 /** Strip vault:// prefix for display; return '' if value is exactly 'vault://' */
 const toDisplayValue = (full: string): string => {
@@ -31,6 +29,8 @@ export interface VaultInputProps {
   multiline?: boolean;
   rows?: number;
   labelComponent?: React.ReactNode;
+  /** Mask the directly typed value (default). Set false for a secret-capable field that is not itself secret, e.g. a username. */
+  masked?: boolean;
 }
 
 export function VaultInput({
@@ -48,6 +48,7 @@ export function VaultInput({
   multiline = false,
   rows = 4,
   labelComponent,
+  masked = true,
 }: VaultInputProps): React.JSX.Element {
   const intl = useIntl();
   const [useVault, setUseVault] = useState<boolean>(() => isVaultReference(value));
@@ -121,6 +122,25 @@ export function VaultInput({
           invalid={invalid}
           invalidText={invalidText}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+            onChange(e.target.value);
+          }}
+          helperText={helperText}
+        />
+      );
+    }
+
+    if (!masked) {
+      return (
+        <TextInput
+          id={id}
+          labelText={labelText}
+          hideLabel
+          value={value}
+          placeholder={placeholder}
+          disabled={disabled}
+          invalid={invalid}
+          invalidText={invalidText}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             onChange(e.target.value);
           }}
           helperText={helperText}

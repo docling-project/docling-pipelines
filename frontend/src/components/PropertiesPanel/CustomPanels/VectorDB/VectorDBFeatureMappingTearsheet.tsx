@@ -28,6 +28,7 @@ import {
   Loading,
   TextInput,
   TextInputSkeleton,
+  Tooltip,
 } from '@carbon/react';
 import { ErrorEmptyState } from '@carbon/ibm-products';
 import { Tearsheet } from '@carbon/ibm-products';
@@ -51,7 +52,12 @@ import styles from './VectorDB.module.scss';
 
 const { CREATE_NEW } = VECTORDB_LABELS;
 
-/** Validation for new resource names: must start with letter/underscore, then word chars only. */
+/** Delay before the BM25 tooltip opens on pointer hover. */
+const SPARSE_TOOLTIP_ENTER_DELAY_MS = 800;
+/** Id of the visually hidden description referenced by the sparse checkbox. */
+const SPARSE_DESCRIPTION_ID = 'add-sparse-vector-description';
+
+/** Default rule for new resource names: a letter or underscore, then word characters. */
 const NEW_RESOURCE_NAME_RE = /^[A-Za-z_]\w*$/;
 
 interface VectorDBFeatureMappingTearsheetProps {
@@ -77,7 +83,7 @@ interface VectorDBFeatureMappingTearsheetProps {
   nodeId: string;
   /** Already-parsed provider_config object. */
   parsedProviderConfig: Record<string, unknown>;
-  /** Whether sparse vector (BM25) support is enabled. Milvus-only. */
+  /** Saved sparse retrieval setting (Milvus sparse vectors / Weaviate BM25). */
   addSparseVector: boolean;
   /** Valid similarity values from operator metadata (space_type / metric_type). */
   vectorSimilarityOptions: string[];
@@ -163,11 +169,15 @@ export function VectorDBFeatureMappingTearsheet({
   const {
     resourceLabel,
     resourceNameKey,
-    similarityLabel,
     hasEngine,
   } = providerCfg;
+  const similarityLabel = intl.formatMessage(providerCfg.similarityLabel);
 
   const similarityMetricLabels: Record<string, string> = {
+    dot: intl.formatMessage(messages.metricDot),
+    'l2-squared': intl.formatMessage(messages.metricL2Squared),
+    manhattan: intl.formatMessage(messages.metricManhattan),
+    hamming: intl.formatMessage(messages.metricHamming),
     l2: intl.formatMessage(messages.metricL2),
     L2: intl.formatMessage(messages.metricL2Milvus),
     cosine: intl.formatMessage(messages.metricCosine),
@@ -186,15 +196,21 @@ export function VectorDBFeatureMappingTearsheet({
     jvector: intl.formatMessage(messages.engineJvector),
   };
 
+  const { resourceNamePattern, resourceNameExample } = providerCfg;
+
   /** Validate a proposed new resource name. Returns an error string or null. */
   const validateNewName = useCallback((name: string, existingNames: string[]): string | null => {
     const trimmed = name.trim();
     if (!trimmed) { return intl.formatMessage(messages.nameRequired); }
-    if (!/^[A-Za-z_]/.test(trimmed)) { return intl.formatMessage(messages.nameMustStartWithLetter); }
-    if (!NEW_RESOURCE_NAME_RE.test(trimmed)) { return intl.formatMessage(messages.nameOnlyLettersNumbersUnderscores); }
+    if (resourceNamePattern) {
+      if (!resourceNamePattern.test(trimmed)) { return intl.formatMessage(messages.weaviateCollectionNameInvalid); }
+    } else {
+      if (!/^[A-Za-z_]/.test(trimmed)) { return intl.formatMessage(messages.nameMustStartWithLetter); }
+      if (!NEW_RESOURCE_NAME_RE.test(trimmed)) { return intl.formatMessage(messages.nameOnlyLettersNumbersUnderscores); }
+    }
     if (existingNames.includes(trimmed)) { return intl.formatMessage(messages.nameAlreadyExists, { name: trimmed }); }
     return null;
-  }, [intl]);
+  }, [intl, resourceNamePattern]);
 
   // ── Enrichment state — owned here, not in the parent panel ──
   const [loading, setLoading] = useState(false);
@@ -203,6 +219,8 @@ export function VectorDBFeatureMappingTearsheet({
   const [loadingMappings, setLoadingMappings] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [enrichmentResult, setEnrichmentResult] = useState<VectorDBEnrichmentResult | null>(null);
+  // Provider error from the last refresh; the previously enriched state is kept.
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   // ── Form state ──
   const [selectedResource, setSelectedResource] = useState<string>(CREATE_NEW);
@@ -220,6 +238,19 @@ export function VectorDBFeatureMappingTearsheet({
   // so stale responses from superseded requests are discarded.
   const runRef = React.useRef(0);
 
+  // Collection and sparse flag the displayed mappings were enriched for; restored together on a failed refresh.
+  const enrichedRef = React.useRef<{ resource: string; sparse: boolean }>({
+    resource: CREATE_NEW,
+    sparse: addSparseVector,
+  });
+  // Rollback and provider error handling apply to Weaviate only.
+  const isWeaviate = provider === VECTORDB_PROVIDERS.WEAVIATE;
+  const restoreEnriched = (): void => {
+    if (!isWeaviate) { return; }
+    setSelectedResource(enrichedRef.current.resource);
+    setSparseVectorEnabled(enrichedRef.current.sparse);
+  };
+
   // Fire the enrichment API whenever the tearsheet opens.
   // The tearsheet opens immediately; the loading skeleton renders inside it.
   useEffect(() => {
@@ -231,6 +262,7 @@ export function VectorDBFeatureMappingTearsheet({
     const run = async () => {
       setLoading(true);
       setLoadError(null);
+      setRefreshError(null);
       setEnrichmentResult(null);
 
       try {
@@ -238,10 +270,12 @@ export function VectorDBFeatureMappingTearsheet({
         // (vector_similarity, dimension_size) for the already-saved resource.
         // Pass undefined when creating new (empty savedResourceName) so the backend
         // returns defaults instead.
+        // Always enrich with the saved sparse flag, not an unsaved toggle from an earlier open.
+        setSparseVectorEnabled(addSparseVector);
         const result = await enrichFlowFeaturesForNode(
           pipelineFlow, nodeId, provider, parsedProviderConfig, resourceNameKey,
           savedResourceName || undefined,
-          sparseVectorEnabled
+          addSparseVector
         );
         if (runRef.current !== token) { return; }
         setEnrichmentResult(result);
@@ -251,7 +285,8 @@ export function VectorDBFeatureMappingTearsheet({
         const storedMeta = result?.stored_resource_metadata;
         const isCreateNew = !availableResources.includes(savedResourceName);
 
-        setSelectedResource(isCreateNew ? CREATE_NEW : savedResourceName);
+        enrichedRef.current = { resource: isCreateNew ? CREATE_NEW : savedResourceName, sparse: addSparseVector };
+        setSelectedResource(enrichedRef.current.resource);
         setNewResourceName(isCreateNew ? savedResourceName : '');
         setNewNameError(validateNewName(isCreateNew ? savedResourceName : '', availableResources));
         setResourceNameEdited(true);
@@ -265,7 +300,8 @@ export function VectorDBFeatureMappingTearsheet({
         if (runRef.current !== token) { return; }
         setLoadError(intl.formatMessage(messages.loadResourcesError));
         // Still show the tearsheet with last-saved mappings so the user is not blocked.
-        setSelectedResource(savedResourceName ? savedResourceName : CREATE_NEW);
+        enrichedRef.current = { resource: savedResourceName ? savedResourceName : CREATE_NEW, sparse: addSparseVector };
+        setSelectedResource(enrichedRef.current.resource);
         setNewResourceName('');
         setTableRows(buildTableRows(null, currentFeatureMappings));
       } finally {
@@ -329,8 +365,11 @@ export function VectorDBFeatureMappingTearsheet({
 
   const handleResourceChange = ({ selectedItem }: { selectedItem?: string | null }): void => {
     const selectedResourceName = selectedItem ?? CREATE_NEW;
+    // Re-selecting the current resource (a programmatic restore) must not refetch.
+    if (isWeaviate && selectedResourceName === selectedResource) { return; }
     setSelectedResource(selectedResourceName);
     setLoadError(null);
+    setRefreshError(null);
 
     // Strip all resource-specific keys from provider_config before sending —
     // these are saved state and must not bleed into the API call for a different
@@ -354,6 +393,14 @@ export function VectorDBFeatureMappingTearsheet({
           sparseVectorEnabled
         );
         if (runRef.current !== token) { return; }
+        if (isWeaviate && result?.is_docpipe_supported_resource.error) {
+          // Keep the last enriched state so a failed refresh cannot be saved over it.
+          restoreEnriched();
+          setRefreshError(result.is_docpipe_supported_resource.error);
+          return;
+        }
+        enrichedRef.current = { resource: selectedResourceName, sparse: sparseVectorEnabled };
+        setRefreshError(null);
         setEnrichmentResult(result);
         // For existing resources use the stored similarity; for new ones reset to the saved default.
         const freshMeta = result?.stored_resource_metadata;
@@ -368,6 +415,7 @@ export function VectorDBFeatureMappingTearsheet({
         setTableRows(buildTableRows(result, []));
       } catch {
         if (runRef.current !== token) { return; }
+        restoreEnriched();
         setLoadError(
           resourceArg
             ? intl.formatMessage(messages.loadResourceDetailsError)
@@ -412,8 +460,10 @@ export function VectorDBFeatureMappingTearsheet({
   const handleSparseVectorChange = (_evt: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }): void => {
     setSparseVectorEnabled(checked);
     setLoadError(null);
+    setRefreshError(null);
 
     const baseConfig = omitProviderConfigKeys(parsedProviderConfig, providerCfg.resourceSpecificKeys);
+    const requestedResource = selectedResource;
     const resourceArg = isCreateNew ? undefined : selectedResource;
 
     runRef.current += 1;
@@ -426,10 +476,30 @@ export function VectorDBFeatureMappingTearsheet({
           pipelineFlow, nodeId, provider, baseConfig, resourceNameKey, resourceArg, checked
         );
         if (runRef.current !== token) { return; }
+        if (isWeaviate && result?.is_docpipe_supported_resource.error) {
+          restoreEnriched();
+          setRefreshError(result.is_docpipe_supported_resource.error);
+          return;
+        }
+        const previousResource = enrichedRef.current.resource;
+        enrichedRef.current = { resource: requestedResource, sparse: checked };
+        setRefreshError(null);
         setEnrichmentResult(result);
+        if (isWeaviate) {
+          // Keep the saved metric consistent with the displayed collection; a Create new
+          // choice is kept unless the rows last came from another collection.
+          if (resourceArg) {
+            setSimilarityMetric(result?.stored_resource_metadata?.vector_similarity ?? savedVectorSimilarity);
+            setEngine(savedEngine);
+          } else if (previousResource !== CREATE_NEW) {
+            setSimilarityMetric(savedVectorSimilarity);
+            setEngine(savedEngine);
+          }
+        }
         setTableRows(buildTableRows(result, []));
       } catch {
         if (runRef.current !== token) { return; }
+        restoreEnriched();
         setLoadError(intl.formatMessage(messages.reloadMappingsError));
       } finally {
         if (runRef.current === token) { setLoadingMappings(false); }
@@ -439,9 +509,25 @@ export function VectorDBFeatureMappingTearsheet({
     void fetchOnSparseToggle();
   };
 
+  const supportedResource = enrichmentResult?.is_docpipe_supported_resource;
+  // A provider-reported failure is not an unsupported resource.
+  const enrichmentError = supportedResource?.error;
   const isUnsupported =
     !isCreateNew &&
-    enrichmentResult?.is_docpipe_supported_resource?.supported === false;
+    supportedResource?.supported === false &&
+    !enrichmentError;
+
+  // A resource unsupported only while sparse retrieval is off keeps the control that enables it.
+  const showSparseOption =
+    providerCfg.supportsSparse && (!isUnsupported || supportedResource?.sparse_eligible === true);
+  const sparseOptionLabel =
+    providerCfg.sparseLabel === 'bm25'
+      ? intl.formatMessage(messages.bm25Label)
+      : intl.formatMessage(messages.sparseVectorLabel);
+  const providerError = refreshError ?? enrichmentError;
+  const displayedError =
+    loadError ??
+    (providerError ? intl.formatMessage(messages.enrichmentFailed, { reason: providerError }) : null);
 
   // newNameError only blocks save when we are in "Create new" mode — it holds
   // stale validation state when the user switches to an existing resource.
@@ -450,7 +536,8 @@ export function VectorDBFeatureMappingTearsheet({
     !loadingMappings &&
     Boolean(effectiveResourceName) &&
     (!isCreateNew || !newNameError) &&
-    !isUnsupported;
+    !isUnsupported &&
+    !enrichmentError;
 
   const handleSave = (): void => {
     setSubmitted(true);
@@ -478,9 +565,14 @@ export function VectorDBFeatureMappingTearsheet({
   const alreadyMapped = useMemo(() => tableRows.map((r) => r.feature), [tableRows]);
 
   const unsupportedSubtitle =
-    resourceLabel === 'collection'
-      ? intl.formatMessage(messages.unsupportedCollectionSubtitle, { resourceLabel })
-      : intl.formatMessage(messages.unsupportedIndexSubtitle, { resourceLabel });
+    providerCfg.showsUnsupportedReason && supportedResource?.reason
+      ? intl.formatMessage(messages.unsupportedReasonSubtitle, {
+          resourceLabel,
+          reason: supportedResource.reason,
+        })
+      : resourceLabel === 'collection'
+        ? intl.formatMessage(messages.unsupportedCollectionSubtitle, { resourceLabel })
+        : intl.formatMessage(messages.unsupportedIndexSubtitle, { resourceLabel });
 
   return (
     <Tearsheet
@@ -514,11 +606,11 @@ export function VectorDBFeatureMappingTearsheet({
         {!loading && (
           <>
             {/* API error — shown when enrichment fails; table still usable with saved data */}
-            {loadError && (
+            {displayedError && (
               <InlineNotification
                 kind="error"
                 title={intl.formatMessage(messages.errorTitle)}
-                subtitle={loadError}
+                subtitle={displayedError}
                 lowContrast
                 hideCloseButton
               />
@@ -558,7 +650,11 @@ export function VectorDBFeatureMappingTearsheet({
                     <TextInput
                       id="new-resource-name"
                       labelText={intl.formatMessage(messages.enterNewResourceName, { resourceLabel })}
-                      placeholder={intl.formatMessage(messages.newResourceNamePlaceholder, { resourceLabel })}
+                      placeholder={
+                        resourceNameExample
+                          ? intl.formatMessage(messages.newResourceNameExamplePlaceholder, { example: resourceNameExample })
+                          : intl.formatMessage(messages.newResourceNamePlaceholder, { resourceLabel })
+                      }
                       value={newResourceName}
                       invalid={(resourceNameEdited || submitted) && Boolean(newNameError)}
                       invalidText={newNameError ?? undefined}
@@ -608,6 +704,7 @@ export function VectorDBFeatureMappingTearsheet({
                         label={intl.formatMessage(messages.selectSimilarity, { similarityLabel: similarityLabel.toLowerCase() })}
                         items={effectiveSimilarityOptions.map((v) => similarityMetricLabels[v] ?? v)}
                         selectedItem={similarityMetricLabels[similarityMetric] ?? similarityMetric}
+                        disabled={isWeaviate && loadingMappings}
                         onChange={({ selectedItem }: { selectedItem?: string | null }) => {
                           if (selectedItem) {
                             const value = effectiveSimilarityOptions.find(
@@ -640,15 +737,39 @@ export function VectorDBFeatureMappingTearsheet({
               )}
             </div>
 
-            {/* Milvus-only: sparse vector (BM25) toggle — hidden when unsupported (nothing to configure) */}
-            {provider === VECTORDB_PROVIDERS.MILVUS && !isUnsupported && (
+            {/* Sparse retrieval toggle */}
+            {showSparseOption && (
               <div className={styles.sparseVectorCheckbox}>
-                <Checkbox
-                  id="add-sparse-vector"
-                  labelText={intl.formatMessage(messages.sparseVectorLabel)}
-                  checked={sparseVectorEnabled}
-                  onChange={handleSparseVectorChange}
-                />
+                {providerCfg.sparseTooltip ? (
+                  // The hidden description gives assistive technology the tooltip text regardless of the hover delay.
+                  <Tooltip
+                    description={intl.formatMessage(providerCfg.sparseTooltip)}
+                    enterDelayMs={SPARSE_TOOLTIP_ENTER_DELAY_MS}
+                    closeOnActivation
+                    align="bottom-start"
+                    autoAlign
+                  >
+                    <div className={styles.sparseVectorCheckboxHover}>
+                      <Checkbox
+                        id="add-sparse-vector"
+                        labelText={sparseOptionLabel}
+                        checked={sparseVectorEnabled}
+                        onChange={handleSparseVectorChange}
+                        aria-describedby={SPARSE_DESCRIPTION_ID}
+                      />
+                      <span id={SPARSE_DESCRIPTION_ID} className="cds--visually-hidden">
+                        {intl.formatMessage(providerCfg.sparseTooltip)}
+                      </span>
+                    </div>
+                  </Tooltip>
+                ) : (
+                  <Checkbox
+                    id="add-sparse-vector"
+                    labelText={sparseOptionLabel}
+                    checked={sparseVectorEnabled}
+                    onChange={handleSparseVectorChange}
+                  />
+                )}
               </div>
             )}
 

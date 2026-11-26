@@ -47,7 +47,7 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 
 #### Scenario: Authentication method changes credential fields
 - **WHEN** the user selects the Weaviate authentication method "API key", "Bearer token", or "Username and password"
-- **THEN** only the credential inputs of that method are displayed, each masked by default and offering the same Vault toggle as the OpenSearch credential inputs
+- **THEN** only the credential inputs of that method are displayed, each offering the same Vault toggle as the OpenSearch credential inputs; the API key, bearer token, and password are masked by default, while the username is shown as visible text because it identifies an account and is not itself a secret
 - **AND WHEN** the user switches to another method
 - **THEN** the previous method's credentials are removed from the saved `provider_config` in the same update that writes the new `auth_type`
 
@@ -58,6 +58,10 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 #### Scenario: Empty Vault reference blocked
 - **WHEN** a credential is `vault://` with no provider and path after the prefix, for example after the user turns the Vault toggle on and enters nothing
 - **THEN** an inline error is displayed on that field, the feature-mapping tearsheet is not opened, enrichment is not requested, and keyboard focus moves to that field
+
+#### Scenario: Malformed Vault reference blocked
+- **WHEN** a credential is a `vault://` reference that the backend would reject: an empty or `.`/`..` path segment, an empty `#` key or more than one `#`, or any whitespace or control character (including a trailing space)
+- **THEN** the same inline error, blocked open, and focus behavior as for an empty Vault reference apply
 
 #### Scenario: Required connection and credential fields
 - **WHEN** a Weaviate field required for the current connection type or authentication method is empty or invalid, such as a missing host, a port outside 1-65535, a missing cluster URL, or a missing credential
@@ -102,9 +106,20 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 
 #### Scenario: BM25 option driven by provider capability
 - **WHEN** the tearsheet is opened for a provider that supports sparse retrieval and the selected resource is supported
-- **THEN** a BM25 checkbox is displayed, labeled as BM25 keyword retrieval rather than stored sparse vectors for Weaviate
+- **THEN** a BM25 checkbox is displayed, labeled "Enable sparse (BM25) keyword retrieval" for Weaviate, which names both terms Weaviate uses for this feature and does not describe stored sparse vectors
 - **AND WHEN** the provider does not support sparse retrieval
 - **THEN** the checkbox is not displayed
+
+#### Scenario: BM25 option explained by a delayed tooltip
+- **WHEN** the BM25 checkbox is displayed for Weaviate
+- **THEN** no separate info icon or button is rendered, and a tooltip is attached to the checkbox and its text
+- **AND WHEN** the pointer moves onto the option text
+- **THEN** the tooltip is not shown immediately; it appears only after the pointer has rested there for a short delay, and moving off before the delay elapses shows nothing, so crossing the option to click the checkbox does not flash the tip
+- **AND** the tooltip explains that Weaviate calls this keyword search (also known as sparse vector search), that no separate sparse vector is stored, that the text of the column mapped to content is indexed and scored with BM25, that it can be combined with dense embeddings for hybrid search, and that the choice is saved as `add_sparse_vector`
+- **AND WHEN** the checkbox receives keyboard focus
+- **THEN** the tooltip is shown at once, Escape closes it, and the same text is the checkbox's accessible description, so assistive technology announces it without waiting for the delay
+- **AND WHEN** the provider defines no tooltip for the option, as for Milvus
+- **THEN** no tooltip is attached and the existing Milvus label is unchanged
 
 #### Scenario: BM25 option for an eligible unsupported collection
 - **WHEN** a Weaviate node's selected collection is reported unsupported with `sparse_eligible` true and BM25 is unchecked
@@ -126,6 +141,13 @@ The VectorDB custom panel SHALL support database backend selection (OpenSearch /
 #### Scenario: Enrichment failure shown
 - **WHEN** the enrichment response carries `is_docpipe_supported_resource.error`, or the enrichment request throws
 - **THEN** an error message with that reason is displayed, distinct from the empty-collections state, and the node is not shown as an unsupported collection
+
+#### Scenario: Failed refresh scoped to Weaviate
+- **WHEN** a Weaviate collection change or BM25 toggle fails, either because the response carries `is_docpipe_supported_resource.error` or because the request throws
+- **THEN** the tearsheet restores the last collection and BM25 flag whose enrichment completed, keeps their mappings, and shows the error
+- **AND** while a Weaviate collection change or BM25 toggle is pending, the distance metric control is disabled, so a failed refresh cannot save a metric chosen for a collection that was not applied
+- **AND** when a BM25 toggle supersedes a collection change, the saved distance metric is the one reported for the displayed collection, while a BM25 toggle on a new collection keeps the metric the user chose
+- **AND** for OpenSearch and Milvus a failed refresh keeps the user's selection exactly as before this change, and a sparse toggle leaves the distance metric untouched
 
 #### Scenario: Keyboard operation and focus
 - **WHEN** the user operates the panel and the tearsheet with the keyboard only

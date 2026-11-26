@@ -211,6 +211,11 @@
   margin-bottom: $spacing-02;
 }
 
+// Shrinks the BM25 tooltip hover target to the checkbox and its text.
+.sparseVectorCheckboxHover {
+  display: inline-block;
+}
+
 // Carbon accordion reserves 25% right padding at ≥640px for text readability.
 // Override for form accordions so inputs use the full available width.
 .providerAccordion {
