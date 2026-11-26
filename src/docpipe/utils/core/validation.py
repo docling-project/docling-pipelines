@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from docpipe.core.constants.constants import DocpipeConstants
+
 
 def to_bool(value: Any) -> bool:
     """
@@ -473,3 +475,27 @@ def validate_database_path(path: str, base_dir: str | None = None) -> str:
             raise ValueError(msg) from e
 
     return str(resolved_path)
+
+
+def validate_flow_database_path(path: str) -> str:
+    """
+    Validate a database path from a flow configuration and require it to be under the data root.
+
+    Args:
+        path: Database path from the operator configuration
+
+    Returns:
+        Validated absolute path, or ":memory:"
+
+    Raises:
+        ValueError: If the path is invalid or outside the data root
+    """
+    data_root = DocpipeConstants._DUCKDB_ROOT
+    try:
+        return validate_database_path(path, base_dir=str(data_root))
+    except ValueError as exc:
+        msg = (
+            f"{exc}. The data root is set by {DocpipeConstants.DOCPIPE_DATA_PATH}; "
+            f"relative paths resolve against the working directory {Path.cwd()}"
+        )
+        raise ValueError(msg) from exc

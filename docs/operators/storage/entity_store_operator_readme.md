@@ -53,7 +53,7 @@ The operator returns the input table unchanged.
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `data_backend` | string | No | `duckdb` | Database that stores the entities: `duckdb` or `postgres` |
-| `database_path` | string | No | `:memory:` | DuckDB database file, or `:memory:`. Used by the `duckdb` backend |
+| `database_path` | string | No | `:memory:` | DuckDB database file, or `:memory:`. Used by the `duckdb` backend. A file must resolve to a location under the data root set by `DOCPIPE_DATA_PATH` (default `<project root>/data`). A relative path is resolved against the process working directory |
 | `schema` | string | No | `docpipe_entities` | PostgreSQL schema of the entity tables. Used by the `postgres` backend |
 | `table_prefix` | string | No | `entity_` | Prefix of every entity table name. Letters, digits and underscores only |
 | `entities_column` | string | No | `transformed_entities` | Column that holds the curated entities of each document |
@@ -145,6 +145,7 @@ export DOCPIPE_POSTGRES_PASSWORD=...
 | `PostgreSQL connection is not configured` | No password in `DOCPIPE_POSTGRES_PASSWORD` | Set the `DOCPIPE_POSTGRES_*` environment variables |
 | `Failed to connect to PostgreSQL storage` when the flow starts | The server cannot be reached with the configured settings | Check host, port, database and user |
 | `PostgreSQL connection settings are not accepted in the operator configuration` | The operator config has a `postgres` block | Remove it and use the environment variables |
+| `Database path must be within <data root>` or `Path traversal patterns (..) are not allowed` | `database_path` resolves outside the data root, or contains `..` | Use a path under the data root, or set `DOCPIPE_DATA_PATH` to the directory that should hold the databases |
 | Document failed with `Entity table name ... is reserved` | The prefixed table name starts with `docpipe_` or `pg_`, or is `document_sets` | Use another `table_prefix` |
 | Document failed with `Invalid entity table name` | The curated JSON key has characters other than letters, digits and underscores, or the name is longer than 63 characters | Fix the target table names in the document class schema |
 | Document failed with `Column ... has type ..., which cannot store values of type ...` | A field changed type after the table was created (an integer column taking float values is widened instead) | Keep field types stable, or store the field under a new name |

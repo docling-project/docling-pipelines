@@ -3,6 +3,9 @@
 
 """Unit tests for EntityStoreOperator."""
 
+import os
+import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
@@ -12,6 +15,8 @@ from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.abstract_operator import OperatorCategory
 from docpipe.core.operators.storage.entity_store_operator import EntityStoreOperator
+
+pytestmark = pytest.mark.usefixtures("duckdb_data_root")
 
 
 @pytest.fixture
@@ -688,3 +693,52 @@ class TestEntityValueTypes:
         assert metadata[Metrics.External.PROCESSED_DOCS] == 2
         stored = operator.storage.read_data(table_name="entity_Invoice")
         assert stored.column("amount").to_pylist() == ["5", "5.0"]
+
+
+class TestDatabasePathConfinement:
+    """A flow-supplied database_path must stay under the data root (DOCPIPE_DATA_PATH)."""
+
+    @pytest.mark.parametrize("case", ["absolute_outside", "dot_dot", "symlink_escape", "sibling_prefix"])
+    def test_path_outside_the_data_root_is_rejected(self, escaping_database_paths, case):
+        database_path = escaping_database_paths[case]
+
+        with pytest.raises(ValueError, match="DOCPIPE_DATA_PATH"):
+            EntityStoreOperator({"database_path": database_path})
+
+        assert not os.path.lexists(database_path)
+
+    def test_rejected_path_names_the_data_root_and_creates_no_directories(
+        self, escaping_database_paths, duckdb_data_root
+    ):
+        database_path = Path(escaping_database_paths["absolute_outside"])
+
+        with pytest.raises(ValueError, match=f"must be within {re.escape(str(duckdb_data_root))}"):
+            EntityStoreOperator({"database_path": str(database_path)})
+
+        assert not database_path.parent.exists()
+
+    def test_relative_path_under_the_data_root_resolves_against_the_working_directory(
+        self, duckdb_data_root, monkeypatch
+    ):
+        monkeypatch.chdir(duckdb_data_root)
+
+        operator = EntityStoreOperator({"database_path": "entities/x.duckdb"})
+
+        assert operator.database_path == str(duckdb_data_root / "entities" / "x.duckdb")
+
+    def test_absolute_path_under_the_data_root_is_accepted(self, duckdb_data_root):
+        database_path = str(duckdb_data_root / "entities" / "x.duckdb")
+
+        assert EntityStoreOperator({"database_path": database_path}).database_path == database_path
+
+    def test_in_memory_database_is_accepted(self):
+        assert EntityStoreOperator({"database_path": ":memory:"}).database_path == ":memory:"
+
+    @patch("docpipe.core.operators.storage.entity_store_operator.StorageFactory.create_table_storage")
+    def test_postgres_backend_ignores_database_path(self, mock_factory, escaping_database_paths):
+        """Only the duckdb backend receives database_path, so only it is checked."""
+        mock_factory.return_value = MagicMock()
+
+        EntityStoreOperator({"data_backend": "postgres", "database_path": escaping_database_paths["absolute_outside"]})
+
+        mock_factory.assert_called_once()

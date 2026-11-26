@@ -278,6 +278,29 @@ def temp_duckdb_path(tmp_path):
 
 
 @pytest.fixture
+def duckdb_data_root(tmp_path, monkeypatch):
+    """Use tmp_path as the data root for flow-supplied database paths."""
+    from docpipe.core.constants.constants import DocpipeConstants
+
+    data_root = tmp_path.resolve()
+    monkeypatch.setattr(DocpipeConstants, "_DUCKDB_ROOT", data_root)
+    return data_root
+
+
+@pytest.fixture
+def escaping_database_paths(duckdb_data_root, tmp_path_factory):
+    """Database paths that resolve outside duckdb_data_root."""
+    outside = tmp_path_factory.mktemp("outside")
+    (duckdb_data_root / "escape").symlink_to(outside, target_is_directory=True)
+    return {
+        "absolute_outside": str(outside / "nested" / "x.duckdb"),
+        "dot_dot": str(duckdb_data_root / ".." / "x.duckdb"),
+        "symlink_escape": str(duckdb_data_root / "escape" / "x.duckdb"),
+        "sibling_prefix": str(duckdb_data_root.parent / f"{duckdb_data_root.name}_evil" / "x.duckdb"),
+    }
+
+
+@pytest.fixture
 def cleanup_test_document_sets():
     """
     Clean up test document sets after each test.

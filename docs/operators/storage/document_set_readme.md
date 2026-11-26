@@ -51,7 +51,7 @@ point in a pipeline without disrupting downstream operators.
 | `description` | string | No | `""` | Human-readable description of the document set |
 | `metadata` | object | No | `{}` | Arbitrary JSON object stored as document set metadata |
 | `document_set_id` | string | No | — | UUID of an existing document set to update instead of creating a new one |
-| `database_path` | string | No | `data/duckdb/document_sets.duckdb` | File path for the DuckDB database (metadata + data share this file when the metadata backend is `duckdb`) |
+| `database_path` | string | No | `data/duckdb/document_sets.duckdb` | File path for the DuckDB database (metadata + data share this file when the metadata backend is `duckdb`). Must resolve to a location under the data root set by `DOCPIPE_DATA_PATH` (default `<project root>/data`). A relative path is resolved against the process working directory |
 | `data_backend` | string | No | `duckdb` | Data store backend for PyArrow table data. The metadata and attachment backend is configured separately via `assets_management.documentset_repository.type` (`duckdb` or `postgres`) in `docling-pipelines-config.yaml`; see [Asset Metadata Storage Configuration](../../guides/ADVANCED_CONFIGURATION.md#asset-metadata-storage-configuration). |
 
 ---
@@ -129,7 +129,8 @@ This operator does not add or remove columns. The original input table is return
 |---|---|---|
 | `Error: Required column 'id' not found` | Input table is missing the `id` column | Ensure `DocIdHashOperator` runs before this operator |
 | `Error: Document set not found: <id>` | The UUID passed in `document_set_id` does not exist | Verify the UUID, or omit `document_set_id` to create a new set |
-| `Error: Invalid database path: Path traversal detected` | `database_path` contains `..` segments | Use an absolute path or a path relative to the workspace root |
+| `Error: Invalid database path: Path traversal patterns (..) are not allowed` | `database_path` contains `..` segments | Use an absolute path, or a path relative to the process working directory, without `..` |
+| `Error: Invalid database path: Database path must be within <data root>` | `database_path` resolves outside the data root, for example an absolute path elsewhere, a symlink that points out, or a relative path while the process runs outside the data root | Use a path under the data root, or set `DOCPIPE_DATA_PATH` to the directory that should hold the databases |
 | `Error: Cannot evolve schema: incompatible types` | A column's type changed between runs | Ensure upstream operators produce stable schemas, or recreate the document set |
 | Duplicate documents accumulate across runs | Upsert requires a stable `id` per document | Use `DocIdHashOperator` to generate deterministic IDs |
 
