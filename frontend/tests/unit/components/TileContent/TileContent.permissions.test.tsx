@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
-import { TileContent } from '@/components/TileContent/TileContent';
+import { TileContent } from '@/components/TileContent';
 
 describe('TileContent disabled state', () => {
   it('keeps the action button enabled by default', () => {

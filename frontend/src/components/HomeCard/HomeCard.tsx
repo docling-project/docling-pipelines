@@ -2,7 +2,7 @@ import React, { type ElementType } from 'react';
 import { Button } from '@carbon/react';
 import { NoDataEmptyState } from '@carbon/ibm-products';
 import type { CarbonIconType } from '@carbon/icons-react';
-import { PermissionTooltip, PermissionButtonElement } from '@/components/common/PermissionTooltip';
+import { PermissionTooltip, PermissionButtonElement } from '@/components/common';
 import styles from './HomeCard.module.scss';
 
 /**
