@@ -52,7 +52,7 @@ point in a pipeline without disrupting downstream operators.
 | `metadata` | object | No | `{}` | Arbitrary JSON object stored as document set metadata |
 | `document_set_id` | string | No | — | UUID of an existing document set to update instead of creating a new one |
 | `database_path` | string | No | `data/duckdb/document_sets.duckdb` | File path for the DuckDB database (metadata + data share this file when the metadata backend is `duckdb`) |
-| `data_backend` | string | No | `duckdb` | Data store backend for PyArrow table data. The metadata and attachment backend is configured separately via `assets_management.documentset_repository.type` (`duckdb` or `postgres`) in `docling-pipelines-config.yaml`; see [Asset Metadata Storage Configuration](../../guides/ADVANCED_CONFIGURATION.md#asset-metadata-storage-configuration). |
+| `data_backend` | string | No | `duckdb` | Data store backend for PyArrow table data: `duckdb` or `postgres` (see [Document Set Data Tables in PostgreSQL](../../guides/ADVANCED_CONFIGURATION.md#document-set-data-tables-in-postgresql)). The metadata and attachment backend is configured separately via `assets_management.documentset_repository.type` (`duckdb` or `postgres`) in `docling-pipelines-config.yaml`; see [Asset Metadata Storage Configuration](../../guides/ADVANCED_CONFIGURATION.md#asset-metadata-storage-configuration). |
 
 ---
 
@@ -152,8 +152,12 @@ DocumentSetOperator
 
 With `assets_management.documentset_repository.type: postgres`, the registry and attachment
 layers become `PostgresAssetRepository[DocumentSet]` and `PostgresAttachmentRepository`
-(tables `asset_records` and `asset_attachments` in a dedicated PostgreSQL schema); the data
-store layer is unchanged.
+(tables `asset_records` and `asset_attachments` in a dedicated PostgreSQL schema). The data
+store layer is selected separately with `data_backend`: with `postgres` it is
+`PostgresDocumentSetStorage`, which writes the data tables to the `content_schema` of the
+`documentset_repository` config (default `docpipe_document_sets`); see
+[Document Set Data Tables in PostgreSQL](../../guides/ADVANCED_CONFIGURATION.md#document-set-data-tables-in-postgresql).
+Both data stores share their table logic in `TableDocumentSetStorage`.
 
 The data store adapter derives the physical `table_name` from the document set name (via
 `sanitize_table_name`) and returns an `AttachmentRef`. The service persists that ref via the
