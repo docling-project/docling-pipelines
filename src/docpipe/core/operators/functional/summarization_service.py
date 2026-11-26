@@ -1,13 +1,13 @@
 """Summarization service for chunked content using LLM adapters."""
 
-import logging
 import re
 from typing import Any, Iterator
 
 from docpipe.core.constants import DocpipeConstants, OperatorConstants
 from docpipe.core.ports.llm_inference_port import LLMInferencePort
+from docpipe.utils.infrastructure.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class SummarizationService:
@@ -62,7 +62,7 @@ class SummarizationService:
         # Log warnings
         if result.get("warnings"):
             for warning in result["warnings"]:
-                logger.warning(f"LLM adapter validation warning: {warning}")
+                logger.warning("LLM adapter validation warning: %s", warning)
 
         # Raise error if validation failed
         if not result.get("valid", True):
@@ -71,6 +71,57 @@ class SummarizationService:
                 message=f"LLM adapter validation failed: {'; '.join(errors)}",
                 status_code=400,
             )
+
+    def generate_summary(self, *, content: str) -> str:
+        """Generate one summary for document content.
+
+        Short content is summarized in one request. Long content is split on
+        sentence boundaries, summarized window by window, and reduced into a
+        single final summary.
+        """
+        if not content or not content.strip():
+            return ""
+
+        if self._estimated_tokens(content=content) <= self.max_input_tokens:
+            return self._call_llm_for_document_summary(content=content).strip()
+
+        partial_summaries: list[str] = []
+        for window_index, window_text in self._sliding_text_chunks(content=content):
+            try:
+                summary = self._call_llm_for_document_summary(content=window_text).strip()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to summarize document window %s: %s",
+                    window_index,
+                    type(exc).__name__,
+                )
+                continue
+            if summary:
+                partial_summaries.append(summary)
+        if not partial_summaries:
+            raise ValueError("Summarization returned no partial summaries")
+
+        combined_summaries = "\n\n".join(partial_summaries)
+        while self._estimated_tokens(content=combined_summaries) > self.max_input_tokens:
+            reduced_summaries: list[str] = []
+            for window_index, window_text in self._sliding_text_chunks(content=combined_summaries):
+                try:
+                    summary = self._call_llm_for_document_summary(content=window_text).strip()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to reduce document window %s: %s",
+                        window_index,
+                        type(exc).__name__,
+                    )
+                    continue
+                if summary:
+                    reduced_summaries.append(summary)
+            partial_summaries = reduced_summaries
+            if not partial_summaries:
+                raise ValueError("Summarization returned no reduced summaries")
+            combined_summaries = "\n\n".join(partial_summaries)
+
+        return self._call_llm_for_document_summary(content=combined_summaries).strip()
 
     def generate_summary_for_chunked_content(self, *, chunked_content: list[dict[str, Any]]) -> None:
         """
@@ -102,6 +153,27 @@ class SummarizationService:
         for seq_num, chunk in enumerate(chunked_content):
             if isinstance(chunk, dict):
                 chunk[OperatorConstants.Columns.SUMMARY] = summaries.get(seq_num, "No summary available")
+
+    @staticmethod
+    def _estimated_tokens(*, content: str) -> int:
+        """Estimate token usage consistently with the existing windowing logic."""
+        return int(len(content.split()) / 0.5)
+
+    def _call_llm_for_document_summary(self, *, content: str) -> str:
+        """Call the adapter with a prompt for one document summary."""
+        prompt = (
+            "Summarize the following document in the same language as the input. "
+            f"Write no more than {self.summary_sentences} sentences and "
+            f"{self.summary_max_words} words. Return only the summary.\n\n"
+            f"Document:\n{content}"
+        )
+        response = self.llm_adapter.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+        )
+        if not response or not response.strip():
+            raise ValueError("Summarization provider returned an empty response")
+        return response
 
     def _annotate_paragraph(self, *, chunk_sequence_number: int, para: str) -> str:
         """Annotate a paragraph with its sequence number.
@@ -142,7 +214,7 @@ class SummarizationService:
                         all_summaries[para_num] = []
                     all_summaries[para_num].append(summary)
             except Exception as e:
-                logger.warning(f"Failed to generate summary for window {chunk_idx}: {e}")
+                logger.warning("Failed to generate summary for window %s: %s", chunk_idx, type(e).__name__)
                 continue
 
         merged_summaries = {}

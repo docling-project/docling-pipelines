@@ -37,6 +37,26 @@ class TestGetBinaryContentLocalFile:
 
         assert result == b"text content"
 
+    def test_reads_windows_style_file_url(self, tmp_path):
+        import os
+
+        import pytest
+
+        if os.name != "nt":
+            pytest.skip("Windows file URL format")
+
+        from docpipe.utils.operators.binary_content_fetcher import get_binary_content
+
+        f = tmp_path / "doc.txt"
+        f.write_bytes(b"windows content")
+
+        result = get_binary_content(
+            doc_metadata={"path": f"file://{f}"},
+            global_config={},
+        )
+
+        assert result == b"windows content"
+
     def test_missing_path_raises(self):
         import pytest
 
@@ -79,6 +99,29 @@ class TestGetBinaryContentLocalFile:
         result = get_binary_content(doc_metadata={"source_id": source_id}, global_config={})
 
         assert result == b"archived content"
+
+
+class TestGetBinaryContentFilesystemSource:
+    """Tests for filesystem ingest configuration."""
+
+    def test_filesystem_ingest_uses_local_path(self, tmp_path):
+        from docpipe.core.constants.operator_constants import OperatorConstants
+        from docpipe.utils.operators.binary_content_fetcher import get_binary_content
+
+        f = tmp_path / "doc.txt"
+        f.write_bytes(b"filesystem content")
+
+        result = get_binary_content(
+            doc_metadata={"path": f"file://{f}", "name": f.name},
+            global_config={
+                OperatorConstants.Config.INGEST_SOURCE: {
+                    OperatorConstants.Config.PROVIDER: "filesystem",
+                    OperatorConstants.Config.PROVIDER_CONFIG: {"paths": [str(tmp_path)]},
+                }
+            },
+        )
+
+        assert result == b"filesystem content"
 
 
 class TestGetBinaryContentCloudSource:

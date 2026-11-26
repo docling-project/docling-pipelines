@@ -182,7 +182,7 @@ def get_binary_content(
         ingest_source is not None,
     )
 
-    if ingest_source:
+    if ingest_source and ingest_source.get(OperatorConstants.Config.PROVIDER) != "filesystem":
         logger.debug(
             "Using cloud source adapter for '%s', provider=%s",
             doc_name,
@@ -328,7 +328,9 @@ def _read_from_local_file(
     # Parse file:// URLs to extract actual path
     if isinstance(file_path, str) and file_path.startswith("file://"):
         parsed = urlparse(file_path)
-        file_path = unquote(parsed.path)
+        file_path = unquote(parsed.netloc + parsed.path)
+        if file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
+            file_path = file_path[1:]
 
     path = Path(file_path)
 

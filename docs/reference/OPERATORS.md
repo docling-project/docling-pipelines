@@ -28,6 +28,7 @@ title: Operator Reference
       - [SQLFilterOperator](#sqlfilteroperator)
     - [Functional Operators](#functional-operators)
       - [ChunkerOperator](#chunkeroperator)
+      - [SummarizationOperator](#summarizationoperator)
       - [EntityCurationOperator](#entitycurationoperator)
       - [EmbeddingsOperator](#embeddingsoperator)
       - [BranchingOperator](#branchingoperator)
@@ -1522,14 +1523,30 @@ Deduplication does not perform rename detection, downstream filename updates, or
 
 **Note:** Flat configuration (top-level `summarization_provider`, `summarization_provider_config`, etc.) is still supported for backward compatibility but the nested `summarization` object is recommended.
 
-**Summarization Providers:**
+#### SummarizationOperator
 
-When `summarization` object is present with a `provider` specified, the operator uses the common LLM infrastructure to generate summaries for each chunk:
+**Purpose:** Generate one document summary per input row without creating chunks.
 
-- **LiteLLM** (default): Unified API for 100+ providers (OpenAI, Azure, Anthropic, Cohere, AWS Bedrock, GCP Vertex AI, etc.)
-- **Watsonx**: IBM watsonx.ai cloud service (enterprise AI)
+**Category:** Functional
 
-**Provider-Specific Configuration (`summarization.provider_config`):**
+**Class:** `core.operators.functional.summarization.SummarizationOperator`
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---:|---|---|
+| `doc_column` | string | No | `content` | Input content column |
+| `output_column` | string | No | `summary` | Output summary column |
+| `provider` | string | Yes | - | LLM provider: `litellm` or `watsonx` |
+| `provider_config` | object | Yes | - | Provider configuration; `model_id` is required |
+| `max_input_tokens` | int | No | `4096` | Maximum estimated tokens per request |
+| `overlap_ratio` | float | No | `0.1` | Overlap between sentence-aware long-document windows |
+| `summary_sentences` | int | No | `3` | Target maximum number of summary sentences |
+| `summary_max_words` | int | No | `50` | Target maximum number of summary words |
+
+The operator preserves all input rows and columns, adds a nullable string
+summary column, skips empty content, and records provider failures in
+operator metadata. Long documents use sentence-aware map-reduce summarization.
+
+**Provider Configuration (`provider_config`):**
 
 | Provider    | Parameter        | Type   | Default                             | Description                           |
 | ----------- | ---------------- | ------ | ----------------------------------- | ------------------------------------- |
@@ -1542,11 +1559,13 @@ When `summarization` object is present with a `provider` specified, the operator
 
 **Configuration Structure:**
 
-The **recommended approach** is to use the nested `summarization` object:
-
 ```json
 {
-  "summarization": {
+  "type": "summarization",
+  "name": "summarize_documents",
+  "config": {
+    "doc_column": "content",
+    "output_column": "summary",
     "provider": "litellm",
     "provider_config": {
       "model_id": "openai/llama3.2:3b",
@@ -1559,34 +1578,17 @@ The **recommended approach** is to use the nested `summarization` object:
 }
 ```
 
-**Backward Compatibility:**
-
-The flat configuration structure is still supported:
-
-```json
-{
-  "summarization": {
-    "provider": "litellm",
-    "provider_config": {
-      "model_id": "openai/llama3.2:3b",
-      "api_base": "http://localhost:11434/v1",
-      "api_key": "<ollama>"
-    },
-    "summary_sentences": 3
-  },
-  "summary_max_words": 50
-}
-```
-
 **Input Schema**
 
 - configured `doc_column`, usually `content`
 
 **Output Schema**
 
-- `chunk_sequence_number`
-- `start_index`
-- `chunked_content` (array of objects with `chunk`, `start_index`, and optional `summary` fields when summarization is configured)
+- all original input columns
+- configured `output_column` as a nullable string
+
+The operator does not create or modify `chunked_content`; use
+`ChunkerOperator` for chunk-level summarization.
 
 **Exceptions**
 

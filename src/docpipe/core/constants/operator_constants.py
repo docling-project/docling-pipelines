@@ -52,8 +52,10 @@ class OperatorConstants:
         EXTRACT_JSON: Final[str] = "extract_json"
 
         # Processing Operators
+       # Processing Operators
         BRANCHING: Final[str] = "branching"
         CHUNKER: Final[str] = "chunker"
+        SUMMARIZATION: Final[str] = "summarization"
         DOC_ID_OPERATOR: Final[str] = "doc_id_hash"
         DOC_QUALITY: Final[str] = "doc_quality"
         EDEDUP: Final[str] = "ededup"
