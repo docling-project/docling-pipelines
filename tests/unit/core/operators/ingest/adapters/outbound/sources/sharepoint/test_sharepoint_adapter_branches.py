@@ -184,6 +184,29 @@ class TestFetchBinaryContent:
         assert content is None
         get_loader.assert_not_called()
 
+    def test_uppercase_web_url_without_item_id_returns_none(self):
+        """The scheme check is case-insensitive; an uppercase URL is a URL, not an item id."""
+        adapter = SharePointSourceAdapter()
+
+        with patch.object(adapter, "_get_loader") as get_loader:
+            content = adapter.fetch_binary_content(
+                source_id="HTTPS://contoso.sharepoint.com/sites/team/a.docx", provider_config=PROVIDER_CONFIG
+            )
+
+        assert content is None
+        get_loader.assert_not_called()
+
+    def test_item_id_that_starts_with_http_is_not_a_web_url(self):
+        """An item id such as 'httpdoc' is an id; only a scheme followed by :// makes a URL."""
+        rest = FakeRestClient(json_responses={"/drives/lib-1/items/httpdoc": RuntimeError("404")})
+        adapter = SharePointSourceAdapter()
+
+        with patch.object(adapter, "_get_loader", return_value=FakeGraphLoader(rest_client=rest)):
+            content = adapter.fetch_binary_content(source_id="httpdoc", provider_config=PROVIDER_CONFIG)
+
+        assert content is None
+        assert rest.urls == ["/drives/lib-1/items/httpdoc"]
+
     def test_graph_error_returns_none(self):
         """Errors raised by Graph calls are logged and reported as None."""
         rest = FakeRestClient(json_responses={"/drives/lib-1/items/i1": RuntimeError("503")})
@@ -194,6 +217,23 @@ class TestFetchBinaryContent:
 
         assert content is None
         assert rest.urls == ["/drives/lib-1/items/i1"]
+
+
+class TestResolveSharePointItemId:
+    """_resolve_sharepoint_item_id's URL and item-id split."""
+
+    def test_an_item_id_that_starts_with_http_is_returned_as_an_id(self):
+        """Only a scheme followed by :// is a URL; 'httpdoc' is a direct item id."""
+        adapter = SharePointSourceAdapter()
+
+        item_id, drive_id = adapter._resolve_sharepoint_item_id(
+            file_path="httpdoc",
+            document_library_id="lib-1",
+            loader=FakeGraphLoader(),
+            token="tok",
+        )
+
+        assert (item_id, drive_id) == ("httpdoc", "lib-1")
 
 
 class TestBuildConfigOptionalKeys:
