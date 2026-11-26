@@ -83,6 +83,28 @@ class TestDocpipeConfigLoaderGetConfig:
         assert first is not second
         assert second["version"] == 2
 
+    def test_config_loaded_by_another_thread_while_waiting_for_lock_is_reused(self, *, monkeypatch):
+        """If another thread fills the cache while this one waits for the lock, the file is not read again."""
+        loaded_elsewhere = {"loaded": "by another thread"}
+
+        class _RacingLock:
+            """Lock stand-in that simulates the other thread finishing first."""
+
+            def __enter__(self):
+                DocpipeConfigLoader._config = loaded_elsewhere
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+        def _fail_load():
+            raise AssertionError("_load must not run when the cache is already filled")
+
+        monkeypatch.setattr(DocpipeConfigLoader, "_lock", _RacingLock())
+        monkeypatch.setattr(DocpipeConfigLoader, "_load", _fail_load)
+
+        assert DocpipeConfigLoader.get_config() is loaded_elsewhere
+
 
 class TestDocpipeConfigLoaderGet:
     def test_returns_value_for_existing_key(self, *, tmp_path, monkeypatch):

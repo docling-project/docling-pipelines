@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for NLTK Data Manager
 """
@@ -100,6 +103,28 @@ class TestUnverifiedNLTKDownloader:
 
         # Verify urlopen was restored to original
         assert nltk.downloader.urlopen == original_urlopen
+
+    def test_patched_urlopen_injects_unverified_context(self, tmp_path):
+        """While downloading, nltk's urlopen forwards calls with the unverified SSL context"""
+        import nltk.downloader
+
+        downloader = UnverifiedNLTKDownloader(str(tmp_path / "nltk_data"))
+        seen = {}
+
+        def fake_download(package_id, quiet=False):
+            seen["response"] = nltk.downloader.urlopen("https://example.invalid/index.xml", timeout=5)
+            return True
+
+        with (
+            patch("urllib.request.urlopen", return_value="response") as mock_urlopen,
+            patch.object(downloader.downloader, "download", side_effect=fake_download),
+        ):
+            assert downloader.download("punkt_tab", quiet=True) is True
+
+        assert seen["response"] == "response"
+        mock_urlopen.assert_called_once_with(
+            "https://example.invalid/index.xml", timeout=5, context=downloader.ssl_context
+        )
 
 
 class TestEnsureNLTKData:
