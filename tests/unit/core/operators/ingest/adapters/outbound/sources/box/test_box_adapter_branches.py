@@ -82,7 +82,7 @@ class TestFetchDocuments:
 
         with (
             patch.object(adapter, "_get_box_client", side_effect=ImportError("box_sdk_gen")),
-            pytest.raises(ImportError, match="docling-pipelines\\[box\\]"),
+            pytest.raises(ImportError, match="uv pip install box-sdk-gen"),
         ):
             asyncio.run(consume())
 

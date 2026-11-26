@@ -46,7 +46,7 @@ except ImportError:
     UploadFileAttributesParentField = None  # type: ignore[assignment,misc]
     _BOX_AVAILABLE = False
 
-_BOX_INSTALL_HINT = "box-sdk-gen is not installed. Install with: uv pip install 'docling-pipelines[box]'"
+_BOX_INSTALL_HINT = "box-sdk-gen is not installed. Install with: uv pip install box-sdk-gen"
 
 
 @register_destination_adapter
