@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """File-locked ededup admissions for workers sharing a directory."""
 
 import hashlib
@@ -5,9 +8,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import portalocker
 import pyarrow as pa
 import pyarrow.parquet as pq
-from filelock import FileLock
 
 from docpipe.core.operators.quality.ededup_storage.ports.ededup_store import EdedupStore
 from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
@@ -35,7 +38,11 @@ class FilesystemEdedupStore(EdedupStore):
         temporary = path.with_suffix(".tmp")
         schema = pa.schema([(key, pa.string()) for key in ("job_id", "node_id", "job_run_id", "hash_value", "doc_id")])
         try:
-            with FileLock(str(path.with_suffix(".lock")), timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(path.with_suffix(".lock")),
+                flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+                timeout=self._lock_timeout,
+            ):
                 previous = pq.read_table(path) if path.exists() else pa.Table.from_pylist([], schema=schema)
                 seen = set(previous["hash_value"].to_pylist())
                 accepted = set(records) - seen

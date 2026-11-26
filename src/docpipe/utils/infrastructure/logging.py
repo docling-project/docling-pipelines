@@ -341,10 +341,10 @@ def configure_third_party_loggers(*, log_level: int | str, handler: logging.Hand
         "urllib3",
         "requests",
         # Other third-party loggers
-        "filelock",
         "websockets",
         "graphviz",
         "huggingface_hub",
+        "portalocker",
     ]
 
     for logger_name in third_party_loggers:

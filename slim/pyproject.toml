@@ -27,7 +27,6 @@ dependencies = [
     "duckdb==1.5.6",
     "fastapi==0.150.0",
     "fasttext-numpy2==0.10.4",
-    "filelock==4.2.12",
     "ftfy==6.3.1",
     "google-api-python-client==2.202.0",
     "google-auth-httplib2==0.4.4",
@@ -64,6 +63,7 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
     "pillow==13.0.0",
     "polars==2.1.0",
+    "portalocker==4.4.2",
     "prefect==3.9.3",
     "psycopg2-binary==2.9.13",
     "pyarrow==26.0.1",
@@ -210,8 +210,6 @@ override-dependencies = [
     "oauthlib==4.0.1",
     # Dependabot: anyio < 4.14.2 — TLS spoofing (critical), process group leak (high), stderr deadlock (medium).
     "anyio>=4.14.2",
-    # litellm 1.104.0+ (CVE-2026-114612 fix) caps filelock<4; filelock==4.2.1 is required by this project.
-    "filelock==4.2.12",
     # CVE-2026-59939: Security fix for httplib2 vulnerability (transitive via google-auth-httplib2).
     "httplib2>=0.32.0",
     # Dependabot: h2 <= 4.4.0 — duplicate Host header request smuggling (transitive via httpx).

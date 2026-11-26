@@ -531,3 +531,4 @@ jobs:
           tests/integration/storage
           tests/integration/assets
           tests/integration/test_ededup_postgres.py
+          tests/integration/test_postgres_incremental_metadata.py

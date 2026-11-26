@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Edge cases of the in-memory, DuckDB and JSON job stats stores.
 
 Each store runs for real (DuckDB file and JSON files in tmp_path). Failures are produced the way
@@ -8,8 +11,8 @@ name that is too long for the file system.
 import threading
 from pathlib import Path
 
+import portalocker
 import pytest
-from filelock import FileLock
 
 from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.adapters.stores.duckdb.duckdb_job_stats_store import DuckDBJobStatsStore
@@ -255,7 +258,7 @@ class TestJsonStore:
     def test_read_times_out_while_another_process_holds_the_lock(self, json_store):
         lock_path = json_store._get_job_stats_lock_path(job_run_id=RUN)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        holder = FileLock(str(lock_path))
+        holder = portalocker.Lock(str(lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=0.1)
 
         with holder, pytest.raises(JobStatsStoreReadException, match="Failed to acquire lock for job stats read"):
             json_store.get_job_stats(RUN)

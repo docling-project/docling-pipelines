@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JsonJobStatsStore - Filesystem-based storage adapter
 
@@ -17,11 +20,12 @@ File Layout:
 """
 
 import json
+import shutil
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock, Timeout
+import portalocker
 
 from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.domain.models import JobStats, NodeStats
@@ -46,7 +50,7 @@ class JsonJobStatsStore(JobStatsStore):
     Process-safe and thread-safe JSON file-based storage for job statistics.
 
     Features:
-    - File-level locking using filelock library for concurrent access
+    - File-level locking using portalocker library for concurrent access
     - Human-readable JSON files for inspection
     - Deterministic file layout per job_run_id
     - Atomic writes using temp files
@@ -221,13 +225,14 @@ class JsonJobStatsStore(JobStatsStore):
         """
         job_run_id = job_stats.job_run_id
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 self._write_job_stats_unlocked(job_stats=job_stats)
                 logger.debug("Stored job stats: job_run_id=%s", job_run_id)
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for job stats write: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -250,12 +255,13 @@ class JsonJobStatsStore(JobStatsStore):
             JobStats if found, None otherwise
         """
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 return self._read_job_stats_unlocked(job_run_id=job_run_id)
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreReadException(
                 message=f"Failed to acquire lock for job stats read: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -275,10 +281,11 @@ class JsonJobStatsStore(JobStatsStore):
             TimeoutError: If lock cannot be acquired
         """
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 node_id = node_stats.id
                 batch_id = getattr(node_stats, "batch_id", None)
 
@@ -288,7 +295,7 @@ class JsonJobStatsStore(JobStatsStore):
                 self._atomic_write_json(path=path, data=data)
 
                 logger.debug("Stored node stats: job_run_id=%s, node_id=%s, batch_id=%s", job_run_id, node_id, batch_id)
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for node stats write: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -314,10 +321,11 @@ class JsonJobStatsStore(JobStatsStore):
             List of ALL NodeStats records
         """
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 result: list[NodeStats] = []
                 node_stats_dir = self._get_node_stats_dir(job_run_id=job_run_id)
 
@@ -339,7 +347,7 @@ class JsonJobStatsStore(JobStatsStore):
                     raise JobStatsStoreReadException(
                         message=f"Failed to read node stats: {e}", job_run_id=job_run_id, operation="get_node_stats"
                     ) from e
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreReadException(
                 message=f"Failed to acquire lock for node stats read: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -360,10 +368,11 @@ class JsonJobStatsStore(JobStatsStore):
             Nested dict: {node_id: {batch_id: NodeStats}}
         """
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 result: dict[str, dict[str, NodeStats]] = {}
                 node_stats_dir = self._get_node_stats_dir(job_run_id=job_run_id)
 
@@ -393,7 +402,7 @@ class JsonJobStatsStore(JobStatsStore):
                         job_run_id=job_run_id,
                         operation="get_batch_node_stats",
                     ) from e
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreReadException(
                 message=f"Failed to acquire lock for batch node stats read: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -441,17 +450,18 @@ class JsonJobStatsStore(JobStatsStore):
             JobStatsStoreWriteException: On any error other than a lock timeout.
         """
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path))
 
         try:
-            with lock.acquire(timeout=lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=lock_timeout
+            ):
                 node_id = node_stats.id
                 batch_id = getattr(node_stats, "batch_id", None)
                 path = self._get_node_stats_path(job_run_id=job_run_id, node_id=node_id, batch_id=batch_id)
                 self._atomic_write_json(path=path, data=node_stats.model_dump(by_alias=True))
                 logger.debug("try_store_node_stats: wrote node_id=%s job_run_id=%s", node_id, job_run_id)
                 return True
-        except Timeout:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked):
             return False
         except Exception as e:
             logger.error("try_store_node_stats failed: %s", e)
@@ -476,10 +486,11 @@ class JsonJobStatsStore(JobStatsStore):
             TimeoutError: If lock cannot be acquired
         """
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 for node_stats in node_stats_list:
                     node_id = node_stats.id
                     batch_id = getattr(node_stats, "batch_id", None)
@@ -490,7 +501,7 @@ class JsonJobStatsStore(JobStatsStore):
                     self._atomic_write_json(path=path, data=data)
 
                 logger.debug("Bulk stored %s node stats: job_run_id=%s", len(node_stats_list), job_run_id)
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreWriteException(
                 message=f"Failed to acquire lock for bulk node stats write: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -530,10 +541,11 @@ class JsonJobStatsStore(JobStatsStore):
             )
         """
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 # Use unlocked helpers — the lock is already held by this frame.
                 job_stats = self._read_job_stats_unlocked(job_run_id=job_run_id)
                 if not job_stats:
@@ -561,7 +573,7 @@ class JsonJobStatsStore(JobStatsStore):
                 # Write back atomically — still inside the lock.
                 self._write_job_stats_unlocked(job_stats=job_stats)
                 logger.debug("Atomic update applied: job_run_id=%s", job_run_id)
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreAtomicUpdateException(
                 message=f"Failed to acquire lock for atomic update: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -582,10 +594,11 @@ class JsonJobStatsStore(JobStatsStore):
             NodeStats if found, None otherwise
         """
         lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 path = self._get_node_stats_path(job_run_id=job_run_id, node_id=node_id, batch_id=batch_id)
                 data = self._read_json(path=path)
 
@@ -601,7 +614,7 @@ class JsonJobStatsStore(JobStatsStore):
                         job_run_id=job_run_id,
                         operation="get_node_stats_by_batch_and_node",
                     ) from e
-        except Timeout as e:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreReadException(
                 message=f"Failed to acquire lock for node stats read: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -622,32 +635,31 @@ class JsonJobStatsStore(JobStatsStore):
         job_lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
         node_lock_path = self._get_node_stats_lock_path(job_run_id=job_run_id)
 
-        job_lock = FileLock(str(job_lock_path), timeout=self._lock_timeout)
-        node_lock = FileLock(str(node_lock_path), timeout=self._lock_timeout)
-
         try:
-            with job_lock.acquire(timeout=self._lock_timeout):
-                with node_lock.acquire(timeout=self._lock_timeout):
-                    job_dir = self._get_job_dir(job_run_id=job_run_id)
+            with (
+                portalocker.Lock(
+                    str(job_lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=self._lock_timeout
+                ),
+                portalocker.Lock(
+                    str(node_lock_path), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=self._lock_timeout
+                ),
+            ):
+                try:
+                    job_stats_path = self._get_job_stats_path(job_run_id=job_run_id)
+                    if job_stats_path.exists():
+                        job_stats_path.unlink()
 
-                    if not job_dir.exists():
-                        raise JobStatsStoreDeleteException(
-                            message=f"Job run not found: {job_run_id}", job_run_id=job_run_id
-                        )
+                    node_stats_dir = self._get_node_stats_dir(job_run_id=job_run_id)
+                    if node_stats_dir.exists():
+                        shutil.rmtree(node_stats_dir)
 
-                    try:
-                        # Delete entire job directory
-                        import shutil
-
-                        shutil.rmtree(job_dir)
-
-                        logger.info("Deleted job stats: job_run_id=%s", job_run_id)
-                    except Exception as e:
-                        logger.error("Failed to delete job stats: %s", e)
-                        raise JobStatsStoreDeleteException(
-                            message=f"Failed to delete job stats: {e}", job_run_id=job_run_id
-                        ) from e
-        except Timeout as e:
+                    logger.info("Deleted job stats: job_run_id=%s", job_run_id)
+                except Exception as e:
+                    logger.error("Failed to delete job stats: %s", e)
+                    raise JobStatsStoreDeleteException(
+                        message=f"Failed to delete job stats: {e}", job_run_id=job_run_id
+                    ) from e
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked) as e:
             raise JobStatsStoreDeleteException(
                 message=f"Failed to acquire lock for job stats deletion: timeout={self._lock_timeout}s",
                 job_run_id=job_run_id,
@@ -685,10 +697,11 @@ class JsonJobStatsStore(JobStatsStore):
 
         job_run_id = job_dir.name
         lock_path = self._get_job_stats_lock_path(job_run_id=job_run_id)
-        lock = FileLock(str(lock_path), timeout=self._lock_timeout)
 
         try:
-            with lock.acquire(timeout=self._lock_timeout):
+            with portalocker.Lock(
+                str(lock_path), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=self._lock_timeout
+            ):
                 data = self._read_json(path=job_stats_path)
                 if not data:
                     return None
@@ -708,7 +721,7 @@ class JsonJobStatsStore(JobStatsStore):
                 except Exception as e:
                     logger.warning("Failed to parse job stats from %s: %s", job_stats_path, e)
                     return None
-        except Timeout:
+        except (portalocker.exceptions.LockException, portalocker.exceptions.AlreadyLocked):
             logger.warning("Timeout acquiring lock for job stats read: %s", job_run_id)
             return None
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for PyArrow table handler utilities.
 Tests for reading, writing, and transforming Parquet tables.
@@ -6,13 +9,16 @@ Tests for reading, writing, and transforming Parquet tables.
 from pathlib import Path
 from unittest.mock import patch
 
+import portalocker
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
 
+from docpipe.utils.data import pyarrow_handler
 from docpipe.utils.data.pyarrow_handler import (
     BaseParquetTableHandler,
     CpdParquetTableHandler,
+    _lock_path,
     get_parquet_table_handler,
 )
 
@@ -174,15 +180,42 @@ class TestCpdParquetTableHandler:
             # Should not raise, but log error
             handler.save_table(path=invalid_path, table=sample_table)
 
-    def test_concurrent_access_with_filelock(self, handler, sample_table, temp_parquet_file):
-        """Test that file locking prevents concurrent access issues."""
+    def test_read_table_allows_concurrent_shared_lock(self, handler, sample_table, temp_parquet_file, monkeypatch):
+        """An externally held LOCK_SH must not block read_table (readers share the lock)."""
         handler.save_table(path=temp_parquet_file, table=sample_table)
+        monkeypatch.setattr(pyarrow_handler, "LOCK_TIMEOUT", 0.3)
 
-        # Simulate concurrent read - should work with file locking
-        table1 = handler.read_table(path=temp_parquet_file)
-        table2 = handler.read_table(path=temp_parquet_file)
+        with portalocker.Lock(
+            _lock_path(path=temp_parquet_file), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=1.0
+        ):
+            result = handler.read_table(path=temp_parquet_file)
 
-        assert table1.equals(table2)
+        assert result is not None
+        assert result.equals(sample_table)
+
+    def test_read_table_blocked_by_exclusive_lock_raises(self, handler, sample_table, temp_parquet_file, monkeypatch):
+        """An externally held LOCK_EX must make read_table raise LockException after LOCK_TIMEOUT."""
+        handler.save_table(path=temp_parquet_file, table=sample_table)
+        monkeypatch.setattr(pyarrow_handler, "LOCK_TIMEOUT", 0.3)
+
+        with portalocker.Lock(
+            _lock_path(path=temp_parquet_file), flags=portalocker.LOCK_EX | portalocker.LOCK_NB, timeout=1.0
+        ):
+            with pytest.raises(portalocker.exceptions.LockException):
+                handler.read_table(path=temp_parquet_file)
+
+    def test_save_table_blocked_by_shared_lock_does_not_write(
+        self, handler, sample_table, temp_parquet_file, monkeypatch
+    ):
+        """A writer cannot acquire LOCK_EX while a reader holds LOCK_SH; the file is left unwritten."""
+        monkeypatch.setattr(pyarrow_handler, "LOCK_TIMEOUT", 0.3)
+
+        with portalocker.Lock(
+            _lock_path(path=temp_parquet_file), flags=portalocker.LOCK_SH | portalocker.LOCK_NB, timeout=1.0
+        ):
+            handler.save_table(path=temp_parquet_file, table=sample_table)
+
+        assert not Path(temp_parquet_file).exists()
 
     def test_save_table_creates_lock_file(self, handler, sample_table, temp_parquet_file):
         """Test that lock file is created during save operation."""

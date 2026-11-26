@@ -107,6 +107,10 @@ class FlowExecutionFailedException(DocpipeException):
         self.errors = errors
 
 
+class LockTimeoutError(FlowExecutionFailedException):
+    """Raised when acquiring a shared or exclusive lock times out."""
+
+
 class FlowValidationException(DocpipeException):
     """Flowvalidationexception."""
 
@@ -1004,6 +1008,7 @@ __all__ = [
     "JobStatsStoreInitializationException",
     "JobStatsStoreReadException",
     "JobStatsStoreWriteException",
+    "LockTimeoutError",
     "PermissionDeniedException",
     "PostgresConnectionException",
     "PostgresOperationException",

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JsonJobStatsStore - Phase 5 compatibility tests
 
@@ -16,8 +19,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import portalocker
 import pytest
-from filelock import Timeout
 
 from docpipe.core.constants.constants import ExecutionStatus
 from docpipe.core.job_management.adapters.stores.json.json_job_stats_store import (
@@ -490,7 +493,7 @@ class TestDeleteOperations:
     """Test delete operations."""
 
     def test_delete_job_stats_removes_files(self, *, store, sample_job_stats, temp_data_dir):
-        """delete_job_stats should remove all files."""
+        """delete_job_stats should remove data files."""
         job_run_id = sample_job_stats.job_run_id
 
         # Store job stats
@@ -499,12 +502,14 @@ class TestDeleteOperations:
         # Verify directory exists
         job_dir = Path(temp_data_dir) / "job_stats" / job_run_id
         assert job_dir.exists()
+        assert (job_dir / "job_stats.json").exists()
 
         # Delete
         store.delete_job_stats(job_run_id)
 
-        # Directory should be removed
-        assert not job_dir.exists()
+        # Data files should be removed
+        assert not (job_dir / "job_stats.json").exists()
+        assert not (job_dir / "node_stats").exists()
 
     def test_delete_nonexistent_job_succeeds_silently(self, *, store):
         """Deleting nonexistent job should succeed silently (idempotent)."""
@@ -689,11 +694,9 @@ class TestWriteReadFailures:
         """try_store_node_stats returns False (does not raise) when lock times out."""
         from unittest.mock import patch
 
-        from filelock import Timeout
-
         store.store_job_stats(job_stats=sample_job_stats)
 
-        with patch("filelock.FileLock.acquire", side_effect=Timeout("lock")):
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             result = store.try_store_node_stats(
                 job_run_id=sample_job_stats.job_run_id,
                 node_stats=sample_node_stats,
@@ -1005,6 +1008,8 @@ class TestInitAndParseErrorPaths:
         from docpipe.exceptions.docpipe_exceptions import JobStatsStoreDeleteException
 
         store.store_job_stats(sample_job_stats)
+        node_stats_dir = store._get_node_stats_dir(job_run_id=sample_job_stats.job_run_id)
+        node_stats_dir.mkdir(parents=True, exist_ok=True)
 
         with patch("shutil.rmtree", side_effect=OSError("permission denied")):
             with pytest.raises(JobStatsStoreDeleteException):
@@ -1185,11 +1190,7 @@ class TestReadJobStatsIfMatch:
         job_run_id = str(uuid.uuid4())
         job_dir = self._make_job_dir(tmp_path, job_run_id)
 
-        with patch(
-            "docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock"
-        ) as mock_filelock_cls:
-            mock_lock = mock_filelock_cls.return_value
-            mock_lock.acquire.side_effect = Timeout(str(job_dir / "job_stats.json"))
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             result = store._read_job_stats_if_match(job_dir=job_dir, job_id=None, job_ids_set=None, status=None)
         assert result is None
 
@@ -1236,8 +1237,7 @@ class TestExceptionPaths:
     def test_store_job_stats_raises_on_lock_timeout(self, store):
         """store_job_stats raises JobStatsStoreWriteException on lock Timeout."""
         js = JobStats(job_id="j1", job_run_id=str(uuid.uuid4()), status=ExecutionStatus.RUNNING)
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreWriteException, match="acquire lock for job stats write"):
                 store.store_job_stats(js)
 
@@ -1255,8 +1255,7 @@ class TestExceptionPaths:
 
     def test_store_node_stats_raises_on_lock_timeout(self, store, sample_node_stats):
         """store_node_stats raises JobStatsStoreWriteException on lock Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreWriteException, match="acquire lock for node stats write"):
                 store.store_node_stats(job_run_id=str(uuid.uuid4()), node_stats=sample_node_stats)
 
@@ -1268,8 +1267,7 @@ class TestExceptionPaths:
 
     def test_get_node_stats_raises_on_lock_timeout(self, store):
         """get_node_stats raises JobStatsStoreReadException on lock Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreReadException, match="acquire lock for node stats read"):
                 store.get_node_stats(job_run_id=str(uuid.uuid4()))
 
@@ -1290,8 +1288,7 @@ class TestExceptionPaths:
 
     def test_get_batch_node_stats_raises_on_lock_timeout(self, store):
         """get_batch_node_stats raises JobStatsStoreReadException on lock Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreReadException, match="acquire lock for batch node stats read"):
                 store.get_batch_node_stats(job_run_id=str(uuid.uuid4()))
 
@@ -1315,8 +1312,7 @@ class TestExceptionPaths:
 
     def test_try_store_node_stats_returns_false_on_lock_timeout(self, store, sample_node_stats):
         """try_store_node_stats returns False (not raises) on lock Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             result = store.try_store_node_stats(
                 job_run_id=str(uuid.uuid4()), node_stats=sample_node_stats, lock_timeout=0.01
             )
@@ -1330,8 +1326,7 @@ class TestExceptionPaths:
 
     def test_bulk_store_node_stats_raises_on_lock_timeout(self, store, sample_node_stats):
         """bulk_store_node_stats raises JobStatsStoreWriteException on lock Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreWriteException, match="acquire lock for bulk node stats write"):
                 store.bulk_store_node_stats(job_run_id=str(uuid.uuid4()), node_stats_list=[sample_node_stats])
 
@@ -1393,8 +1388,7 @@ class TestExceptionPaths:
         """atomic_increment_fields raises JobStatsStoreAtomicUpdateException on Timeout."""
         from docpipe.exceptions.docpipe_exceptions import JobStatsStoreAtomicUpdateException
 
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreAtomicUpdateException, match="acquire lock for atomic update"):
                 store.atomic_increment_fields(str(uuid.uuid4()), increments={"processed_docs": 1})
 
@@ -1417,8 +1411,7 @@ class TestExceptionPaths:
 
     def test_get_node_stats_by_batch_raises_on_lock_timeout(self, store):
         """get_node_stats_by_batch_and_node raises JobStatsStoreReadException on Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreReadException, match="acquire lock for node stats read"):
                 store.get_node_stats_by_batch_and_node(job_run_id=str(uuid.uuid4()), node_id="n1", batch_id=None)
 
@@ -1437,6 +1430,8 @@ class TestExceptionPaths:
         job_dir = store._base_dir / job_run_id
         job_dir.mkdir(parents=True, exist_ok=True)
         (job_dir / "job_stats.json").write_text("{}")
+        node_stats_dir = job_dir / "node_stats"
+        node_stats_dir.mkdir(parents=True, exist_ok=True)
 
         with patch("shutil.rmtree", side_effect=OSError("permission denied")):
             with pytest.raises(JobStatsStoreDeleteException, match="Failed to delete job stats"):
@@ -1444,8 +1439,7 @@ class TestExceptionPaths:
 
     def test_delete_job_stats_raises_on_lock_timeout(self, store):
         """delete_job_stats raises JobStatsStoreDeleteException on lock Timeout."""
-        with patch("docpipe.core.job_management.adapters.stores.json.json_job_stats_store.FileLock") as mock_cls:
-            mock_cls.return_value.acquire.side_effect = Timeout("lock")
+        with patch("portalocker.Lock.acquire", side_effect=portalocker.exceptions.AlreadyLocked("lock")):
             with pytest.raises(JobStatsStoreDeleteException, match="acquire lock for job stats deletion"):
                 store.delete_job_stats(str(uuid.uuid4()))
 

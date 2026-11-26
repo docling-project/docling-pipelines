@@ -9,7 +9,7 @@ import pytest
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.incremental_metadata.adapters.stores.filesystem import FilesystemIncrementalMetadataStore
 from docpipe.core.incremental_metadata.application.services import IncrementalUpdateService
-from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException
+from docpipe.exceptions.docpipe_exceptions import FlowExecutionFailedException, LockTimeoutError
 
 
 @pytest.fixture
@@ -236,6 +236,20 @@ class TestIncrementalUpdateService:
         with patch.object(service.store, "upsert_records", side_effect=Exception("Store failure")):
             with pytest.raises(FlowExecutionFailedException, match="Store failure"):
                 service.save_metadata_for_incremental_update(job_id="job-1", job_run_id="run-1", tables=[table])
+
+    def test_store_lock_timeout_error_surfaces_with_cause(self, *, service):
+        """A LockTimeoutError from the store surfaces as FlowExecutionFailedException with LockTimeoutError as __cause__."""
+        from unittest.mock import patch
+
+        table = _build_table(ids=["doc-1"], names=["a"], modified_times=[1])
+        timeout_err = LockTimeoutError("Failed to acquire write lock for job job-1 within 30.0s")
+
+        with patch.object(service.store, "upsert_records", side_effect=timeout_err):
+            with pytest.raises(FlowExecutionFailedException) as exc_info:
+                service.save_metadata_for_incremental_update(job_id="job-1", job_run_id="run-1", tables=[table])
+
+            assert exc_info.value.__cause__ is timeout_err
+            assert isinstance(exc_info.value.__cause__, LockTimeoutError)
 
     def test_get_all_processed_docs_exception_handling(self, *, service):
         """Test exception handling in get_all_processed_docs."""

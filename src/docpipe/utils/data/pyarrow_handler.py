@@ -1,12 +1,15 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """PyArrow table handling utilities for reading, writing, and transforming Parquet tables."""
 
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+import portalocker
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-from filelock import FileLock
 
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.utils.core.memmap_file_utils import replace_memmap_paths_combined
@@ -76,7 +79,7 @@ class BaseParquetTableHandler(ABC):
         """
         Delete rows from a Parquet table based on a filter function.
         """
-        self.logger.info(f"Deleting rows from: {path} table")
+        self.logger.info("Deleting rows from: %s table", path)
         table = self.read_table(path=path)
         if not table:
             return
@@ -92,7 +95,7 @@ class BaseParquetTableHandler(ABC):
 
         updated_table = table.filter(keep_mask)
         self.save_table(path=path, table=updated_table)
-        self.logger.info(f"Deleted {table.num_rows - updated_table.num_rows} rows.")
+        self.logger.info("Deleted %s rows.", table.num_rows - updated_table.num_rows)
 
     @abstractmethod
     def delete_file(self, *, path):
@@ -117,11 +120,15 @@ class CpdParquetTableHandler(BaseParquetTableHandler):
         """
         Read a Parquet table from File storage and optionally filter rows.
         """
-        self.logger.info(f"Reading table from: {path}")
-        lock = FileLock(_lock_path(path=path), timeout=LOCK_TIMEOUT)
+        self.logger.info("Reading table from: %s", path)
+        lock = portalocker.Lock(
+            _lock_path(path=path),
+            flags=portalocker.LOCK_SH | portalocker.LOCK_NB,
+            timeout=LOCK_TIMEOUT,
+        )
         with lock:
             if not Path(path).exists():
-                self.logger.debug(f"Table not found from: {path}")
+                self.logger.debug("Table not found from: %s", path)
                 return None
             return pq.read_table(path, columns=columns, filters=filters)
 
@@ -131,28 +138,36 @@ class CpdParquetTableHandler(BaseParquetTableHandler):
         Replaces memmap file paths with actual data before saving.
         """
         try:
-            self.logger.info(f"Saving table to: {path}")
+            self.logger.info("Saving table to: %s", path)
 
             # Replace memmap paths with actual data before saving to parquet
             table = replace_memmap_paths_combined(table=table)
 
-            with FileLock(_lock_path(path=path), timeout=LOCK_TIMEOUT):
+            with portalocker.Lock(
+                _lock_path(path=path),
+                flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+                timeout=LOCK_TIMEOUT,
+            ):
                 pq.write_table(table, path)
         except Exception as exc:
-            self.logger.error(str(exc), exc_info=True, stack_info=True)
+            self.logger.exception("%s", exc, stack_info=True)
 
     def delete_file(self, *, path):
         """Delete file."""
         try:
-            self.logger.info(f"Deleting file: {path}")
-            with FileLock(_lock_path(path=path), timeout=LOCK_TIMEOUT):
+            self.logger.info("Deleting file: %s", path)
+            with portalocker.Lock(
+                _lock_path(path=path),
+                flags=portalocker.LOCK_EX | portalocker.LOCK_NB,
+                timeout=LOCK_TIMEOUT,
+            ):
                 if Path(path).exists():
                     Path(path).unlink()
-                    self.logger.info(f"File deleted successfully {path}")
+                    self.logger.info("File deleted successfully %s", path)
                 else:
                     self.logger.warning("File does not exist.")
         except Exception as exc:
-            self.logger.error(str(exc), exc_info=True, stack_info=True)
+            self.logger.exception("%s", exc, stack_info=True)
 
 
 def get_parquet_table_handler() -> BaseParquetTableHandler:

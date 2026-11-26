@@ -11,12 +11,13 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from docpipe.core.incremental_metadata.adapters.stores.postgres.postgres_incremental_store import (
     PostgresIncrementalMetadataStore,
 )
 from docpipe.core.incremental_metadata.domain.models import IncrementalMetadataRecord
+from docpipe.exceptions import LockTimeoutError
 
 _MODULE = "docpipe.core.incremental_metadata.adapters.stores.postgres.postgres_incremental_store"
 pytestmark = pytest.mark.integration
@@ -138,3 +139,121 @@ def test_concurrent_bootstrap_safe(database: tuple[str, str]) -> None:
         stores = [f.result() for f in futures]
 
     assert len(stores) == 3
+
+
+def test_concurrent_mark_missing_against_upsert(database: tuple[str, str]) -> None:
+    url, schema = database
+    job_id = "job-concurrent-mark-upsert"
+    store = _create_store(url=url, schema=schema)
+
+    # Prepopulate with 20 documents
+    initial_records = [
+        IncrementalMetadataRecord(
+            job_id=job_id,
+            doc_id=f"doc-{i}",
+            name=f"file-{i}.pdf",
+            modified_time=1000,
+        )
+        for i in range(20)
+    ]
+    store.upsert_records(job_id=job_id, job_run_id="run-init", records=initial_records)
+
+    def _upsert_worker(worker_id: int) -> None:
+        worker_store = _create_store(url=url, schema=schema)
+        records = [
+            IncrementalMetadataRecord(
+                job_id=job_id,
+                doc_id=f"doc-{i}",
+                name=f"file-{i}-v{worker_id}.pdf",
+                modified_time=2000 + worker_id,
+            )
+            for i in range(10, 30)
+        ]
+        worker_store.upsert_records(job_id=job_id, job_run_id=f"run-{worker_id}", records=records)
+
+    def _mark_missing_worker() -> set[str]:
+        worker_store = _create_store(url=url, schema=schema)
+        return worker_store.mark_missing_docs_as_deleted(job_id=job_id, doc_ids=[f"doc-{i}" for i in range(15)])
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        f_mark = executor.submit(_mark_missing_worker)
+        f_upserts = [executor.submit(_upsert_worker, w) for w in range(3)]
+
+        marked_deleted = f_mark.result()
+        for f in f_upserts:
+            f.result()
+
+    keep_ids = {f"doc-{i}" for i in range(15)}
+    contested_ids = {f"doc-{i}" for i in range(15, 30)}
+    all_ids = {f"doc-{i}" for i in range(30)}
+    initially_present_contested_ids = {f"doc-{i}" for i in range(15, 20)}
+
+    processed = store.get_processed_docs(job_id=job_id)
+    soft_deleted = store.get_soft_deleted_doc_ids(job_id=job_id)
+
+    # mark_missing always sees the seeded doc-15..19 as live, and can never touch the keep-list.
+    assert initially_present_contested_ids <= marked_deleted <= contested_ids
+
+    # Only mark_missing soft-deletes, so every soft-deleted doc must have been reported by it.
+    assert soft_deleted <= marked_deleted
+    assert soft_deleted.isdisjoint(keep_ids)
+
+    # No lost or phantom records: every doc is exactly one of live or soft-deleted.
+    assert set(processed).isdisjoint(soft_deleted)
+    assert set(processed) | soft_deleted == all_ids
+
+    # No torn records: each live doc carries metadata written entirely by one writer.
+    for doc_id, meta in processed.items():
+        index = int(doc_id.removeprefix("doc-"))
+        if index < 10:
+            # Never touched by any upsert worker.
+            assert meta == {"modified_time": 1000, "job_run_id": "run-init"}
+        else:
+            worker_id = meta["modified_time"] - 2000
+            assert worker_id in range(3)
+            assert meta["job_run_id"] == f"run-{worker_id}"
+
+
+def test_lock_timeout_rolls_back_partial_batch(database: tuple[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    url, schema = database
+    job_id = "job-timeout-test"
+
+    # Store with very short lock_timeout
+    with patch(f"{_MODULE}.get_postgres_connection_string", return_value=url):
+        store = PostgresIncrementalMetadataStore(config={"schema": schema, "lock_timeout": 0.5})
+
+    engine = create_engine(url)
+    lock_key = f"{schema}.inc_update_metadata:{job_id}"
+
+    # Hold the advisory lock on an external connection
+    raw_conn = engine.connect()
+    trans = raw_conn.begin()
+    try:
+        raw_conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": lock_key},
+        )
+
+        records = [
+            IncrementalMetadataRecord(
+                job_id=job_id,
+                doc_id=f"doc-timeout-{i}",
+                name=f"file-{i}.pdf",
+                modified_time=5000,
+            )
+            for i in range(5)
+        ]
+
+        # Upsert should fail with LockTimeoutError
+        with pytest.raises(LockTimeoutError):
+            store.upsert_records(job_id=job_id, job_run_id="run-timeout", records=records)
+
+    finally:
+        trans.rollback()
+        raw_conn.close()
+        engine.dispose()
+
+    # Verify no partial records remain in database
+    processed = store.get_processed_docs(job_id=job_id)
+    assert processed == {}

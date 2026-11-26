@@ -5,7 +5,7 @@
 
 import time
 
-from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.docpipe_exceptions import DocpipeException, LockTimeoutError
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger()
@@ -114,3 +114,19 @@ def should_retry_on_result(result, exception):
         Tuple of (should_retry: bool, error_message: str)
     """
     return not bool(result), "Error in acquiring postgres advisory lock"
+
+
+def should_retry_on_lock_timeout(*, result: object = None, exception: BaseException | None = None) -> tuple[bool, str]:
+    """
+    Retry logic for lock acquisition timeouts in incremental metadata stores.
+
+    Args:
+        result: The result from the function call (unused).
+        exception: Any exception that occurred.
+
+    Returns:
+        Tuple of (should_retry: bool, error_message: str). Retries only on LockTimeoutError.
+    """
+    if isinstance(exception, LockTimeoutError):
+        return True, f"Lock acquisition timeout: {exception!s}"
+    return False, ""

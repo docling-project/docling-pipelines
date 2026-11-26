@@ -10,15 +10,23 @@ offering ACID compliance and scalability for production environments.
 Features:
 - Persistent storage in PostgreSQL database
 - ACID transactions for data consistency
+- Advisory transaction-level locking per job with bounded lock_timeout
 - Efficient querying with indexes
 - Separate schema for isolation from job stats
 """
 
+import math
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any, cast
 
-from sqlalchemy import MetaData, delete, select, text, update
+import psycopg2.errors
+import sqlalchemy.exc
+from sqlalchemy import MetaData, String, all_, any_, bindparam, delete, select, text, update
 from sqlalchemy import Table as SATable
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Connection
 
 from docpipe.core.incremental_metadata.adapters.config.incremental_metadata_factory import (
     register_incremental_update_store,
@@ -32,11 +40,13 @@ from docpipe.core.job_management.adapters.stores.postgres.database import (
     create_session_factory,
     get_postgres_connection_string,
 )
-from docpipe.exceptions.docpipe_exceptions import (
+from docpipe.exceptions import (
     FlowExecutionFailedException,
     JobStatsStoreInitializationException,
+    LockTimeoutError,
 )
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.retry import retry_with_exponential_backoff, should_retry_on_lock_timeout
 
 from .models import IncrementalMetadataPostgresModel
 
@@ -62,6 +72,7 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         - DOCPIPE_POSTGRES_USER (default: docpipe_user)
         - DOCPIPE_POSTGRES_PASSWORD (required)
         - DOCPIPE_INCREMENTAL_POSTGRES_SCHEMA (default: incremental_metadata)
+        - lock_timeout: lock acquisition timeout in seconds (default: 30.0)
     """
 
     STORE_BACKEND = "postgresql"
@@ -79,6 +90,21 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         """
         self.config = config or {}
 
+        # Validate and read lock_timeout (seconds, positive number)
+        raw_lock_timeout = self.config.get("lock_timeout", 30.0)
+        if (
+            isinstance(raw_lock_timeout, bool)
+            or not isinstance(raw_lock_timeout, (int, float))
+            or not math.isfinite(raw_lock_timeout)
+            or raw_lock_timeout <= 0
+        ):
+            raise JobStatsStoreInitializationException(
+                message=f"Invalid lock_timeout: {raw_lock_timeout!r}. Must be a finite positive number of seconds.",
+                store_type="postgres",
+            )
+        # Round up and clamp to >= 1 ms: PostgreSQL treats lock_timeout = 0 as "wait forever".
+        self._lock_timeout_ms: int = max(1, math.ceil(raw_lock_timeout * 1000))
+
         # Extract flat postgres config: nested "postgres" key takes precedence
         postgres_config = self.config.get("postgres")
         flat_config = postgres_config if isinstance(postgres_config, dict) else self.config
@@ -87,7 +113,6 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         logger.debug("PostgresIncrementalMetadataStore config keys: %s", list(flat_config.keys()))
 
         # Wrap flat config in expected structure for get_postgres_connection_string
-        # The function expects config["postgres"]["password"], etc.
         wrapped_config = {"postgres": flat_config}
 
         # Get connection string from config or environment
@@ -105,8 +130,6 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
             self._session_factory = create_session_factory(engine=self._engine)
 
             # Create schema and incremental metadata table if they don't exist.
-            # We copy the SQLAlchemy Table into a per-instance MetaData with the
-            # target schema so we never mutate the shared class-level __table__.
             self.schema_name = flat_config.get("schema", "incremental_metadata")
             source_table = cast(SATable, IncrementalMetadataPostgresModel.__table__)  # type: ignore[attr-defined]
             instance_metadata = MetaData(schema=self.schema_name)
@@ -122,9 +145,10 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
                 self._table.create(connection, checkfirst=True)
 
             logger.info(
-                "PostgresIncrementalMetadataStore initialized successfully (schema: %s, table: %s)",
+                "PostgresIncrementalMetadataStore initialized successfully (schema: %s, table: %s, lock_timeout: %sms)",
                 self.schema_name,
                 self._table.name,
+                self._lock_timeout_ms,
             )
 
         except JobStatsStoreInitializationException:
@@ -134,6 +158,48 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
             raise JobStatsStoreInitializationException(
                 message=f"PostgreSQL initialization failed: {e}", store_type="postgres"
             ) from e
+
+    @staticmethod
+    def _is_lock_timeout(exc: Exception) -> bool:
+        """Check if an exception is a PostgreSQL lock timeout (55P03 / LockNotAvailable)."""
+        if isinstance(exc, sqlalchemy.exc.OperationalError):
+            orig = getattr(exc, "orig", None)
+            if orig is not None:
+                if getattr(orig, "pgcode", None) == "55P03":
+                    return True
+                if isinstance(orig, psycopg2.errors.LockNotAvailable):
+                    return True
+        return False
+
+    @contextmanager
+    def _write_transaction(self, *, job_id: str, operation: str) -> Generator[Connection, None, None]:
+        """Execute a write operation inside an advisory-locked transaction with bounded lock_timeout.
+
+        Sets transaction-level lock_timeout and acquires an advisory xact lock for the job.
+        Maps lock timeout errors (SQLSTATE 55P03) to LockTimeoutError.
+        """
+        lock_key = f"{self.schema_name}.inc_update_metadata:{job_id}"
+        timeout_val = f"{self._lock_timeout_ms}ms"
+
+        try:
+            with self._engine.begin() as conn:
+                conn.execute(
+                    text("SELECT set_config('lock_timeout', :val, true)"),
+                    {"val": timeout_val},
+                )
+                conn.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                    {"key": lock_key},
+                )
+                yield conn
+        except Exception as exc:
+            if self._is_lock_timeout(exc):
+                raise LockTimeoutError(
+                    f"Lock timeout during {operation} for job_id={job_id} (timeout={self._lock_timeout_ms}ms)"
+                ) from exc
+            if isinstance(exc, FlowExecutionFailedException):
+                raise
+            raise FlowExecutionFailedException(f"Failed to {operation} for job_id={job_id}: {exc}") from exc
 
     def get_processed_docs(self, *, job_id: str) -> dict[str, Any]:
         """Retrieve processed document IDs with modification times and job run IDs (non-deleted only)."""
@@ -155,48 +221,47 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         except Exception as exc:
             raise FlowExecutionFailedException(f"Failed to retrieve processed docs for job_id={job_id}: {exc}") from exc
 
+    @retry_with_exponential_backoff(
+        max_retries=5, initial_delay=1, max_delay=30, retry_logic=should_retry_on_lock_timeout
+    )
     def upsert_records(self, *, job_id: str, job_run_id: str, records: list[IncrementalMetadataRecord]) -> None:
-        """Insert or update incremental metadata records."""
+        """Insert or update incremental metadata records with retry on lock timeout."""
         if not records:
             return
 
-        try:
-            # Deduplicate by doc_id (last wins) and sort by doc_id
-            deduped: dict[str, IncrementalMetadataRecord] = {record.doc_id: record for record in records}
-            sorted_records = sorted(deduped.values(), key=lambda r: r.doc_id)
+        # Deduplicate by doc_id (last wins) and sort by doc_id
+        deduped: dict[str, IncrementalMetadataRecord] = {record.doc_id: record for record in records}
+        sorted_records = sorted(deduped.values(), key=lambda r: r.doc_id)
 
-            values = [
-                {
-                    "job_id": job_id,
-                    "id": record.doc_id,
-                    "name": record.name,
-                    "modified_time": record.modified_time,
-                    "job_run_id": job_run_id,
-                    "deleted": False,
-                }
-                for record in sorted_records
-            ]
+        values = [
+            {
+                "job_id": job_id,
+                "id": record.doc_id,
+                "name": record.name,
+                "modified_time": record.modified_time,
+                "job_run_id": job_run_id,
+                "deleted": False,
+            }
+            for record in sorted_records
+        ]
 
-            chunk_size = 1000
-            with self._engine.begin() as conn:
-                for i in range(0, len(values), chunk_size):
-                    chunk = values[i : i + chunk_size]
-                    stmt = pg_insert(self._table).values(chunk)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["job_id", "id"],
-                        set_={
-                            "name": stmt.excluded.name,
-                            "modified_time": stmt.excluded.modified_time,
-                            "job_run_id": stmt.excluded.job_run_id,
-                            "deleted": stmt.excluded.deleted,
-                        },
-                    )
-                    conn.execute(stmt)
+        chunk_size = 1000
+        with self._write_transaction(job_id=job_id, operation="upsert records") as conn:
+            for i in range(0, len(values), chunk_size):
+                chunk = values[i : i + chunk_size]
+                stmt = pg_insert(self._table).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["job_id", "id"],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "modified_time": stmt.excluded.modified_time,
+                        "job_run_id": stmt.excluded.job_run_id,
+                        "deleted": stmt.excluded.deleted,
+                    },
+                )
+                conn.execute(stmt)
 
-            logger.info("Upserted %s records for job_id=%s", len(records), job_id)
-
-        except Exception as exc:
-            raise FlowExecutionFailedException(f"Failed to upsert records for job_id={job_id}: {exc}") from exc
+        logger.info("Upserted %s records for job_id=%s", len(records), job_id)
 
     def get_soft_deleted_doc_ids(self, *, job_id: str) -> set[str]:
         """Retrieve document IDs marked as soft-deleted."""
@@ -218,102 +283,83 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
 
     def mark_missing_docs_as_deleted(self, *, job_id: str, doc_ids: list[str]) -> set[str]:
         """Mark documents as soft-deleted if not in provided list."""
-        try:
-            current_doc_ids = set(doc_ids)
+        stmt = (
+            update(self._table)
+            .where(
+                self._table.c.job_id == job_id,
+                self._table.c.deleted == False,  # noqa: E712
+            )
+            .values(deleted=True)
+            .returning(self._table.c.id)
+        )
+        params: dict[str, Any] = {}
+        if doc_ids:
+            stmt = stmt.where(self._table.c.id != all_(bindparam("doc_ids", type_=postgresql.ARRAY(String))))
+            params["doc_ids"] = list(doc_ids)
 
-            with self._engine.begin() as conn:
-                # Get all non-deleted record ids for this job
-                stmt = select(self._table.c.id).where(
-                    self._table.c.job_id == job_id,
-                    self._table.c.deleted == False,  # noqa: E712
-                )
-                rows = conn.execute(stmt).scalars().all()
+        with self._write_transaction(job_id=job_id, operation="mark missing docs as deleted") as conn:
+            rows = conn.execute(stmt, params).scalars().all()
+            deleted_ids = set(rows)
 
-                # Find documents to mark as deleted
-                deleted_ids = {doc_id for doc_id in rows if doc_id not in current_doc_ids}
+        if deleted_ids:
+            logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
 
-                if deleted_ids:
-                    update_stmt = (
-                        update(self._table)
-                        .where(
-                            self._table.c.job_id == job_id,
-                            self._table.c.id.in_(list(deleted_ids)),
-                        )
-                        .values(deleted=True)
-                    )
-                    conn.execute(update_stmt)
-                    logger.info("Marked %s docs as deleted for job_id=%s", len(deleted_ids), job_id)
-
-                return deleted_ids
-
-        except Exception as exc:
-            raise FlowExecutionFailedException(
-                f"Failed to mark missing docs as deleted for job_id={job_id}: {exc}"
-            ) from exc
+        return deleted_ids
 
     def unmark_soft_deleted_docs(self, *, job_id: str, doc_ids: list[str] | None = None) -> None:
         """Unmark soft-deleted documents, setting deleted flag back to False."""
         if doc_ids is not None and not doc_ids:
             return
-        try:
-            stmt = update(self._table).where(
+
+        stmt = (
+            update(self._table)
+            .where(
                 self._table.c.job_id == job_id,
                 self._table.c.deleted == True,  # noqa: E712
             )
-            if doc_ids is not None:
-                stmt = stmt.where(self._table.c.id.in_(doc_ids))
+            .values(deleted=False)
+        )
+        params: dict[str, Any] = {}
+        if doc_ids is not None:
+            stmt = stmt.where(self._table.c.id == any_(bindparam("doc_ids", type_=postgresql.ARRAY(String))))
+            params["doc_ids"] = list(doc_ids)
 
-            stmt = stmt.values(deleted=False)
-            with self._engine.begin() as conn:
-                result = conn.execute(stmt)
-                if result.rowcount > 0:
-                    logger.info("Unmarked %s soft-deleted docs for job_id=%s", result.rowcount, job_id)
-
-        except Exception as exc:
-            raise FlowExecutionFailedException(
-                f"Failed to unmark soft-deleted docs for job_id={job_id}: {exc}"
-            ) from exc
+        with self._write_transaction(job_id=job_id, operation="unmark soft deleted docs") as conn:
+            result = conn.execute(stmt, params)
+            if result.rowcount > 0:
+                logger.info("Unmarked %s soft-deleted docs for job_id=%s", result.rowcount, job_id)
 
     def purge_soft_deleted_docs(self, *, job_id: str) -> None:
         """Permanently delete all soft-deleted records for a given job."""
-        try:
-            stmt = delete(self._table).where(
-                self._table.c.job_id == job_id,
-                self._table.c.deleted == True,  # noqa: E712
-            )
-            with self._engine.begin() as conn:
-                conn.execute(stmt)
-                logger.info("Purged soft-deleted records for job_id=%s", job_id)
+        stmt = delete(self._table).where(
+            self._table.c.job_id == job_id,
+            self._table.c.deleted == True,  # noqa: E712
+        )
+        with self._write_transaction(job_id=job_id, operation="purge soft deleted docs") as conn:
+            conn.execute(stmt)
 
-        except Exception as exc:
-            raise FlowExecutionFailedException(f"Failed to purge soft-deleted docs for job_id={job_id}: {exc}") from exc
+        logger.info("Purged soft-deleted records for job_id=%s", job_id)
 
     def delete_docs(self, *, job_id: str, doc_ids: list[str]) -> None:
         """Permanently delete metadata records for specified documents."""
         if not doc_ids:
             return
 
-        try:
-            stmt = delete(self._table).where(
-                self._table.c.job_id == job_id,
-                self._table.c.id.in_(doc_ids),
-            )
-            with self._engine.begin() as conn:
-                conn.execute(stmt)
-                logger.info("Deleted %s docs for job_id=%s", len(doc_ids), job_id)
+        stmt = delete(self._table).where(
+            self._table.c.job_id == job_id,
+            self._table.c.id == any_(bindparam("doc_ids", type_=postgresql.ARRAY(String))),
+        )
+        with self._write_transaction(job_id=job_id, operation="delete docs") as conn:
+            conn.execute(stmt, {"doc_ids": list(doc_ids)})
 
-        except Exception as exc:
-            raise FlowExecutionFailedException(f"Failed to delete docs for job_id={job_id}: {exc}") from exc
+        logger.info("Deleted %s docs for job_id=%s", len(doc_ids), job_id)
 
     def clear(self, *, job_id: str) -> None:
         """Clear all incremental metadata for a specific job."""
-        try:
-            stmt = delete(self._table).where(
-                self._table.c.job_id == job_id,
-            )
-            with self._engine.begin() as conn:
-                conn.execute(stmt)
-                logger.info("Cleared all metadata for job_id=%s", job_id)
+        stmt = delete(self._table).where(
+            self._table.c.job_id == job_id,
+        )
+        with self._write_transaction(job_id=job_id, operation="clear metadata") as conn:
+            conn.execute(stmt)
 
-        except Exception as exc:
-            raise FlowExecutionFailedException(f"Failed to clear metadata for job_id={job_id}: {exc}") from exc
+        logger.info("Cleared all metadata for job_id=%s", job_id)
