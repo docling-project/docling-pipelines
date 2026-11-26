@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 from docpipe.utils.orchestration.dag_utils import (
     extract_dag_nodes,
     get_topologically_sorted_node_ids,
+    identify_ingest_and_destination_nodes,
 )
 
 
@@ -386,3 +387,76 @@ class TestGetTopologicallySortedNodeIds:
         }
 
         assert get_topologically_sorted_node_ids(flow_definition=flow_definition) == ["Ingest", "Extract"]
+
+    def test_authoring_format_ignores_dependencies_on_unknown_operators(self):
+        """Dependencies on operators not in the authoring flow are left out of the sort."""
+        flow_definition = {
+            "flow": [
+                {"name": "Extract", "depends_on": ["Ingest", "Removed"]},
+                {"name": "Ingest", "depends_on": []},
+            ]
+        }
+
+        assert get_topologically_sorted_node_ids(flow_definition=flow_definition) == ["Ingest", "Extract"]
+
+    def test_authoring_format_without_named_operators_returns_empty_list(self):
+        """An authoring flow whose entries carry no names has nothing to sort."""
+        flow_definition = {"flow": [{"type": "ingest_source"}, "not-a-dict"]}
+
+        assert get_topologically_sorted_node_ids(flow_definition=flow_definition) == []
+
+    def test_elyra_format_without_nodes_returns_empty_list(self):
+        """An Elyra snapshot whose pipeline has no nodes converts to an empty DAG and yields no IDs."""
+        flow_definition = {"doc_type": "pipeline", "pipelines": [{"id": "p1", "nodes": []}]}
+
+        with patch("docpipe.utils.orchestration.dag_utils.ElyraConverter") as mock_cls:
+            mock_cls.return_value.transform_elyra_to_internal.return_value = {"flow": {"dag": []}}
+            result = get_topologically_sorted_node_ids(flow_definition=flow_definition)
+
+        assert result == []
+
+    def test_unrecognised_snapshot_format_returns_empty_list(self):
+        """A snapshot with neither a dag list, an Elyra pipeline nor an authoring flow list yields no IDs."""
+        assert get_topologically_sorted_node_ids(flow_definition={"name": "x", "flow": "not-a-list"}) == []
+
+
+class TestReconstructFromAuthoringEdges:
+    """Test edge reconstruction for authoring flows with dangling dependencies."""
+
+    def test_dependency_on_unknown_operator_creates_no_edge(self):
+        """A depends_on entry naming an operator absent from the flow is ignored for both edge lists."""
+        flow_definition = {
+            "flow": [
+                {"name": "Ingest", "type": "ingest_source"},
+                {"name": "Extract", "type": "extract_operator", "depends_on": ["Ingest", "Ghost"]},
+            ]
+        }
+        node_stats = {"uuid-i": {"name": "Ingest"}, "uuid-e": {"name": "Extract"}}
+
+        result = extract_dag_nodes(flow_definition=flow_definition, node_stats=node_stats)
+
+        by_id = {node["id"]: node for node in result}
+        assert by_id["uuid-e"]["input_edges"] == [{"node_id_ref": "uuid-i"}]
+        assert by_id["uuid-i"]["output_edges"] == [{"node_id_ref": "uuid-e"}]
+        assert by_id["uuid-e"]["output_edges"] == []
+
+
+class TestIdentifyIngestAndDestinationNodes:
+    """Test identify_ingest_and_destination_nodes."""
+
+    def test_identifies_ingest_and_destinations_and_skips_nodes_without_id(self):
+        """The node without input edges is the ingest node; nodes without output edges are destinations."""
+        dag_nodes = [
+            {"name": "no-id", "input_edges": [], "output_edges": []},
+            {"id": "ingest", "input_edges": [], "output_edges": [{"node_id_ref": "a"}, {"node_id_ref": "b"}]},
+            {"id": "a", "input_edges": [{"node_id_ref": "ingest"}], "output_edges": []},
+            {"id": "b", "input_edges": [{"node_id_ref": "ingest"}]},
+        ]
+
+        assert identify_ingest_and_destination_nodes(dag_nodes) == ("ingest", ["a", "b"])
+
+    def test_no_destination_nodes(self):
+        """When every node has output edges, no destinations are reported."""
+        dag_nodes = [{"id": "x", "output_edges": [{"node_id_ref": "x"}], "input_edges": [{"node_id_ref": "x"}]}]
+
+        assert identify_ingest_and_destination_nodes(dag_nodes) == (None, [])

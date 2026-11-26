@@ -11,7 +11,7 @@ Tests cover:
 
 from types import SimpleNamespace
 
-from docpipe.utils.orchestration.node_ordering import map_node_order_to_stats, order_node_items
+from docpipe.utils.orchestration.node_ordering import build_name_to_uuid, map_node_order_to_stats, order_node_items
 
 
 class TestMapNodeOrderToStats:
@@ -77,3 +77,30 @@ class TestOrderNodeItems:
         }
         result = order_node_items(node_stats=node_stats, node_order=None)
         assert [k for k, _ in result] == ["completed", "pending"]
+
+
+class TestBuildNameToUuid:
+    """Test build_name_to_uuid helper."""
+
+    def test_skips_entries_without_a_resolvable_name(self):
+        """Entries that are neither objects with a name nor dicts, or have an empty name, are skipped."""
+        node_stats = {
+            "uuid-obj": SimpleNamespace(name="Ingest"),
+            "uuid-dict": {"name": "Extract"},
+            "uuid-empty": {"name": ""},
+            "uuid-other": 42,
+        }
+
+        assert build_name_to_uuid(node_stats) == {"Ingest": "uuid-obj", "Extract": "uuid-dict"}
+
+
+class TestOrderNodeItemsDuplicates:
+    """Test order_node_items with duplicate and unknown node_order entries."""
+
+    def test_duplicate_and_unknown_order_entries_are_ignored(self):
+        """Each node appears once in the order given; unknown IDs in node_order are skipped."""
+        node_stats = {"a": {"name": "A", "start_time": 2}, "b": {"name": "B", "start_time": 1}}
+
+        result = order_node_items(node_stats=node_stats, node_order=["b", "missing", "b", "a"])
+
+        assert [node_id for node_id, _ in result] == ["b", "a"]
