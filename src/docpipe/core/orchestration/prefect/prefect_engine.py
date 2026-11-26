@@ -729,7 +729,6 @@ class PrefectEngine(FlowEnginePort):
             failed_doc_ids=failed_doc_ids,
             non_recoverable_docs_table=non_recoverable_docs_table,
         )
-
         # Reset non-recoverable docs for micro-batching support
         self.orchestrator._reset_non_recoverable_docs_for_batch(
             global_config=global_config, common_log_arguments=self.common_log_arguments

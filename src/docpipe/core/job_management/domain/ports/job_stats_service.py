@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JobStatsService Port - Interface for job statistics service operations
 
@@ -170,6 +173,7 @@ class JobStatsService(ABC):
         node_metadata: dict[str, Any] | None = None,
         batch_id: str | None = None,
         batch_num: int | None = None,
+        deferred_execution_docs: list[str] | None = None,
     ) -> None:
         """
         Finalize node execution with completion statistics.
@@ -190,6 +194,7 @@ class JobStatsService(ABC):
             node_metadata: Optional operator-specific metadata
             batch_id: Optional batch identifier for micro-batch execution
             batch_num: Optional batch number for micro-batch execution
+            deferred_execution_docs: Documents scheduled for resumption at a downstream node
 
         Raises:
             JobRunNotFoundException: If job_run_id not found

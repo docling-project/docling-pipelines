@@ -6,7 +6,7 @@ Batch aggregation logic for node statistics.
 This is the single source of truth for batch aggregation.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from docpipe.core.constants.constants import COMPLETED_JOB_STATUSES, ExecutionStatus, Metrics
@@ -23,6 +23,7 @@ class DocumentStats:
     total_expected: int
     completed: int
     processed: int
+    deferred: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -68,6 +69,7 @@ def _get_empty_node_stats(*, node_id: str) -> NodeStats:
         total_docs=[],
         failed_docs=[],
         skipped_docs=[],
+        deferred_execution_docs=[],
         docs_completed=[],
         docs_completed_count=0,
         node_metadata={},
@@ -183,6 +185,7 @@ def _aggregate_document_lists(*, batch_records: list[NodeStats]) -> tuple:
     all_total_docs = set()
     all_failed_docs = set()
     all_skipped_docs = set()
+    all_deferred_docs = set()
     all_docs_completed = set()
 
     for record in batch_records:
@@ -194,10 +197,15 @@ def _aggregate_document_lists(*, batch_records: list[NodeStats]) -> tuple:
             all_failed_docs.update(record.failed_docs)
         if record.skipped_docs:
             all_skipped_docs.update(record.skipped_docs)
+        if record.deferred_execution_docs:
+            all_deferred_docs.update(record.deferred_execution_docs)
         if record.docs_completed:
             all_docs_completed.update(record.docs_completed)
 
-    return all_col_names, all_total_docs, all_failed_docs, all_skipped_docs, all_docs_completed
+    # A document deferred in one batch record but resolved in another is no longer deferred
+    all_deferred_docs -= all_docs_completed | all_failed_docs | all_skipped_docs
+
+    return all_col_names, all_total_docs, all_failed_docs, all_skipped_docs, all_docs_completed, all_deferred_docs
 
 
 def _aggregate_errors(*, batch_records: list[NodeStats]) -> str:
@@ -764,6 +772,9 @@ def _inject_metadata_fields(
     metadata[Metrics.External.COMPLETED_DOCS_COUNT] = doc_stats.completed
     metadata[Metrics.External.PROCESSED_DOCS] = doc_stats.processed
     metadata[Metrics.External.NODE_STATUS] = aggregated_status
+    # Deferred documents are in scope but resume at a downstream node: total = processed + deferred + ...
+    metadata[Metrics.External.DEFERRED_EXECUTION_DOCS] = list(doc_stats.deferred)
+    metadata[Metrics.External.DEFERRED_EXECUTION_DOCS_COUNT] = len(doc_stats.deferred)
 
     # Add batch-based Progress field
     _add_progress_field(
@@ -829,9 +840,14 @@ def aggregate_batch_node_stats(
     )
 
     # Aggregate document lists
-    all_col_names, all_total_docs, all_failed_docs, all_skipped_docs, all_docs_completed = _aggregate_document_lists(
-        batch_records=batch_records
-    )
+    (
+        all_col_names,
+        all_total_docs,
+        all_failed_docs,
+        all_skipped_docs,
+        all_docs_completed,
+        all_deferred_docs,
+    ) = _aggregate_document_lists(batch_records=batch_records)
 
     # Aggregate errors
     aggregated_error = _aggregate_errors(batch_records=batch_records)
@@ -842,6 +858,7 @@ def aggregate_batch_node_stats(
 
     # Calculate statistics
     # Processed docs: sum of completed, failed, and skipped documents for the processed batches
+    # Consistency: total_docs = processed + deferred + failed + skipped (deferred docs are in scope but not yet run)
     processed_docs = len(all_docs_completed) + len(all_failed_docs) + len(all_skipped_docs)
     # Completed docs: only successfully completed documents
     completed_docs_count = len(all_docs_completed)
@@ -857,7 +874,10 @@ def aggregate_batch_node_stats(
 
     # Create data class instances for cleaner parameter passing
     doc_stats = DocumentStats(
-        total_expected=total_expected_docs, completed=completed_docs_count, processed=processed_docs
+        total_expected=total_expected_docs,
+        completed=completed_docs_count,
+        processed=processed_docs,
+        deferred=sorted(all_deferred_docs),
     )
 
     batch_progress = BatchProgress(
@@ -887,6 +907,7 @@ def aggregate_batch_node_stats(
         total_docs=sorted(all_total_docs),
         failed_docs=sorted(all_failed_docs),
         skipped_docs=sorted(all_skipped_docs),
+        deferred_execution_docs=sorted(all_deferred_docs),
         docs_completed=sorted(all_docs_completed),
         docs_completed_count=len(all_docs_completed),
         node_metadata=aggregated_metadata,
