@@ -5,12 +5,17 @@ import { server } from '../../mocks/server';
 import { http, HttpResponse } from 'msw';
 import React from 'react';
 import { Provider } from 'react-redux';
+import { IntlProvider } from 'react-intl';
 import { createTestStore } from '../../mocks/fixtures/store.fixture';
 
 function makeWrapper() {
   const store = createTestStore();
   const Wrapper = ({ children }: { children: React.ReactNode }) =>
-    React.createElement(Provider as any, { store }, children);
+    React.createElement(
+      Provider as any,
+      { store },
+      React.createElement(IntlProvider, { locale: 'en', defaultLocale: 'en' }, children)
+    );
   return { store, Wrapper };
 }
 
@@ -151,5 +156,53 @@ describe('useJobRunPoller', () => {
     act(() => { result.current.startPoll('run-unmount'); });
     // Unmount triggers cleanup — should not throw
     expect(() => { unmount(); }).not.toThrow();
+  });
+
+  describe('completion notifications', () => {
+    async function runToTerminal(status: string, flowName?: string) {
+      server.use(
+        http.get('/api/job_runs/:id', () =>
+          HttpResponse.json({ job_stats: { status, job_run_id: 'run-1', job_id: 'job-1' } })
+        )
+      );
+      const { Wrapper, store } = makeWrapper();
+      const { result } = renderHook(() => useJobRunPoller(), { wrapper: Wrapper });
+      act(() => { result.current.startPoll('run-1', flowName); });
+      // First poll, then the one-shot final poll after the terminal status.
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      return store.getState().notifications;
+    }
+
+    it('shows a success notification with the flow name on Completed', async () => {
+      const state = await runToTerminal('Completed', 'my-flow');
+      expect(state.history).toHaveLength(1);
+      expect(state.history[0]?.kind).toBe('success');
+      expect(state.history[0]?.title).toBe('Execution of the flow my-flow completed successfully.');
+    });
+
+    it('shows an error notification on Failed', async () => {
+      const state = await runToTerminal('Failed', 'my-flow');
+      expect(state.history).toHaveLength(1);
+      expect(state.history[0]?.kind).toBe('error');
+      expect(state.history[0]?.title).toBe('Execution of the flow my-flow failed.');
+    });
+
+    it('shows a warning notification on CompletedWithErrors', async () => {
+      const state = await runToTerminal('CompletedWithErrors', 'my-flow');
+      expect(state.history).toHaveLength(1);
+      expect(state.history[0]?.kind).toBe('warning');
+      expect(state.history[0]?.title).toBe('Execution of the flow my-flow completed with issues.');
+    });
+
+    it('does not notify for Canceled', async () => {
+      const state = await runToTerminal('Canceled', 'my-flow');
+      expect(state.history).toHaveLength(0);
+    });
+
+    it('does not notify when no flow name is given', async () => {
+      const state = await runToTerminal('Completed');
+      expect(state.history).toHaveLength(0);
+    });
   });
 });

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import pytest
 from pydantic import BaseModel
 
@@ -27,6 +30,15 @@ from docpipe.core.operators.ingest.ports.outbound.document_source import Documen
 
 class DummyConfig(BaseModel):
     value: str = "x"
+
+
+@pytest.fixture(autouse=True)
+def _restore_source_adapter_registry():
+    """Put every registered source back after a test that clears the registry, for the tests that run later."""
+    saved = dict(SourceAdapterFactory._adapters)
+    yield
+    SourceAdapterFactory._adapters.clear()
+    SourceAdapterFactory._adapters.update(saved)
 
 
 class TestSourceAdapterFactory:

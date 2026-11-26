@@ -41,7 +41,7 @@ It connects to cloud document sources (S3, OneDrive, SharePoint, Google Drive, B
 - 🔀 **[DAG-based flows](docs/guides/FLOW_AUTHORING_FORMAT.md) & [micro-batching](docs/integrations/prefect/DISTRIBUTED_EXECUTION_GUIDE.md)** — define pipelines as JSON with automatic dependency resolution, parallel micro-batching, and distributed execution via Prefect (thread pools, process pools, or Docker work pools)
 - 🔄 **[Incremental processing](docs/reference/GLOBAL_CONFIG.md#incremental-processing)** — stateful delta runs (backed by Parquet or PostgreSQL) that track document changes, skip unchanged files, and optionally synchronize source deletions
 - ⚡ **[Event-driven streaming](docs/guides/EVENT_STREAMING_GUIDE.md)** — real-time Kafka event consumption with Schema Registry support and routing-key-to-flow mappings for automated create/update/delete triggers
-- 🔐 **[Enterprise security & governance](docs/guides/SECURITY_BEST_PRACTICES.md)** — [HashiCorp Vault](docs/guides/VAULT_INTEGRATION_GUIDE.md) (`vault://`) secret resolution, document [ACL extraction](docs/operators/extract/acl_readme.md) and [query-time enforcement](docs/api/ACL_DOCUMENT_RETRIEVAL.md), and [OAuth2/OIDC](docs/api/OAUTH2_AUTHENTICATION.md) + LDAP/JWT REST API authentication
+- 🔐 **[Enterprise security & governance](docs/guides/SECURITY_BEST_PRACTICES.md)** — [HashiCorp Vault](docs/guides/VAULT_INTEGRATION_GUIDE.md) (`vault://`) secret resolution with a [deny-by-default policy](docs/guides/SECRETS_GUIDE.md), document [ACL extraction](docs/operators/extract/acl_readme.md) and [query-time enforcement](docs/api/ACL_DOCUMENT_RETRIEVAL.md), and [OAuth2/OIDC](docs/api/OAUTH2_AUTHENTICATION.md) + LDAP/JWT REST API authentication
 - 📊 **Observability, lineage & reporting** — [OpenLineage](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md) event emission, [OpenTelemetry](docs/guides/TELEMETRY_SETUP.md) distributed tracing and metrics, and automated per-run [CSV job reports](docs/guides/JOB_REPORT_GENERATION.md)
 - 🗂️ **Asset management** — organize pipelines and data with Projects, [Document Libraries](docs/guides/USER_GUIDE_DOCUMENT_LIBRARIES.md), [Document Sets](docs/operators/storage/document_set_readme.md), and custom [Document Class schemas](docs/reference/DOCUMENT_SCHEMAS.md) (backed by DuckDB or PostgreSQL)
 - 🔌 **[Extensible](docs/guides/CUSTOM_OPERATORS_GUIDE.md)** — load custom operators from Python packages, local paths, or S3 without modifying core code
@@ -118,6 +118,8 @@ docling-pipelines-api
 uvicorn docpipe.api.main:app --host 0.0.0.0 --port 8080
 ```
 
+Authentication is enabled by default for both the REST API and the bundled UI. The API refuses to start until `JWT_SECRET_KEY` is set (at least 32 random characters), and the UI redirects to `/ui/login` until you sign in with a configured login method such as LDAP or the bootstrap administrator. To run without authentication on a local, trusted machine, set `DOCPIPE_AUTH_ENABLED=false` before starting the API. See the [Authentication and Authorization Guide](docs/guides/AUTHENTICATION_AND_AUTHORIZATION_GUIDE.md).
+
 Interactive OpenAPI documentation is available at `http://localhost:8080/api/v1/docs`.
 
 ### 4. Documentation MCP Server
@@ -176,6 +178,7 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 - [REST API Server](docs/api/REST_API_SERVER.md) — endpoints, OAuth2/LDAP authentication, and ACL document retrieval
 - [Event Streaming Guide](docs/guides/EVENT_STREAMING_GUIDE.md) — Kafka event-driven execution and routing-key mappings
 - [Observability & Lineage](docs/guides/TELEMETRY_SETUP.md) — OpenTelemetry tracing, [OpenLineage](docs/integrations/openlineage/OPENLINEAGE_GUIDE.md), and [CSV Job Reports](docs/guides/JOB_REPORT_GENERATION.md)
+- [Secrets Guide](docs/guides/SECRETS_GUIDE.md) — `vault://` reference rules, path policy, audit records, and custom operator isolation
 - [Vault Integration](docs/guides/VAULT_INTEGRATION_GUIDE.md) — HashiCorp Vault `vault://` secret resolution
 - [Deployment Guides](docs/deployment/DOCKER_COMPOSE.md) — Docker Compose and [OpenShift](docs/deployment/OPENSHIFT.md) deployment
 - [Architecture](ARCHITECTURE.md) — system design and distributed execution patterns

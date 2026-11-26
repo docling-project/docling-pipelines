@@ -45,7 +45,8 @@ docker compose --env-file docker/event-streaming/.env -f docker/event-streaming/
 or, for a GPU build, use:
 
 ```bash
-# docker compose --env-file docker/event-streaming/.env -f docker/event-streaming/docker-compose.yml build --build-arg COMPUTE_BACKEND=gpu
+docker compose --env-file docker/event-streaming/.env -f docker/event-streaming/docker-compose.yml build \
+  --build-arg BUILD_PROFILE=gpu
 ```
 
 ## Step 3: Start Application

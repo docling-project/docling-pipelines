@@ -11,9 +11,13 @@ import hashlib
 import json
 from typing import Any
 
-from pymilvus import MilvusClient
+from pymilvus import DataType, MilvusClient
 
 from docpipe.core.constants import OperatorConstants
+from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import (
+    FEATURE_TYPE_TO_MILVUS_DTYPE,
+    VARCHAR_MAX_LENGTH,
+)
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     build_mapping_dict,
@@ -78,6 +82,17 @@ class MilvusBatchProcessor:
         self.primary_key_field = primary_key_field
         self.embeddings_column = embeddings_column
         self.add_sparse_vector = add_sparse_vector
+        # Same name lookup as MilvusIndexManager, so the field written is the field the schema declares.
+        self._content_field_name: str = self._mapping_dict.get(
+            OperatorConstants.Columns.DOC_COLUMN_DEFAULT,
+            OperatorConstants.VectorDB.DEFAULT_TEXT_FIELD_NAME,
+        )
+        self._varchar_field_names: frozenset[str] = self._resolve_varchar_field_names(
+            feature_mappings=self.feature_mappings,
+            available_features=self.available_features,
+            content_field_name=self._content_field_name,
+            primary_key_field=self.primary_key_field,
+        )
 
     def prepare_document(self, *, row_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -85,8 +100,9 @@ class MilvusBatchProcessor:
         Handles both dense and sparse vector modes.
 
         Only fields explicitly listed in feature_mappings will be included in the
-        indexed document. This ensures predictable behavior and matches the
-        documented configuration pattern.
+        indexed document, plus the collection's content field: when no mapping
+        targets it, it is filled from the row's ``content`` value if that value
+        fits in a Milvus VARCHAR.
 
         Args:
             row_data: Raw row data from PyArrow table
@@ -144,19 +160,27 @@ class MilvusBatchProcessor:
 
             doc[mapped_name] = value
 
+        self._fill_unmapped_content_field(doc=doc, row_data=row_data)
         return doc
 
-    def create_batches(self, *, documents: list[tuple[str, dict[str, Any]]]) -> list[list[dict[str, Any]]]:
+    def create_batches(
+        self, *, documents: list[tuple[str, dict[str, Any]]]
+    ) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
         """
         Create batches from documents considering both count and size limits.
+
+        A document with a VARCHAR value over the Milvus limit is left out of the batches and
+        reported in the returned failed items, so it does not fail the other documents in its batch.
 
         Args:
             documents: List of (doc_id, document_dict) tuples
 
         Returns:
-            List of batches, where each batch is a list of prepared documents
+            Tuple of (batches, failed_items): each batch is a list of prepared documents, and each
+            failed item is in the shape VectorDBOperator reads
         """
         batches: list[list[dict[str, Any]]] = []
+        failed_items: list[dict[str, Any]] = []
         current_batch: list[dict[str, Any]] = []
         current_size: int = 0
         max_size_bytes: int = MAX_BATCH_SIZE_MB * 1024 * 1024
@@ -173,6 +197,28 @@ class MilvusBatchProcessor:
 
             # Add primary key
             prepared_doc[self.primary_key_field] = doc_id
+
+            # Milvus rejects the whole insert call if one value is too long, so reject only this row
+            oversized: tuple[str, int] | None = self._find_oversized_varchar_value(doc=prepared_doc)
+            if oversized is not None:
+                field_name, size = oversized
+                logger.warning(
+                    "Skipping chunk %s: Milvus field '%s' is %s UTF-8 bytes, over the VARCHAR limit of %s",
+                    doc_id,
+                    field_name,
+                    size,
+                    VARCHAR_MAX_LENGTH,
+                )
+                failed_items.append(
+                    self._failed_item(
+                        chunk_pk=doc_id,
+                        reason=(
+                            f"Milvus field '{field_name}' is {size} UTF-8 bytes, over the VARCHAR limit of "
+                            f"{VARCHAR_MAX_LENGTH}; add a chunker node before vectordb"
+                        ),
+                    )
+                )
+                continue
 
             # Calculate document size
             doc_size = calculate_batch_size_bytes(documents=[prepared_doc])
@@ -198,12 +244,13 @@ class MilvusBatchProcessor:
             batches.append(current_batch)
 
         logger.info(
-            "Created %s batches from %s documents, total docs in batches: %s",
+            "Created %s batches from %s documents, total docs in batches: %s, rejected before insert: %s",
             len(batches),
             len(documents),
             sum(len(b) for b in batches),
+            len(failed_items),
         )
-        return batches
+        return batches, failed_items
 
     def process_batches(self, *, batches: list[list[dict[str, Any]]]) -> tuple[int, list[dict[str, Any]]]:
         """
@@ -263,7 +310,9 @@ class MilvusBatchProcessor:
                 logger.error("[MILVUS INSERT] Batch %s/%s FAILED: %s", i + 1, len(batches), e)
                 # Add all documents in failed batch to failed items
                 for doc in batch:
-                    all_failed.append({"document": doc, "error": str(e)})
+                    all_failed.append(
+                        self._failed_item(chunk_pk=str(doc.get(self.primary_key_field, "unknown")), reason=str(e))
+                    )
 
         logger.info(
             "[MILVUS INSERT] Batch insertion complete: %s documents inserted successfully, %s failed",
@@ -399,3 +448,79 @@ class MilvusBatchProcessor:
         except Exception as e:
             logger.error("Error querying PKs by doc IDs: %s", e)
             return {}
+
+    def _fill_unmapped_content_field(self, *, doc: dict[str, Any], row_data: dict[str, Any]) -> None:
+        """Write the chunk text into the collection's content field when no mapping covers it.
+
+        MilvusIndexManager always declares a content field, named by the ``content`` feature
+        mapping or ``text`` by default. Default feature mappings only map ``content`` in sparse
+        mode, so without this fallback dense-mode rows are inserted with an empty content field.
+
+        An explicit mapping always wins: if any feature is mapped to the content field, the
+        fallback is skipped, even when that feature's value is missing for this row.
+
+        The fallback is best-effort and never makes a row fail: text over the Milvus VARCHAR
+        limit is left out (the field stays empty, as it did before this fallback existed) and
+        a warning is logged. Explicitly mapped values over the limit are rejected per row in
+        create_batches instead.
+        """
+        if self._content_field_name in self._mapping_dict.values():
+            return
+        content_config: dict[str, Any] = self.available_features.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT, {})
+        if not content_config.get(OperatorConstants.Config.AVAILABLE_FOR_VECTOR_DB, True):
+            return
+        content_value: Any = row_data.get(OperatorConstants.Columns.DOC_COLUMN_DEFAULT)
+        if not isinstance(content_value, str):
+            return
+        size: int = self._utf8_length(value=content_value)
+        if size > VARCHAR_MAX_LENGTH:
+            logger.warning(
+                "Leaving Milvus field '%s' empty for document '%s': content is %s UTF-8 bytes, over the "
+                "VARCHAR limit of %s. Add a chunker node before vectordb to store the text.",
+                self._content_field_name,
+                row_data.get(OperatorConstants.Columns.NAME, "unknown"),
+                size,
+                VARCHAR_MAX_LENGTH,
+            )
+            return
+        doc[self._content_field_name] = content_value
+
+    def _find_oversized_varchar_value(self, *, doc: dict[str, Any]) -> tuple[str, int] | None:
+        """Return (field name, UTF-8 byte size) of the first VARCHAR value over the Milvus limit, if any."""
+        for field_name in sorted(self._varchar_field_names):
+            value: Any = doc.get(field_name)
+            if isinstance(value, str):
+                size: int = self._utf8_length(value=value)
+                if size > VARCHAR_MAX_LENGTH:
+                    return field_name, size
+        return None
+
+    @staticmethod
+    def _resolve_varchar_field_names(
+        *,
+        feature_mappings: list[dict[str, str]],
+        available_features: dict[str, Any],
+        content_field_name: str,
+        primary_key_field: str,
+    ) -> frozenset[str]:
+        """Return the collection fields that MilvusIndexManager declares as VARCHAR with VARCHAR_MAX_LENGTH."""
+        names: set[str] = {content_field_name}
+        for feature_name, mapped_name in feature_mapping_items(feature_mappings):
+            if mapped_name == primary_key_field:
+                continue
+            feature_type: str = available_features.get(feature_name, {}).get(
+                OperatorConstants.Misc.TYPE, OperatorConstants.Types.TYPE_TEXT
+            )
+            if FEATURE_TYPE_TO_MILVUS_DTYPE.get(feature_type) == DataType.VARCHAR:
+                names.add(mapped_name)
+        return frozenset(names)
+
+    @staticmethod
+    def _utf8_length(*, value: str) -> int:
+        """Return the value's size in UTF-8 bytes, the unit Milvus uses for VARCHAR max_length."""
+        return len(value.encode("utf-8"))
+
+    @staticmethod
+    def _failed_item(*, chunk_pk: str, reason: str) -> dict[str, Any]:
+        """Build a failed item in the shape VectorDBOperator reads, shared with the other adapters."""
+        return {"index": {"_id": chunk_pk, "error": {"reason": reason}}}

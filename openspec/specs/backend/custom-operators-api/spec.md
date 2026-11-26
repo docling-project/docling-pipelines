@@ -125,3 +125,52 @@ Every `/api/v1/custom_operators` route, including list, get, `directory_tree`, c
 #### Scenario: Delete while disabled
 - **WHEN** a stored operator is deleted and custom operators are disabled
 - **THEN** the operator is removed and no factory refresh is attempted
+
+### Requirement: Upload is restricted to configured identities when secrets are in use
+When a secret provider is registered, create, update, and delete SHALL additionally require the authenticated username to appear in `custom_operators.allowed_uploaders`. An empty or unset list SHALL permit nobody. When no secret provider is registered, any authenticated user SHALL be permitted, as before.
+
+#### Scenario: Authenticated but not listed
+- **WHEN** a secret provider is registered, the caller is authenticated, and the caller is not in `custom_operators.allowed_uploaders`
+- **THEN** the response is 403 and no file is stored
+
+#### Scenario: Listed uploader
+- **WHEN** a secret provider is registered and the caller is in `custom_operators.allowed_uploaders`
+- **THEN** the operation proceeds
+
+#### Scenario: No secret provider
+- **WHEN** no secret provider is registered and the caller is authenticated
+- **THEN** the operation proceeds without an uploader list
+
+### Requirement: Custom operator changes are audited in a dedicated store
+Every create, update, and delete attempt, including rejected ones, SHALL emit one structured JSON record to a dedicated `docpipe.audit` logger that debug and scrub filters cannot suppress. The record SHALL contain timestamp, caller, `operator_id`, `short_name`, action, `script_sha256`, and `outcome` (`success` or `rejected`). Retention SHALL be configurable by `audit.retention_days`.
+
+#### Scenario: Successful change
+- **WHEN** an operator is created, replaced, or deleted
+- **THEN** one record with outcome `success`, the caller, operator, action, and script digest is written to `docpipe.audit`
+
+#### Scenario: Rejected attempt
+- **WHEN** a create, update, or delete is refused with 403 or a validation error
+- **THEN** one record with outcome `rejected` is written to `docpipe.audit`
+
+#### Scenario: Debug level does not hide the record
+- **WHEN** `DS_LOG_LEVEL` is set to `WARNING`
+- **THEN** audit records are still written
+
+### Requirement: Custom operator changes require administrator
+Creating, updating and deleting custom operators SHALL require the `admin` role, because an upload runs arbitrary code in the pipeline runtime. Listing and reading operators SHALL remain available to any authenticated caller.
+
+#### Scenario: Editor upload refused
+- **WHEN** an editor posts a valid `.py` operator to `POST /api/v1/custom_operators`
+- **THEN** the response is 403 and the operator is not stored
+
+#### Scenario: Editor update and delete refused
+- **WHEN** an editor calls `PATCH` or `DELETE` on a custom operator
+- **THEN** the response is 403
+
+#### Scenario: Viewer can list
+- **WHEN** a viewer calls `GET /api/v1/custom_operators`
+- **THEN** the response is 200
+
+#### Scenario: Admin upload allowed
+- **WHEN** an admin posts a valid operator
+- **THEN** the response is 201

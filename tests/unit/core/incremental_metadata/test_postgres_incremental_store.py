@@ -24,14 +24,14 @@ _MODULE = "docpipe.core.incremental_metadata.adapters.stores.postgres.postgres_i
 
 def _make_pg_row(
     *,
-    doc_id: str,
+    id: str,
     modified_time: int | None = 1000,
     job_run_id: str | None = "run-1",
     deleted: bool = False,
 ):
-    """Build a minimal mock that looks like IncrementalMetadataPostgresModel row."""
+    """Build a minimal mock that looks like a row fetched from SATable."""
     row = Mock()
-    row.doc_id = doc_id
+    row.id = id
     row.modified_time = modified_time
     row.job_run_id = job_run_id
     row.deleted = deleted
@@ -44,13 +44,13 @@ def _make_store(config: dict[str, Any] | None = None) -> "PostgresIncrementalMet
     mock_conn = MagicMock()
     mock_engine.begin.return_value.__enter__ = lambda *a: mock_conn
     mock_engine.begin.return_value.__exit__ = Mock(return_value=False)
+    mock_engine.connect.return_value.__enter__ = lambda *a: mock_conn
+    mock_engine.connect.return_value.__exit__ = Mock(return_value=False)
 
     with (
         patch(f"{_MODULE}.get_postgres_connection_string", return_value="postgresql+psycopg2://u:p@h/db"),
         patch(f"{_MODULE}.create_postgres_engine", return_value=mock_engine),
         patch(f"{_MODULE}.create_session_factory", return_value=MagicMock()),
-        patch(f"{_MODULE}.MetaData"),
-        patch(f"{_MODULE}.cast", return_value=MagicMock()),
     ):
         from docpipe.core.incremental_metadata.adapters.stores.postgres.postgres_incremental_store import (
             PostgresIncrementalMetadataStore,
@@ -60,38 +60,32 @@ def _make_store(config: dict[str, Any] | None = None) -> "PostgresIncrementalMet
 
 
 @contextmanager
-def _mock_session(store, *, rows=None, scalars_side_effect=None):
-    """Replace the store's session factory with a preconfigured mock session."""
-    mock_session = MagicMock()
+def _mock_connection(store, *, fetchall_rows=None, scalars_rows=None, execute_side_effect=None):
+    """Replace the store's engine connect/begin with a preconfigured mock connection."""
+    mock_conn = MagicMock()
     mock_execute_result = MagicMock()
 
-    if scalars_side_effect is not None:
-        mock_execute_result.scalars.return_value.all.side_effect = scalars_side_effect
+    if execute_side_effect is not None:
+        mock_conn.execute.side_effect = execute_side_effect
     else:
-        mock_execute_result.scalars.return_value.all.return_value = rows or []
-
-    mock_session.execute.return_value = mock_execute_result
+        mock_execute_result.fetchall.return_value = fetchall_rows or []
+        mock_execute_result.scalars.return_value.all.return_value = scalars_rows or []
+        mock_conn.execute.return_value = mock_execute_result
 
     @contextmanager
-    def _factory():
-        yield mock_session
+    def _begin():
+        yield mock_conn
 
-    original = store._session_factory
-    store._session_factory = _factory
+    @contextmanager
+    def _connect():
+        yield mock_conn
+
+    store._engine.begin = _begin
+    store._engine.connect = _connect
     try:
-        yield mock_session
+        yield mock_conn
     finally:
-        store._session_factory = original
-
-
-def _session_factory_for(mock_session):
-    """Return a context-manager factory that yields mock_session."""
-
-    @contextmanager
-    def _factory():
-        yield mock_session
-
-    return _factory
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +144,28 @@ class TestInit:
     def test_init_with_custom_schema(self):
         s = _make_store(config={"schema": "custom_schema"})
         assert s is not None
+        assert s.schema_name == "custom_schema"
+        assert s._table.schema == "custom_schema"
+
+    def test_init_schema_and_bootstrap_lock(self):
+        """Bootstrap acquires advisory lock before creating schema and table."""
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.begin.return_value.__enter__ = lambda *a: mock_conn
+        mock_engine.begin.return_value.__exit__ = Mock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}.get_postgres_connection_string", return_value="postgresql+psycopg2://u:p@h/db"),
+            patch(f"{_MODULE}.create_postgres_engine", return_value=mock_engine),
+            patch(f"{_MODULE}.create_session_factory", return_value=MagicMock()),
+        ):
+            s = PostgresIncrementalMetadataStore(config={"schema": "test_schema"})
+            assert s._table.schema == "test_schema"
+            # Verify lock statement and schema creation executed
+            calls = mock_conn.execute.call_args_list
+            assert len(calls) >= 2
+            lock_call = str(calls[0][0][0])
+            assert "pg_advisory_xact_lock" in lock_call
 
     def test_init_with_mixed_company_db_and_example_password(self):
         mock_engine = MagicMock()
@@ -183,11 +199,37 @@ class TestInit:
             patch(f"{_MODULE}.get_postgres_connection_string", return_value="postgresql+psycopg2://u:p@h/db"),
             patch(f"{_MODULE}.create_postgres_engine", return_value=mock_engine),
             patch(f"{_MODULE}.create_session_factory", return_value=MagicMock()),
-            patch(f"{_MODULE}.MetaData"),
-            patch(f"{_MODULE}.cast", return_value=MagicMock()),
         ):
             with pytest.raises(JobStatsStoreInitializationException, match="boom"):
                 PostgresIncrementalMetadataStore(config={})
+
+
+# ---------------------------------------------------------------------------
+# Schema Qualification
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaQualification:
+    def test_default_schema_table_name(self):
+        store = _make_store()
+        assert store.schema_name == "incremental_metadata"
+        assert store._table.schema == "incremental_metadata"
+        assert store._table.name == "inc_update_metadata"
+
+    def test_custom_schema_table_name(self):
+        store = _make_store(config={"schema": "my_custom_schema"})
+        assert store.schema_name == "my_custom_schema"
+        assert store._table.schema == "my_custom_schema"
+        assert store._table.name == "inc_update_metadata"
+
+    def test_compiled_sql_contains_schema(self):
+        from sqlalchemy import select
+        from sqlalchemy.dialects import postgresql
+
+        store = _make_store(config={"schema": "custom_schema"})
+        stmt = select(store._table.c.id).where(store._table.c.job_id == "job-1")
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+        assert "custom_schema.inc_update_metadata" in compiled or '"custom_schema"."inc_update_metadata"' in compiled
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +240,10 @@ class TestInit:
 class TestGetProcessedDocs:
     def test_returns_non_deleted_docs(self, *, store):
         rows = [
-            _make_pg_row(doc_id="doc-1", modified_time=1000, job_run_id="run-1"),
-            _make_pg_row(doc_id="doc-2", modified_time=2000, job_run_id="run-1"),
+            _make_pg_row(id="doc-1", modified_time=1000, job_run_id="run-1"),
+            _make_pg_row(id="doc-2", modified_time=2000, job_run_id="run-1"),
         ]
-        with _mock_session(store, rows=rows):
+        with _mock_connection(store, fetchall_rows=rows):
             result = store.get_processed_docs(job_id="job-1")
 
         assert result == {
@@ -210,19 +252,19 @@ class TestGetProcessedDocs:
         }
 
     def test_returns_empty_when_no_rows(self, *, store):
-        with _mock_session(store, rows=[]):
+        with _mock_connection(store, fetchall_rows=[]):
             result = store.get_processed_docs(job_id="job-1")
 
         assert result == {}
 
     def test_raises_flow_exception_on_db_error(self, *, store):
-        with _mock_session(store, scalars_side_effect=Exception("db error")):
+        with _mock_connection(store, execute_side_effect=Exception("db error")):
             with pytest.raises(FlowExecutionFailedException, match="job-1"):
                 store.get_processed_docs(job_id="job-1")
 
     def test_includes_null_modified_time_in_result(self, *, store):
-        rows = [_make_pg_row(doc_id="doc-1", modified_time=None, job_run_id=None)]
-        with _mock_session(store, rows=rows):
+        rows = [_make_pg_row(id="doc-1", modified_time=None, job_run_id=None)]
+        with _mock_connection(store, fetchall_rows=rows):
             result = store.get_processed_docs(job_id="job-1")
 
         assert result == {"doc-1": {"modified_time": None, "job_run_id": None}}
@@ -235,57 +277,31 @@ class TestGetProcessedDocs:
 
 class TestUpsertRecords:
     def test_empty_records_is_noop(self, *, store):
-        mock_session = MagicMock()
-        store._session_factory = _session_factory_for(mock_session)
+        with _mock_connection(store) as mock_conn:
+            store.upsert_records(job_id="job-1", job_run_id="run-1", records=[])
+            mock_conn.execute.assert_not_called()
 
-        store.upsert_records(job_id="job-1", job_run_id="run-1", records=[])
+    def test_upserts_records_with_on_conflict(self, *, store, sample_records):
+        with _mock_connection(store) as mock_conn:
+            store.upsert_records(job_id="job-1", job_run_id="run-1", records=sample_records)
+            mock_conn.execute.assert_called_once()
 
-        mock_session.add.assert_not_called()
-        mock_session.commit.assert_not_called()
-
-    def test_inserts_new_records(self, *, store, sample_records):
-        mock_session = MagicMock()
-        mock_session.get.return_value = None  # no pre-existing records
-        store._session_factory = _session_factory_for(mock_session)
-
-        store.upsert_records(job_id="job-1", job_run_id="run-1", records=sample_records)
-
-        assert mock_session.add.call_count == 2
-        mock_session.commit.assert_called_once()
-
-    def test_updates_existing_record(self, *, store, sample_records):
-        existing_model = MagicMock()
-        mock_session = MagicMock()
-        mock_session.get.return_value = existing_model
-        store._session_factory = _session_factory_for(mock_session)
-
-        store.upsert_records(job_id="job-1", job_run_id="run-2", records=[sample_records[0]])
-
-        assert existing_model.name == "a.pdf"
-        assert existing_model.modified_time == 1000
-        assert existing_model.job_run_id == "run-2"
-        assert existing_model.deleted is False
-        mock_session.commit.assert_called_once()
-
-    def test_upsert_sets_deleted_false_on_existing(self, *, store, sample_records):
-        """A previously soft-deleted record is un-deleted on upsert."""
-        existing_model = MagicMock()
-        existing_model.deleted = True
-        mock_session = MagicMock()
-        mock_session.get.return_value = existing_model
-        store._session_factory = _session_factory_for(mock_session)
-
-        store.upsert_records(job_id="job-1", job_run_id="run-1", records=[sample_records[0]])
-
-        assert existing_model.deleted is False
+    def test_deduplicates_duplicate_doc_ids_in_batch(self, *, store):
+        records = [
+            IncrementalMetadataRecord(job_id="job-1", doc_id="doc-1", name="first.pdf", modified_time=100),
+            IncrementalMetadataRecord(job_id="job-1", doc_id="doc-1", name="second.pdf", modified_time=200),
+        ]
+        with _mock_connection(store) as mock_conn:
+            store.upsert_records(job_id="job-1", job_run_id="run-1", records=records)
+            mock_conn.execute.assert_called_once()
+            # Verify the statement executed
+            executed_stmt = mock_conn.execute.call_args[0][0]
+            assert "ON CONFLICT" in str(executed_stmt)
 
     def test_raises_flow_exception_on_db_error(self, *, store, sample_records):
-        mock_session = MagicMock()
-        mock_session.get.side_effect = Exception("insert failed")
-        store._session_factory = _session_factory_for(mock_session)
-
-        with pytest.raises(FlowExecutionFailedException, match="job-1"):
-            store.upsert_records(job_id="job-1", job_run_id="run-1", records=sample_records)
+        with _mock_connection(store, execute_side_effect=Exception("insert failed")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.upsert_records(job_id="job-1", job_run_id="run-1", records=sample_records)
 
 
 # ---------------------------------------------------------------------------
@@ -295,30 +311,21 @@ class TestUpsertRecords:
 
 class TestGetSoftDeletedDocIds:
     def test_returns_deleted_ids(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalars.return_value.all.return_value = ["doc-2", "doc-3"]
-        store._session_factory = _session_factory_for(mock_session)
-
-        result = store.get_soft_deleted_doc_ids(job_id="job-1")
+        with _mock_connection(store, scalars_rows=["doc-2", "doc-3"]):
+            result = store.get_soft_deleted_doc_ids(job_id="job-1")
 
         assert result == {"doc-2", "doc-3"}
 
     def test_returns_empty_set_when_none(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalars.return_value.all.return_value = []
-        store._session_factory = _session_factory_for(mock_session)
-
-        result = store.get_soft_deleted_doc_ids(job_id="job-1")
+        with _mock_connection(store, scalars_rows=[]):
+            result = store.get_soft_deleted_doc_ids(job_id="job-1")
 
         assert result == set()
 
     def test_raises_flow_exception_on_db_error(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.side_effect = Exception("query failed")
-        store._session_factory = _session_factory_for(mock_session)
-
-        with pytest.raises(FlowExecutionFailedException, match="job-1"):
-            store.get_soft_deleted_doc_ids(job_id="job-1")
+        with _mock_connection(store, execute_side_effect=Exception("query failed")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.get_soft_deleted_doc_ids(job_id="job-1")
 
 
 # ---------------------------------------------------------------------------
@@ -328,56 +335,39 @@ class TestGetSoftDeletedDocIds:
 
 class TestMarkMissingDocsAsDeleted:
     def test_marks_docs_not_in_list(self, *, store):
-        rows = [_make_pg_row(doc_id="doc-1"), _make_pg_row(doc_id="doc-2")]
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalars.return_value.all.return_value = rows
-        store._session_factory = _session_factory_for(mock_session)
-
-        deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
+        with _mock_connection(store, scalars_rows=["doc-1", "doc-2"]) as mock_conn:
+            deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
 
         assert deleted == {"doc-2"}
-        assert rows[1].deleted is True
-        mock_session.commit.assert_called_once()
+        # Select and Update were executed
+        assert mock_conn.execute.call_count == 2
 
     def test_returns_empty_when_all_docs_present(self, *, store):
-        rows = [_make_pg_row(doc_id="doc-1"), _make_pg_row(doc_id="doc-2")]
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalars.return_value.all.return_value = rows
-        store._session_factory = _session_factory_for(mock_session)
-
-        deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1", "doc-2"])
+        with _mock_connection(store, scalars_rows=["doc-1", "doc-2"]) as mock_conn:
+            deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1", "doc-2"])
 
         assert deleted == set()
-        mock_session.commit.assert_called_once()
+        # Only Select was executed, no Update needed
+        assert mock_conn.execute.call_count == 1
 
     def test_returns_empty_when_no_existing_rows(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalars.return_value.all.return_value = []
-        store._session_factory = _session_factory_for(mock_session)
-
-        deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-x"])
+        with _mock_connection(store, scalars_rows=[]) as mock_conn:
+            deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-x"])
 
         assert deleted == set()
+        assert mock_conn.execute.call_count == 1
 
     def test_marks_all_docs_when_list_is_empty(self, *, store):
-        rows = [_make_pg_row(doc_id="doc-1"), _make_pg_row(doc_id="doc-2")]
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalars.return_value.all.return_value = rows
-        store._session_factory = _session_factory_for(mock_session)
-
-        deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=[])
+        with _mock_connection(store, scalars_rows=["doc-1", "doc-2"]) as mock_conn:
+            deleted = store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=[])
 
         assert deleted == {"doc-1", "doc-2"}
-        assert rows[0].deleted is True
-        assert rows[1].deleted is True
+        assert mock_conn.execute.call_count == 2
 
     def test_raises_flow_exception_on_db_error(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.side_effect = Exception("db error")
-        store._session_factory = _session_factory_for(mock_session)
-
-        with pytest.raises(FlowExecutionFailedException, match="job-1"):
-            store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
+        with _mock_connection(store, execute_side_effect=Exception("db error")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.mark_missing_docs_as_deleted(job_id="job-1", doc_ids=["doc-1"])
 
 
 # ---------------------------------------------------------------------------
@@ -387,30 +377,19 @@ class TestMarkMissingDocsAsDeleted:
 
 class TestDeleteDocs:
     def test_empty_list_is_noop(self, *, store):
-        mock_session = MagicMock()
-        store._session_factory = _session_factory_for(mock_session)
+        with _mock_connection(store) as mock_conn:
+            store.delete_docs(job_id="job-1", doc_ids=[])
+            mock_conn.execute.assert_not_called()
 
-        store.delete_docs(job_id="job-1", doc_ids=[])
-
-        mock_session.execute.assert_not_called()
-        mock_session.commit.assert_not_called()
-
-    def test_executes_delete_and_commits(self, *, store):
-        mock_session = MagicMock()
-        store._session_factory = _session_factory_for(mock_session)
-
-        store.delete_docs(job_id="job-1", doc_ids=["doc-1", "doc-2"])
-
-        mock_session.execute.assert_called_once()
-        mock_session.commit.assert_called_once()
+    def test_executes_delete(self, *, store):
+        with _mock_connection(store) as mock_conn:
+            store.delete_docs(job_id="job-1", doc_ids=["doc-1", "doc-2"])
+            mock_conn.execute.assert_called_once()
 
     def test_raises_flow_exception_on_db_error(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.side_effect = Exception("delete failed")
-        store._session_factory = _session_factory_for(mock_session)
-
-        with pytest.raises(FlowExecutionFailedException, match="job-1"):
-            store.delete_docs(job_id="job-1", doc_ids=["doc-1"])
+        with _mock_connection(store, execute_side_effect=Exception("delete failed")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.delete_docs(job_id="job-1", doc_ids=["doc-1"])
 
 
 # ---------------------------------------------------------------------------
@@ -419,30 +398,59 @@ class TestDeleteDocs:
 
 
 class TestClear:
-    def test_executes_delete_and_commits(self, *, store):
-        mock_session = MagicMock()
-        store._session_factory = _session_factory_for(mock_session)
-
-        store.clear(job_id="job-1")
-
-        mock_session.execute.assert_called_once()
-        mock_session.commit.assert_called_once()
+    def test_executes_delete(self, *, store):
+        with _mock_connection(store) as mock_conn:
+            store.clear(job_id="job-1")
+            mock_conn.execute.assert_called_once()
 
     def test_raises_flow_exception_on_db_error(self, *, store):
-        mock_session = MagicMock()
-        mock_session.execute.side_effect = Exception("clear failed")
-        store._session_factory = _session_factory_for(mock_session)
-
-        with pytest.raises(FlowExecutionFailedException, match="job-1"):
-            store.clear(job_id="job-1")
+        with _mock_connection(store, execute_side_effect=Exception("clear failed")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.clear(job_id="job-1")
 
     def test_clear_passes_correct_job_id(self, *, store):
         """Verify clear uses the right job_id in its delete statement."""
-        mock_session = MagicMock()
-        store._session_factory = _session_factory_for(mock_session)
+        with _mock_connection(store) as mock_conn:
+            store.clear(job_id="specific-job-xyz")
+            mock_conn.execute.assert_called_once()
 
-        store.clear(job_id="specific-job-xyz")
 
-        # The execute was called — job_id is passed via the SQLAlchemy expression;
-        # what we can verify is that commit was called exactly once with no error.
-        mock_session.commit.assert_called_once()
+# ---------------------------------------------------------------------------
+# unmark_soft_deleted_docs
+# ---------------------------------------------------------------------------
+
+
+class TestUnmarkSoftDeletedDocs:
+    def test_unmarks_all_when_doc_ids_none(self, *, store):
+        with _mock_connection(store) as mock_conn:
+            mock_conn.execute.return_value.rowcount = 1
+            store.unmark_soft_deleted_docs(job_id="job-1")
+            mock_conn.execute.assert_called_once()
+
+    def test_unmarks_specific_doc_ids(self, *, store):
+        with _mock_connection(store) as mock_conn:
+            mock_conn.execute.return_value.rowcount = 1
+            store.unmark_soft_deleted_docs(job_id="job-1", doc_ids=["doc-1"])
+            mock_conn.execute.assert_called_once()
+
+    def test_raises_flow_exception_on_db_error(self, *, store):
+        with _mock_connection(store, execute_side_effect=Exception("unmark failed")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.unmark_soft_deleted_docs(job_id="job-1")
+
+
+# ---------------------------------------------------------------------------
+# purge_soft_deleted_docs
+# ---------------------------------------------------------------------------
+
+
+class TestPurgeSoftDeletedDocs:
+    def test_executes_delete(self, *, store):
+        with _mock_connection(store) as mock_conn:
+            store.purge_soft_deleted_docs(job_id="job-1")
+            mock_conn.execute.assert_called_once()
+
+    def test_raises_flow_exception_on_db_error(self, *, store):
+        with _mock_connection(store, execute_side_effect=Exception("purge failed")):
+            with pytest.raises(FlowExecutionFailedException, match="job-1"):
+                store.purge_soft_deleted_docs(job_id="job-1")

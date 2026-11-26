@@ -1,13 +1,21 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Pytest configuration and fixtures for docling-pipelines tests.
 """
 
+import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+
+# ``docpipe.api.main`` validates the auth configuration at import time, and authentication is on by
+# default. Opt out before any test module is collected; ``auth_enabled`` turns it back on per test.
+os.environ.setdefault("DOCPIPE_AUTH_ENABLED", "false")
 
 
 # Centralized path setup - automatically adds backend to Python path
@@ -24,6 +32,41 @@ def setup_python_path():
     # Cleanup: Remove from path after tests complete
     if str(backend_dir) in sys.path:
         sys.path.remove(str(backend_dir))
+
+
+# ============================================================================
+# Authentication Fixtures
+# ============================================================================
+
+
+# These fixtures use their own MonkeyPatch instances instead of the ``monkeypatch``
+# fixture so they do not change the teardown order of tests that request it.
+@pytest.fixture(autouse=True)
+def _auth_disabled_by_default():
+    """Run every test with API authentication off so existing tests need no credentials."""
+    from docpipe.api.auth.config import reset_auth_settings_cache
+
+    reset_auth_settings_cache()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DOCPIPE_AUTH_ENABLED", "false")
+        reset_auth_settings_cache()
+        yield
+    reset_auth_settings_cache()
+
+
+@pytest.fixture
+def auth_enabled(_auth_disabled_by_default):
+    """Turn API authentication on for tests that assert 401 or other auth behavior.
+
+    The setting is read per request, so this takes effect inside an already-built app.
+    """
+    from docpipe.api.auth.config import reset_auth_settings_cache
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DOCPIPE_AUTH_ENABLED", "true")
+        reset_auth_settings_cache()
+        yield
+    reset_auth_settings_cache()
 
 
 # ============================================================================
@@ -360,3 +403,13 @@ def pytest_collection_modifyitems(config, items):
         # Auto-mark slow tests based on name
         if "slow" in item.nodeid.lower() or "performance" in item.nodeid.lower():
             item.add_marker(pytest.mark.slow)
+
+
+@pytest.fixture(autouse=True)
+def _reset_secret_registry():
+    """Drop scrubber entries registered by a test so they cannot alter later tests' log records."""
+    from docpipe.integrations.secrets.registry import get_registry
+
+    get_registry().clear_all()
+    yield
+    get_registry().clear_all()

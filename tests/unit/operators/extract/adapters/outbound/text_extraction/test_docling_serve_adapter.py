@@ -319,6 +319,25 @@ class TestDoclingServeAdapter:
         assert "Connection timeout" in result[OperatorConstants.Extraction.ERROR]
         assert result[OperatorConstants.Columns.DOC_COLUMN_DEFAULT] is None
 
+    @patch("docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_serve_adapter.DoclingServeClient")
+    def test_extract_single_document_error_does_not_echo_an_http_client_error(self, mock_client_class, adapter, caplog):
+        """The failure reason reaches node and job messages, so an HTTP client's text (URL, header) must not."""
+        from requests.exceptions import ConnectionError as RequestsConnectionError
+
+        marker = "api-key-marker-5d1e"  # pragma: allowlist secret
+        mock_client_instance = MagicMock()
+        mock_client_instance.process_document.side_effect = RequestsConnectionError(
+            f"HTTPSConnectionPool(host='h'): Max retries exceeded with url: /v1/convert?key={marker}"
+        )
+        mock_client_class.return_value = mock_client_instance
+
+        with caplog.at_level("DEBUG"):
+            result = adapter.extract_single_document(file_path="/path/to/document.pdf", binary_content=b"PDF")
+
+        assert result[OperatorConstants.Extraction.SUCCESS] is False
+        assert marker not in result[OperatorConstants.Extraction.ERROR]
+        assert marker not in caplog.text
+
     @patch(
         "docpipe.core.operators.extract.adapters.outbound.text_extraction.docling_serve_adapter.OperatorUtils.detect_extension_from_bytes"
     )

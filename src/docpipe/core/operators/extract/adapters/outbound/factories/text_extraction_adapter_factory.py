@@ -17,6 +17,7 @@ import re2 as re
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.extract.domain.models import DoclingServeConfig, TextExtractionMode
 from docpipe.core.operators.extract.ports.outbound.text_extraction import TextExtractionPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -332,6 +333,7 @@ class TextExtractionAdapterFactory:
         Raises:
             ValueError: If provider is unsupported or config is invalid
         """
+        text_extraction_config = reveal_value(text_extraction_config)
         # Build adapter-specific configuration from nested text_extraction config
         adapter_config = TextExtractionAdapterFactory.build_adapter_config(
             mode=mode, text_extraction_config=text_extraction_config

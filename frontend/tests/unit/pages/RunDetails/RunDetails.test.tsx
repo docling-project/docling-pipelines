@@ -345,4 +345,48 @@ describe('RunDetails page', () => {
       expect(document.body).toBeInTheDocument();
     }
   });
+
+  // ── Run-completion notifications ────────────────────────────────────────────
+  describe('run completion notification', () => {
+    const renderWithRunStatus = (statuses: string[]) => {
+      let call = 0;
+      server.use(
+        http.get('/api/job_runs/:id/flow_definition', () =>
+          HttpResponse.json({ pipeline_flow: pipelineFlowFixture })
+        ),
+        http.get('/api/flows/:id', () => HttpResponse.json({ flow_id: 'flow-1', name: 'my-flow' })),
+        http.get('/api/job_runs/:id', () => {
+          const status = statuses[Math.min(call, statuses.length - 1)];
+          call += 1;
+          return HttpResponse.json({
+            node_sequence: [],
+            node_metadata: [],
+            job_stats: { status, job_run_id: 'run-1', job_id: 'flow-1', node_stats: {}, batch_node_stats: {} },
+          });
+        })
+      );
+      return renderWithProviders(wrapInRoute(<RunDetails />), {
+        initialEntries: ['/flows/flow-1/runs/run-1?project_id=proj-1'],
+      });
+    };
+
+    it('notifies when a run that was live on page load completes', async () => {
+      // 1st call: bootstrap check (Running); 2nd call: first poll (Completed)
+      const { store } = renderWithRunStatus(['Running', 'Completed']);
+      await waitFor(() => {
+        expect(store.getState().notifications.history).toHaveLength(1);
+      }, { timeout: 4000 });
+      expect(store.getState().notifications.history[0]?.title).toBe(
+        'Execution of the flow my-flow completed successfully.'
+      );
+    });
+
+    it('does not notify when the run was already finished on page load', async () => {
+      const { store } = renderWithRunStatus(['Completed']);
+      await waitFor(() => {
+        expect(store.getState().jobRun.executionLogs).not.toBeNull();
+      }, { timeout: 4000 });
+      expect(store.getState().notifications.history).toHaveLength(0);
+    });
+  });
 });

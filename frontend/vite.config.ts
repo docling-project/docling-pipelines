@@ -1,9 +1,17 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+// Default API port of the REST server (uvicorn --port 8080).
+export const DEFAULT_BACKEND_API_URL = 'http://localhost:8080'
+
+// Empty prefix loads every variable, including the BFF's BACKEND_API_URL from
+// .env, which the browser bundle never sees.
+export const resolveBackendApiUrl = (mode: string): string =>
+  loadEnv(mode, __dirname, '').BACKEND_API_URL || DEFAULT_BACKEND_API_URL
+
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   // Always use /ui/ as base path for both dev and production
   base: '/ui/',
@@ -37,6 +45,12 @@ export default defineConfig(() => ({
       // This handles ALL API endpoints - no need to update for new endpoints
       '/api': {
         target: 'http://localhost:3001',
+        changeOrigin: true
+      },
+      // /auth/* is served by the REST API itself, never by the BFF.
+      // The path is kept as is so the browser origin matches the session cookie.
+      '/auth': {
+        target: resolveBackendApiUrl(mode),
         changeOrigin: true
       }
     }

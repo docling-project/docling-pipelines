@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for validation utility functions."""
 
 import pytest
@@ -394,3 +397,14 @@ class TestValidateDatabasePath:
         other = str(tmp_path.parent / "other.db")
         with pytest.raises(ValueError, match="must be within"):
             validate_database_path(other, base_dir=str(tmp_path))
+
+    def test_base_dir_within_allowed(self, tmp_path):
+        direct = tmp_path / "test.db"
+        nested = tmp_path / "subdir" / "test.db"
+        assert validate_database_path(str(direct), base_dir=str(tmp_path)) == str(direct.resolve())
+        assert validate_database_path(str(nested), base_dir=str(tmp_path)) == str(nested.resolve())
+
+    def test_base_dir_shared_prefix_outside_raises(self, tmp_path):
+        sibling = tmp_path.parent / f"{tmp_path.name}_evil" / "test.db"
+        with pytest.raises(ValueError, match="must be within"):
+            validate_database_path(str(sibling), base_dir=str(tmp_path))

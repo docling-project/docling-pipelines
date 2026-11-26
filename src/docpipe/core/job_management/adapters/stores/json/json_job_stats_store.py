@@ -718,6 +718,28 @@ class JsonJobStatsStore(JobStatsStore):
             logger.warning("Timeout acquiring lock for job stats read: %s", job_run_id)
             return None
 
+    def _iter_matching_job_stats(
+        self,
+        *,
+        job_id: str | None,
+        job_ids: list[str] | None,
+        status: ExecutionStatus | str | None,
+    ):
+        if not self._base_dir.exists():
+            return
+        job_ids_set = set(job_ids) if job_ids else None
+        for job_dir in self._base_dir.iterdir():
+            if not job_dir.is_dir():
+                continue
+            job_stats = self._read_job_stats_if_match(
+                job_dir=job_dir,
+                job_id=job_id,
+                job_ids_set=job_ids_set,
+                status=status,
+            )
+            if job_stats is not None:
+                yield job_stats
+
     def list_job_runs(
         self,
         job_id: str | None = None,
@@ -737,32 +759,41 @@ class JsonJobStatsStore(JobStatsStore):
         Returns:
             List of JobStats matching filters (sorted by start_time desc)
         """
-        if not self._base_dir.exists():
-            return []
-
-        job_ids_set = set(job_ids) if job_ids else None
-
         try:
-            result: list[JobStats] = []
-            for job_dir in self._base_dir.iterdir():
-                if not job_dir.is_dir():
-                    continue
-                job_stats = self._read_job_stats_if_match(
-                    job_dir=job_dir,
-                    job_id=job_id,
-                    job_ids_set=job_ids_set,
-                    status=status,
-                )
-                if job_stats is not None:
-                    result.append(job_stats)
-
-            # Sort by start_time descending (most recent first)
+            result = list(self._iter_matching_job_stats(job_id=job_id, job_ids=job_ids, status=status))
             result.sort(key=lambda x: x.start_time or 0, reverse=True)
-
-            # Apply limit
             return result[:limit]
         except Exception as e:
             logger.error("Failed to list jobs: %s", e)
             raise JobStatsStoreReadException(
                 message=f"Failed to list jobs: {e}", job_run_id=None, operation="list_job_runs"
+            ) from e
+
+    def count_job_runs(
+        self,
+        *,
+        job_id: str | None = None,
+        job_ids: list[str] | None = None,
+        status: ExecutionStatus | str | None = None,
+    ) -> int:
+        """
+        Count job runs using the same filters as list_job_runs.
+
+        Args:
+            job_id: Optional filter by a single job_id
+            job_ids: Optional filter by a set of job_ids
+            status: Optional filter by status
+
+        Returns:
+            Number of matching job runs, with no result limit
+
+        Raises:
+            JobStatsStoreReadException: If the count operation fails
+        """
+        try:
+            return sum(1 for _ in self._iter_matching_job_stats(job_id=job_id, job_ids=job_ids, status=status))
+        except Exception as e:
+            logger.error("Failed to count jobs: %s", e)
+            raise JobStatsStoreReadException(
+                message=f"Failed to count jobs: {e}", job_run_id=None, operation="count_job_runs"
             ) from e

@@ -22,6 +22,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from docpipe.core.constants.constants import ExecutionStatus
+from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.job_management.adapters.services.job_tracker_service import JobTrackerService
 from docpipe.core.job_management.domain.models.job_stats import JobStats
 from docpipe.core.job_management.domain.models.node_stats import NodeStats
@@ -1711,6 +1712,24 @@ class TestGetNodeStats:
         assert "n1" in result
 
 
+class TestCountJobRuns:
+    def test_count_job_runs_delegates_to_store(self, *, job_tracker_service, mock_store):
+        mock_store.count_job_runs.return_value = 7
+
+        result = job_tracker_service.count_job_runs(
+            job_id=JOB_ID,
+            job_ids=[JOB_ID],
+            status=ExecutionStatus.COMPLETED,
+        )
+
+        assert result == 7
+        mock_store.count_job_runs.assert_called_once_with(
+            job_id=JOB_ID,
+            job_ids=[JOB_ID],
+            status=ExecutionStatus.COMPLETED,
+        )
+
+
 class TestCancelJobRunIfCancelling:
     def test_returns_false_when_no_job(self, *, job_tracker_service, mock_store):
         """Line 846 branch: job not found."""
@@ -2266,3 +2285,43 @@ class TestWriteJobLogs:
             written_data = json.load(f)
 
         assert list(written_data["node_stats"].keys()) == [node_ingest, node_extract, node_quality, node_chunk]
+
+
+class TestUpdateDocCountsExecutionTime:
+    """``execution_time`` is the update time minus ``start_time``, both rounded the same way."""
+
+    @staticmethod
+    def _job_stats_at(*, start_time: int) -> JobStats:
+        return JobStats(job_id=JOB_ID, job_run_id=JOB_RUN_ID, start_time=start_time)
+
+    def test_an_update_in_the_first_second_after_a_rounded_up_start_is_not_negative(
+        self, *, job_tracker_service, mock_store
+    ):
+        # A start at 100.6 is stored as 101 (round). An update at 100.9 must not truncate to 100, which gave -1.
+        job_stats = self._job_stats_at(start_time=101)
+        mock_store.get_job_stats.return_value = job_stats
+
+        with patch("docpipe.core.job_management.adapters.services.job_tracker_service.datetime") as clock:
+            clock.now.return_value.timestamp.return_value = 100.9
+            job_tracker_service.update_doc_counts(
+                job_run_id=JOB_RUN_ID,
+                metadata={OperatorConstants.Metadata.TOTAL_PAGES_PROCESSED: 3},
+                operator_category="extract",
+            )
+
+        assert job_stats.execution_time == 0
+        assert job_stats.total_pages_processed == 3
+
+    def test_the_duration_is_the_rounded_difference(self, *, job_tracker_service, mock_store):
+        job_stats = self._job_stats_at(start_time=100)
+        mock_store.get_job_stats.return_value = job_stats
+
+        with patch("docpipe.core.job_management.adapters.services.job_tracker_service.datetime") as clock:
+            clock.now.return_value.timestamp.return_value = 107.4
+            job_tracker_service.update_doc_counts(
+                job_run_id=JOB_RUN_ID,
+                metadata={OperatorConstants.Metadata.TOTAL_PAGES_PROCESSED: 1},
+                operator_category="extract",
+            )
+
+        assert job_stats.execution_time == 7

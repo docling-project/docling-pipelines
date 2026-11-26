@@ -19,6 +19,8 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.factories.des
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -99,7 +101,8 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 config.create_dirs,
             )
         except Exception as e:
-            msg = f"Box destination validation failed: folder_id={config.folder_id}, error={e}"
+            safe_error = sanitize_exception(exc=e, config_key="storage_output.destination_config.box")
+            msg = f"Box destination validation failed: folder_id={config.folder_id}, error={safe_error}"
             logger.error(msg)
             return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
 
@@ -194,8 +197,9 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
             )
 
         except Exception as e:
-            msg = f"Unexpected error writing to Box '{destination_path}': {e}"
-            logger.exception("Unexpected error writing to Box '%s': %s", destination_path, e)
+            safe_error = sanitize_exception(exc=e, config_key="storage_output.destination_config.box")
+            msg = f"Unexpected error writing to Box '{destination_path}': {safe_error}"
+            logger.error(msg)
             return WriteResult(doc_id="", doc_name=destination_path, success=False, error_message=msg)
 
     def ensure_directory(self, *, path: str) -> None:
@@ -239,6 +243,8 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 # or legacy:
                 credentials_json_path: "${BOX_CONFIG_PATH}"
         """
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
         raw_path = (
             credentials.get("credentials_path")
             or credentials.get("credentials_json_path")
@@ -332,7 +338,11 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 if getattr(entry, "type", None) == "folder" and getattr(entry, "name", None) == name:
                     return str(entry.id)
         except Exception as e:
-            logger.error("Error listing Box folder items for parent_id=%s: %s", parent_id, e)
+            logger.error(
+                "Error listing Box folder items for parent_id=%s: %s",
+                parent_id,
+                sanitize_exception(exc=e, config_key="storage_output.destination_config.box"),
+            )
         return None
 
     def _find_existing_file(
@@ -353,7 +363,7 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 "Error checking for existing file '%s' in Box folder_id=%s: %s",
                 filename,
                 parent_folder_id,
-                e,
+                sanitize_exception(exc=e, config_key="storage_output.destination_config.box"),
             )
         return None
 
