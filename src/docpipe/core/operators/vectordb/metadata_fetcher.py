@@ -168,18 +168,22 @@ class VectorDBMetadataFetcher:
         *,
         adapter_name: str,
         available_features: dict[str, Any],
+        operator_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Project mappable features for a vector database provider.
 
         Delegates to provider-specific project_mappable_features if defined,
-        falling back to returning available_features as-is.
+        falling back to returning available_features as-is. ``operator_config`` is
+        forwarded to Weaviate only, which uses it to mark the BM25 content feature mandatory.
         """
         if adapter_name == OperatorConstants.VectorDB.WEAVIATE:
             from docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata import (
                 WeaviateResourceMetadata,
             )
 
-            return WeaviateResourceMetadata.project_mappable_features(available_features=available_features)
+            return WeaviateResourceMetadata.project_mappable_features(
+                available_features=available_features, operator_config=operator_config
+            )
 
         if adapter_name == OperatorConstants.VectorDB.MILVUS:
             from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import (

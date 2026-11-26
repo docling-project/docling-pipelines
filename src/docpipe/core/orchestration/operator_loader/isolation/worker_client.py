@@ -37,20 +37,21 @@ logger = get_logger(__name__)
 
 WORKER_MODULE: Final[str] = "docpipe.core.orchestration.operator_loader.isolation.worker_main"
 
-# Names copied from the parent's environment into the worker's. Anything else, including every credential-like
-# variable, is dropped. ``PYTHONPATH`` is kept so a source checkout can import ``docpipe``.
 ENVIRONMENT_ALLOWLIST: Final[frozenset[str]] = frozenset(
     {"PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "PYTHONPATH", "VIRTUAL_ENV", "DS_LOG_LEVEL"}
 )
+
+DOTENV_DISABLED_VARIABLE: Final[str] = "PYTHON_DOTENV_DISABLED"
 
 _STOP_GRACE_SECONDS: Final[float] = 5.0
 _MAX_STDERR_LINES: Final[int] = 200
 
 
 def build_worker_environment(*, parent_environment: dict[str, str]) -> dict[str, str]:
-    """Return the allowlisted subset of ``parent_environment`` for a worker."""
+    """Return the allowlisted subset of ``parent_environment`` plus the parent-set control variables."""
     environment = {name: value for name, value in parent_environment.items() if name in ENVIRONMENT_ALLOWLIST}
     environment["PYTHONUNBUFFERED"] = "1"
+    environment[DOTENV_DISABLED_VARIABLE] = "1"
     return environment
 
 
@@ -105,6 +106,7 @@ class IsolatedWorker:
         return not self._closed and self._process.poll() is None
 
     def _drain_stderr(self) -> None:
+        """Read and log remaining stderr lines from the worker process, up to the configured limit."""
         stream = self._process.stderr
         if stream is None:
             return
@@ -118,6 +120,7 @@ class IsolatedWorker:
     def _request(
         self, *, header: dict[str, Any], tables: list[pa.Table] | None = None
     ) -> tuple[dict[str, Any], list[pa.Table]]:
+        """Send a request to the worker and return the parsed reply header and output tables."""
         with self._lock:
             if self._closed:
                 raise IsolatedWorkerError(f"isolated worker for '{self._label}' is stopped")

@@ -312,6 +312,9 @@ class SQLFilterOperator(AbstractOperator):
                     con.register("input_table", input_table)
                     if is_auth_enabled():
                         con.execute("SET enable_external_access = false;")
+                        con.execute("SET autoinstall_known_extensions = false;")
+                        con.execute("SET autoload_known_extensions = false;")
+                        con.execute("SET lock_configuration = true;")
                     # collect per-criterion stats before the main filter (filter_criteria_list path only)
                     if len(self.filter_criteria) > 0 and not self.filter_criteria_json:
                         stats_row = con.execute(stats_sql).fetchone()
@@ -320,7 +323,7 @@ class SQLFilterOperator(AbstractOperator):
                             docs_filtered: int = total_docs - keep_count
                             metadata[f"docs_filtered_out_by '{criterion}'"] = docs_filtered
 
-                    filtered_table: pa.Table = con.execute(sql_statement).arrow()
+                    filtered_table: pa.Table = con.execute(sql_statement).fetch_arrow_table()
                 except duckdb_binding_errors as ex:  # type: ignore[misc]
                     binding_err_msg: str = f"Filter condition is invalid due to mismatched data types. (e.g. comparing text to numbers). Please review the filter expression and table schema. {ex}"
                     raise DocpipeException(
