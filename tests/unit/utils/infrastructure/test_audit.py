@@ -55,7 +55,9 @@ def _emit(**overrides: Any) -> None:
 
 
 def _stream_handler() -> logging.StreamHandler:  # type: ignore[type-arg]
-    handlers = [h for h in get_audit_logger().handlers if isinstance(h, logging.StreamHandler)]
+    # pytest also attaches its capture handlers (StreamHandler subclasses) to non-propagating
+    # loggers like docpipe.audit, so match the audit handler class and not any StreamHandler.
+    handlers = [h for h in get_audit_logger().handlers if isinstance(h, _AuditStreamHandler)]
     assert handlers
     return handlers[0]
 
