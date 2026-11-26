@@ -141,7 +141,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
         token: str,
     ) -> tuple[str | None, str]:
         """Resolve a file path or URL to an (item_id, actual_drive_id) pair for SharePoint."""
-        if not file_path.startswith("http"):
+        if not file_path.lower().startswith(("http://", "https://")):
             logger.info("Using direct file path as item ID: %s", file_path)
             return file_path, document_library_id
 
@@ -391,7 +391,7 @@ class SharePointSourceAdapter(DocumentSourcePort):
 
             # Handle case where source_id is a web URL instead of item_id
             item_id = source_id
-            if source_id.startswith("http"):
+            if source_id.lower().startswith(("http://", "https://")):
                 extracted_id = provider_config.get("item_id")
                 if not extracted_id:
                     logger.error("source_id is a web URL but no item_id found in provider_config: %s", source_id)
