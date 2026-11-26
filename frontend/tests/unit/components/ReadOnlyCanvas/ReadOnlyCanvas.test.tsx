@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { screen, fireEvent, act } from '@testing-library/react';
+import { configureStore } from '@reduxjs/toolkit';
+import { Provider } from 'react-redux';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { ReadOnlyCanvas } from '@/components/ReadOnlyCanvas/ReadOnlyCanvas';
-import { buildPreloadedState } from '../../../mocks/fixtures/store.fixture';
+import { buildPreloadedState, authStateFixture } from '../../../mocks/fixtures/store.fixture';
 import { jobRunStatusResponseFixture, createMockNodeStats } from '../../../mocks/fixtures/jobRun.fixture';
 import type { PipelineFlowDef } from '@elyra/canvas';
 import { CommonCanvas } from '@elyra/canvas';
@@ -1137,5 +1139,47 @@ describe('ReadOnlyCanvas', () => {
     expect(screen.getByTestId('elyra-common-canvas')).toBeDefined();
     mockCreate.mockRestore();
     void createJobRun; // suppress unused warning
+  });
+
+  // ── Elyra store isolation ─────────────────────────────────────────────────
+  // Elyra renders topPanelContent inside its own react-redux Provider. react-redux shares one context
+  // key across copies, so without ReadOnlyCanvas re-providing the app store the panel reads Elyra's
+  // store, where `state.auth` does not exist, and crashes.
+  it('renders RunStatusTopPanel against the app store when Elyra wraps it in its own Provider', () => {
+    const elyraStore = configureStore({ reducer: { elyra: (state: object = {}) => state } });
+    const originalImpl = vi.mocked(CommonCanvas).getMockImplementation();
+    vi.mocked(CommonCanvas).mockImplementation((props: any) => (
+      <Provider store={elyraStore}>
+        <div data-testid="elyra-common-canvas">{props?.topPanelContent}</div>
+      </Provider>
+    ));
+
+    try {
+      renderCanvas(
+        { jobRunId: 'run-1' },
+        {
+          auth: authStateFixture({ role: 'viewer' }),
+          jobRun: {
+            items: {},
+            byJobId: {},
+            selectedRunId: null,
+            logs: {},
+            statistics: {},
+            loading: false,
+            error: null,
+            isRunning: false,
+            currentJobRunId: 'run-1',
+            currentJobId: 'job-1',
+            executionLogs: MATCHING_LOGS_WITH_CONTENT,
+          },
+        }
+      );
+
+      // Viewer role comes from the app store's `auth` slice, so Run Again must be disabled.
+      const runAgain = screen.getByRole('button', { name: /run again/i });
+      expect((runAgain as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      vi.mocked(CommonCanvas).mockImplementation(originalImpl as (props: any) => React.ReactElement);
+    }
   });
 });
