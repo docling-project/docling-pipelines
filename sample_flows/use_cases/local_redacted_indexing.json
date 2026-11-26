@@ -1,6 +1,6 @@
 {
   "flow_name": "local-redacted-indexing",
-  "description": "Fully local pipeline that redacts PII and HAP before indexing, so neither reaches the vector store: Ingest -> Extract -> PII/HAP redaction (Presidio for PII, Hugging Face ibm-granite/granite-guardian-hap-38m for HAP) -> Chunk -> Embeddings (sentence-transformers) -> Milvus Lite (.db file). Requires the presidio extra and the spaCy model en_core_web_sm; the HAP and embedding models are downloaded on first use unless they are already in the local Hugging Face cache. To run offline (HF_HUB_OFFLINE=1), pre-fetch both models, including their weight files, with 'hf download <model_id>'.",
+  "description": "Fully local pipeline that redacts PII and HAP before indexing, so neither reaches the vector store: Ingest -> Extract -> PII/HAP redaction (Presidio for PII, Hugging Face ibm-granite/granite-guardian-hap-38m for HAP) -> Chunk -> Embeddings (sentence-transformers) -> Milvus Lite (.db file). Requires the presidio and huggingface extras (on the slim distribution, also extract) and the spaCy model en_core_web_sm; the HAP and embedding models are downloaded on first use unless they are already in the local Hugging Face cache. To run offline (HF_HUB_OFFLINE=1), pre-fetch both models, including their weight files, with 'hf download <model_id>'.",
   "global_config": {
     "doc_column": "content",
     "disable_validation": false,

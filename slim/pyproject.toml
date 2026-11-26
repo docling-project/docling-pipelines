@@ -106,6 +106,19 @@ event-streaming = [
 lineage = [
     "openlineage-python==1.55.0",
 ]
+# Optional local PII provider for the pii_and_hap operator (pii_provider: "presidio").
+# Also requires a spaCy model wheel matching the installed spaCy minor version, e.g. en_core_web_sm==3.8.0.
+presidio = [
+    "presidio-analyzer==2.2.366",
+]
+# Optional local Hugging Face provider: HAP detection in pii_and_hap (hap_provider: "huggingface")
+# and local embeddings in the embeddings operator (provider: "huggingface").
+# torch is pinned without a local version label, so any 2.15.0 build (CPU-only "+cpu" or CUDA) satisfies it.
+huggingface = [
+    "torch==2.15.0",
+    "transformers>=5.17,<5.18",
+    "sentence-transformers==6.3.0",
+]
 dev = [
     "black==26.10.1",
     "detect-secrets==1.5.0",
@@ -216,6 +229,9 @@ override-dependencies = [
     "httplib2>=0.32.0",
     # Dependabot: h2 <= 4.4.0 — duplicate Host header request smuggling (transitive via httpx).
     "h2==4.4.1",
+    # Same override as the root manifest: presidio-analyzer (presidio extra) caps numpy<2.5.0, which would
+    # otherwise lower numpy for every slim install resolved from this lock.
+    "numpy>=2.0.0,<3.0.0",
     # Pin rapidocr to 3.9.0 within docling-slim's >=3.8,<4.0 constraint.
     "rapidocr==3.10.0",
     # CVE-2026-49476, CVE-2026-49477: Security fix for soupsieve vulnerability (transitive via beautifulsoup4).

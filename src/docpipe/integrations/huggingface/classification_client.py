@@ -27,6 +27,7 @@ from typing import Any, ClassVar, Final
 
 from docpipe.core.constants.constants import EnvironmentVariables, ServiceConstants
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
+from docpipe.integrations.base_llm_client import require_package
 from docpipe.utils.core.strings import trim_whitespace_span
 from docpipe.utils.infrastructure.logging import get_logger
 
@@ -187,10 +188,13 @@ class HuggingFaceClassificationClient:
             The shared tokenizer/model pair.
 
         Raises:
+            DependencyError: If ``torch`` or ``transformers`` is not installed.
             ConfigurationError: If the device, model or tokenizer is invalid.
         """
         if self.loaded is not None:
             return self.loaded
+        require_package("torch", ServiceConstants.HUGGINGFACE_INSTALL_HINT)
+        require_package("transformers", ServiceConstants.HUGGINGFACE_INSTALL_HINT)
         with self.instance_lock:
             if self.loaded is not None:
                 return self.loaded

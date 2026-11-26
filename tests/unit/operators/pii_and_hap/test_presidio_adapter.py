@@ -3,6 +3,7 @@
 
 """Unit tests for PresidioPIIAdapter (Presidio analyzer mocked; presidio-analyzer not required)."""
 
+import importlib.metadata
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -27,6 +28,9 @@ _BUILD_ANALYZER = (
     "docpipe.core.operators.quality.pii_and_hap.adapters.outbound.presidio.adapter.PresidioPIIAdapter._build_analyzer"
 )
 _IMPORT_MODULE = "docpipe.core.operators.quality.pii_and_hap.adapters.outbound.presidio.adapter.importlib.import_module"
+_SPACY_VERSION = (
+    "docpipe.core.operators.quality.pii_and_hap.adapters.outbound.presidio.adapter.importlib.metadata.version"
+)
 
 _TEXT = "Contact John Smith at john@example.com on 2024-01-01."
 
@@ -104,16 +108,38 @@ def test_validate_reports_install_hint_when_presidio_missing():
         result = inst.validate()
     assert result["valid"] is False
     assert result["errors"] == [PRESIDIO_INSTALL_HINT]
-    assert "pip install presidio-analyzer" in PRESIDIO_INSTALL_HINT
+    assert 'pip install "docling-pipelines[presidio]"' in PRESIDIO_INSTALL_HINT
+    assert 'pip install "docling-pipelines-slim[presidio]"' in PRESIDIO_INSTALL_HINT
+    assert "spacy download" not in PRESIDIO_INSTALL_HINT
 
 
 def test_validate_reports_spacy_model_problems():
-    with patch(_BUILD_ANALYZER, side_effect=OSError("[E050] Can't find model 'en_core_web_lg'")):
+    with (
+        patch(_BUILD_ANALYZER, side_effect=OSError("[E050] Can't find model 'en_core_web_lg'")),
+        patch(_SPACY_VERSION, return_value="3.8.18"),
+    ):
         inst = PresidioPIIAdapter(model_id="", provider_config={})
         result = inst.validate()
     assert result["valid"] is False
     assert "Failed to initialise Presidio AnalyzerEngine" in result["errors"][0]
-    assert "python -m spacy download en_core_web_lg" in result["errors"][0]
+    assert "Install the 'en_core_web_lg' model wheel built for spaCy 3.8" in result["errors"][0]
+    assert "spacy download" not in result["errors"][0]
+
+
+def test_validate_spacy_model_hint_without_installed_spacy():
+    with (
+        patch(_BUILD_ANALYZER, side_effect=OSError("[E050] Can't find model 'en_core_web_lg'")),
+        patch(_SPACY_VERSION, side_effect=importlib.metadata.PackageNotFoundError("spacy")),
+    ):
+        result = PresidioPIIAdapter(model_id="", provider_config={}).validate()
+    assert "built for your installed spaCy minor version" in result["errors"][0]
+    assert "spacy download" not in result["errors"][0]
+
+
+def test_spacy_model_description_has_no_spacy_download():
+    description = PresidioPIIConfig.model_json_schema()["properties"]["spacy_model"]["description"]
+    assert "spacy download" not in description
+    assert "model wheel" in description
 
 
 def test_validate_builds_analyzer_once(mock_analyzer):

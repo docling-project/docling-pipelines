@@ -112,10 +112,14 @@ lineage = [
     "openlineage-python==1.55.0",
 ]
 # Optional local PII provider for the pii_and_hap operator (pii_provider: "presidio").
-# Also requires a spaCy model, e.g. `python -m spacy download en_core_web_lg`.
+# Also requires a spaCy model wheel matching the installed spaCy minor version, e.g. en_core_web_sm==3.8.0.
 presidio = [
     "presidio-analyzer==2.2.366",
 ]
+# Optional local Hugging Face provider (HAP detection in pii_and_hap, local embeddings in embeddings).
+# Empty on purpose: torch, transformers and sentence-transformers are core dependencies of this
+# distribution. It exists so `<distribution>[huggingface]` works for both this package and the slim one.
+huggingface = []
 benchmark = [
     "matplotlib==3.11.2",
     "psutil==7.2.2",
