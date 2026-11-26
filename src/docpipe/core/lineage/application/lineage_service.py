@@ -137,7 +137,7 @@ class LineageService:
             outputs = [
                 self._build_dataset_from_summary(
                     summary=NodeTableSummary.from_table(t),
-                    name=f"{base_name}/output_{i}" if len(context.output_tables) > 1 else f"{base_name}/output",
+                    name=f"{base_name}.output_{i}" if len(context.output_tables) > 1 else f"{base_name}.output",
                     namespace=LineageConstants.NAMESPACE_INMEMORY,
                 )
                 for i, t in enumerate(context.output_tables)
@@ -317,6 +317,7 @@ class LineageService:
         inputs: list[LineageDataset] | None = None,
         outputs: list[LineageDataset] | None = None,
     ) -> None:
+        """Publish a scrubbed lineage event via the injected publisher."""
         run.facets = scrub_value(run.facets)
         job.facets = scrub_value(job.facets)
         job.name = scrub(job.name)
@@ -333,6 +334,7 @@ class LineageService:
         flow_name: str,
         flow_def: dict[str, Any] | None = None,
     ) -> LineageJob:
+        """Build a LineageJob for a top-level flow."""
         facets: dict[str, Any] = {
             "jobType": {
                 "_producer": self._producer,
@@ -357,12 +359,12 @@ class LineageService:
     def _build_node_job(self, *, context: Any) -> LineageJob:
         """Build a LineageJob for a DAG node (operator mode).
 
-        Job name is ``{flow_name}/{node_name}`` — stable across START/COMPLETE/FAIL
+        Job name is ``{flow_name}.{node_name}`` — stable across START/COMPLETE/FAIL
         so Marquez can correlate all events for the same operator under one job entry.
         """
         flow_name = getattr(context, "flow_name", "") or getattr(context, "flow_id", "") or ""
         node_name = getattr(context, "node_name", "") or getattr(context, "node_id", "") or ""
-        job_name = f"{flow_name}/{node_name}"
+        job_name = f"{flow_name}.{node_name}"
 
         job_type_facet: dict[str, Any] = {
             "_producer": self._producer,
@@ -394,8 +396,8 @@ class LineageService:
         Falls back to the node's own name when there are no predecessors (ingest).
         """
         if predecessor_node_ids:
-            return f"{flow_name}/{predecessor_node_ids[0]}/output"
-        return f"{flow_name}/{node_name}/input"
+            return f"{flow_name}.{predecessor_node_ids[0]}.output"
+        return f"{flow_name}.{node_name}.input"
 
     def _build_node_output_dataset_name(self, *, flow_name: str, node_name: str, index: int = 0) -> str:
         """Derive the output dataset name for a node.
@@ -404,8 +406,8 @@ class LineageService:
         Marquez stitches the two jobs together with a shared dataset edge.
         """
         if index == 0:
-            return f"{flow_name}/{node_name}/output"
-        return f"{flow_name}/{node_name}/output_{index}"
+            return f"{flow_name}.{node_name}.output"
+        return f"{flow_name}.{node_name}.output_{index}"
 
     def _build_dataset_from_summary(
         self,
@@ -500,6 +502,7 @@ class LineageService:
         }
 
     def _build_error_facet(self, *, message: str, exception: Exception | None = None) -> dict[str, Any]:
+        """Build an errorMessage run facet for a failed run."""
         facet: dict[str, Any] = {
             "errorMessage": {
                 "_producer": self._producer,
@@ -515,6 +518,7 @@ class LineageService:
         return facet
 
     def _build_nominal_time_facet(self, *, start_time: datetime | str | None) -> dict[str, Any]:
+        """Build a nominalTime run facet from start time."""
         if start_time is None:
             return {}
         return {
