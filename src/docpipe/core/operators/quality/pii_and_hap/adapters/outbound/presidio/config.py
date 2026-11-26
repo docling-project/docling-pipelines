@@ -69,7 +69,8 @@ class PresidioPIIConfig(BaseModel):
         default=DEFAULT_SPACY_MODEL,
         description=(
             "spaCy model used for named-entity recognition (e.g. 'en_core_web_lg', 'en_core_web_sm'). "
-            "Install it beforehand with 'python -m spacy download <model>'."
+            "Install its model wheel beforehand, built for your installed spaCy minor version "
+            "(for example en_core_web_sm==3.8.0 for spaCy 3.8)."
         ),
     )
     entity_mapping: dict[str, str] | None = Field(

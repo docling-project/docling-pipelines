@@ -9,6 +9,7 @@ Tests cover base client functionality, retry logic, and provider-specific implem
 
 import importlib.util
 import os
+import sys
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -248,6 +249,20 @@ class TestHuggingFaceLLMClient:
         assert client.model_name == "sentence-transformers/all-MiniLM-L6-v2"
         assert client.use_local is True
         mock_st.assert_called_once()
+
+    def test_missing_sentence_transformers_names_huggingface_extra(self, monkeypatch):
+        """Without sentence-transformers, local mode raises DependencyError naming both huggingface extras."""
+        # A None entry makes ``import sentence_transformers`` raise ImportError.
+        monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+
+        with pytest.raises(DependencyError) as error:
+            HuggingFaceLLMClient(model_name="sentence-transformers/all-MiniLM-L6-v2", use_local=True)
+
+        message = str(error.value)
+        assert "sentence_transformers package not installed" in message
+        assert '"docling-pipelines[huggingface]"' in message
+        assert '"docling-pipelines-slim[huggingface]"' in message
+        assert "pip install sentence-transformers" not in message
 
     @patch("sentence_transformers.SentenceTransformer")
     def test_initialization_local_uses_cached_model(self, mock_st):

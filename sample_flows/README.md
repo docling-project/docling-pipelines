@@ -106,7 +106,7 @@ Real-world scenarios showing practical applications.
 | [s3_ingest_vault.json](use_cases/s3_ingest_vault.json) | Secrets from Vault | Ingest from S3 with `access_key` and `secret_key` as `vault://` references; needs `secrets.vault.allowed_paths` |
 | `audio_video_extraction.json` | Audio/Video Transcription | ASR transcription → chunking → embeddings → vector storage |
 | `document_set_management.json` | Document Sets | Demonstrates document_set operator for managing document collections |
-| [local_redacted_indexing.json](use_cases/local_redacted_indexing.json) | Local Redacted Indexing | Redacts PII (Presidio) and HAP (local Hugging Face classifier) before chunking, local embeddings and Milvus Lite, so neither reaches the vector store; no external services. Needs the `presidio` extra and the spaCy model `en_core_web_sm` |
+| [local_redacted_indexing.json](use_cases/local_redacted_indexing.json) | Local Redacted Indexing | Redacts PII (Presidio) and HAP (local Hugging Face classifier) before chunking, local embeddings and Milvus Lite, so neither reaches the vector store; no external services. Needs the `presidio` and `huggingface` extras (on the slim distribution, also `extract`) and the spaCy model `en_core_web_sm` |
 
 **Start here if:** You want to see how docling-pipelines solves real problems.
 

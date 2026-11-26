@@ -8,6 +8,7 @@ label probabilities per span text, so no model is loaded.
 """
 
 import logging
+import sys
 from collections.abc import Generator, Sequence
 from typing import Any
 from unittest.mock import Mock, patch
@@ -507,3 +508,33 @@ class TestHuggingFaceAdapterTextDetection:
 
         embedding_cls.assert_not_called()
         detection_cls.assert_not_called()
+
+
+class TestHuggingFaceAdapterMissingPackages:
+    """A missing Hugging Face package fails startup validation with the shared install hint.
+
+    Real clients are used (nothing injected), so the error comes from the actual package check.
+    A ``None`` entry in ``sys.modules`` makes importing that module raise ``ImportError``.
+    """
+
+    @pytest.mark.parametrize("module", ["torch", "transformers"])
+    def test_validate_detection_reports_missing_package(self, monkeypatch: pytest.MonkeyPatch, module: str) -> None:
+        """Without torch or transformers, detection validation fails naming the module and the extras."""
+        monkeypatch.setitem(sys.modules, module, None)
+
+        result = HuggingFaceAdapter(model_name=_CLASSIFIER, toxic_labels=("LABEL_1",)).validate_detection()
+
+        assert result["valid"] is False
+        assert f"{module} package not installed" in result["errors"][0]
+        assert ServiceConstants.HUGGINGFACE_INSTALL_HINT in result["errors"][0]
+
+    def test_validate_embedding_reports_missing_sentence_transformers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without sentence-transformers, local embedding validation fails naming the module and the extras."""
+        monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+
+        result = HuggingFaceAdapter(model_name=_MODEL).validate_embedding()
+
+        assert result["valid"] is False
+        assert "sentence_transformers package not installed" in result["errors"][0]
+        assert ServiceConstants.HUGGINGFACE_INSTALL_HINT in result["errors"][0]
+        assert "pip install sentence-transformers" not in result["errors"][0]

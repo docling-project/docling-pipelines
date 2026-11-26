@@ -24,8 +24,8 @@ original content column.
 
 - Independent provider per capability: `pii_provider` / `hap_provider`, each with its own config
 - LLM-based detection via LiteLLM (100+ providers including Ollama) or the WatsonX native detection API
-- Local, model-free PII detection via Microsoft Presidio (optional `presidio` extra)
-- Local HAP detection with a Hugging Face sequence classifier (`huggingface`, default
+- Local, model-free PII detection via Microsoft Presidio (optional `presidio` extra on both distributions, plus a spaCy model wheel)
+- Local HAP detection with a Hugging Face sequence classifier (`huggingface`; optional `huggingface` extra on the slim distribution; default
   `ibm-granite/granite-guardian-hap-38m` at a pinned revision), scored sentence by sentence so redaction masks
   exactly the flagged sentence; any classifier with a fast tokenizer works through config alone
 - Legacy `provider` / `provider_config` shorthand still configures both capabilities at once
@@ -61,6 +61,52 @@ original content column.
 }
 ```
 
+### Installing the local providers (including offline images)
+
+The `presidio` and `huggingface` providers run in-process and need optional packages. Each extra is named after
+the provider and exists on both distributions (`docling-pipelines` and `docling-pipelines-slim`).
+
+**Presidio (PII).** Install the extra and a spaCy model wheel built for your installed spaCy minor version, for
+example `en_core_web_sm==3.8.0` for spaCy 3.8:
+
+```bash
+pip install "docling-pipelines-slim[presidio]"
+```
+
+```bash
+pip install "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+```
+
+`presidio-analyzer` declares `numpy<2.5.0` and `preshed<3.0.14`, so installing it can downgrade those packages in
+an existing environment.
+
+**Hugging Face (HAP).** On the slim distribution, install the `huggingface` extra. If you do not need a GPU,
+install the CPU-only `torch` build first. On Linux, `torch` from PyPI is the CUDA build, which pulls several GB of
+NVIDIA libraries:
+
+```bash
+pip install "torch==2.15.0" --index-url https://download.pytorch.org/whl/cpu
+```
+
+```bash
+pip install "docling-pipelines-slim[huggingface]"
+```
+
+**Offline images.** Install everything while building the image, so nothing is downloaded at runtime:
+
+1. Install the spaCy model wheel as shown above. If the model is missing at startup, spaCy tries to download it
+   itself, which needs network access and `pip` or `uv` in the container. When that download cannot run, spaCy
+   can end the process instead of raising a normal error.
+2. Pre-download the HAP model weights into the Hugging Face cache at the pinned revision of the default model
+   (`ServiceConstants.DEFAULT_HUGGINGFACE_HAP_REVISION`):
+
+   ```bash
+   hf download ibm-granite/granite-guardian-hap-38m --revision faf9291163c7363d4a7ba7fc1dc72243214af931
+   ```
+
+3. At runtime, set `HF_HUB_OFFLINE=1` (or `local_files_only: true` in `hap_provider_config`), so the model loads
+   only from the local cache.
+
 ---
 
 ## Parameters
@@ -89,8 +135,8 @@ original content column.
 |---|---|---|---|
 | `litellm` | Yes | Yes | Prompt-based detection through any LiteLLM-compatible endpoint (Ollama, vLLM, OpenAI, ...) |
 | `watsonx` | Yes | Yes | WatsonX native `/ml/v1/text/detection` API |
-| `presidio` | Yes | No | Local detection with Microsoft Presidio; needs `pip install "docling-pipelines[presidio]"` and a spaCy model |
-| `huggingface` | No | Yes | Local sequence-classification model run in-process (no extra install; `torch` and `transformers` are core dependencies) |
+| `presidio` | Yes | No | Local detection with Microsoft Presidio; needs the `presidio` extra (`pip install "docling-pipelines[presidio]"` or `pip install "docling-pipelines-slim[presidio]"`) and a spaCy model wheel (see [Installing the local providers](#installing-the-local-providers-including-offline-images)) |
+| `huggingface` | No | Yes | Local sequence-classification model run in-process; install the `huggingface` extra (`pip install "docling-pipelines-slim[huggingface]"` on the slim distribution; on the full distribution it adds nothing, because `torch` and `transformers` are core dependencies) |
 
 Selecting a provider for a capability it does not support (for example `hap_provider: "presidio"`,
 `pii_provider: "huggingface"`, or `provider: "presidio"` while `expected_redactions` contains `hap`) is a
@@ -120,7 +166,7 @@ validation error raised when the operator is created, before any document is pro
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `language` | string | No | Document language code passed to Presidio (default: `"en"`) |
-| `spacy_model` | string | No | spaCy NER model (default: `"en_core_web_lg"`); install it with `python -m spacy download <model>` |
+| `spacy_model` | string | No | spaCy NER model (default: `"en_core_web_lg"`); install its model wheel beforehand, built for your installed spaCy minor version (for example `en_core_web_sm==3.8.0` for spaCy 3.8) |
 | `entity_mapping` | object | No | Presidio entity type to PII type overrides, merged over the built-in mapping (e.g. `{"DATE_TIME": "DateOfBirth"}`) |
 
 Presidio entity types are mapped to the `pii_list` vocabulary as follows; unmapped entities are ignored:
@@ -399,10 +445,12 @@ Use another Hugging Face classifier without code changes. Pin `revision` to a co
 | Low detection accuracy / many false positives | Model or threshold mismatch | Adjust `pii_threshold` / `hap_threshold`; try a larger or more capable model |
 | `ValidationError` for WatsonX | Missing required `provider_config` fields | Ensure `api_key`, `url`, `container_id` are all set |
 | `Provider 'presidio' ... does not support HAP detection` | A PII-only provider was selected for HAP (directly or via `provider`) | Set `hap_provider` to `litellm` or `watsonx`, or remove `hap` from `expected_redactions` |
-| `The 'presidio' PII provider requires the optional 'presidio-analyzer' package` | Presidio is not installed | `pip install "docling-pipelines[presidio]"` (or `pip install presidio-analyzer`) |
-| `Failed to initialise Presidio AnalyzerEngine ...` | spaCy model in `spacy_model` is not installed | `python -m spacy download en_core_web_lg` (or set `spacy_model` to an installed model) |
+| `The 'presidio' PII provider requires the optional 'presidio-analyzer' package` | Presidio is not installed | `pip install "docling-pipelines[presidio]"` (full distribution) or `pip install "docling-pipelines-slim[presidio]"` (slim distribution), then install a spaCy model wheel |
+| `Failed to initialise Presidio AnalyzerEngine ...` | spaCy model in `spacy_model` is not installed (and spaCy could not download it) | Install the model wheel named in the error, built for your installed spaCy minor version (for example `en_core_web_sm==3.8.0` for spaCy 3.8), or set `spacy_model` to an installed model |
+| The process exits during startup with a spaCy download message, without a docpipe error | The spaCy model is missing and spaCy's own download could not run (no `pip` or `uv` in the environment, or the server returned an error), so spaCy ended the process | Install the spaCy model wheel when building the environment or image, before the flow starts (see [Installing the local providers](#installing-the-local-providers-including-offline-images)) |
 | Presidio misses dates of birth or addresses | `DATE_TIME` / `LOCATION` are not mapped by default | Add them to `entity_mapping` if broad matching is acceptable |
 | Old flows using `provider: "ollama"` fail | Direct Ollama provider was removed | Use `provider: "litellm"` with an `openai/` model prefix and `api_base: "http://localhost:11434/v1"` |
+| `torch package not installed. Install with: ...` or `transformers package not installed. Install with: ...` | `hap_provider: "huggingface"` on an installation without `torch` or `transformers` (usually the slim distribution without the `huggingface` extra) | `pip install "docling-pipelines[huggingface]"` (full distribution) or `pip install "docling-pipelines-slim[huggingface]"` (slim distribution). If you do not need a GPU, install the CPU-only torch build first from `https://download.pytorch.org/whl/cpu` |
 | `Provider 'huggingface' ... does not support PII detection` | `huggingface` detects HAP only; it was selected for PII (directly or via `provider` with PII in `expected_redactions`) | Use `hap_provider: "huggingface"` and pick a PII provider such as `presidio` |
 | `Failed to load Hugging Face model ... Offline mode is enabled` | `local_files_only: true` or `HF_HUB_OFFLINE=1`, but the model (or its weight files) is not in the local cache | Pre-fetch it once: `hf download <model_id> --revision <revision>` |
 | `Failed to load Hugging Face model ...` (online) | Wrong `model_id` or `revision`, no network, or a gated or removed repository | Check the model page on Hugging Face; set `model_id` and `toxic_labels` to use another classifier |

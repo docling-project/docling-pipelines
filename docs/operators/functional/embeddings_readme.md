@@ -76,6 +76,8 @@ to packed 1-bit vectors for compact storage in Milvus binary indexes.
 | `api_token` | string | — | HuggingFace API token (required when `use_local: false`) |
 | `batch_size` | integer | `32` | Texts per encode call, packed across documents (calls run one at a time) |
 
+Local inference (`use_local: true`) needs `sentence-transformers`. On the slim distribution, install it with `pip install "docling-pipelines-slim[huggingface]"`; the full distribution includes it. See [docling-pipelines-slim](../../guides/SLIM_VARIANT.md).
+
 ### LiteLLM `provider_config`
 
 | Field | Type | Default | Description |
@@ -227,6 +229,7 @@ Pair this node with a Milvus VectorDB node that uses `index_type: "BIN_FLAT"` or
 | `The api_key client option must be set` | Missing API key | Set `OPENAI_API_KEY`, `HUGGINGFACE_API_KEY`, etc. as env vars |
 | Ollama connection refused | Ollama not running | Run `ollama serve && ollama pull <model>` |
 | `chunked_content` column not found | Chunker was skipped | Add `ChunkerOperator` before this step; a validation warning is also emitted |
+| `sentence_transformers package not installed. Install with: ...` | Local HuggingFace inference on an installation without `sentence-transformers` (usually the slim distribution without the `huggingface` extra) | `pip install "docling-pipelines[huggingface]"` (full distribution) or `pip install "docling-pipelines-slim[huggingface]"` (slim distribution). If you do not need a GPU, install the CPU-only torch build first from `https://download.pytorch.org/whl/cpu` |
 | Slow throughput with HuggingFace API | Rate limits | Switch to `use_local: true` for local inference |
 | Rate-limit (HTTP 429) errors from a hosted provider | Too many requests in flight | Lower `provider_config.max_concurrent_requests` (LiteLLM default `4`) |
 | Warning `A shared embedding request failed; re-embedding ... documents in isolation` | A request shared by several documents was rejected for its input (HTTP 400/413/422 or a context-length error) | Expected fallback: each affected document is retried on its own and only documents that still fail are recorded as failed; check their failure reasons |

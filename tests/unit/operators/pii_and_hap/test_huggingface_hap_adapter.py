@@ -3,6 +3,7 @@
 
 """Unit tests for HuggingFaceHAPConfig and HuggingFaceHAPAdapter (core adapter mocked; no model loaded)."""
 
+import sys
 import typing
 from collections.abc import Generator
 from typing import Any
@@ -19,9 +20,11 @@ from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.huggingface im
 from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.huggingface.adapter import HuggingFaceHAPAdapter
 from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.huggingface.config import HuggingFaceHAPConfig
 from docpipe.core.operators.quality.pii_and_hap.domain.models import DetectionCapability, DetectionResult
+from docpipe.core.operators.quality.pii_and_hap.pii_and_hap_annotator import PIIAndHAPAnnotator
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.hap_detection_port import HAPDetectionPort
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.pii_detection_port import PIIDetectionPort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.integrations.huggingface.classification_client import HuggingFaceClassificationClient
 
 _DEFAULT_MODEL = ServiceConstants.DEFAULT_HUGGINGFACE_HAP_MODEL_ID
 _DEFAULT_REVISION = ServiceConstants.DEFAULT_HUGGINGFACE_HAP_REVISION
@@ -275,3 +278,29 @@ class TestHuggingFaceHAPAdapter:
 
         with pytest.raises(DocpipeException, match=expected):
             HuggingFaceHAPAdapter(model_id="", provider_config={}).detect_hap(text="Some text.", threshold=0.8)
+
+
+class TestHuggingFaceHAPOperatorStartup:
+    """The pii_and_hap operator fails at startup when the Hugging Face HAP provider's packages are missing."""
+
+    def test_operator_fails_at_startup_when_torch_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without torch, creating the operator raises the install hint, before any model or document is touched."""
+        # A None entry makes ``import torch`` raise ImportError.
+        monkeypatch.setitem(sys.modules, "torch", None)
+        config = {
+            "redaction": False,
+            "hap_redaction": False,
+            "expected_redactions": ["hap"],
+            "hap_provider": "huggingface",
+        }
+
+        with (
+            patch.object(HuggingFaceClassificationClient, "_load_model") as load_model,
+            pytest.raises(DocpipeException) as error,
+        ):
+            PIIAndHAPAnnotator(config)
+
+        message = str(error.value)
+        assert "torch package not installed" in message
+        assert ServiceConstants.HUGGINGFACE_INSTALL_HINT in message
+        load_model.assert_not_called()

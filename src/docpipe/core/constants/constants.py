@@ -154,6 +154,14 @@ class DocpipeConstants:
         OWNER_DOCPIPE: 200,
     }
 
+    # Install command for an optional local provider's extra. Each extra is named after the provider value
+    # flows use (for example "presidio", "huggingface"), and the code cannot tell which distribution is
+    # installed, so the command names both. Fill in with .format(extra=<provider name>).
+    PROVIDER_EXTRA_INSTALL_COMMAND = (
+        'pip install "docling-pipelines[{extra}]" (full distribution) or '
+        'pip install "docling-pipelines-slim[{extra}]" (slim distribution)'
+    )
+
     # Feature Flag States
     FEATURE_ENABLED = "enabled"
     FEATURE_DISABLED = "disabled"
@@ -504,6 +512,15 @@ class ServiceConstants:
     DEFAULT_HUGGINGFACE_HAP_THRESHOLD = 0.8
     HUGGINGFACE_HAP_TOXIC_LABELS_HINT = (
         "Check the model's config.json id2label on Hugging Face for available label names."
+    )
+    # Install command for the local Hugging Face provider (HAP detection and local embeddings). It follows
+    # "Install with:" in require_package's message. "huggingface" is ProviderConstants.HUGGINGFACE, written
+    # out because ProviderConstants is defined below this class. The torch version is left out on purpose,
+    # so the hint does not go stale when the pin is upgraded.
+    HUGGINGFACE_INSTALL_HINT = (
+        DocpipeConstants.PROVIDER_EXTRA_INSTALL_COMMAND.format(extra="huggingface")
+        + ". If you do not need a GPU, install the CPU-only torch build first from "
+        "https://download.pytorch.org/whl/cpu"
     )
 
     # Local Hugging Face sequence-classification option values

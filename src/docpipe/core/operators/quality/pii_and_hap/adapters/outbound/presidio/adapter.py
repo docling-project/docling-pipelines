@@ -13,12 +13,13 @@ document is processed.
 """
 
 import importlib
+import importlib.metadata
 import threading
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from docpipe.core.constants.constants import LLMConstants
+from docpipe.core.constants.constants import DocpipeConstants, LLMConstants
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.quality.pii_and_hap.adapters.outbound.factories.pii_and_hap_detection_factory import (
     register_pii_and_hap_detection_adapter,
@@ -40,10 +41,13 @@ PRESIDIO_PACKAGE = "presidio_analyzer"
 PRESIDIO_NLP_ENGINE_MODULE = "presidio_analyzer.nlp_engine"
 PRESIDIO_INSTALL_HINT = (
     "The 'presidio' PII provider requires the optional 'presidio-analyzer' package, which is not installed. "
-    "Install it with: pip install presidio-analyzer (or pip install 'docling-pipelines[presidio]'), "
-    "then install a spaCy model, e.g.: python -m spacy download en_core_web_lg"
+    f"Install it with: {DocpipeConstants.PROVIDER_EXTRA_INSTALL_COMMAND.format(extra=ADAPTER_NAME)}. "
+    "Presidio also needs a spaCy model: install the model wheel built for your spaCy minor version, "
+    "for example en_core_web_sm==3.8.0 for spaCy 3.8."
 )
 PRESIDIO_SOURCE = "presidio"
+# Distribution name used to read the installed spaCy version for the model install hint.
+SPACY_DISTRIBUTION = "spacy"
 
 
 @register_pii_and_hap_detection_adapter
@@ -132,11 +136,29 @@ class PresidioPIIAdapter(PIIDetectionPort):
             return PresidioPIIAdapter._validation_result(
                 errors=[
                     f"Failed to initialise Presidio AnalyzerEngine (language='{self._config.language}', "
-                    f"spacy_model='{self._config.spacy_model}'): {exc}. Make sure the spaCy model is installed: "
-                    f"python -m spacy download {self._config.spacy_model}"
+                    f"spacy_model='{self._config.spacy_model}'): {exc}. "
+                    + PresidioPIIAdapter._spacy_model_install_hint(spacy_model=self._config.spacy_model)
                 ]
             )
         return PresidioPIIAdapter._validation_result(errors=[])
+
+    @staticmethod
+    def _spacy_model_install_hint(*, spacy_model: str) -> str:
+        """Tell the user to install the spaCy model wheel built for the installed spaCy minor version.
+
+        The version is read from package metadata, so spaCy is not imported just to build the message.
+        """
+        try:
+            major, minor = importlib.metadata.version(SPACY_DISTRIBUTION).split(".")[:2]
+        except (importlib.metadata.PackageNotFoundError, ValueError):
+            return (
+                f"Install the '{spacy_model}' model wheel built for your installed spaCy minor version "
+                "from spaCy's model releases."
+            )
+        return (
+            f"Install the '{spacy_model}' model wheel built for spaCy {major}.{minor} "
+            f"(any {spacy_model} {major}.{minor}.x release) from spaCy's model releases."
+        )
 
     @staticmethod
     def _validation_result(*, errors: list[str]) -> dict[str, Any]:

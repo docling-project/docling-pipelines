@@ -22,7 +22,8 @@ import pytest
 import torch
 import transformers
 
-from docpipe.exceptions.docpipe_exceptions import ConfigurationError
+from docpipe.core.constants.constants import ServiceConstants
+from docpipe.exceptions.docpipe_exceptions import ConfigurationError, DependencyError
 from docpipe.integrations.huggingface.classification_client import (
     HuggingFaceClassificationClient,
     LoadedModel,
@@ -471,6 +472,27 @@ def test_load_error_appends_hint(mocker: Any) -> None:
 
     with pytest.raises(ConfigurationError, match=re.escape(hint)):
         _make_client(load_error_hint=hint).load()
+
+
+@pytest.mark.parametrize("module", ["torch", "transformers"])
+def test_load_reports_missing_package_with_install_hint(
+    mocker: Any, monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    """A missing torch or transformers raises DependencyError naming the module and both huggingface extras."""
+    load_model = mocker.patch.object(HuggingFaceClassificationClient, "_load_model")
+    # A None entry makes ``import <module>`` raise ImportError, even though the test module imported it.
+    monkeypatch.setitem(sys.modules, module, None)
+
+    with pytest.raises(DependencyError) as error:
+        _make_client().load()
+
+    message = str(error.value)
+    assert f"{module} package not installed" in message
+    assert ServiceConstants.HUGGINGFACE_INSTALL_HINT in message
+    assert '"docling-pipelines[huggingface]"' in message
+    assert '"docling-pipelines-slim[huggingface]"' in message
+    assert "CPU-only torch build" in message
+    load_model.assert_not_called()
 
 
 def test_load_model_rejects_slow_tokenizer_without_loading_model(mocker: Any) -> None:

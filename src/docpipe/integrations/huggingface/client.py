@@ -12,6 +12,7 @@ import os
 import threading
 from typing import Any, ClassVar
 
+from docpipe.core.constants.constants import ServiceConstants
 from docpipe.exceptions.docpipe_exceptions import (
     ConfigurationError,
     ExternalServiceError,
@@ -108,9 +109,9 @@ class HuggingFaceLLMClient(BaseLLMClient):
         Initialize local sentence-transformers model with thread safety.
 
         Raises:
-            ImportError: If sentence-transformers is not installed
+            DependencyError: If sentence-transformers is not installed
         """
-        require_package("sentence_transformers", "pip install sentence-transformers")
+        require_package("sentence_transformers", ServiceConstants.HUGGINGFACE_INSTALL_HINT)
         from sentence_transformers import SentenceTransformer
 
         # Thread-safe model loading

@@ -43,7 +43,7 @@ No flow JSON, configuration key, REST route or output column changes. Not breaki
 - **Layer**: backend only. No frontend, BFF, routing or Redux changes; the properties panel is driven by the published config schema, which does not change.
 - **REST routes**: none. Validation errors returned by the existing validation endpoints change wording only.
 - **Operators**: `pii_and_hap` (the `presidio` and `huggingface` providers) and `embeddings` (the local `huggingface` provider). Storage adapters: none.
-- **Packaging**: `pyproject.toml` (one empty extra, and the `presidio` extra's comment, which still recommends `spacy download`), `uv.lock`, `slim/pyproject.toml` and `slim/uv.lock` (both lock files regenerated with `uv lock`). Dependabot's existing `/` and `/slim` entries keep the new pins up to date.
+- **Packaging**: `pyproject.toml` (one empty extra, and the `presidio` extra's comment, which still recommends `spacy download`), `uv.lock`, `slim/pyproject.toml` (two extras, plus the root manifest's `numpy` override so `presidio-analyzer`'s `numpy<2.5.0` cap does not lower `numpy` for all slim installs) and `slim/uv.lock` (both lock files regenerated with `uv lock`). Dependabot's existing `/` and `/slim` entries keep the new pins up to date.
 - **Code**:
   - `src/docpipe/core/constants/constants.py`: one shared Hugging Face install hint.
   - `src/docpipe/integrations/huggingface/classification_client.py`: missing `torch`/`transformers` check for HAP.
