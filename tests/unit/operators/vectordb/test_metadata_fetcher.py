@@ -517,6 +517,29 @@ class TestFetchMetadataRouting:
         )
         assert result == features
 
+    def test_project_mappable_features_forwards_operator_config_to_weaviate_only(self):
+        mandatory = OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB
+        features = {"content": {"type": "string", mandatory: False}}
+        op_cfg = {"add_sparse_vector": True}
+
+        weaviate = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+            available_features=features,
+            operator_config=op_cfg,
+        )
+        assert weaviate["content"][mandatory] is True
+        assert features["content"][mandatory] is False
+
+        for provider in (OperatorConstants.VectorDB.OPENSEARCH, OperatorConstants.VectorDB.MILVUS):
+            assert (
+                VectorDBMetadataFetcher.project_mappable_features(
+                    adapter_name=provider,
+                    available_features=features,
+                    operator_config=op_cfg,
+                )
+                == features
+            )
+
 
 # ---------------------------------------------------------------------------
 # OpenSearchResourceMetadata.fetch()
