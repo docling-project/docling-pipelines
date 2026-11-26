@@ -214,9 +214,11 @@ class TestHuggingFaceHAPAdapter:
         adapter = HuggingFaceHAPAdapter(model_id="", provider_config={"local_file_only": True, "batch_size": 0})
 
         assert adapter.validate()["errors"] == [
-            "Provider config for 'huggingface' is invalid: "
-            f"unknown key(s) ['local_file_only']; accepted keys: {_ACCEPTED_KEYS}; "
-            "batch_size: Input should be greater than or equal to 1"
+            (
+                "Provider config for 'huggingface' is invalid: "
+                f"unknown key(s) ['local_file_only']; accepted keys: {_ACCEPTED_KEYS}; "
+                "batch_size: Input should be greater than or equal to 1"
+            )
         ]
         core_adapter.create_adapter.assert_not_called()
 
