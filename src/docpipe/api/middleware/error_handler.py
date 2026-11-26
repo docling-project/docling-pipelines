@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Custom exception handler for REST API standard error responses.
 
 This module provides FastAPI exception handlers that convert all exceptions
@@ -5,7 +8,9 @@ to REST API standard error format as defined in error_dto.py.
 """
 
 import logging
+import traceback
 import uuid
+from collections.abc import Mapping
 
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +26,8 @@ from docpipe.api.dto.error_dto import (
 )
 from docpipe.core.constants.constants import DocpipeConstants
 from docpipe.exceptions.docpipe_exceptions import DOCLING_PIPELINES_DOCS_URL, DocpipeException
+from docpipe.integrations.secrets.registry import scrub
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,7 @@ def create_error_response(
     trace_id: str,
     more_info: str | None = None,
     target: ErrorTarget | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """Create REST API standard error response.
 
@@ -54,13 +62,14 @@ def create_error_response(
         trace_id: Trace ID for debugging (required)
         more_info: Optional URL to error documentation
         target: Optional target information
+        headers: Optional response headers (for example ``Retry-After``)
 
     Returns:
         JSONResponse: REST API standard error response
     """
     error_detail = ErrorDetail(
         code=error_code,
-        message=message,
+        message=scrub(message),
         more_info=more_info,
         target=target,
     )
@@ -73,7 +82,10 @@ def create_error_response(
 
     # Log error with stack trace
     logger.error(
-        f"Error response: status={status_code}, code={error_code}, trace={trace_id}",
+        "Error response: status=%s, code=%s, trace=%s",
+        status_code,
+        error_code,
+        trace_id,
         exc_info=True,
         stack_info=True,
     )
@@ -81,6 +93,7 @@ def create_error_response(
     return JSONResponse(
         status_code=status_code,
         content=error_response.model_dump(exclude_none=True),
+        headers=dict(headers) if headers else None,
     )
 
 
@@ -124,6 +137,7 @@ def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSO
         message=str(exc.detail),
         trace_id=trace_id,
         target=target,
+        headers=exc.headers,
     )
 
 
@@ -156,7 +170,7 @@ def validation_exception_handler(request: Request, exc: RequestValidationError) 
 
         error_detail = ErrorDetail(
             code="validation_error",
-            message=f"Error in Field: {field_name}: {error['msg']}",
+            message=scrub(f"Error in Field: {field_name}: {error['msg']}"),
             target=ErrorTarget(type=target_type, name=field_name),
         )
         errors.append(error_detail)
@@ -169,7 +183,9 @@ def validation_exception_handler(request: Request, exc: RequestValidationError) 
 
     # Log error with stack trace
     logger.error(
-        f"Validation error: trace={trace_id}, error_count={len(errors)}",
+        "Validation error: trace=%s, error_count=%d",
+        trace_id,
+        len(errors),
         exc_info=True,
         stack_info=True,
     )
@@ -211,10 +227,14 @@ def docpipe_exception_handler(request: Request, exc: DocpipeException) -> JSONRe
     # This takes precedence over the domain error code so the response body
     # matches the REST API contract (e.g. 425 → "too_early").
     status_code_error_map: dict[int, str] = {
+        403: "forbidden",
         425: "too_early",
     }
     domain_error_code = str(exc.error_code.value) if exc.error_code else None
-    api_error_code = status_code_error_map.get(exc.status_code) or domain_error_code or "internal_error"
+    if exc.status_code == 425:
+        api_error_code = "too_early"
+    else:
+        api_error_code = domain_error_code or status_code_error_map.get(exc.status_code) or "internal_error"
 
     # FlowValidationException carries a structured errors list — unpack each
     # alert as a separate ErrorDetail so the caller gets actionable per-error detail.
@@ -226,7 +246,7 @@ def docpipe_exception_handler(request: Request, exc: DocpipeException) -> JSONRe
             errors.append(
                 ErrorDetail(
                     code=api_error_code,  # type: ignore[arg-type]
-                    message=f"{message_code}: {message}" if message_code else message,
+                    message=scrub(f"{message_code}: {message}" if message_code else message),
                 )
             )
         error_response = ErrorResponse(
@@ -311,10 +331,14 @@ def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         )
 
     # Default to internal server error for unknown exceptions
-    # Log full exception details but return sanitized message
+    # Log the exception class, the sanitized text, and the stack frames. The exception's own text is
+    # not logged raw (it may echo a configured credential) and the traceback is logged without its
+    # final "Type: message" line for the same reason.
     logger.error(
-        f"Unhandled exception: {type(exc).__name__}: {exc!s}",
-        exc_info=True,
+        "Unhandled exception: %s: %s\n%s",
+        type(exc).__name__,
+        scrub(sanitize_exception(exc=exc, config_key="request")),
+        scrub("".join(traceback.format_tb(exc.__traceback__))),
         extra={"trace_id": trace_id},
     )
 

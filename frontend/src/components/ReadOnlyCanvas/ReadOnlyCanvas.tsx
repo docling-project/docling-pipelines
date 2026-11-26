@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useDispatch } from 'react-redux';
+import { Provider, useDispatch, useStore } from 'react-redux';
 import { useIntl } from 'react-intl';
 import { useAppSelector } from '@/hooks';
 import type { PipelineFlowDef, CanvasController, CanvasConfig } from '@elyra/canvas';
@@ -70,6 +70,7 @@ export function ReadOnlyCanvas({
 }: ReadOnlyCanvasProps): React.JSX.Element {
   const intl = useIntl();
   const dispatch = useDispatch<AppDispatch>();
+  const store = useStore();
   const executionLogs = useAppSelector(selectExecutionLogs);
   const isRunning = useAppSelector(selectIsRunning);
   const logsMatchCurrentRun = executionLogs?.job_stats?.job_run_id === jobRunId;
@@ -431,16 +432,20 @@ export function ReadOnlyCanvas({
           onCanvasControllerReady={handleCanvasControllerReady}
           showTopPanel
           topPanelContent={
-            <RunStatusTopPanel
-              jobStats={displayJobStats}
-              isMinimized={isMinimized}
-              isRunning={isRunning}
-              isStopDisabled={isStopDisabled}
-              onToggleMinimize={() => { setIsMinimized((v) => !v); }}
-              onClose={onExit}
-              onStop={handleStop}
-              onRunAgain={handleRunAgain}
-            />
+            // Elyra wraps its children in its own react-redux Provider, which shares the same context key as the
+            // app store. Re-provide the app store so hooks such as useAuth() read `state.auth`, not Elyra's state.
+            <Provider store={store}>
+              <RunStatusTopPanel
+                jobStats={displayJobStats}
+                isMinimized={isMinimized}
+                isRunning={isRunning}
+                isStopDisabled={isStopDisabled}
+                onToggleMinimize={() => { setIsMinimized((v) => !v); }}
+                onClose={onExit}
+                onStop={handleStop}
+                onRunAgain={handleRunAgain}
+              />
+            </Provider>
           }
         />
       </div>

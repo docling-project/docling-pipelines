@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for LLMAdapterFactory provider dispatch and argument mapping."""
 
 from unittest.mock import patch
@@ -99,17 +102,29 @@ class TestCreateEmbeddingAdapter:
                 model_id="sentence-transformers/all-MiniLM-L6-v2",
                 provider_config={"use_local": False, "api_key": "hf-key"},  # pragma: allowlist secret
             )
+            adapter.validate_embedding()
 
         assert isinstance(adapter, HuggingFaceAdapter)
         assert client_cls.call_args.kwargs["use_local"] is False
         assert client_cls.call_args.kwargs["api_token"] == "hf-key"  # pragma: allowlist secret
+
+    def test_huggingface_embedding_adapter_gets_no_hap_defaults(self):
+        """The embedding branch keeps the caller's model and sets no detection defaults."""
+        adapter = LLMAdapterFactory.create_embedding_adapter(
+            provider="huggingface", model_id="sentence-transformers/all-MiniLM-L6-v2", provider_config={}
+        )
+
+        assert isinstance(adapter, HuggingFaceAdapter)
+        assert adapter.model_name == "sentence-transformers/all-MiniLM-L6-v2"
+        assert adapter.toxic_labels == ()
+        assert adapter.revision is None
 
 
 class TestCreateTextDetectionAdapter:
     """Test suite for LLMAdapterFactory.create_text_detection_adapter."""
 
     def test_unsupported_provider_raises(self):
-        """Only watsonx supports text detection."""
+        """Providers without text detection are rejected."""
         with pytest.raises(ValueError, match="Unsupported text detection provider: litellm"):
             LLMAdapterFactory.create_text_detection_adapter(
                 provider="litellm", model_id="m", provider_config={"api_key": "k"}
@@ -148,6 +163,67 @@ class TestCreateTextDetectionAdapter:
         assert adapter.container_kind == "space"
         assert adapter.timeout == 45
 
+    def test_huggingface_adapter_created_from_explicit_options(self):
+        """Hugging Face detection options are mapped onto the adapter without loading a model."""
+        adapter = LLMAdapterFactory.create_text_detection_adapter(
+            provider="HuggingFace",
+            model_id="unitary/unbiased-toxic-roberta",
+            provider_config={
+                "toxic_labels": ["toxicity", "insult"],
+                "revision": "abc123",
+                "activation": "sigmoid",
+                "max_length": 256,
+                "batch_size": 8,
+                "device": "cpu",
+                "local_files_only": True,
+            },
+        )
+
+        assert isinstance(adapter, HuggingFaceAdapter)
+        assert adapter.model_name == "unitary/unbiased-toxic-roberta"
+        assert adapter.toxic_labels == ("toxicity", "insult")
+        assert adapter.revision == "abc123"
+        assert adapter.activation == "sigmoid"
+        assert adapter.max_length == 256
+        assert adapter.batch_size == 8
+        assert adapter.device == "cpu"
+        assert adapter.local_files_only is True
+        assert adapter.detection_client is None
+
+    def test_huggingface_optional_options_fall_back_without_hap_model_defaults(self):
+        """Omitted options use generic fallbacks; the model, revision and labels are never defaulted."""
+        adapter = LLMAdapterFactory.create_text_detection_adapter(
+            provider="huggingface",
+            model_id="org/classifier",
+            provider_config={"toxic_labels": ["toxic"], "batch_size": 0},
+        )
+
+        assert isinstance(adapter, HuggingFaceAdapter)
+        assert adapter.model_name == "org/classifier"
+        assert adapter.revision is None
+        assert adapter.activation == "auto"
+        assert adapter.max_length == 512
+        assert adapter.batch_size == 32
+        assert adapter.device is None
+        assert adapter.local_files_only is False
+
+    def test_huggingface_empty_model_id_raises(self):
+        """The factory does not pick a default Hugging Face model."""
+        with pytest.raises(ValueError, match="model_id cannot be empty"):
+            LLMAdapterFactory.create_text_detection_adapter(
+                provider="huggingface", model_id="", provider_config={"toxic_labels": ["LABEL_1"]}
+            )
+
+    @pytest.mark.parametrize("provider_config", [{}, {"toxic_labels": []}])
+    def test_huggingface_missing_toxic_labels_raises_with_id2label_hint(self, provider_config):
+        """toxic_labels are required and the error points to the model's id2label."""
+        with pytest.raises(ValueError, match="'toxic_labels' is required for model 'org/classifier'") as error:
+            LLMAdapterFactory.create_text_detection_adapter(
+                provider="huggingface", model_id="org/classifier", provider_config=provider_config
+            )
+
+        assert "config.json id2label" in str(error.value)
+
 
 class TestGetSupportedProviders:
     """Test suite for LLMAdapterFactory.get_supported_providers."""
@@ -158,8 +234,8 @@ class TestGetSupportedProviders:
             ("inference", {"watsonx", "litellm"}),
             ("Embedding", {"watsonx", "litellm", "huggingface"}),
             ("embeddings", {"watsonx", "litellm", "huggingface"}),
-            ("text_detection", {"watsonx"}),
-            ("detection", {"watsonx"}),
+            ("text_detection", {"watsonx", "huggingface"}),
+            ("detection", {"watsonx", "huggingface"}),
         ],
     )
     def test_supported_providers(self, capability, expected):
@@ -175,7 +251,7 @@ class TestGetSupportedProviders:
         providers = LLMAdapterFactory.get_supported_providers(capability="detection")
         providers.add("other")
 
-        assert LLMAdapterFactory.TEXT_DETECTION_PROVIDERS == {"watsonx"}
+        assert LLMAdapterFactory.TEXT_DETECTION_PROVIDERS == {"watsonx", "huggingface"}
 
     def test_unknown_capability_raises(self):
         """Unknown capabilities are rejected."""

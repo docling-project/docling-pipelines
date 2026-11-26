@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Box destination adapter — writes documents via the box-sdk-gen library."""
 
 from io import BytesIO
@@ -16,6 +19,8 @@ from docpipe.core.operators.storage.adapters.outbound.destinations.factories.des
 )
 from docpipe.core.operators.storage.domain.models import WriteResult
 from docpipe.core.operators.storage.ports.outbound.destination_adapter import DestinationAdapterPort
+from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -96,7 +101,8 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 config.create_dirs,
             )
         except Exception as e:
-            msg = f"Box destination validation failed: folder_id={config.folder_id}, error={e}"
+            safe_error = sanitize_exception(exc=e, config_key="storage_output.destination_config.box")
+            msg = f"Box destination validation failed: folder_id={config.folder_id}, error={safe_error}"
             logger.error(msg)
             return WriteResult(doc_id="", doc_name="", success=False, error_message=msg)
 
@@ -191,8 +197,9 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
             )
 
         except Exception as e:
-            msg = f"Unexpected error writing to Box '{destination_path}': {e}"
-            logger.error(msg, exc_info=True)
+            safe_error = sanitize_exception(exc=e, config_key="storage_output.destination_config.box")
+            msg = f"Unexpected error writing to Box '{destination_path}': {safe_error}"
+            logger.error(msg)
             return WriteResult(doc_id="", doc_name=destination_path, success=False, error_message=msg)
 
     def ensure_directory(self, *, path: str) -> None:
@@ -220,18 +227,33 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
     ) -> BoxDestinationConfig:
         """Build BoxDestinationConfig from operator flow params.
 
+        Accepts both "credentials_path" (primary, matching BoxDestinationConfig
+        and frontend UI) and the legacy "credentials_json_path" key inside
+        credentials or provider_config for backward compatibility with stored flows.
+
         Expected flow config shape::
 
             provider_config:
                 folder_id: "123456789"   # target Box folder ID; "0" = root
                 create_dirs: true
+                credentials_path: "${BOX_CONFIG_PATH}"
 
             credentials:
+                credentials_path: "${BOX_CONFIG_PATH}"
+                # or legacy:
                 credentials_json_path: "${BOX_CONFIG_PATH}"
         """
-        credentials_path = resolve_env_var(credentials.get("credentials_json_path"))
+        provider_config = reveal_value(provider_config)
+        credentials = reveal_value(credentials)
+        raw_path = (
+            credentials.get("credentials_path")
+            or credentials.get("credentials_json_path")
+            or provider_config.get("credentials_path")
+            or provider_config.get("credentials_json_path")
+        )
+        credentials_path = resolve_env_var(raw_path)
         if not credentials_path:
-            raise ValueError("Missing required Box credential: 'credentials_json_path'")
+            raise ValueError("Missing required Box credential: 'credentials_path'")
 
         folder_id = resolve_env_var(provider_config.get("folder_id")) or "0"
 
@@ -316,7 +338,11 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 if getattr(entry, "type", None) == "folder" and getattr(entry, "name", None) == name:
                     return str(entry.id)
         except Exception as e:
-            logger.error("Error listing Box folder items for parent_id=%s: %s", parent_id, e)
+            logger.error(
+                "Error listing Box folder items for parent_id=%s: %s",
+                parent_id,
+                sanitize_exception(exc=e, config_key="storage_output.destination_config.box"),
+            )
         return None
 
     def _find_existing_file(
@@ -337,7 +363,7 @@ class BoxDestinationAdapter(DestinationAdapterPort[BoxDestinationConfig]):
                 "Error checking for existing file '%s' in Box folder_id=%s: %s",
                 filename,
                 parent_folder_id,
-                e,
+                sanitize_exception(exc=e, config_key="storage_output.destination_config.box"),
             )
         return None
 

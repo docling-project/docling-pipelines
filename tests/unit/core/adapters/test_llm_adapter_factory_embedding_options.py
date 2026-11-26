@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests that LLMAdapterFactory threads batch_size / max_concurrent_requests into embedding adapters."""
 
 from unittest.mock import patch
@@ -96,6 +99,7 @@ class TestHuggingFaceEmbeddingOptions:
                 model_id="sentence-transformers/all-MiniLM-L6-v2",
                 provider_config={"batch_size": 16, "max_concurrent_requests": 8},
             )
+            adapter.validate_embedding()
 
         assert client_cls.call_args.kwargs["batch_size"] == 16
         assert adapter.get_embedding_batch_size() == 16

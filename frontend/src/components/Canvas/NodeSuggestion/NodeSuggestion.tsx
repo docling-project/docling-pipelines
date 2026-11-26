@@ -182,6 +182,7 @@ const NodeSuggestion: React.FC<NodeSuggestionProps> = ({
         <NodeSuggestionConnector start={lineStart} end={lineEnd} />
       )}
       <div
+        data-node-suggestion
         className={styles.card}
         style={{ left: `${position.x}px`, top: `${position.y}px` }}
         role="dialog"

@@ -274,6 +274,100 @@ def test_validate_rejects_non_dict_capability_config(mocked_wiring):
 
 
 # ---------------------------------------------------------------------------
+# huggingface: local, HAP-only provider
+# ---------------------------------------------------------------------------
+
+
+def test_presidio_and_huggingface_build_two_adapters(mocked_wiring):
+    operator = PIIAndHAPAnnotator({"pii_provider": "presidio", "hap_provider": "huggingface"})
+
+    assert [c.args[0] for c in mocked_wiring.create.call_args_list] == ["presidio", "huggingface"]
+    pii_adapter = mocked_wiring.service_cls.call_args.kwargs["pii_adapter"]
+    hap_adapter = mocked_wiring.service_cls.call_args.kwargs["hap_adapter"]
+    assert pii_adapter is not hap_adapter
+    assert operator.hap_selection == ProviderSelection(
+        provider="huggingface", provider_key="hap_provider", provider_config_key="provider_config"
+    )
+
+
+def test_huggingface_as_pii_provider_fails_listing_pii_providers(mocked_wiring):
+    with pytest.raises(ValueError) as exc_info:
+        PIIAndHAPAnnotator({"pii_provider": "huggingface", "hap_provider": "huggingface"})
+
+    message = str(exc_info.value)
+    assert "Provider 'huggingface' (set via 'pii_provider') does not support PII detection" in message
+    assert "Providers supporting PII: litellm, presidio, watsonx" in message
+    mocked_wiring.create.assert_not_called()
+
+
+def test_legacy_huggingface_provider_with_hap_only_needs_no_pii_provider(mocked_wiring):
+    operator = PIIAndHAPAnnotator({"provider": "huggingface", "expected_redactions": ["HAP"]})
+
+    assert operator.pii_selection is None
+    assert operator.hap_selection.provider == "huggingface"
+    assert [c.args[0] for c in mocked_wiring.create.call_args_list] == ["huggingface"]
+    assert mocked_wiring.service_cls.call_args.kwargs["pii_adapter"] is None
+
+
+def test_validate_huggingface_accepts_empty_hap_provider_config(mocked_wiring):
+    operator = PIIAndHAPAnnotator({**_REQUIRED, "pii_provider": "presidio", "hap_provider": "huggingface"})
+
+    assert _validate(operator) == []
+
+
+def test_validate_huggingface_rejects_misspelled_key(mocked_wiring):
+    operator = PIIAndHAPAnnotator(
+        {
+            **_REQUIRED,
+            "pii_provider": "presidio",
+            "hap_provider": "huggingface",
+            "hap_provider_config": {"local_file_only": True},
+        }
+    )
+
+    (error,) = _validate(operator)
+    assert error.startswith("hap_provider_config: unknown key 'local_file_only' for provider 'huggingface'.")
+
+
+def test_validate_legacy_huggingface_provider_reports_misspelled_key_once_without_hint(mocked_wiring):
+    operator = PIIAndHAPAnnotator(
+        {**_REQUIRED, "provider": "huggingface", "expected_redactions": ["HAP"], "provider_config": {"devise": "cpu"}}
+    )
+
+    (error,) = _validate(operator)
+    assert error.startswith("provider_config: unknown key 'devise' for provider 'huggingface'.")
+
+
+def test_validate_huggingface_with_shared_watsonx_config_suggests_hap_provider_config(mocked_wiring):
+    operator = PIIAndHAPAnnotator(
+        {**_REQUIRED, "pii_provider": "watsonx", "hap_provider": "huggingface", "provider_config": _WATSONX_CONFIG}
+    )
+
+    errors = _validate(operator)
+
+    # Reported in config order; model_id is a valid huggingface key
+    assert errors[:-1] == [
+        f"provider_config: unknown key '{key}' for provider 'huggingface'. Valid keys: "
+        "['activation', 'batch_size', 'device', 'local_files_only', 'max_length', 'model_id', 'revision', "
+        "'toxic_labels']"
+        for key in ("api_key", "url", "container_kind", "container_id")
+    ]
+    assert errors[-1] == (
+        "'provider_config' is shared by the capability providers because 'provider' is unset; "
+        "set 'hap_provider_config' to configure 'huggingface' separately"
+    )
+
+
+def test_validate_shared_config_fallback_to_lenient_providers_reports_nothing(mocked_wiring):
+    # presidio's and litellm's schemas accept extra keys, so sharing one config is not an error
+    operator = PIIAndHAPAnnotator(
+        {**_REQUIRED, "pii_provider": "presidio", "hap_provider": "litellm", "provider_config": _LITELLM_CONFIG}
+    )
+
+    assert _validate(operator) == []
+
+
+# ---------------------------------------------------------------------------
 # Metadata (schema the UI reads)
 # ---------------------------------------------------------------------------
 
@@ -306,6 +400,36 @@ def test_metadata_provider_schemas_list_capabilities():
     assert {"language", "spacy_model", "entity_mapping"} <= set(
         schemas["presidio"][OperatorConstants.Config.PROPERTIES]
     )
+
+
+def test_metadata_lists_huggingface_for_hap_only_with_its_config_schema():
+    attributes = PIIAndHAPAnnotator.get_metadata()[OperatorConstants.Config.ATTRIBUTES]
+    valid_values = OperatorConstants.Config.VALID_VALUES
+    providers = OperatorConstants.Config.PROVIDERS
+    properties = OperatorConstants.Config.PROPERTIES
+
+    assert "huggingface" in attributes["hap_provider"][valid_values]
+    assert "huggingface" not in attributes["pii_provider"][valid_values]
+    assert "huggingface" in attributes["hap_provider_config"][providers]
+    assert "huggingface" not in attributes["pii_provider_config"][providers]
+
+    schema = attributes["hap_provider_config"][providers]["huggingface"]
+    assert schema["capabilities"] == ["hap"]
+    assert set(schema[properties]) == {
+        "model_id",
+        "revision",
+        "toxic_labels",
+        "activation",
+        "max_length",
+        "batch_size",
+        "device",
+        "local_files_only",
+    }
+    assert schema[properties]["model_id"][OperatorConstants.Config.DEFAULT] == "ibm-granite/granite-guardian-hap-38m"
+    assert schema[properties]["activation"][valid_values] == ["softmax", "sigmoid", "auto"]
+    assert schema[properties]["batch_size"][OperatorConstants.Filtering.MIN_VALUE] == 1
+    # extra="forbid" publishes no allow_extra_keys flag, so validate_config_from_metadata rejects unknown keys
+    assert schema.get(OperatorConstants.Config.ALLOW_EXTRA_KEYS, False) is False
 
 
 # ---------------------------------------------------------------------------

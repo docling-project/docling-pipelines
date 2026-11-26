@@ -32,11 +32,13 @@ import {
 import { ErrorEmptyState } from '@carbon/ibm-products';
 import { Tearsheet } from '@carbon/ibm-products';
 import type { FeatureMappingRow, FeatureMappingItem, VectorDBEnrichmentResult } from '@/types';
+import { isMilvusGpuMode } from '@/utils/vectordb';
 import { enrichFlowFeaturesForNode } from './vectordb-enrichment';
 import {
   DEFAULT_COLUMN_MAPPINGS,
   MILVUS_BINARY_METRIC_VALUES,
   MILVUS_DENSE_METRIC_VALUES,
+  MILVUS_GPU_METRIC_VALUES,
   VECTORDB_LABELS,
   VECTORDB_PROVIDERS,
   omitProviderConfigKeys,
@@ -305,6 +307,10 @@ export function VectorDBFeatureMappingTearsheet({
       }
       return base.filter((v) => vectorSimilarityOptions.includes(v));
     }
+    // GPU indexes accept only L2/IP; BM25 is excluded because GPU mode rejects sparse vectors.
+    if (isMilvusGpuMode(parsedProviderConfig)) {
+      return MILVUS_GPU_METRIC_VALUES.filter((v) => vectorSimilarityOptions.includes(v));
+    }
     if (hasDense && !hasBinary) {
       const base: string[] = [...MILVUS_DENSE_METRIC_VALUES];
       if (sparseVectorEnabled && !base.includes('BM25')) {
@@ -313,7 +319,7 @@ export function VectorDBFeatureMappingTearsheet({
       return base.filter((v) => vectorSimilarityOptions.includes(v));
     }
     return vectorSimilarityOptions;
-  }, [availableFeatures, provider, sparseVectorEnabled, tableRows, vectorSimilarityOptions]);
+  }, [availableFeatures, parsedProviderConfig, provider, sparseVectorEnabled, tableRows, vectorSimilarityOptions]);
 
   useEffect(() => {
     if (isCreateNew && effectiveSimilarityOptions.length > 0 && !effectiveSimilarityOptions.includes(similarityMetric)) {

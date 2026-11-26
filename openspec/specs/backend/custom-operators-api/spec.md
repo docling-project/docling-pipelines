@@ -87,3 +87,90 @@ The custom-operators-api capability is the REST API surface for managing user-su
 #### Scenario: Unknown operator returns 404
 - **WHEN** `DELETE /api/v1/custom_operators/{unknown_id}` is called
 - **THEN** the response is 404
+
+### Requirement: Custom operator routes require authentication
+Every `/api/v1/custom_operators` route, including list, get, `directory_tree`, create, update and delete, SHALL require a valid bearer token. A request without a valid token SHALL NOT reach the handler. When `JWT_SECRET_KEY` is missing or invalid, these routes SHALL return 503 and SHALL NOT invoke the custom operator service.
+
+#### Scenario: Request without a token
+- **WHEN** any `/api/v1/custom_operators` route is called without an `Authorization` header
+- **THEN** the response is 401 and the custom operator service is not called
+
+#### Scenario: Request with an invalid token
+- **WHEN** any `/api/v1/custom_operators` route is called with a token that fails verification
+- **THEN** the response is 401 and the custom operator service is not called
+
+#### Scenario: Read routes are protected
+- **WHEN** `GET /api/v1/custom_operators`, `GET /api/v1/custom_operators/{operator_id}` or `GET /api/v1/custom_operators/directory_tree` is called without a valid token
+- **THEN** the response is not 200 and no operator inventory or file layout is returned
+
+#### Scenario: JWT secret not configured
+- **WHEN** `JWT_SECRET_KEY` is unset and any `/api/v1/custom_operators` route is called with a bearer token
+- **THEN** the response is 503 and the custom operator service is not called
+
+#### Scenario: Valid token
+- **WHEN** a route is called with a valid bearer token
+- **THEN** the handler runs and the existing success and error responses apply
+
+### Requirement: Operator code is not stored while custom operators are disabled
+`POST /api/v1/custom_operators` and a `PATCH` that replaces the script file SHALL be refused with 409 (error code `custom_operators_disabled`) when custom operators are disabled, and SHALL NOT store the script or its metadata. A metadata-only `PATCH`, `GET` and `DELETE` SHALL keep working so that previously stored operators can be inspected and removed. The operator factory SHALL NOT be refreshed while custom operators are disabled.
+
+#### Scenario: Upload while disabled
+- **WHEN** a valid operator script is uploaded and custom operators are disabled
+- **THEN** the response is 409 and no script or metadata is stored
+
+#### Scenario: Script replacement while disabled
+- **WHEN** a `PATCH` with a replacement script is sent and custom operators are disabled
+- **THEN** the response is 409 and the stored script is unchanged
+
+#### Scenario: Delete while disabled
+- **WHEN** a stored operator is deleted and custom operators are disabled
+- **THEN** the operator is removed and no factory refresh is attempted
+
+### Requirement: Upload is restricted to configured identities when secrets are in use
+When a secret provider is registered, create, update, and delete SHALL additionally require the authenticated username to appear in `custom_operators.allowed_uploaders`. An empty or unset list SHALL permit nobody. When no secret provider is registered, any authenticated user SHALL be permitted, as before.
+
+#### Scenario: Authenticated but not listed
+- **WHEN** a secret provider is registered, the caller is authenticated, and the caller is not in `custom_operators.allowed_uploaders`
+- **THEN** the response is 403 and no file is stored
+
+#### Scenario: Listed uploader
+- **WHEN** a secret provider is registered and the caller is in `custom_operators.allowed_uploaders`
+- **THEN** the operation proceeds
+
+#### Scenario: No secret provider
+- **WHEN** no secret provider is registered and the caller is authenticated
+- **THEN** the operation proceeds without an uploader list
+
+### Requirement: Custom operator changes are audited in a dedicated store
+Every create, update, and delete attempt, including rejected ones, SHALL emit one structured JSON record to a dedicated `docpipe.audit` logger that debug and scrub filters cannot suppress. The record SHALL contain timestamp, caller, `operator_id`, `short_name`, action, `script_sha256`, and `outcome` (`success` or `rejected`). Retention SHALL be configurable by `audit.retention_days`.
+
+#### Scenario: Successful change
+- **WHEN** an operator is created, replaced, or deleted
+- **THEN** one record with outcome `success`, the caller, operator, action, and script digest is written to `docpipe.audit`
+
+#### Scenario: Rejected attempt
+- **WHEN** a create, update, or delete is refused with 403 or a validation error
+- **THEN** one record with outcome `rejected` is written to `docpipe.audit`
+
+#### Scenario: Debug level does not hide the record
+- **WHEN** `DS_LOG_LEVEL` is set to `WARNING`
+- **THEN** audit records are still written
+
+### Requirement: Custom operator changes require administrator
+Creating, updating and deleting custom operators SHALL require the `admin` role, because an upload runs arbitrary code in the pipeline runtime. Listing and reading operators SHALL remain available to any authenticated caller.
+
+#### Scenario: Editor upload refused
+- **WHEN** an editor posts a valid `.py` operator to `POST /api/v1/custom_operators`
+- **THEN** the response is 403 and the operator is not stored
+
+#### Scenario: Editor update and delete refused
+- **WHEN** an editor calls `PATCH` or `DELETE` on a custom operator
+- **THEN** the response is 403
+
+#### Scenario: Viewer can list
+- **WHEN** a viewer calls `GET /api/v1/custom_operators`
+- **THEN** the response is 200
+
+#### Scenario: Admin upload allowed
+- **WHEN** an admin posts a valid operator
+- **THEN** the response is 201

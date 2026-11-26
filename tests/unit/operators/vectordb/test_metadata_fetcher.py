@@ -16,6 +16,8 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.resource_metadata import (
     OpenSearchResourceMetadata,
@@ -438,6 +440,27 @@ class TestFetchMetadataRouting:
     def test_milvus_constant_equals_expected_string(self):
         assert OperatorConstants.VectorDB.MILVUS == "milvus"
 
+    def test_weaviate_delegates_to_weaviate_resource_metadata(self):
+        fetcher = VectorDBMetadataFetcher()
+        expected = VectorDBMetadataFetcher._empty_result()
+
+        with patch(
+            "docpipe.core.operators.vectordb.adapters.outbound.weaviate.resource_metadata.WeaviateResourceMetadata"
+        ) as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.fetch.return_value = expected
+            mock_cls.return_value = mock_instance
+
+            result = fetcher.fetch_metadata(
+                adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+                operator_config={OperatorConstants.Config.PROVIDER_CONFIG: {"host": "localhost"}},
+                available_features={},
+            )
+
+        assert result is expected
+        mock_instance.fetch.assert_called_once()
+        assert mock_instance.fetch.call_args.kwargs["provider_config"] == {"host": "localhost"}
+
     def test_fetch_passes_provider_config_to_adapter(self):
         """fetch_metadata extracts provider_config from operator_config and forwards it."""
         fetcher = VectorDBMetadataFetcher()
@@ -460,6 +483,62 @@ class TestFetchMetadataRouting:
         call_kwargs = mock_instance.fetch.call_args.kwargs
         assert call_kwargs["provider_config"] == provider_cfg
         assert call_kwargs["operator_config"] is op_cfg
+
+    def test_project_mappable_features_weaviate_filters_sparse_features(self):
+        features = {
+            "content": {"type": "string"},
+            "embeddings": {"type": "vector"},
+            "sparse_embeddings": {"type": OperatorConstants.Types.TYPE_VECTOR_SPARSE},
+        }
+        result = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+            available_features=features,
+        )
+        assert "sparse_embeddings" not in result
+        assert "content" in result
+        assert "embeddings" in result
+
+    @pytest.mark.parametrize(
+        "provider",
+        [
+            OperatorConstants.VectorDB.OPENSEARCH,
+            OperatorConstants.VectorDB.MILVUS,
+            "custom_provider",
+        ],
+    )
+    def test_project_mappable_features_pass_through_for_other_providers(self, provider: str):
+        features = {
+            "content": {"type": "string"},
+            "sparse_embeddings": {"type": OperatorConstants.Types.TYPE_VECTOR_SPARSE},
+        }
+        result = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=provider,
+            available_features=features,
+        )
+        assert result == features
+
+    def test_project_mappable_features_forwards_operator_config_to_weaviate_only(self):
+        mandatory = OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB
+        features = {"content": {"type": "string", mandatory: False}}
+        op_cfg = {"add_sparse_vector": True}
+
+        weaviate = VectorDBMetadataFetcher.project_mappable_features(
+            adapter_name=OperatorConstants.VectorDB.WEAVIATE,
+            available_features=features,
+            operator_config=op_cfg,
+        )
+        assert weaviate["content"][mandatory] is True
+        assert features["content"][mandatory] is False
+
+        for provider in (OperatorConstants.VectorDB.OPENSEARCH, OperatorConstants.VectorDB.MILVUS):
+            assert (
+                VectorDBMetadataFetcher.project_mappable_features(
+                    adapter_name=provider,
+                    available_features=features,
+                    operator_config=op_cfg,
+                )
+                == features
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -99,7 +99,7 @@ The operator SHALL expose its configurable parameters, defaults, and data types 
 - **THEN** the metadata response includes parameter definitions for provider, doc ID column, vector dimensions, and sparse vector settings, and excludes `create_index`
 
 ### Requirement: Vector store resource metadata and flow enrichment
-The vector database adapters SHALL provide live resource introspection for flow enrichment endpoints, retrieving available indices/collections, existing schema definitions, and resolving default feature mappings.
+The vector database adapters SHALL provide live resource introspection for flow enrichment endpoints, retrieving available indices/collections, existing schema definitions (including dense, sparse, and binary vector dimensions and index information), supporting collections with `FLOAT_VECTOR` or `BINARY_VECTOR` fields, and resolving default feature mappings while preserving upstream dynamic feature descriptions.
 
 #### Scenario: Live resources discovered during enrichment
 - **WHEN** flow feature enrichment is requested for a vectordb node with valid connection configuration
@@ -108,6 +108,14 @@ The vector database adapters SHALL provide live resource introspection for flow 
 #### Scenario: Selected resource schema and feature mapping resolution
 - **WHEN** an existing index or collection name is selected in provider config
 - **THEN** its schema is retrieved in `selected_resource_schema` and feature mappings are aligned with the incoming available features
+
+#### Scenario: Binary vector collection schema and metadata inspection
+- **WHEN** an existing Milvus collection contains a `BINARY_VECTOR` field
+- **THEN** its bit dimension and index metadata (such as `HAMMING` / `JACCARD` metric and binary index type) are extracted into `selected_resource_schema` and `stored_resource_metadata`
+
+#### Scenario: Binary vector collection support check
+- **WHEN** an existing Milvus collection contains a `BINARY_VECTOR` field with an index created
+- **THEN** `is_docpipe_supported_resource` evaluates to `supported: True` without requiring a `FLOAT_VECTOR` field
 
 #### Scenario: Unreachable vector store during enrichment
 - **WHEN** the vector database is unreachable or connection fails during enrichment
@@ -129,11 +137,17 @@ The operator SHALL decide whether a vector field is binary only from the type of
 - **THEN** validation fails with an invalid-configuration error stating that binary vector features are not supported by OpenSearch, instead of silently creating a `text` field
 
 ### Requirement: Binary quantization of embeddings
-`EmbeddingsOperator` SHALL support a node-level `quantization` setting (`none`, `binary`, `ubinary`) that converts float embeddings into packed 1-bit vectors and SHALL expose the resulting `embeddings` feature as `vector_binary`. The setting is read from the embeddings node configuration, not from `global_config`.
+`EmbeddingsOperator` SHALL support a node-level `quantization` setting (`none`, `binary`, `ubinary`) that converts float embeddings into packed 1-bit vectors and SHALL expose the resulting `embeddings` feature as `vector_binary` with dynamically updated feature descriptions. The setting is read from the embeddings node configuration, not from `global_config`.
 
 #### Scenario: Binary quantization types the embeddings feature
 - **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary` on its node
 - **THEN** feature propagation exposes the embeddings feature as `vector_binary` so downstream VectorDB nodes create a `BINARY_VECTOR` field
+
+#### Scenario: Dynamic feature description based on quantization
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `binary` or `ubinary`
+- **THEN** the `embeddings` feature description is dynamically set to `"Binary vector embeddings for similarity search"`
+- **WHEN** `EmbeddingsOperator` is configured with `quantization` of `"none"` or unquantized
+- **THEN** the `embeddings` feature description is set to `"Dense vector embeddings for similarity search"`
 
 #### Scenario: Quantized output format
 - **WHEN** an embedding of dimension `d` is quantized
@@ -195,6 +209,17 @@ The Milvus adapter SHALL reject binary vector field creation and binary index ty
 #### Scenario: Binary vector feature with Milvus Lite and a dense index type
 - **WHEN** `auth_type="lite"` is configured with `FLAT` and an upstream embeddings operator sets `quantization` to `binary` or `ubinary`
 - **THEN** flow validation fails with an invalid configuration exception stating that binary vector features are not supported by Milvus Lite
+
+### Requirement: Soft-deleted document chunk cleanup
+When running in an incremental flow with soft-deleted documents present in the incremental metadata repository, the VectorDB operator SHALL resolve all soft-deleted source document IDs to their stored chunk primary keys across configured vector backends (OpenSearch, Milvus) and delete those chunks. If chunk deletion fails, the operator SHALL unmark the soft-deleted records in the incremental repository and fail the operator execution step.
+
+#### Scenario: Soft-deleted source documents chunks removed from vector store
+- **WHEN** the VectorDB operator executes and soft-deleted document IDs are present in the incremental repository
+- **THEN** all stored chunk primary keys corresponding to those source document IDs are identified and deleted from the vector store
+
+#### Scenario: VectorDB deletion failure triggers unmark rollback
+- **WHEN** deleting chunks for soft-deleted documents fails in the vector store
+- **THEN** the operator unmarks the soft-deleted records in the incremental metadata repository and raises an exception marking the node status as `FAILED`
 
 ### Requirement: Milvus vector mode
 
@@ -307,3 +332,37 @@ When index creation fails after the collection was created, the adapter SHALL dr
 #### Scenario: Cleanup drop fails
 - **WHEN** dropping the collection also fails
 - **THEN** the drop failure is logged and the original index error is still raised
+
+### Requirement: Milvus dense mode unmapped content fallback
+In dense vector mode, when the collection's content field is unmapped and `content` is available for vector DB, the Milvus adapter SHALL populate the content field from `content` if it fits within the 65,535 UTF-8 byte limit. If explicitly mapped, this fallback SHALL be skipped; if over-limit, the text SHALL be omitted with a warning.
+
+#### Scenario: Dense mode with unmapped content within limit
+- **WHEN** a dense-mode Milvus node processes documents without an explicit feature mapping targeting the collection's content field, and `content` is within 65,535 UTF-8 bytes
+- **THEN** each document is indexed with its `content` text populated in the collection's content field alongside its vector embeddings
+
+#### Scenario: Dense mode with explicit feature mapping targeting content
+- **WHEN** a feature mapping explicitly targets the collection's content field
+- **THEN** the automatic content fallback is skipped and the mapped feature's value is used
+
+#### Scenario: Dense mode with unmapped content exceeding VARCHAR limit
+- **WHEN** unmapped `content` text exceeds 65,535 UTF-8 bytes
+- **THEN** the content field is left empty for that document with a warning logged, and the document is still indexed with its vector embeddings without failing
+
+#### Scenario: Content feature unavailable for vector DB
+- **WHEN** the `content` feature in `available_features` has `available_for_vector_db` set to `false`
+- **THEN** the unmapped content fallback is not applied and the content field remains empty
+
+### Requirement: Milvus per-row isolation of oversized VARCHAR values
+The Milvus adapter SHALL validate the UTF-8 byte length of all `VARCHAR` fields against the 65,535 byte limit before batch insertion. When a row contains an explicitly mapped `VARCHAR` field exceeding this limit, the adapter SHALL reject only that row before batch submission, record it in `failed_docs`, and retain all other rows in the batch for insertion.
+
+#### Scenario: Explicitly mapped over-limit text rejects only that row
+- **WHEN** a batch contains a document whose explicitly mapped `content` or `VARCHAR` field exceeds 65,535 UTF-8 bytes alongside valid documents
+- **THEN** the oversized document is rejected before insertion and recorded in `failed_docs` with its chunk ID and reason, while valid documents in the batch are inserted successfully
+
+#### Scenario: Multi-byte text measured in UTF-8 bytes
+- **WHEN** a document's `VARCHAR` field contains multi-byte characters that exceed 65,535 UTF-8 bytes even if the character count is below 65,535
+- **THEN** the document is identified as oversized based on UTF-8 byte length and handled according to the VARCHAR length policy
+
+#### Scenario: Non-VARCHAR fields bypass VARCHAR length check
+- **WHEN** a document contains large text in a field mapped to a non-VARCHAR data type such as `JSON`
+- **THEN** the field is not checked against the 65,535 UTF-8 byte `VARCHAR` limit and the document is batched normally

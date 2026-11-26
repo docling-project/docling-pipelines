@@ -38,5 +38,8 @@
     "noUncheckedIndexedAccess": true,
     "types": ["vitest/globals", "@testing-library/jest-dom/vitest", "node"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  // BFF tests import server/ controllers, which are not strict-clean (tsconfig.server.json
+  // reports the same errors). They run under vitest and stay out of this program.
+  "exclude": ["tests/unit/server"]
 }

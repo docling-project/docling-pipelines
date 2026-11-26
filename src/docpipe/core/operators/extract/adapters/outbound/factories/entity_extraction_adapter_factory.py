@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating entity extraction adapters.
 
 This factory creates appropriate entity extraction adapter instances based on the
@@ -18,6 +21,7 @@ from typing import Any, ClassVar
 from docpipe.core.constants.operator_constants import OperatorConstants
 from docpipe.core.operators.extract.domain import EntityExtractionMode
 from docpipe.core.operators.extract.ports.outbound.entity_extraction import EntityExtractionPort
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -171,6 +175,7 @@ class EntityExtractionAdapterFactory:
         Raises:
             ValueError: If mode is unsupported or config is invalid
         """
+        entity_extraction_config = reveal_value(entity_extraction_config)
         if mode == EntityExtractionMode.NONE:
             logger.info("Entity extraction disabled (mode='none')")
             return None

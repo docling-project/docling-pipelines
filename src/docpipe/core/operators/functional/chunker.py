@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Chunker operator that splits documents into smaller text segments."""
 
 import io
@@ -25,6 +28,7 @@ from docpipe.exceptions.docpipe_exceptions import DocpipeException
 from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
 from docpipe.integrations.ollama.client import InteractionMode, OllamaClient
 from docpipe.integrations.ollama.embeddings import OllamaClientEmbeddings
+from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.core.memmap_file_utils import write_chunks_to_file
 from docpipe.utils.infrastructure import get_pyarrow_table_size_mb
 from docpipe.utils.infrastructure.filesystem import get_data_path
@@ -326,9 +330,30 @@ class ChunkerOperator(AbstractOperator):
         }
 
     @staticmethod
+    def _get_secret_fields_by_provider() -> dict[str, dict[str, list[str]]]:
+        """Aggregate the summarization provider config classes' secret-capable declarations."""
+        from docpipe.core.operators.secret_fields import build_provider_secret_fields
+        from docpipe.core.operators.shared.llm_provider_config import LLMProviderConfig, WatsonxProviderConfig
+
+        return build_provider_secret_fields(
+            selector=f"{OperatorConstants.Config.SUMMARIZATION}.{OperatorConstants.Config.PROVIDER}",
+            prefix=f"{OperatorConstants.Config.SUMMARIZATION}.{OperatorConstants.Config.PROVIDER_CONFIG}",
+            classes={
+                OperatorConstants.Config.PROVIDER_LITELLM: LLMProviderConfig,
+                OperatorConstants.Config.PROVIDER_WATSONX: WatsonxProviderConfig,
+            },
+        )
+
+    @staticmethod
     def get_metadata() -> dict[str, Any]:
         """Get metadata."""
         return {
+            "secret_fields": [
+                # Remote chunking (docling_serve) provider_config
+                f"{OperatorConstants.Config.PROVIDER_CONFIG}.{OperatorConstants.Config.API_BASE}",
+                f"{OperatorConstants.Config.PROVIDER_CONFIG}.{OperatorConstants.Config.API_KEY}",
+            ],
+            "secret_fields_by_provider": ChunkerOperator._get_secret_fields_by_provider(),
             OperatorConstants.Misc.SDK: True,
             OperatorConstants.Misc.CATEGORY: ChunkerOperator.category.value,
             OperatorConstants.Misc.IS_OPERATOR_AVAILABLE: ChunkerOperator.is_available(),
@@ -679,7 +704,9 @@ class ChunkerOperator(AbstractOperator):
                 timeout = self.provider_config.get(OperatorConstants.Processing.TIMEOUT, 300)
                 max_retries = self.provider_config.get(OperatorConstants.Processing.MAX_RETRIES, 3)
                 verify_ssl = self.provider_config.get(OperatorConstants.Processing.VERIFY_SSL, True)
-                api_base = self.provider_config.get(OperatorConstants.Config.API_BASE, "http://localhost:5001")
+                api_base = reveal_value(
+                    self.provider_config.get(OperatorConstants.Config.API_BASE, "http://localhost:5001")
+                )
 
                 # Initialize RestClient with configuration
                 rest_config = RestClientConfig(
@@ -745,7 +772,7 @@ class ChunkerOperator(AbstractOperator):
 
             # Prepare headers
             headers = {"Content-Type": "application/json"}
-            api_key = self.provider_config.get(OperatorConstants.Config.API_KEY)
+            api_key = reveal_value(self.provider_config.get(OperatorConstants.Config.API_KEY))
             if api_key:
                 headers["X-Api-Key"] = api_key
 

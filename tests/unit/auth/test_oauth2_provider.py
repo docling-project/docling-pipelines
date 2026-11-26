@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for OAuth2 provider."""
 
 import base64
@@ -128,7 +131,7 @@ class TestGoogleOAuth2Provider:
             user = await provider.extract_user_from_token(token_data)
 
             assert isinstance(user, User)
-            assert user.username == "test@gmail.com"
+            assert user.username == "oidc:google:google-user-id"
             assert user.email == "test@gmail.com"
             assert user.full_name == "Test User"
 
@@ -177,25 +180,42 @@ class TestAzureADOAuth2Provider:
             user = await provider.extract_user_from_token(token_data)
 
             assert isinstance(user, User)
-            assert user.username == "test@company.com"
+            assert user.username == "oidc:azure:azure-user-id"
             assert user.email == "test@company.com"
             assert user.full_name == "Test User"
 
     @pytest.mark.asyncio
     async def test_extract_user_fallback_to_email(self, azure_config):
-        """Test extracting user falls back to email if no preferred_username."""
+        """Test extracting user falls back to email if no sub or preferred_username and email_verified is True."""
         provider = AzureADOAuth2Provider(azure_config)
 
         with patch.object(provider, "validate_id_token", new_callable=AsyncMock) as mock_validate:
             mock_validate.return_value = {
                 "email": "test@company.com",
+                "email_verified": True,
                 "name": "Test User",
             }
 
             token_data = {"id_token": "mock-id-token"}
             user = await provider.extract_user_from_token(token_data)
 
-            assert user.username == "test@company.com"
+            assert user.username == "oidc:azure:test@company.com"
+
+    @pytest.mark.asyncio
+    async def test_extract_user_fallback_to_unverified_email_rejected(self, azure_config):
+        """Test extracting user rejects unverified email fallback."""
+        provider = AzureADOAuth2Provider(azure_config)
+
+        with patch.object(provider, "validate_id_token", new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = {
+                "email": "test@company.com",
+                "email_verified": False,
+                "name": "Test User",
+            }
+
+            token_data = {"id_token": "mock-id-token"}
+            with pytest.raises(ExternalServiceError, match="email_verified"):
+                await provider.extract_user_from_token(token_data)
 
 
 class TestGenericOIDCProvider:
@@ -222,7 +242,7 @@ class TestGenericOIDCProvider:
             token_data = {"id_token": "mock-id-token"}
             user = await provider.extract_user_from_token(token_data)
 
-            assert user.username == "testuser"
+            assert user.username == "oidc:generic:user-id"
             assert user.email == "test@example.com"
             assert user.full_name == "Test User"
 
@@ -241,7 +261,7 @@ class TestGenericOIDCProvider:
             token_data = {"access_token": "mock-access-token"}
             user = await provider.extract_user_from_token(token_data)
 
-            assert user.username == "test@example.com"
+            assert user.username == "oidc:generic:user-id"
             assert user.email == "test@example.com"
 
     @pytest.mark.asyncio
@@ -250,7 +270,6 @@ class TestGenericOIDCProvider:
         provider = GenericOIDCProvider(oauth2_config)
 
         with patch.object(provider, "validate_id_token", new_callable=AsyncMock) as mock_validate:
-            # Test fallback: preferred_username -> email -> sub
             mock_validate.return_value = {
                 "sub": "user-id-123",
                 "name": "Test User",
@@ -259,7 +278,7 @@ class TestGenericOIDCProvider:
             token_data = {"id_token": "mock-id-token"}
             user = await provider.extract_user_from_token(token_data)
 
-            assert user.username == "user-id-123"
+            assert user.username == "oidc:generic:user-id-123"
 
     @pytest.mark.asyncio
     async def test_extract_user_no_token(self, oauth2_config):
@@ -698,10 +717,34 @@ class TestProviderHttpInteractions:
         """Full Google extraction: JWKS served over (mocked) HTTP, real RS256 verification."""
         mock_http(lambda request: httpx.Response(200, json=signing_key["jwks"]))
         id_token = _sign_rs256(
-            _claims(iss="https://accounts.google.com", aud="google-client-id", email="bob@gmail.com", name="Bob"),
+            _claims(
+                iss="https://accounts.google.com",
+                aud="google-client-id",
+                sub="google-sub-bob",
+                email="bob@gmail.com",
+                name="Bob",
+            ),
             private_pem=signing_key["private_pem"],
         )
 
         user = await GoogleOAuth2Provider(google_config).extract_user_from_token({"id_token": id_token})
 
-        assert user == User(username="bob@gmail.com", email="bob@gmail.com", full_name="Bob")
+        assert user == User(username="oidc:google:google-sub-bob", email="bob@gmail.com", full_name="Bob")
+
+    async def test_validate_id_token_checks_nonce(self, *, oidc_provider, signing_key):
+        token = _sign_rs256(_claims(nonce="expected-nonce"), private_pem=signing_key["private_pem"])
+
+        payload = await oidc_provider.validate_id_token(token, nonce="expected-nonce")
+        assert payload["nonce"] == "expected-nonce"
+
+        with pytest.raises(ExternalServiceError, match="invalid nonce"):
+            await oidc_provider.validate_id_token(token, nonce="wrong-nonce")
+
+    async def test_token_exchange_includes_code_verifier_when_provided(self, *, oauth2_config, mock_http):
+        requests = mock_http(lambda request: httpx.Response(200, json={"access_token": "at", "id_token": "it"}))
+
+        await GenericOIDCProvider(oauth2_config).exchange_code_for_token("auth-code-123", code_verifier="verifier-xyz")
+
+        (request,) = requests
+        form = dict(parse_qsl(request.content.decode()))
+        assert form["code_verifier"] == "verifier-xyz"
