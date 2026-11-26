@@ -264,9 +264,7 @@ class BoxSourceAdapter(DocumentSourcePort):
                 doc_count += 1
 
         except ImportError as e:
-            raise ImportError(
-                "Box SDK dependencies not installed. Install with: uv pip install 'docling-pipelines[box]'"
-            ) from e
+            raise ImportError("Box SDK dependencies not installed. Install with: uv pip install box-sdk-gen") from e
         except Exception as e:
             logger.exception("Error fetching documents from Box: %s", e)
             raise ValueError(f"Failed to fetch documents from Box: {e!s}") from e
