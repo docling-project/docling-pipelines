@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Unit tests for non-recoverable document utilities."""
 
 from typing import Any
@@ -39,6 +42,29 @@ def test_is_non_recoverable_error_is_case_insensitive() -> None:
 @pytest.mark.parametrize("error_message", ["", None, "Network timeout"])
 def test_is_non_recoverable_error_rejects_recoverable_or_empty_messages(error_message: Any) -> None:
     assert not is_non_recoverable_error(error_message)
+
+
+@pytest.mark.parametrize(
+    "failure_reason",
+    [
+        OperatorConstants.Extraction.PASSWORD_REQUIRED,
+        OperatorConstants.Extraction.PASSWORD_INCORRECT,
+        OperatorConstants.Extraction.DECRYPTION_UNAVAILABLE,
+    ],
+)
+def test_is_non_recoverable_error_exempts_recoverable_failure_reasons(failure_reason: str) -> None:
+    # The message would match the "password" keyword; the explicit reason takes precedence
+    message = f"{failure_reason}: Document is password-protected"
+    assert is_non_recoverable_error(message)
+    assert not is_non_recoverable_error(message, failure_reason=failure_reason)
+
+
+@pytest.mark.parametrize("failure_reason", [None, "", "network_error"])
+def test_is_non_recoverable_error_other_failure_reasons_keep_keyword_classification(failure_reason: Any) -> None:
+    assert is_non_recoverable_error(
+        "Failed to load document (PDFium: Incorrect password error)", failure_reason=failure_reason
+    )
+    assert not is_non_recoverable_error("Network timeout", failure_reason=failure_reason)
 
 
 def test_extract_non_recoverable_rows_selects_rows_and_standard_columns() -> None:

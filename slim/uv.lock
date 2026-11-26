@@ -1453,6 +1453,7 @@ event-streaming = [
 extract = [
     { name = "accelerate" },
     { name = "docling", extra = ["rapidocr"] },
+    { name = "msoffcrypto-tool" },
     { name = "sentence-transformers" },
     { name = "transformers" },
 ]
@@ -1551,6 +1552,7 @@ requires-dist = [
     { name = "milvus-lite", specifier = "==3.2.2" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = "==0.32.4" },
     { name = "msal", specifier = "==1.39.0" },
+    { name = "msoffcrypto-tool", marker = "extra == 'extract'", specifier = "==6.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.4.1" },
     { name = "nbconvert", marker = "extra == 'notebooks'", specifier = "==7.17.2" },
     { name = "nbformat", marker = "extra == 'notebooks'", specifier = "==5.11.1" },
@@ -3820,6 +3822,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/bb/85/747d28986a44b715cc51cf57aa021c8fd94e9614064261ceec77320e8b0b/msal-1.39.0.tar.gz", hash = "sha256:6ab7de335e6d7f5717e2c7e1dbf86e4dda2f6acf3c56773b78dc53ebc6395b5f", size = 205360, upload-time = "2026-09-17T16:07:45.1Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/32/178457385925ce301c7b3232bd85665d4df57da39568b62dcfc74031873f/msal-1.39.0-py3-none-any.whl", hash = "sha256:2d2577886906cd7293850dffa2da29119966c213bfc6ec0cecf8bf7621e1ca77", size = 131629, upload-time = "2026-09-17T16:07:46.722Z" },
+]
+
+[[package]]
+name = "msoffcrypto-tool"
+version = "6.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "olefile" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/f3/4256235af3e868097dc270627159c672a8d00573833c91669526d025c810/msoffcrypto_tool-6.1.0.tar.gz", hash = "sha256:e2d7dfca6ff69cf3da0a7225329e6c26febb4360f329db4937d6ee527fdd2569", size = 41025, upload-time = "2026-11-03T18:19:38.15Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/9e/d6a7b1e343d8cea4ac63a1b672ca7eed491ef5fce1813308942d96fca8e1/msoffcrypto_tool-6.1.0-py3-none-any.whl", hash = "sha256:32ced1299858018e6c1ca3d0007127335dbcff90e777a77eb52f92d5112869f8", size = 49366, upload-time = "2026-11-03T18:19:39.431Z" },
 ]
 
 [[package]]

@@ -68,5 +68,5 @@ def test_each_entry_builds_a_config_with_the_reference_at_its_field(*, key: Fiel
 
     node = config
     for segment in entry.concrete_path.split("."):
-        node = node[segment]
+        node = node[int(segment)] if isinstance(node, list) else node[segment]
     assert node == "vault://fake/p#v"

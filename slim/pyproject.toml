@@ -145,6 +145,7 @@ telemetry = [
 extract = [
     "accelerate==1.16.0",
     "docling[rapidocr]==2.150.1",
+    "msoffcrypto-tool==6.1.0",
     "sentence-transformers==6.3.0",
     "transformers>=5.17.0,<5.18.0",
 ]

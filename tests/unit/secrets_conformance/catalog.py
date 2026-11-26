@@ -51,6 +51,8 @@ class Case:
             conflict with the field's alternatives.
         row: Columns added to (or replacing) the default one-row input table, for operators that read more
             than ``id``, ``name`` and ``content``.
+        concrete: Field name relative to ``prefix`` to the config path to set, for a wildcard whose keys are not
+            free-form (a list element rather than a canary key name). Segments that are digits index into lists.
     """
 
     operator: str
@@ -63,6 +65,7 @@ class Case:
     env: Mapping[str, str] = field(default_factory=dict)
     row: Mapping[str, Any] = field(default_factory=dict)
     companions: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    concrete: Mapping[str, str] = field(default_factory=dict)
 
     def key(self, *, name: str) -> FieldKey:
         """Return the catalog key of the field ``name``."""
@@ -84,6 +87,8 @@ class Entry:
     @property
     def concrete_path(self) -> str:
         """The config path to set; a trailing ``.*`` is made concrete with a canary key name."""
+        if self.name in self.case.concrete:
+            return self.case.concrete[self.name]
         return f"{self.case.prefix}{self.name}".replace("*", "canary_key")
 
     @property
@@ -113,15 +118,21 @@ class Entry:
 
 
 def _set(*, config: dict[str, Any], path: str, value: Any) -> None:
-    node = config
+    node: Any = config
     *parents, leaf = path.split(".")
     for segment in parents:
+        if isinstance(node, list):
+            node = node[int(segment)]
+            continue
         child = node.get(segment)
-        if not isinstance(child, dict):
+        if not isinstance(child, dict | list):
             child = {}
             node[segment] = child
         node = child
-    node[leaf] = value
+    if isinstance(node, list):
+        node[int(leaf)] = value
+    else:
+        node[leaf] = value
 
 
 _CLASSIFIER_ROW = {"name": "a.pdf"}
@@ -452,6 +463,19 @@ CASES: tuple[Case, ...] = (
         defaults={"api_key": "k", "base_url": "http://h.example.test"},
         row=_DOC_ROW,
     ),
+    Case(
+        "extract_operator",
+        None,
+        None,
+        "",
+        {
+            "text_extraction": {"provider": "docling_library", "provider_config": {}},
+            "document_passwords": {"rules": [{"match": "*.pdf", "passwords": ["x"]}], "default": ["x"]},
+        },
+        {"document_passwords": S, "document_passwords.*": S},
+        concrete={"document_passwords.*": "document_passwords.rules.0.passwords.0"},
+        row=_DOC_ROW,
+    ),
     *(
         Case(
             "extract_operator",
@@ -487,6 +511,10 @@ _DOCLING_LIB = (
     "Docling parses a local file and no remote client is faked; the engine options are used only for remote VLM calls."
 )
 
+_PASSWORDS_UNUSED = (
+    "A password is read only to open an encrypted document; the input is plain, so no client is involved."
+)
+
 NOT_REACHED: dict[tuple[str, str], str] = {
     **{
         (test_id, scenario): _PARENT
@@ -516,6 +544,11 @@ NOT_REACHED: dict[tuple[str, str], str] = {
         for name in ("api_base", "api_key")
         for s in ("client_failure", "mid_run_failure")
     },
+    **{
+        (f"extract_operator:any:{path}", s): _PASSWORDS_UNUSED
+        for path in ("document_passwords", "document_passwords.*")
+        for s in ("client_failure", "mid_run_failure")
+    },
 }
 """Scenario/field pairs whose client stage the fakes cannot reach, with the reason.
 
@@ -527,6 +560,7 @@ an entry that starts being reached must be removed, so the list cannot hide cove
 SUCCESS_NEEDS_REAL_SERVER: dict[str, str] = {
     "acl_operator:any:credentials": _PARENT,
     "storage_output:any:destination_config.credentials": _PARENT,
+    "extract_operator:any:document_passwords": _PARENT,
     "extract_operator:docling_serve:text_extraction.provider_config.api_key": (
         "The do-nothing fake client returns no HTTP response, so the extraction legitimately fails."
     ),
