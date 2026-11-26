@@ -161,3 +161,10 @@ class ValidationCodeMessages(StrEnum):
     STORAGE_OUTPUT_REQUIRES_INGEST_SOURCE = (
         "storage_output: mode '{mode}' requires an upstream 'ingest_source' operator"
     )
+
+    # Keyword Count Operator warnings
+    KEYWORD_COUNT_AGGREGATE_LIMIT_EXCEEDED = (
+        "Flow configures {total} keyword entries across all keyword_count nodes, "
+        "exceeding the recommended limit of {threshold}. "
+        "Consider reducing the number of keywords to avoid increased memory and processing overhead."
+    )

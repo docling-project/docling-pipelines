@@ -411,6 +411,53 @@ class FlowValidator:
                     validate_results=validate_results,
                 )
 
+    def _validate_keyword_count_budget(self, *, dag: list, validate_results: ValidateStepResults) -> None:
+        """Warn when all keyword_count nodes together configure more than 100 keyword entries.
+
+        Sums ``len(config["keywords"])`` over all keyword_count nodes whose
+        ``keywords`` value is a list. When the total exceeds the threshold, one
+        warning is emitted referencing the node at which the running total first
+        crossed the threshold.
+
+        This is an advisory warning; execution proceeds regardless.
+
+        Args:
+            dag: List of operator node definitions.
+            validate_results: Validation results accumulator.
+        """
+        from docpipe.core.constants.operator_constants import OperatorConstants as OpConstants
+
+        threshold = OpConstants.KeywordCount.AGGREGATE_KEYWORD_WARNING_THRESHOLD
+        total = 0
+        trigger_op_def = None
+
+        for op_def in dag:
+            if op_def.get(OperatorConstants.Misc.OPERATOR) != OpConstants.Operators.KEYWORD_COUNT:
+                continue
+            config = op_def.get(OperatorConstants.Config.CONFIG, {})
+            kws = config.get(OpConstants.KeywordCount.KEYWORDS)
+            if not isinstance(kws, list):
+                continue
+            total += len(kws)
+            if trigger_op_def is None and total > threshold:
+                trigger_op_def = op_def
+
+        if trigger_op_def is not None:
+            from docpipe.exceptions.error_messages import ValidationCodeMessages, ValidationMessage
+            from docpipe.utils.orchestration.flow_utils import add_validation_alert
+
+            add_validation_alert(
+                message=ValidationMessage(
+                    message=ValidationCodeMessages.KEYWORD_COUNT_AGGREGATE_LIMIT_EXCEEDED.value.format(
+                        total=total,
+                        threshold=threshold,
+                    ),
+                    message_code=ValidationCodeMessages.KEYWORD_COUNT_AGGREGATE_LIMIT_EXCEEDED.name,
+                ),
+                op_def=trigger_op_def,
+                alerts=validate_results.warnings,
+            )
+
     def validate_dag(self, *, flow_def: FlowConfig, global_config: FlowConfig) -> None:
         """Validate the DAG structure and all nodes.
 
@@ -500,6 +547,7 @@ class FlowValidator:
         self._validate_no_cycles(dag=dag, validate_results=validate_results)
         self._validate_operator_availability(dag=dag, global_config=global_config, validate_results=validate_results)
         self._validate_vault_references(dag=dag, validate_results=validate_results)
+        self._validate_keyword_count_budget(dag=dag, validate_results=validate_results)
 
         def node_validation_task(task_name, op_def, result=None, link_name=None):
             return self._validate_node(

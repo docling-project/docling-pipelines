@@ -67,6 +67,9 @@ class OperatorConstants:
         PII_AND_HAP: Final[str] = "pii_and_hap"
         SQL_FILTER: Final[str] = "sql_filter"
 
+        # Keyword Count Operator
+        KEYWORD_COUNT: Final[str] = "keyword_count"
+
         # Storage Operators
         DOCUMENT_SET: Final[str] = "document_set"
         ENTITY_CURATION_OPERATOR: Final[str] = "entity_curation_operator"
@@ -136,6 +139,9 @@ class OperatorConstants:
 
         # Page calculation columns
         PAGES_PROCESSED: Final[str] = "pages_processed"
+
+        # Keyword Count Columns
+        KEYWORD_COUNTS: Final[str] = "keyword_counts"
 
         # Language Detection Columns
         LANGUAGE_NAME_COLUMN_KEY: Final[str] = "lang_name"
@@ -347,6 +353,41 @@ class OperatorConstants:
         NODE_PARAMETERS: Final[str] = "node_parameters"
         NODES_METADATA_FILE: Final[str] = "nodes_metadata.json"
         PIPELINE_DETAILS: Final[str] = "pipeline_details"
+
+    class KeywordCount:
+        """Keyword count operator constants."""
+
+        # Configuration Keys
+        KEYWORDS: Final[str] = "keywords"
+        MATCH_MODE: Final[str] = "match_mode"
+        LANGUAGE: Final[str] = "language"
+        LEMMATIZER_MODEL: Final[str] = "lemmatizer_model"
+        CASE_SENSITIVE: Final[str] = "case_sensitive"
+        WHOLE_WORD: Final[str] = "whole_word"
+        UNICODE_NORMALIZATION: Final[str] = "unicode_normalization"
+        ALLOW_OVERLAPPING: Final[str] = "allow_overlapping"
+
+        # Match Mode Values
+        MATCH_MODE_LITERAL: Final[str] = "literal"
+        MATCH_MODE_STEM: Final[str] = "stem"
+        MATCH_MODE_LEMMA: Final[str] = "lemma"
+
+        # Unicode Normalization Values
+        UNICODE_NFC: Final[str] = "NFC"
+        UNICODE_NFKC: Final[str] = "NFKC"
+        UNICODE_NONE: Final[str] = "none"
+
+        # Limits
+        MAX_KEYWORDS: Final[int] = 20
+        MAX_KEYWORD_CODE_POINTS: Final[int] = 50
+        MAX_COMBINED_CODE_POINTS: Final[int] = 1_000
+        MAX_DOCUMENT_CHARS_LINGUISTIC: Final[int] = 1_000_000
+        AGGREGATE_KEYWORD_WARNING_THRESHOLD: Final[int] = 100
+
+        # Execution Metric Keys
+        DOCUMENTS_WITH_MATCHES: Final[str] = "documents_with_matches"
+        TOTAL_MATCHES: Final[str] = "total_matches"
+        MATCH_MODE_KEY: Final[str] = "match_mode"
 
     class Classification:
         """Document classification constants."""

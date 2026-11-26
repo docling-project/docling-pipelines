@@ -190,7 +190,7 @@ Check out the full [documentation](docs/README.md) for installation, flow author
 |---|---|
 | **Ingest** | Local Filesystem & Remote Source Ingest (`ingest_source`) — [filesystem, S3, IBM COS, SharePoint, OneDrive, Google Drive, Box, Dropbox, web](docs/operators/ingest/ingest_source_readme.md) |
 | **Extract** | Document Extractor (`extract_operator`), ACL Extraction (`acl_operator`) |
-| **Functional** | Chunking (`chunker`), Embeddings (`embeddings`), Branching Operator (`branching`), Merge Operator (`merge`), Document ID Hash (`doc_id_hash`), Entity Curation (`entity_curation`), No-op (`noop`) |
+| **Functional** | Chunking (`chunker`), Embeddings (`embeddings`), Branching Operator (`branching`), Merge Operator (`merge`), Document ID Hash (`doc_id_hash`), Entity Curation (`entity_curation`), No-op (`noop`), Keyword Count (`keyword_count`) |
 | **Quality** | Language Annotator (`lang_detect`), Readability Operator (`readability`), PII and HAP Annotator (`pii_and_hap`), Document Classifier (`document_classifier`), Annotation Filter (`sql_filter`), Redaction (`redaction`), De-duplicator (`ededup`), ML Text Enrichment (`ml_enrichment`), Document Quality (`doc_quality`) |
 | **VectorDB** | Vector Database (`vectordb`) — OpenSearch, Milvus, Milvus Lite, and Weaviate |
 | **Storage** | Document Set (`document_set`) — DuckDB/PostgreSQL-backed document collections, Storage Output (`storage_output`) — write pipeline output to filesystem, S3, IBM COS, SharePoint, OneDrive, and Google Drive |

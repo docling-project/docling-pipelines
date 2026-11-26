@@ -1,0 +1,60 @@
+{
+  "flow_name": "keyword-count-example",
+  "global_config": {
+    "storage": "in-memory",
+    "execute_type": "local",
+    "enable_micro_batching": false
+  },
+  "flow": [
+    {
+      "type": "ingest_source",
+      "name": "ingest_documents",
+      "config": {
+        "provider": "filesystem",
+        "connection_params": {
+          "paths": ["./sample_data/documents"]
+        },
+        "include_filter": "pdf,docx,txt,md"
+      }
+    },
+    {
+      "type": "extract_operator",
+      "name": "extract_text",
+      "config": {},
+      "depends_on": ["ingest_documents"]
+    },
+    {
+      "type": "keyword_count",
+      "name": "count_legal_terms",
+      "config": {
+        "keywords": ["contract", "liability", "indemnity", "warranty", "termination"],
+        "match_mode": "literal",
+        "case_sensitive": false,
+        "whole_word": true,
+        "unicode_normalization": "NFC",
+        "allow_overlapping": false,
+        "doc_column": "content"
+      },
+      "depends_on": ["extract_text"]
+    },
+    {
+      "type": "keyword_count",
+      "name": "count_risk_terms",
+      "config": {
+        "keywords": ["risk", "exposure", "breach", "penalty"],
+        "match_mode": "stem",
+        "language": "english",
+        "doc_column": "content"
+      },
+      "depends_on": ["count_legal_terms"]
+    },
+    {
+      "type": "document_set",
+      "name": "store_results",
+      "config": {
+        "document_set_name": "keyword-counted-docs"
+      },
+      "depends_on": ["count_risk_terms"]
+    }
+  ]
+}

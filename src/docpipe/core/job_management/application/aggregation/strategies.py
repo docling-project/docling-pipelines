@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Aggregation strategies for metadata fields.
 
@@ -96,6 +99,9 @@ DEFAULT_STRATEGIES = {
     "hashed_rows": AggregationStrategy.SUM,
     # Redaction operator
     "total_redactions": AggregationStrategy.SUM,
+    # Keyword Count operator
+    "documents_with_matches": AggregationStrategy.SUM,
+    "total_matches": AggregationStrategy.SUM,
     # Extract operator - page statistics
     OperatorConstants.Metadata.TOTAL_PAGES_PROCESSED: AggregationStrategy.SUM,
     OperatorConstants.Metadata.PAGE_TYPE_STATS: AggregationStrategy.DEEP_MERGE,
