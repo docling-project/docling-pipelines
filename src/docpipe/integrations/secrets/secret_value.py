@@ -94,6 +94,24 @@ class SecretValue:
         return id(self)
 
 
+def reveal_value(value: Any) -> Any:
+    """Return ``value`` with every ``SecretValue`` in it replaced by its underlying secret.
+
+    Walks dicts, lists and tuples; any other value is returned as is. Like
+    :meth:`SecretValue.reveal`, call this only at a client-construction point inside an
+    adapter module. The pre-commit hook ``check-secret-reveal`` enforces that.
+    """
+    if isinstance(value, SecretValue):
+        return value.reveal()
+    if isinstance(value, dict):
+        return {key: reveal_value(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [reveal_value(child) for child in value]
+    if isinstance(value, tuple):
+        return tuple(reveal_value(child) for child in value)
+    return value
+
+
 def secret_json_default(obj: Any) -> str:
     """``json.dumps(default=...)`` hook that masks a ``SecretValue``.
 

@@ -210,7 +210,6 @@ class DocpipeConstants:
 
     # Document Library constants
     DOCUMENT_LIBRARY_TABLE_NAME = "document_libraries"
-    LIBRARY_DOCUMENTSET_JUNCTION_TABLE = "library_documentset_junction"
 
     # Find project root by searching for marker files (pyproject.toml, .git)
     _DEFAULT_DATA_ROOT = _find_project_root() / "data"
@@ -265,9 +264,6 @@ class DocumentLibraryConstants:
     # Size value limits (JavaScript MAX_SAFE_INTEGER for JSON compatibility)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Bulk operation limits
-    MAX_BULK_OPERATION_SIZE = 1000  # Maximum number of items in bulk operations
-
 
 class DocpipeConfigKeys:
     """YAML configuration keys for Docpipe."""
@@ -294,6 +290,10 @@ class DocpipeConfigKeys:
     POOL_SIZE = "pool_size"
     MAX_OVERFLOW = "max_overflow"
     POOL_TIMEOUT = "pool_timeout"
+
+    # API authentication configuration keys (auth.role_mapping.<role> in the config file)
+    AUTH = "auth"
+    ROLE_MAPPING = "role_mapping"
 
     # Incremental metadata configuration keys
     INCREMENTAL_METADATA = "incremental_metadata"
@@ -369,6 +369,33 @@ class EnvironmentVariables:
     KAFKA_INPUT_TOPIC = "KAFKA_INPUT_TOPIC"
     KAFKA_GROUP_ID = "KAFKA_GROUP_ID"
     SCHEMA_REGISTRY_URL = "SCHEMA_REGISTRY_URL"
+
+    # API authentication and authorization
+    DOCPIPE_AUTH_ENABLED = "DOCPIPE_AUTH_ENABLED"
+    DOCPIPE_AUTH_DEFAULT_ROLE = "DOCPIPE_AUTH_DEFAULT_ROLE"
+    DOCPIPE_AUTH_ROLE_MAPPING_VIEWER = "DOCPIPE_AUTH_ROLE_MAPPING_VIEWER"
+    DOCPIPE_AUTH_ROLE_MAPPING_EDITOR = "DOCPIPE_AUTH_ROLE_MAPPING_EDITOR"
+    DOCPIPE_AUTH_ROLE_MAPPING_ADMIN = "DOCPIPE_AUTH_ROLE_MAPPING_ADMIN"
+    DOCPIPE_AUTH_COOKIE_NAME = "DOCPIPE_AUTH_COOKIE_NAME"
+    DOCPIPE_AUTH_COOKIE_SECURE = "DOCPIPE_AUTH_COOKIE_SECURE"
+    DOCPIPE_TRUST_PROXY_HEADERS = "DOCPIPE_TRUST_PROXY_HEADERS"
+    DOCPIPE_TRUSTED_PROXY_COUNT = "DOCPIPE_TRUSTED_PROXY_COUNT"
+    DOCPIPE_INGEST_ALLOWED_PATHS = "DOCPIPE_INGEST_ALLOWED_PATHS"
+    DOCPIPE_AUTH_BOOTSTRAP_USERNAME = "DOCPIPE_AUTH_BOOTSTRAP_USERNAME"
+    DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH = (
+        "DOCPIPE_AUTH_BOOTSTRAP_PASSWORD_HASH"  # pragma: allowlist secret  # nosec B105
+    )
+
+
+_AUTH_TRUE_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+
+
+def is_auth_enabled() -> bool:
+    """Return True when ``DOCPIPE_AUTH_ENABLED`` is set to a truthy value."""
+    raw = os.environ.get(EnvironmentVariables.DOCPIPE_AUTH_ENABLED)
+    if raw is None or not raw.strip():
+        return False
+    return raw.strip().lower() in _AUTH_TRUE_VALUES
 
 
 class LineageConstants:
@@ -727,6 +754,14 @@ TERMINAL_JOB_STATUSES = frozenset(
         ExecutionStatus.CANCELED,
         ExecutionStatus.FAILED,
         ExecutionStatus.ABORTED,
+    ]
+)
+
+COMPLETED_JOB_STATUSES = frozenset(
+    [
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.COMPLETED_WITH_ERRORS,
+        ExecutionStatus.COMPLETED_WITH_WARNINGS,
     ]
 )
 

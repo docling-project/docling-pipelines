@@ -112,16 +112,20 @@ def create_log_folders(job_id, job_run_id, type):
     """
     Created folders for logs: <job_id>/<job_run_id>/docpipe_logs. The log for that job will be stored there
     """
+    log_file_names = {
+        "job": "job_stats.json",
+        "agg_logs": "flow_execute_aggregated.json",
+    }
+    if type not in log_file_names:
+        raise ValueError(f"Unknown log type {type!r}; expected one of {sorted(log_file_names)}")
+    log_job_run_file_name = log_file_names[type]
+
     log_location_path = get_data_path()
 
     log_app_location = DocpipeConstants.DOCPIPE_LOGS
 
     log_job_location = Path(log_location_path) / job_id / str(job_run_id) / log_app_location
     log_job_location.mkdir(parents=True, exist_ok=True)
-    if type == "job":
-        log_job_run_file_name = "job_stats.json"
-    elif type == "agg_logs":
-        log_job_run_file_name = "flow_execute_aggregated.json"
 
     return str(log_job_location / log_job_run_file_name)
 
