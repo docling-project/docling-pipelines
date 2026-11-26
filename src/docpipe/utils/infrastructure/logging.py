@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import ClassVar
 
 from docpipe.core.constants.constants import DocpipeConstants, EnvironmentVariables
@@ -23,6 +24,8 @@ from docpipe.core.constants.constants import DocpipeConstants, EnvironmentVariab
 
 # ANSI color codes
 class Colors:
+    """ANSI escape codes used by ColoredFormatter."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
 
@@ -139,6 +142,7 @@ class ColoredFormatter(logging.Formatter):
         return sys.stdout.isatty()
 
     def format(self, record):
+        """Format the record as a single line, colored when colors are enabled."""
         # Format the message using parent formatter to populate record.asctime
         super().format(record)
 
@@ -413,10 +417,12 @@ def setup_logging(
         root.addHandler(console_handler)
 
     # Optional file handler — add only once per path
+    # (baseFilename is absolute, so compare resolved paths)
     if file:
-        existing_paths = {h.baseFilename for h in root.handlers if isinstance(h, logging.FileHandler)}
-        if file not in existing_paths:
-            file_handler = logging.FileHandler(file)
+        file_path = Path(file).resolve()
+        existing_paths = {Path(h.baseFilename).resolve() for h in root.handlers if isinstance(h, logging.FileHandler)}
+        if file_path not in existing_paths:
+            file_handler = logging.FileHandler(file_path)
             if use_json_format:
                 file_handler.setFormatter(ConditionalFormatter(datefmt=timefmt))
             else:

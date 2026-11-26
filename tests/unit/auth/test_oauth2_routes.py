@@ -27,6 +27,7 @@ from docpipe.api.auth.oauth2_routes import (
     _STATE_TTL_SECONDS,
     NONCE_COOKIE_NAME,
     _consume_state,
+    _discovery_cache,
     _is_same_origin,
     _state_store,
     _store_state,
@@ -41,10 +42,12 @@ from docpipe.exceptions.docpipe_exceptions import ConfigurationError, DocpipeExc
 
 @pytest.fixture(autouse=True)
 def clear_state_store():
-    """Ensure state store is empty before each test."""
+    """Ensure state store and discovery cache are empty before each test."""
     _state_store.clear()
+    _discovery_cache.clear()
     yield
     _state_store.clear()
+    _discovery_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -883,3 +886,61 @@ class TestDiscoveryEndpoint:
 
         assert response.status_code == 500
         assert response.json() == {"detail": "Failed to fetch discovery document"}
+
+    def test_caches_discovery_document_across_requests(self, discovery_app):
+        app, _ = discovery_app
+        provider = MagicMock()
+        provider.discover_endpoints = AsyncMock(return_value={"issuer": "https://accounts.google.com"})
+
+        with patch.object(oauth2_routes, "get_oauth2_provider", return_value=provider) as factory:
+            client = TestClient(app)
+            first = client.get("/auth/oauth2/discovery/google")
+            second = client.get("/auth/oauth2/discovery/google")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json() == {"issuer": "https://accounts.google.com"}
+        assert factory.call_count == 1
+        assert provider.discover_endpoints.await_count == 1
+
+    def test_refetches_discovery_document_after_ttl_expiry(self, discovery_app):
+        app, _ = discovery_app
+        provider = MagicMock()
+        provider.discover_endpoints = AsyncMock(
+            side_effect=[
+                {"issuer": "https://accounts.google.com", "v": 1},
+                {"issuer": "https://accounts.google.com", "v": 2},
+            ]
+        )
+
+        with patch.object(oauth2_routes, "get_oauth2_provider", return_value=provider):
+            client = TestClient(app)
+            first = client.get("/auth/oauth2/discovery/google")
+            # Force the cached entry past its TTL without patching global time.monotonic
+            for key, (doc, _expiry) in list(_discovery_cache.items()):
+                _discovery_cache[key] = (doc, time.monotonic() - 1.0)
+            second = client.get("/auth/oauth2/discovery/google")
+
+        assert first.json() == {"issuer": "https://accounts.google.com", "v": 1}
+        assert second.json() == {"issuer": "https://accounts.google.com", "v": 2}
+        assert provider.discover_endpoints.await_count == 2
+
+    def test_does_not_cache_failed_discovery_fetch(self, discovery_app):
+        app, _ = discovery_app
+        provider = MagicMock()
+        provider.discover_endpoints = AsyncMock(
+            side_effect=[
+                ExternalServiceError("OIDC discovery failed: timeout"),
+                {"issuer": "https://accounts.google.com"},
+            ]
+        )
+
+        with patch.object(oauth2_routes, "get_oauth2_provider", return_value=provider):
+            client = TestClient(app)
+            first = client.get("/auth/oauth2/discovery/google")
+            second = client.get("/auth/oauth2/discovery/google")
+
+        assert first.status_code == 502
+        assert second.status_code == 200
+        assert second.json() == {"issuer": "https://accounts.google.com"}
+        assert provider.discover_endpoints.await_count == 2

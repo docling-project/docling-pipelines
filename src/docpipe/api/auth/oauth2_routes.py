@@ -7,7 +7,7 @@ import inspect
 import secrets
 import threading
 import time
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -39,6 +39,13 @@ _STATE_TTL_SECONDS = 600  # 10 minutes
 _MAX_STATE_ENTRIES = 10_000
 _state_store: dict[str, tuple[str, float, str] | tuple[str, float, str, str]] = {}
 _state_lock = threading.Lock()
+
+# In-process TTL cache for OIDC discovery documents fetched by GET /auth/oauth2/discovery/{provider}.
+# Avoids triggering an outbound HTTP request on every unauthenticated call.
+_DISCOVERY_CACHE_TTL_SECONDS = 3600  # 1 hour
+_MAX_DISCOVERY_CACHE_ENTRIES = 64
+_discovery_cache: dict[tuple[str, str], tuple[dict[str, Any], float]] = {}
+_discovery_lock = threading.Lock()
 
 NONCE_COOKIE_NAME = "docpipe_oauth2_nonce"
 NONCE_COOKIE_PATH = "/auth/oauth2"
@@ -402,6 +409,41 @@ async def list_oauth2_providers():
     return {"providers": [provider.model_dump() for provider in list_enabled_providers()]}
 
 
+def _discovery_cache_key(*, config: OAuth2Config) -> tuple[str, str]:
+    """Return the normalized cache key for an OIDC discovery document."""
+    provider_name = config.oauth2_provider.lower()
+    normalized_provider = provider_name if provider_name in {"google", "azure"} else "generic"
+    return (normalized_provider, config.oauth2_discovery_url or "")
+
+
+def _get_cached_discovery(*, key: tuple[str, str]) -> dict[str, Any] | None:
+    """Return a cached discovery document when present and unexpired, otherwise None."""
+    now = time.monotonic()
+    with _discovery_lock:
+        entry = _discovery_cache.get(key)
+        if entry is None:
+            return None
+        document, expiry = entry
+        if now > expiry:
+            del _discovery_cache[key]
+            return None
+        return dict(document)
+
+
+def _set_cached_discovery(*, key: tuple[str, str], document: dict[str, Any]) -> None:
+    """Store a discovery document in the in-process TTL cache."""
+    now = time.monotonic()
+    expiry = now + _DISCOVERY_CACHE_TTL_SECONDS
+    with _discovery_lock:
+        expired = [k for k, (_, exp) in _discovery_cache.items() if now > exp]
+        for k in expired:
+            del _discovery_cache[k]
+        if key not in _discovery_cache and len(_discovery_cache) >= _MAX_DISCOVERY_CACHE_ENTRIES:
+            oldest_key = min(_discovery_cache, key=lambda k: _discovery_cache[k][1])
+            del _discovery_cache[oldest_key]
+        _discovery_cache[key] = (dict(document), expiry)
+
+
 @router.get("/discovery/{provider}")
 async def oauth2_discovery(
     provider: Annotated[str, Path(description="OAuth2 provider name")],
@@ -422,9 +464,16 @@ async def oauth2_discovery(
             detail="OAuth2 authentication is not enabled",
         )
 
+    cache_key = _discovery_cache_key(config=config)
+    cached = _get_cached_discovery(key=cache_key)
+    if cached is not None:
+        return cached
+
     try:
         provider_instance = get_oauth2_provider(config)
-        return await provider_instance.discover_endpoints()
+        document = await provider_instance.discover_endpoints()
+        _set_cached_discovery(key=cache_key, document=document)
+        return document
     except (HTTPException, DocpipeException):
         raise
     except Exception as e:

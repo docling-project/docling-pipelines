@@ -389,6 +389,7 @@ class FlowEnrichmentService:
             projected_features = fetcher.project_mappable_features(
                 adapter_name=adapter_name,
                 available_features=available_feature_map,
+                operator_config=operator_config,
             )
             available_features = self._normalise_feature_map(feature_map=projected_features, fallback_node_id=node_id)
             if operator_config.get(OperatorConstants.Config.PROVIDER_CONFIG):
