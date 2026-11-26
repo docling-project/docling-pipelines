@@ -252,8 +252,13 @@ The worker receives only these environment variables: `PATH`, `LANG`, `LC_ALL`, 
 `PYTHONPATH`, `VIRTUAL_ENV` and `DS_LOG_LEVEL`. It receives the node's own resolved configuration plus `doc_column`,
 `job_id` and the node identity keys from the global configuration.
 
-Isolation separates memory. It does not separate the operating system account, so you must also provide these
-deployment preconditions:
+The parent also sets two variables to operate the worker: `PYTHONUNBUFFERED` and `PYTHON_DOTENV_DISABLED=1`. The second
+stops the worker from loading a `.env` file from the repository root when it imports application modules, so no
+variable defined in a `.env` appears in the worker's environment. A value of `PYTHON_DOTENV_DISABLED` in the parent
+process is ignored. The API, command line, library and Prefect workers keep loading `.env` as before.
+
+Isolation separates memory. It does not separate the operating system account. Worker code can still open a file that
+its operating system user can read, including a `.env`, so you must also provide these deployment preconditions:
 
 1. **A distinct worker user.** Run the worker under a UID that differs from the one that owns the Vault token and
    configuration.

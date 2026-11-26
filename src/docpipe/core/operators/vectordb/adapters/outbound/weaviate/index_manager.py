@@ -234,7 +234,12 @@ class WeaviateIndexManager:
 
     @staticmethod
     def is_content_mapping(*, feature_name: str, column_name: str) -> bool:
-        """Return True when a mapping carries document text, whatever column it is mapped to."""
+        """Return True when a mapping carries document text, whatever column it is mapped to.
+
+        A mapping with an empty or whitespace-only feature or column writes nothing, so it never counts.
+        """
+        if not feature_name or not feature_name.strip() or not column_name or not column_name.strip():
+            return False
         return feature_name in CONTENT_NAMES or column_name in CONTENT_NAMES
 
     def _content_columns(self) -> set[str]:
@@ -298,7 +303,7 @@ class WeaviateIndexManager:
                 OperatorConstants.Misc.MAPPED_COLUMN_NAME,
                 entry.get("collection_column", entry.get("mapped_column_name")),
             )
-            if not feat_name or not col_name:
+            if not feat_name or not feat_name.strip() or not col_name:
                 continue
 
             if col_name == _PK or feat_name == _SPARSE_FEATURE:
