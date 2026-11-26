@@ -2,38 +2,16 @@
 
 ## ADDED Requirements
 
-### Requirement: Local providers installable on the slim distribution
-The slim distribution SHALL provide a `presidio` extra that installs the package the `presidio` provider needs, and a `hap` extra that installs the packages the `huggingface` HAP provider needs. Neither extra SHALL declare a spaCy model.
-
-#### Scenario: Presidio on slim
-- **WHEN** `docling-pipelines-slim[presidio]` and a spaCy model are installed and a flow sets `pii_provider: "presidio"` with that model as `spacy_model`
-- **THEN** flow validation and operator startup succeed without a missing-package error
-
-#### Scenario: Hugging Face HAP on slim
-- **WHEN** `docling-pipelines-slim[hap]` is installed, the default HAP model's weights are available, and a flow sets `hap_provider: "huggingface"`
-- **THEN** operator startup succeeds without a missing-package error
-
-#### Scenario: No spaCy model in the extras
-- **WHEN** `docling-pipelines-slim[presidio]` is installed into an environment without spaCy models
-- **THEN** no spaCy model package is installed by the extra
-
-### Requirement: CPU-only torch satisfies the hap extra
-The `hap` extra SHALL accept the CPU-only build of the pinned `torch` version, so that a consumer who installs that build first can then install the extra without the installer replacing `torch` or adding GPU libraries.
-
-#### Scenario: CPU build installed first
-- **WHEN** the CPU-only build of the pinned `torch` version is installed and `docling-pipelines-slim[hap]` is then installed
-- **THEN** the CPU-only `torch` build remains installed and no CUDA library packages are added
-
 ### Requirement: Missing HAP provider dependency reported at startup
-When `huggingface` is the `hap_provider` and `torch` or `transformers` is not installed, the operator SHALL fail at startup, before any document is processed and before any output table or transform metadata is produced, with an error that names the missing package and the slim `hap` extra, and that states the CPU-only `torch` build can be used.
+When `huggingface` is the `hap_provider` and `torch` or `transformers` is not installed, the operator SHALL fail at startup, before any document is processed and before any output table or transform metadata is produced, with an error that names the missing package and the slim `huggingface` extra, and that states the CPU-only `torch` build can be used.
 
-#### Scenario: Slim without the hap extra
+#### Scenario: Slim without the huggingface extra
 - **WHEN** a flow sets `hap_provider: "huggingface"` in an environment where `torch` is not installed
-- **THEN** the operator fails at startup with an error naming `torch`, `docling-pipelines-slim[hap]` and the CPU-only build, and no document is processed
+- **THEN** the operator fails at startup with an error naming `torch`, `docling-pipelines-slim[huggingface]` and the CPU-only build, and no document is processed
 
 #### Scenario: Transformers missing
 - **WHEN** a flow sets `hap_provider: "huggingface"` in an environment where `transformers` is not installed
-- **THEN** the operator fails at startup with an error naming `transformers` and `docling-pipelines-slim[hap]`
+- **THEN** the operator fails at startup with an error naming `transformers` and `docling-pipelines-slim[huggingface]`
 
 ### Requirement: Missing Presidio package reported at startup
 When `presidio` is the `pii_provider` and its package is not installed, the operator SHALL fail at startup, before any document is processed, with an error that names the `presidio` extra of both the full and the slim distribution.

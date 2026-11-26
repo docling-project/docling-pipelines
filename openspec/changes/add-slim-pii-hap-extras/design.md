@@ -2,11 +2,13 @@
 
 ## Context
 
-See proposal.md (Why) for the motivation and specs/backend/pii-and-hap-operator/spec.md for the requirements.
+See proposal.md (Why) for the motivation. The requirements are in specs/backend/provider-extras/spec.md (packaging) and specs/backend/pii-and-hap-operator/spec.md (operator errors).
 
 Current state:
 
-- `slim/pyproject.toml` has no `presidio` and no `hap` extra. `transformers>=5.17.0,<5.18.0` is in its `extract` extra; `torch` is not declared anywhere in slim. The full distribution has `torch==2.15.0` and `transformers>=5.17,<5.18` as core dependencies and `presidio = ["presidio-analyzer==2.2.366"]` as an extra.
+- `slim/pyproject.toml` has no extra for either local provider. `transformers>=5.17.0,<5.18.0` and `sentence-transformers==6.3.0` are in its `extract` extra, together with Docling; `torch` is not declared anywhere in slim. A plain slim install has no `torch`, `transformers`, `sentence-transformers`, `scipy` or `scikit-learn`.
+- The full distribution has `torch==2.15.0`, `transformers>=5.17,<5.18` and `sentence-transformers==6.3.0` as core dependencies and `presidio = ["presidio-analyzer==2.2.366"]` as an extra. The `presidio` extra is referenced by the README, the operator docs, one sample flow and the Presidio install hint; no CI job, Docker image or setup script installs it.
+- `huggingface` is one provider shared by two operators. The core `HuggingFaceAdapter` serves HAP detection for `pii_and_hap` through `HuggingFaceClassificationClient` (`torch`, `transformers`), and local embeddings for `embeddings` through `HuggingFaceClient` (`sentence-transformers`). The embeddings client already checks for its package with `require_package("sentence_transformers", "pip install sentence-transformers")`, which raises `DependencyError`; the classification client has no such check.
 - Dependabot has separate `uv` entries for `/` and `/slim`, so one upstream release produces one pull request per manifest.
 - The `huggingface` HAP path is layered as: operator adapter `HuggingFaceHAPAdapter` (no torch) -> core `HuggingFaceAdapter` behind `TextDetectionPort` -> integration client `HuggingFaceClassificationClient`, which imports `torch` and `transformers` lazily. A missing `torch` raises `ModuleNotFoundError` inside the client; `HuggingFaceAdapter.validate_detection()` turns it into a validation error whose text is just `No module named 'torch'`.
 - `PresidioPIIAdapter.validate()` maps `ImportError` to `PRESIDIO_INSTALL_HINT` (names only the full distribution's extra) and any other exception to a message telling the user to run `python -m spacy download <model>`. The `spacy_model` field description in `PresidioPIIConfig` says the same.
@@ -27,40 +29,53 @@ Current state:
 
 ## Decisions
 
-### 1. One extra per provider, named after the provider
+### 1. One extra per provider, named exactly after the provider
 
-`presidio = ["presidio-analyzer==2.2.366"]` and `hap = ["torch==2.15.0", "transformers>=5.17,<5.18"]` in `slim/pyproject.toml`. spaCy is already a core slim dependency, so `presidio` needs nothing else.
+| Distribution | `presidio` | `huggingface` |
+|---|---|---|
+| slim | `["presidio-analyzer==2.2.366"]` (new) | `["torch==2.15.0", "transformers>=5.17,<5.18", "sentence-transformers==6.3.0"]` (new) |
+| full | unchanged | `[]` (new), with a comment that its packages are core dependencies |
 
-- The name `presidio` matches the full distribution's existing extra, so one instruction (`<distribution>[presidio]`) works for both.
-- Providers are independent: a Presidio-only user must not receive `torch`.
+spaCy is already a core dependency of both distributions, so `presidio` needs nothing else.
+
+- The extra name is the provider value the flow already uses: `pii_provider: "presidio"` needs `[presidio]`, and `hap_provider: "huggingface"` or an `embeddings` node with the local `huggingface` provider needs `[huggingface]`. Error messages and docs can name the extra without a lookup table.
+- One extra per provider, not per use. Because `huggingface` serves two operators, a single `huggingface` extra covers both. A future local Hugging Face provider in another operator reuses it instead of adding a name with overlapping contents.
+- This follows the common convention of naming an extra after the integration it installs, as in Docling (`easyocr`, `rapidocr`), Presidio itself (`transformers`, `stanza`), prefect (`aws`, `docker`) and pymilvus (`model`). It also keeps the existing `presidio` extra as it is.
+- The same names exist in both distributions, so one instruction works for either. For example, the `local_redacted_indexing` sample flow, which uses both providers, can say "needs the `presidio` and `huggingface` extras". That is why the full distribution gets an empty `huggingface`.
+- Providers are independent: a Presidio-only user does not receive `torch`.
 - Alternatives considered:
-  - A single `pii_and_hap` extra. Rejected: Presidio-only users would get about 1 GB of `torch`, which slim exists to avoid. Consumers who want both write `[presidio,hap]`.
+  - `<capability>-<provider>` names (`pii-presidio`, `hap-huggingface`). Rejected: once local embeddings need an extra too, `hap-huggingface` and an `embeddings-huggingface` would install mostly the same packages. The scheme is also uncommon among comparable projects and would rename the existing `presidio` extra.
+  - `presidio` and `hap`. Rejected: one is named after a provider, the other after a capability.
+  - `huggingface` without `sentence-transformers`. Rejected: `[huggingface]` would not make the local `huggingface` embeddings provider work, so the name would promise more than it installs.
+  - Capability names only (`pii`, `hap`). Rejected: most PII providers (`litellm`, `watsonx`) need no extra, and a second local PII provider would have to share the name.
+  - A single `pii_and_hap` extra. Rejected: Presidio-only users would get about 1 GB of `torch`, which slim exists to avoid. Consumers who want both write `[presidio,huggingface]`.
   - No extras, documented versions only. Rejected: consumers would copy pins by hand and never learn when docpipe changes them.
-- `transformers` then appears in both `extract` and `hap` with the same range. Overlapping extras are valid and resolve to one install.
+- `transformers` and `sentence-transformers` then appear in both `extract` and `huggingface` in slim with the same pins. Overlapping extras are valid and resolve to one install.
 
 ### 2. Pins start equal to the full distribution's, with no automated equality check
 
-The initial pins are copied from `pyproject.toml`. Afterwards they are updated by the existing Dependabot `/slim` entry, like every other slim dependency (today 112 of the 113 shared packages have identical pins; the only difference, `transformers`, is the same range written differently).
+The initial slim pins are copied from `pyproject.toml`. Afterwards they are updated by the existing Dependabot entries (`/` for the full manifest, `/slim` for slim), like every other dependency (today 112 of the 113 shared packages have identical pins; the only difference, `transformers`, is the same range written differently).
 
 - Alternative considered: a test that fails when the pins differ. Rejected: Dependabot opens one pull request per manifest, and each would fail that test on its own, so neither could merge without a hand-made edit to the other manifest.
 - Alternative considered: grouping both directories into one Dependabot pull request. Out of scope: it changes repository-wide tooling and would apply to every dependency, not only these extras.
 
 ### 3. `torch` is pinned without a local version label
 
-`torch==2.15.0`, not `torch==2.15.0+cpu`. Under PEP 440, `==2.15.0` matches `2.15.0+cpu`, so a CPU-only build installed first satisfies the extra and the installer leaves it in place (spec: "CPU-only torch satisfies the hap extra"). Pinning `+cpu` was rejected: PyTorch publishes no `+cpu` wheels for macOS, it would block GPU users, and installs would fail without PyTorch's index configured. Selecting the CPU build stays the consumer's job (a proposal non-goal) and is documented.
+`torch==2.15.0`, not `torch==2.15.0+cpu`. Under PEP 440, `==2.15.0` matches `2.15.0+cpu`, so a CPU-only build installed first satisfies the extra and the installer leaves it in place (spec: "CPU-only torch satisfies the huggingface extra"). Pinning `+cpu` was rejected: PyTorch publishes no `+cpu` wheels for macOS, it would block GPU users, and installs would fail without PyTorch's index configured. Selecting the CPU build stays the consumer's job (a proposal non-goal) and is documented.
 
-### 4. The missing-dependency check lives in the core detection adapter
+### 4. Both Hugging Face clients check their packages with the existing helper and one shared hint
 
-`HuggingFaceAdapter.validate_detection()` checks that `torch` and `transformers` can be found (`importlib.util.find_spec`) before it creates the classification client. If one is missing, it returns a validation error that names the package, `docling-pipelines-slim[hap]` and the CPU-only build. This keeps the existing layers:
+- A new constant `ServiceConstants.HUGGINGFACE_INSTALL_HINT` in `core/constants/constants.py` (next to the existing `HUGGINGFACE_HAP_TOXIC_LABELS_HINT`) says: install `docling-pipelines-slim[huggingface]`, installing the CPU-only `torch` build first when no GPU is needed.
+- `HuggingFaceClassificationClient.load()` calls `require_package("torch", HINT)` and `require_package("transformers", HINT)` before resolving the device. Today the first `torch` import happens in device resolution, so a missing package currently surfaces as a bare `ModuleNotFoundError`.
+- `HuggingFaceClient._initialize_local_model()` keeps its `require_package("sentence_transformers", ...)` call, with the install command replaced by the same hint.
+- `require_package` raises `DependencyError` with `"<package> package not installed. Install with: <hint>"`. The existing `validate_detection()` and `validate_embedding()` already turn any exception into a startup validation error, so no adapter or operator code changes.
+- Imports stay inside methods, so importing an operator in a slim install without these packages still works (spec: "Offline operation").
 
-- The operator adapter (`HuggingFaceHAPAdapter`) stays free of `torch` knowledge.
-- The integration client stays generic and knows nothing about docpipe's distributions or extras.
-- The check runs only on the detection path. The same core adapter also serves local embeddings, whose slim install is covered by the `extract` extra, so its embedding validation is left unchanged.
-- No import happens at module load, so importing the operator in a slim install without `torch` still works (spec: "Offline operation").
+Alternatives considered:
+- A `find_spec` check in `HuggingFaceAdapter.validate_detection()` (the earlier plan). Rejected: the embeddings path already checks in its client with `require_package`, so checking in both clients gives one mechanism, one message format and one hint for the whole provider.
+- Checking at import time. Rejected: breaks lazy imports and slim installs that never use the provider.
 
-Alternatives considered: catching the `ImportError` in the classification client (rejected: it would put packaging names into a generic integration module), and checking at import time (rejected: breaks lazy imports and slim imports).
-
-The hint text is a module-level constant next to the existing `_DEFAULT_MODEL_LOAD_HINT`, following the file's current pattern.
+Putting an install hint in the integration clients follows existing practice: both clients already carry `pip install` hints. Because the extra is named after the provider rather than after one operator, the hint is correct for every caller.
 
 ### 5. Presidio messages name both extras and the model wheel
 
@@ -71,7 +86,9 @@ The hint text is a module-level constant next to the existing `_DEFAULT_MODEL_LO
 
 ### 6. Documentation
 
-- `docs/guides/SLIM_VARIANT.md`: rows in the operator table for `pii_and_hap` with `presidio` (`presidio` extra plus a spaCy model the user installs) and with `huggingface` HAP (`hap` extra; install the CPU-only `torch` build first if a GPU is not needed), and install commands for both.
+- `docs/guides/SLIM_VARIANT.md`: rows in the operator table for `pii_and_hap` with `presidio` (`presidio` extra plus a spaCy model the user installs) and with `huggingface` HAP (`huggingface` extra; install the CPU-only `torch` build first if a GPU is not needed). Change the "embeddings (HuggingFace local provider)" row from `extract` to `huggingface`. Add install commands, and note that `huggingface` also brings `scipy` and `scikit-learn` (through `sentence-transformers`).
+- `docs/operators/functional/embeddings_readme.md`: note that the local `huggingface` provider needs `docling-pipelines-slim[huggingface]` on slim.
+- `sample_flows/README.md` and the description in `sample_flows/use_cases/local_redacted_indexing.json`: the flow uses both providers, so they name both extras.
 - `docs/operators/quality/pii_and_hap_readme.md`:
   - Fix the provider-table line that says `huggingface` needs no extra install.
   - Update the `spacy_model` row and the two Presidio rows in Troubleshooting.
@@ -81,12 +98,18 @@ The hint text is a module-level constant next to the existing `_DEFAULT_MODEL_LO
 ## Risks / Trade-offs
 
 - [spaCy raises `SystemExit` while downloading a missing model, so the new Presidio message is never shown and the process can exit] -> Out of scope (proposal non-goal); the Troubleshooting entry says to install the model wheel before starting, and a follow-up change adds a guard that checks for the model before Presidio loads it.
-- [A consumer installs `slim[hap]` on Linux without installing the CPU-only `torch` build first and gets the CUDA build, several GB] -> Cannot be prevented from package metadata (Decision 3). The `SLIM_VARIANT.md` instructions and the missing-dependency hint both say to install the CPU-only build first.
+- [HAP-only slim users also receive `sentence-transformers`, `scipy` and `scikit-learn`, which HAP does not use: roughly 150 MB installed when `scipy` is not already present, against about 1 GB for `torch`] -> Accepted in exchange for one extra per provider (Decision 1). `SLIM_VARIANT.md` says what the extra brings in; a consumer who needs the smallest HAP install can still pin `torch` and `transformers` directly.
+- [A consumer installs `slim[huggingface]` on Linux without installing the CPU-only `torch` build first and gets the CUDA build, several GB] -> Cannot be prevented from package metadata (Decision 3). The `SLIM_VARIANT.md` instructions and the missing-dependency hint both say to install the CPU-only build first.
 - [Between the root and `/slim` Dependabot pull requests, the two manifests briefly pin different versions] -> Accepted; this already happens for every shared dependency and is resolved when both pull requests merge.
-- [`slim/uv.lock` grows: it now resolves `torch` and, for Linux, its CUDA dependencies] -> Affects only the repository's own lock file; consumers resolve their own environments.
-- [`find_spec` finds a package that then fails to import (broken install)] -> The existing load path still reports the import error at startup, so the operator still fails before any document is processed.
-- [CI always has `torch` installed, so the missing-package paths are never exercised] -> Unit tests simulate absence by patching `importlib.util.find_spec` and Presidio's import, and assert on the message text.
+- [`slim/uv.lock` grows: it now resolves `torch` and, for Linux, its CUDA dependencies] -> Affects only the repository's own lock file; consumers resolve their own environments. The root `uv.lock` changes only in its recorded extra names.
+- [CI always has `torch`, `transformers` and `sentence-transformers` installed, so the missing-package paths are never exercised] -> Unit tests simulate absence by setting the module to `None` in `sys.modules` (which makes `__import__` raise `ImportError`) and by patching Presidio's import, and assert on the message text.
 
 ## Migration Plan
 
-Additive. No flow, config or API migration. After release, slim consumers can replace hand-pinned `presidio-analyzer`, `torch` and `transformers` lines with `docling-pipelines-slim[presidio,hap]`. Rollback is a revert of the pyproject, lock and message changes.
+No flow, config or API migration. After release:
+
+- Slim consumers can replace hand-pinned `presidio-analyzer`, `torch` and `transformers` lines with `docling-pipelines-slim[presidio,huggingface]`.
+- Slim consumers who installed `extract` only to get local Hugging Face embeddings can use `huggingface` instead; `extract` keeps working.
+- `docling-pipelines[presidio]` keeps working unchanged.
+
+Rollback is a revert of the pyproject, lock, documentation and message changes.
