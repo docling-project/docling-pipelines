@@ -23,7 +23,7 @@ from docpipe.utils.core.memmap_file_utils import (
     yield_chunks_from_file,
     yield_embeddings_from_memmap_file,
 )
-from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors, sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.config_validation import validate_config_from_metadata
 from docpipe.utils.operators.vectordb_utils import is_dense_or_binary_vector_feature
@@ -248,12 +248,7 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             schema_cls = self.adapter.get_config_schema() if hasattr(self, "adapter") else self._schema_cls
             schema_cls.model_validate(provider_config)
         except ValidationError as exc:
-            for error in exc.errors():
-                field_name = ".".join(str(loc) for loc in error["loc"])
-                if error["type"] == "missing":
-                    errors.append(f"{field_name} is not provided")
-                else:
-                    errors.append(error["msg"])
+            errors.extend(format_pydantic_errors(exc=exc))
 
         # Provider-specific mapping/configuration checks (optional hook; default reports nothing).
         if hasattr(self, "adapter"):

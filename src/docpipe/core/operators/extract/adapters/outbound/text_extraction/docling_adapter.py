@@ -28,6 +28,7 @@ from docpipe.core.operators.extract.adapters.outbound.text_extraction.ocr_config
 from docpipe.core.operators.extract.ports.outbound.text_extraction import TextExtractionPort
 from docpipe.core.operators.operator_utils import OperatorUtils, is_asr_available
 from docpipe.integrations.docling.vlm_pipeline_options_provider import VlmPipelineOptionsProviderFactory
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger: logging.Logger = get_logger()
@@ -299,7 +300,7 @@ class DoclingAdapter(TextExtractionPort):
             logger.warning(
                 "Could not import OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
-                exc,
+                sanitize_exception(exc=exc, config_key="ocr_engine_options"),
             )
             return None
 
@@ -310,7 +311,7 @@ class DoclingAdapter(TextExtractionPort):
             logger.warning(
                 "Failed to build OCR options for engine '%s': %s - using Docling defaults",
                 self._ocr_engine,
-                exc,
+                sanitize_exception(exc=exc, config_key="ocr_engine_options"),
             )
             return None
 

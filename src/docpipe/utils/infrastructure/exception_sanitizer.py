@@ -12,6 +12,7 @@ the text reaches a log, a node or job message, or run metadata.
 from __future__ import annotations
 
 import ssl
+from collections import deque
 from typing import Final
 
 from pydantic import ValidationError
@@ -23,8 +24,6 @@ CATEGORY_CONNECTION: Final[str] = "connection failed"
 CATEGORY_HTTP: Final[str] = "HTTP request failed"
 CATEGORY_DATABASE: Final[str] = "database error"
 CATEGORY_CLIENT: Final[str] = "client error"
-
-_MAX_CHAIN_DEPTH: Final[int] = 10
 
 _HTTP_MODULES: Final[frozenset[str]] = frozenset({"requests", "urllib3", "httpx", "aiohttp", "http", "httpcore"})
 _DATABASE_MODULES: Final[frozenset[str]] = frozenset(
@@ -99,24 +98,105 @@ def _classify(*, exc: BaseException) -> str | None:
 
 
 def _exception_chain(*, exc: BaseException) -> list[BaseException]:
-    """Return ``exc`` followed by its causes and contexts, guarding against cycles."""
+    """Return ``exc`` and every exception reachable from it, nearest first.
+
+    The walk follows ``__cause__``, ``__context__`` (even when ``__suppress_context__`` is set, because a consumer
+    that reads the attribute still reaches it) and the members of a ``BaseExceptionGroup``. There is no depth
+    limit, so it covers everything ``traceback.format_exception`` can print. A visited set ends the walk on
+    cycles and on links reached by more than one path.
+    """
     chain: list[BaseException] = []
     seen: set[int] = set()
-    pending: BaseException | None = exc
-    while pending is not None and id(pending) not in seen and len(chain) < _MAX_CHAIN_DEPTH:
-        chain.append(pending)
-        seen.add(id(pending))
-        pending = pending.__cause__ or pending.__context__
+    pending: deque[BaseException] = deque([exc])
+    while pending:
+        link = pending.popleft()
+        if id(link) in seen:
+            continue
+        seen.add(id(link))
+        chain.append(link)
+        if link.__cause__ is not None:
+            pending.append(link.__cause__)
+        if link.__context__ is not None:
+            pending.append(link.__context__)
+        if isinstance(link, BaseExceptionGroup):
+            pending.extend(link.exceptions)
     return chain
+
+
+def is_sensitive_chain(*, exc: BaseException) -> bool:
+    """Return True when ``exc`` or any exception reachable from it is a known secret-bearing type.
+
+    This is the single sensitivity decision for ``sanitize_exception`` and for callers that choose whether a
+    traceback may be logged or chained. It applies ``_classify`` to every link ``traceback.format_exception``
+    can print.
+    """
+    return any(_classify(exc=link) is not None for link in _exception_chain(exc=exc))
+
+
+class SanitizedCause(ValueError):
+    """Stand-in cause whose text is already sanitized; it carries no reference to the original exception."""
+
+
+def sanitized_cause(*, exc: BaseException, config_key: str) -> BaseException:
+    """Return the exception to chain as the cause of a wrapper raised for ``exc``.
+
+    A chain with no sensitive link keeps ``exc`` itself. A sensitive chain is replaced by a ``SanitizedCause``
+    holding ``sanitize_exception`` output, so a traceback printed from the wrapper cannot reveal the original.
+    The caller must raise the wrapper after its ``except`` block has exited: raising inside the block makes
+    Python set ``__context__`` to the original, which would stay reachable.
+    """
+    if not is_sensitive_chain(exc=exc):
+        return exc
+    return SanitizedCause(sanitize_exception(exc=exc, config_key=config_key))
+
+
+def _format_location(*, loc: tuple[int | str, ...]) -> str:
+    """Render a Pydantic location with dots for keys and brackets for list indices."""
+    text = ""
+    for item in loc:
+        if isinstance(item, int):
+            text += f"[{item}]"
+        else:
+            text = f"{text}.{item}" if text else item
+    return text
+
+
+def format_pydantic_errors(*, exc: ValidationError, prefix: str = "") -> list[str]:
+    """Render each Pydantic error as a message that names its field and never includes input values.
+
+    A missing field becomes ``<path> is not provided``. Any other error with a path becomes ``<path>: <message>``,
+    and a model-level error without a path keeps only its message. ``prefix`` is joined to the field path with a
+    dot, so a model-level error with a prefix becomes ``<prefix>: <message>``. A leading ``Value error, `` on a
+    ``value_error`` becomes ``Value error: ``. Input, context and URLs are never extracted, and ``ctx["error"]``
+    is not read. The message is copied verbatim, so a validator that interpolates rejected input into its own
+    message still leaks that input; provider validators must not do so.
+
+    Args:
+        exc: The Pydantic validation error to render.
+        prefix: Optional leading path, such as a config key, prepended to every message.
+
+    Returns:
+        One message per error, in the order Pydantic reports them.
+    """
+    messages: list[str] = []
+    for error in exc.errors(include_input=False, include_context=False, include_url=False):
+        loc = _format_location(loc=error["loc"])
+        path = ".".join(part for part in (prefix, loc) if part)
+        message = error["msg"]
+        if error["type"] == "value_error" and message.startswith("Value error, "):
+            message = "Value error: " + message.removeprefix("Value error, ")
+        if error["type"] == "missing":
+            messages.append(f"{path} is not provided")
+        elif path:
+            messages.append(f"{path}: {message}")
+        else:
+            messages.append(message)
+    return messages
 
 
 def _validation_detail(*, exc: ValidationError, config_key: str) -> str:
     """Render a Pydantic error as category, key paths and constraints, without input values or URLs."""
-    parts: list[str] = []
-    for error in exc.errors(include_input=False, include_url=False, include_context=False):
-        loc = ".".join(str(item) for item in error["loc"])
-        key_path = f"{config_key}.{loc}" if loc else config_key
-        parts.append(f"{key_path}: {error['msg']}")
+    parts = format_pydantic_errors(exc=exc, prefix=config_key)
     return f"{CATEGORY_VALIDATION} ({'; '.join(parts)})"
 
 
@@ -196,7 +276,9 @@ def sanitize_exception(*, exc: BaseException, config_key: str) -> str:
         if index == 0:
             return fallback
         replacement = _safe_text(link=link, config_key=config_key)
-        redacted = _redact_wrapper_message(exc=exc, causes=chain[index:], replacement=replacement)
+        # Every link below the wrapper is a redaction source, classified or not: an unclassified link between
+        # the wrapper and the classified one can carry the same secret text.
+        redacted = _redact_wrapper_message(exc=exc, causes=chain[1:], replacement=replacement)
         return f"{config_key}: {redacted}" if redacted else fallback
     message = str(exc)
     return message if message else type(exc).__name__

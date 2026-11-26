@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Factory for creating ACL extraction adapters.
 
 This module provides a factory pattern for creating ACL extraction adapters
@@ -11,6 +14,11 @@ from typing import Any, Callable
 from docpipe.core.operators.acl.ports.outbound.acl_extraction import ACLExtractionPort
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError
 from docpipe.exceptions.error_codes import ErrorCode
+from docpipe.utils.infrastructure.exception_sanitizer import (
+    is_sensitive_chain,
+    sanitize_exception,
+    sanitized_cause,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,22 +87,39 @@ class ACLAdapterFactory:
 
         adapter_constructor = _ACL_ADAPTER_REGISTRY[provider_lower]
 
+        failure: tuple[BaseException, ConfigurationError] | None = None
         try:
             # Create adapter instance (no parameters - adapters configure themselves)
             adapter = adapter_constructor()
 
-            logger.info(f"Created ACL adapter for provider: {provider}")
+            logger.info("Created ACL adapter for provider: %s", provider)
             return adapter
 
-        except ConfigurationError:
-            # Re-raise configuration errors as-is
-            raise
+        except ConfigurationError as e:
+            if not is_sensitive_chain(exc=e):
+                # Re-raise configuration errors as-is
+                raise
+            # A constructor wrapped a secret-bearing cause (for example a ValidationError) in its own
+            # ConfigurationError. Keep its status, error code and extra fields, and replace the cause.
+            sanitized = sanitize_exception(exc=e, config_key=provider_lower)
+            logger.error("Failed to create ACL adapter for provider %s: %s", provider, sanitized)
+            replacement = ConfigurationError(sanitized, error_code=e.error_code, status_code=e.status_code)
+            replacement.more_info = e.more_info
+            replacement.message_code = e.message_code
+            failure = (sanitized_cause(exc=e, config_key=provider_lower), replacement)
         except Exception as e:
-            logger.error(f"Failed to create ACL adapter for provider {provider}: {e}", exc_info=True)
-            raise ConfigurationError(
-                f"Failed to create ACL adapter for provider {provider}: {e}",
+            # Sanitized text, no traceback: an adapter constructor may fail on a config ValidationError. The
+            # wrapper is raised after this block so no __context__ keeps the original reachable (see sanitized_cause).
+            sanitized = sanitize_exception(exc=e, config_key=provider_lower)
+            logger.error("Failed to create ACL adapter for provider %s: %s", provider, sanitized)
+            wrapper = ConfigurationError(
+                f"Failed to create ACL adapter for provider {provider}: {sanitized}",
                 error_code=ErrorCode.ACL_ADAPTER_INITIALIZATION_FAILED,
-            ) from e
+            )
+            failure = (sanitized_cause(exc=e, config_key=provider_lower), wrapper)
+
+        cause, error = failure
+        raise error from cause
 
     @classmethod
     def register_adapter(cls, *, provider: str, adapter_class: type[ACLExtractionPort]) -> None:
@@ -113,10 +138,10 @@ class ACLAdapterFactory:
         provider_lower = provider.lower()
 
         if provider_lower in _ACL_ADAPTER_REGISTRY:
-            logger.warning(f"Overwriting existing ACL adapter registration for provider: {provider}")
+            logger.warning("Overwriting existing ACL adapter registration for provider: %s", provider)
 
         _ACL_ADAPTER_REGISTRY[provider_lower] = adapter_class
-        logger.info(f"Registered ACL adapter for provider: {provider}")
+        logger.info("Registered ACL adapter for provider: %s", provider)
 
     @classmethod
     def get_registered_providers(cls) -> list[str]:
@@ -159,6 +184,7 @@ def register_acl_adapter(provider: str) -> Callable[[type[ACLExtractionPort]], t
     """
 
     def decorator(adapter_class: type[ACLExtractionPort]) -> type[ACLExtractionPort]:
+        """Register the decorated adapter class and return it unchanged."""
         ACLAdapterFactory.register_adapter(provider=provider, adapter_class=adapter_class)
         return adapter_class
 

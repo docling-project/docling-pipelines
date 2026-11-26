@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: The Docling-pipeline Contributors
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for WeaviateConfig and format_config_errors."""
+"""Unit tests for WeaviateConfig and format_pydantic_errors."""
 
 import pytest
 from pydantic import ValidationError
@@ -9,8 +9,8 @@ from pydantic import ValidationError
 from docpipe.core.operators.vectordb.adapters.outbound.weaviate.config import (
     ADAPTER_NAME,
     WeaviateConfig,
-    format_config_errors,
 )
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors, sanitize_exception
 
 
 class TestWeaviateConfig:
@@ -64,7 +64,7 @@ class TestWeaviateConfig:
         """Verify invalid collection names are rejected with exact error message."""
         with pytest.raises(ValidationError) as exc_info:
             WeaviateConfig(collection_name=name)
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         expected_msg = "collection_name must start with an uppercase ASCII letter and contain only ASCII letters, digits, and underscores"
         assert any(expected_msg in err for err in errors)
 
@@ -72,7 +72,7 @@ class TestWeaviateConfig:
         """Verify missing collection_name yields 'collection_name is not provided'."""
         with pytest.raises(ValidationError) as exc_info:
             WeaviateConfig.model_validate({})
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert "collection_name is not provided" in errors
 
     def test_cloud_missing_cluster_url(self) -> None:
@@ -82,7 +82,7 @@ class TestWeaviateConfig:
                 collection_name="Documents",
                 connection_type="cloud",
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert any("cluster_url is required when connection_type is 'cloud'" in err for err in errors)
 
     def test_cloud_with_cluster_url(self) -> None:
@@ -104,7 +104,7 @@ class TestWeaviateConfig:
                 secure=True,
                 auth_type="api_key",
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert any("api_key is required when auth_type is 'api_key'" in err for err in errors)
 
     def test_auth_bearer_token_missing_token(self) -> None:
@@ -115,7 +115,7 @@ class TestWeaviateConfig:
                 secure=True,
                 auth_type="bearer_token",
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert any("bearer_token is required when auth_type is 'bearer_token'" in err for err in errors)
 
     @pytest.mark.parametrize(
@@ -137,7 +137,7 @@ class TestWeaviateConfig:
                 username=username,
                 password=password,
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert any("username and password are required when auth_type is 'client_password'" in err for err in errors)
 
     @pytest.mark.parametrize(
@@ -163,7 +163,7 @@ class TestWeaviateConfig:
                 secure=False,
                 **kwargs,
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert any(expected_msg in err for err in errors)
 
         # 2. secure=True, grpc_secure=False
@@ -175,7 +175,7 @@ class TestWeaviateConfig:
                 grpc_secure=False,
                 **kwargs,
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         assert any(expected_msg in err for err in errors)
 
         # 3. secure=True, grpc_secure=True (accepted)
@@ -256,7 +256,7 @@ class TestWeaviateConfig:
         assert cfg2.bearer_token == "${TEST_WV_BEARER}"
 
     def test_unset_env_var_raises_config_error(self, *, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Verify unset environment variable raises a validation error naming the variable."""
+        """Verify an unset environment reference names the field and not the variable."""
         monkeypatch.delenv("NON_EXISTENT_WV_KEY", raising=False)
 
         with pytest.raises(ValidationError) as exc_info:
@@ -266,11 +266,48 @@ class TestWeaviateConfig:
                 auth_type="api_key",
                 api_key="${NON_EXISTENT_WV_KEY}",
             )
-        errors = format_config_errors(exc_info.value)
-        assert any("Environment variable NON_EXISTENT_WV_KEY is not set" in err for err in errors)
+        errors = format_pydantic_errors(exc=exc_info.value)
+        assert any("api_key references an environment variable that is not set" in err for err in errors)
+        assert not any("NON_EXISTENT_WV_KEY" in err for err in errors)
 
-    def test_format_config_errors_never_discloses_input_values(self) -> None:
-        """Verify format_config_errors never contains sensitive input values."""
+    @pytest.mark.parametrize(
+        ("auth_type", "field", "kwargs"),
+        [
+            ("api_key", "api_key", {"api_key": "$DOCPIPE_SENTINEL_WV_KEY"}),
+            ("bearer_token", "bearer_token", {"bearer_token": "${DOCPIPE_SENTINEL_WV_KEY}"}),
+            (
+                "client_password",
+                "username",
+                {"username": "$DOCPIPE_SENTINEL_WV_KEY", "password": "plain-password"},  # pragma: allowlist secret
+            ),
+            (
+                "client_password",
+                "password",
+                {"username": "user", "password": "$DOCPIPE_SENTINEL_WV_KEY"},  # pragma: allowlist secret
+            ),
+        ],
+    )
+    def test_env_reference_sentinel_never_rendered(
+        self, *, monkeypatch: pytest.MonkeyPatch, auth_type: str, field: str, kwargs: dict
+    ) -> None:
+        """Verify an unset reference in each credential field is absent from the validator message and the renderers."""
+        sentinel = "DOCPIPE_SENTINEL_WV_KEY"
+        monkeypatch.delenv(sentinel, raising=False)
+
+        with pytest.raises(ValidationError) as exc_info:
+            WeaviateConfig(collection_name="Documents", secure=True, auth_type=auth_type, **kwargs)
+
+        messages = [
+            error["msg"]
+            for error in exc_info.value.errors(include_input=False, include_context=False, include_url=False)
+        ]
+        assert any(f"{field} references an environment variable that is not set" in msg for msg in messages)
+        assert not any(sentinel in msg for msg in messages)
+        assert not any(sentinel in err for err in format_pydantic_errors(exc=exc_info.value))
+        assert sentinel not in sanitize_exception(exc=exc_info.value, config_key="vectordb.provider_config")
+
+    def test_format_pydantic_errors_never_discloses_input_values(self) -> None:
+        """Verify format_pydantic_errors never contains sensitive input values."""
         secret_value = "super_secret_plaintext_key_xyz_987"  # pragma: allowlist secret
         with pytest.raises(ValidationError) as exc_info:
             WeaviateConfig(
@@ -279,6 +316,6 @@ class TestWeaviateConfig:
                 auth_type="api_key",
                 api_key=secret_value,
             )
-        errors = format_config_errors(exc_info.value)
+        errors = format_pydantic_errors(exc=exc_info.value)
         for err in errors:
             assert secret_value not in err

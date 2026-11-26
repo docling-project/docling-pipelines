@@ -32,6 +32,7 @@ from docpipe.core.operators.quality.pii_and_hap.domain.models import DetectionRe
 from docpipe.core.operators.quality.pii_and_hap.pii_and_hap_helper import DEFAULT_PII_TYPES_OF_CONCERN
 from docpipe.core.operators.quality.pii_and_hap.ports.outbound.pii_detection_port import PIIDetectionPort
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -75,7 +76,9 @@ class PresidioPIIAdapter(PIIDetectionPort):
             self._config = PresidioPIIConfig.model_validate(provider_config or {})
         except ValidationError as exc:
             self._config = PresidioPIIConfig()
-            self._config_errors.append(f"Invalid Presidio provider_config: {exc}")
+            self._config_errors.append(
+                f"Invalid Presidio provider_config: {'; '.join(format_pydantic_errors(exc=exc))}"
+            )
         self._config_errors.extend(PresidioPIIAdapter._check_entity_mapping(entity_mapping=self._config.entity_mapping))
         self._entity_mapping = {**DEFAULT_PRESIDIO_ENTITY_MAPPING, **(self._config.entity_mapping or {})}
         self._analyzer: Any = None
@@ -95,7 +98,9 @@ class PresidioPIIAdapter(PIIDetectionPort):
         try:
             config = PresidioPIIConfig.model_validate(provider_config or {})
         except ValidationError as exc:
-            return [f"{config_key} is invalid for provider '{cls.ADAPTER_NAME}': {exc}"]
+            return [
+                f"{config_key} is invalid for provider '{cls.ADAPTER_NAME}': {'; '.join(format_pydantic_errors(exc=exc))}"
+            ]
         return [
             f"{config_key}: {error}"
             for error in PresidioPIIAdapter._check_entity_mapping(entity_mapping=config.entity_mapping)
@@ -131,9 +136,11 @@ class PresidioPIIAdapter(PIIDetectionPort):
         except Exception as exc:
             return PresidioPIIAdapter._validation_result(
                 errors=[
-                    f"Failed to initialise Presidio AnalyzerEngine (language='{self._config.language}', "
-                    f"spacy_model='{self._config.spacy_model}'): {exc}. Make sure the spaCy model is installed: "
-                    f"python -m spacy download {self._config.spacy_model}"
+                    (
+                        f"Failed to initialise Presidio AnalyzerEngine (language='{self._config.language}', "
+                        f"spacy_model='{self._config.spacy_model}'): {exc}. Make sure the spaCy model is installed: "
+                        f"python -m spacy download {self._config.spacy_model}"
+                    )
                 ]
             )
         return PresidioPIIAdapter._validation_result(errors=[])

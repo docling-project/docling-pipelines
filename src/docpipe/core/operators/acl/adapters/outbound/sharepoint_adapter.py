@@ -38,9 +38,13 @@ from docpipe.exceptions.docpipe_exceptions import (
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestMethod
 from docpipe.integrations.secrets.secret_value import reveal_value
+from docpipe.utils.infrastructure.exception_sanitizer import sanitize_exception
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Config key used when rendering exceptions through sanitize_exception
+_PROVIDER_KEY: str = OperatorConstants.ACL.PROVIDER_SHAREPOINT
 
 # Microsoft Graph API Constants (module-level - SharePoint-specific)
 _MICROSOFT_LOGIN_URL: str = "https://login.microsoftonline.com"
@@ -273,10 +277,13 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                 f"SharePoint ACL adapter requires missing dependency: {e!s}. Install with: pip install msal"
             ) from e
         except Exception as e:
-            # Wrap unknown exceptions as ExternalServiceError
-            logger.exception("Failed to extract ACL for SharePoint item %s: %s", request.resource_path, e)
+            # Wrap unknown exceptions as ExternalServiceError. A config ValidationError raised while building the
+            # per-request config carries the rejected input, so the log and the message use sanitized text and the
+            # log has no traceback. The ACL operator replaces a sensitive cause when it wraps this error.
+            sanitized = sanitize_exception(exc=e, config_key=_PROVIDER_KEY)
+            logger.error("Failed to extract ACL for SharePoint item %s: %s", request.resource_path, sanitized)
             raise ExternalServiceError(
-                f"SharePoint ACL extraction failed for {request.resource_path}: {e!s}",
+                f"SharePoint ACL extraction failed for {request.resource_path}: {sanitized}",
                 error_code=ErrorCode.ACL_EXTRACTION_FAILED,
             ) from e
 
@@ -353,7 +360,11 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                 current_id = parent_id
 
         except Exception as e:
-            logger.warning("Failed to resolve full inheritance chain for %s: %s", resource_id, e)
+            logger.warning(
+                "Failed to resolve full inheritance chain for %s: %s",
+                resource_id,
+                sanitize_exception(exc=e, config_key=_PROVIDER_KEY),
+            )
 
         return inheritance_chain
 
@@ -405,7 +416,9 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
             self._group_cache[group_id] = members
 
         except Exception as e:
-            logger.warning("Failed to expand group %s: %s", group_id, e)
+            logger.warning(
+                "Failed to expand group %s: %s", group_id, sanitize_exception(exc=e, config_key=_PROVIDER_KEY)
+            )
 
         return members
 
@@ -484,7 +497,7 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
             return True
 
         except Exception as e:
-            logger.error("Failed to connect to SharePoint: %s", e)
+            logger.error("Failed to connect to SharePoint: %s", sanitize_exception(exc=e, config_key=_PROVIDER_KEY))
             return False
 
     def build_config_from_operator_params(
@@ -628,7 +641,8 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
         except Exception as e:
             # Wrap authentication errors
             raise ExternalServiceError(
-                f"Microsoft Graph authentication failed: {e!s}", error_code=ErrorCode.ACL_AUTHENTICATION_FAILED
+                f"Microsoft Graph authentication failed: {sanitize_exception(exc=e, config_key=_PROVIDER_KEY)}",
+                error_code=ErrorCode.ACL_AUTHENTICATION_FAILED,
             ) from e
 
         # Cache the token
@@ -661,7 +675,11 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
                 permissions.extend(self._parse_graph_permission(permission=perm))
 
         except Exception as e:
-            logger.warning("Failed to fetch permissions for item %s: %s", item_id, e)
+            logger.warning(
+                "Failed to fetch permissions for item %s: %s",
+                item_id,
+                sanitize_exception(exc=e, config_key=_PROVIDER_KEY),
+            )
 
         return permissions
 
@@ -836,7 +854,8 @@ class SharePointACLAdapter(ACLExtractionPort[SharePointACLConfig]):
             raise
         except Exception as e:
             raise ExternalServiceError(
-                f"Failed to resolve item ID from SharePoint URL {source_url}: {e!s}",
+                f"Failed to resolve item ID from SharePoint URL {source_url}: "
+                f"{sanitize_exception(exc=e, config_key=_PROVIDER_KEY)}",
                 error_code=ErrorCode.ACL_EXTRACTION_FAILED,
             ) from e
 

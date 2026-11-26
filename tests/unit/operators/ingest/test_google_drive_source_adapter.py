@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 import asyncio
 from collections import deque
 from datetime import datetime
@@ -584,6 +587,61 @@ class TestGoogleDriveSourceAdapter:
             )
 
         assert result is None
+
+    def test_fetch_binary_content_with_rejected_config_logs_no_sentinel_or_traceback(self, caplog):
+        sentinel = "SENTINEL_GDRIVE_SCOPES_7d20"
+        adapter = GoogleDriveSourceAdapter()
+
+        with caplog.at_level("ERROR"):
+            result = adapter.fetch_binary_content(
+                source_id="doc123",
+                provider_config={
+                    "folder_id": "folder123",
+                    "credentials_path": "/tmp/credentials.json",
+                    "scopes": sentinel,
+                },
+            )
+
+        assert result is None
+        assert caplog.records
+        for record in caplog.records:
+            assert sentinel not in record.getMessage()
+            assert sentinel not in (record.exc_text or "")
+            assert record.exc_info is None
+
+    def test_fetch_binary_content_keeps_traceback_for_non_sensitive_failure(self, caplog):
+        adapter = GoogleDriveSourceAdapter()
+
+        with caplog.at_level("ERROR"):
+            with patch.object(adapter, "_get_drive_service", side_effect=RuntimeError("service unavailable")):
+                result = adapter.fetch_binary_content(
+                    source_id="doc123",
+                    provider_config={"folder_id": "folder123", "credentials_path": "/tmp/credentials.json"},
+                )
+
+        assert result is None
+        records = [record for record in caplog.records if "Google Drive" in record.getMessage()]
+        assert records
+        assert any(record.exc_info is not None for record in records)
+
+    def test_fetch_binary_content_drops_traceback_for_sensitive_failure(self, caplog):
+        sentinel = "SENTINEL_GDRIVE_TOKEN_URL_3b9a"
+        adapter = GoogleDriveSourceAdapter()
+        error = ConnectionError(f"could not reach https://user:{sentinel}@oauth.example/token")
+
+        with caplog.at_level("DEBUG"):
+            with patch.object(adapter, "_get_drive_service", side_effect=error):
+                result = adapter.fetch_binary_content(
+                    source_id="doc123",
+                    provider_config={"folder_id": "folder123", "credentials_path": "/tmp/credentials.json"},
+                )
+
+        assert result is None
+        assert caplog.records
+        for record in caplog.records:
+            assert sentinel not in record.getMessage()
+            assert sentinel not in (record.exc_text or "")
+            assert record.exc_info is None
 
 
 class TestBindFileReference:

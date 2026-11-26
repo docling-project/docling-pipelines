@@ -25,6 +25,7 @@ from docpipe.core.operators.quality.pii_and_hap.ports.outbound.pii_and_hap_detec
     PIIAndHAPDetectionPort,
 )
 from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.utils.infrastructure.exception_sanitizer import format_pydantic_errors
 from docpipe.utils.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -149,7 +150,9 @@ class WatsonxPIIAndHAPAdapter(PIIAndHAPDetectionPort):
         try:
             return WatsonxPIIAndHAPConfig.model_validate(provider_config or {}), []
         except ValidationError as exc:
-            return None, [f"{config_key} is invalid for provider '{ADAPTER_NAME}': {exc}"]
+            return None, [
+                f"{config_key} is invalid for provider '{ADAPTER_NAME}': {'; '.join(format_pydantic_errors(exc=exc))}"
+            ]
 
     @staticmethod
     def _resolve_config(*, provider_config: dict[str, Any], config: WatsonxPIIAndHAPConfig) -> dict[str, Any]:

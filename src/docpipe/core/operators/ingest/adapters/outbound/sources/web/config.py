@@ -53,14 +53,15 @@ class WebPageSourceConfig(BaseModel):
             raise ValueError("At least one URL must be provided")
 
         validated_urls = []
-        for url in v:
+        for index, url in enumerate(v):
             url = url.strip()
             if not url:
                 raise ValueError("URLs cannot be empty strings")
 
-            # Basic URL validation - must start with http:// or https://
+            # Basic URL validation - must start with http:// or https://. The URL itself is not echoed: it can
+            # carry credentials, so the failing index identifies the entry instead.
             if not url.startswith(("http://", "https://")):
-                raise ValueError(f"URL must start with http:// or https://: {url}")
+                raise ValueError(f"URL must start with http:// or https:// (urls[{index}])")
 
             validated_urls.append(url)
 
