@@ -1006,6 +1006,40 @@ class TestVectorDBEnrichmentIntegration:
         assert "sparse_embeddings" in block[OperatorConstants.Config.INPUT_FEATURES]
         assert block[OperatorConstants.VectorDB.AVAILABLE_RESOURCES] == ["Alpha"]
 
+    @staticmethod
+    def _weaviate_block(*, add_sparse_vector: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+        service = FlowEnrichmentService.__new__(FlowEnrichmentService)
+        content = _make_feature()
+        content[OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB] = False
+        features = {"content": content}
+        nfr = _make_node_feature_result(
+            available=features,
+            inputs=features,
+            operator_config={
+                "provider": OperatorConstants.VectorDB.WEAVIATE,
+                "add_sparse_vector": add_sparse_vector,
+            },
+        )
+        block = service._build_node_feature_metadata(
+            node_id="node-vdb",
+            node_feature_result=nfr,
+            operator_type=OperatorConstants.Operators.VECTORDB,
+        )
+        return block, features
+
+    def test_weaviate_bm25_on_marks_content_mandatory_without_mutating_upstream(self):
+        block, features = self._weaviate_block(add_sparse_vector=True)
+
+        flagged = block[OperatorConstants.Config.AVAILABLE_FEATURES]["content"]
+        assert flagged[OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB] is True
+        assert features["content"][OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB] is False
+
+    def test_weaviate_bm25_off_leaves_content_optional(self):
+        block, _ = self._weaviate_block(add_sparse_vector=False)
+
+        flagged = block[OperatorConstants.Config.AVAILABLE_FEATURES]["content"]
+        assert flagged[OperatorConstants.Config.MANDATORY_FOR_VECTOR_DB] is False
+
 
 # ---------------------------------------------------------------------------
 # Tests: _expand_dag_env_vars
