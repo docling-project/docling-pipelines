@@ -1653,4 +1653,464 @@ describe('VectorDBFeatureMappingTearsheet — enrichment & form', () => {
       expect(screen.getByText(/Hamming distance/i)).toBeInTheDocument();
     });
   });
+
+  // ── Index type / algorithm control ────────────────────────────────────────
+
+  const feature = (name: string, type: string) => ({
+    name,
+    type,
+    description: name,
+    available_for_filter: false,
+    available_for_vector_db: true,
+    mandatory_for_vector_db: true,
+    node_id: 'node-1',
+    tags: [],
+  });
+
+  const enrichmentWith = (
+    features: Record<string, ReturnType<typeof feature>>,
+    overrides: Record<string, unknown> = {}
+  ) =>
+    ({
+      ...denseEnrichment,
+      available_features: features,
+      ...overrides,
+    }) as unknown as import('@/types').VectorDBEnrichmentResult;
+
+  const milvusApplicability = {
+    index_families: [
+      {
+        id: 'cpu_dense',
+        index_types: ['FLAT', 'IVF_FLAT', 'HNSW', 'AUTOINDEX'],
+        metric_types: ['L2', 'IP', 'COSINE'],
+        feature_types: ['vector'],
+      },
+      {
+        id: 'gpu',
+        index_types: ['GPU_CAGRA', 'GPU_IVF_FLAT'],
+        metric_types: ['L2', 'IP'],
+        feature_types: ['vector'],
+      },
+      {
+        id: 'binary',
+        index_types: ['BIN_FLAT', 'BIN_IVF_FLAT'],
+        metric_types: ['HAMMING', 'JACCARD'],
+        feature_types: ['vector_binary'],
+      },
+    ],
+    lite: { index_types: ['FLAT'], default: 'FLAT' },
+  };
+
+  const milvusIndexValues = [
+    'FLAT', 'IVF_FLAT', 'HNSW', 'AUTOINDEX', 'GPU_CAGRA', 'GPU_IVF_FLAT', 'BIN_FLAT', 'BIN_IVF_FLAT',
+  ];
+
+  const renderMilvusIndex = (
+    parsedProviderConfig: Record<string, unknown> = {},
+    extra: Record<string, unknown> = {}
+  ) =>
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        provider="milvus"
+        providerCfg={getProviderConfig('milvus')}
+        engineOptions={[]}
+        savedEngine=""
+        parsedProviderConfig={parsedProviderConfig}
+        vectorSimilarityOptions={['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD']}
+        savedVectorSimilarity="L2"
+        indexTypeValidValues={milvusIndexValues}
+        indexTypeDefault="HNSW"
+        applicability={milvusApplicability}
+        {...extra}
+      />
+    );
+
+  const openDropdownOptions = async (id: string): Promise<string[]> => {
+    await waitFor(() => expect(document.getElementById(id)).toBeInTheDocument());
+    const trigger = document.querySelector(`#${id} button`) as HTMLButtonElement;
+    fireEvent.click(trigger);
+    await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
+    return Array.from(document.querySelectorAll('[role="option"]')).map((el) => el.textContent ?? '');
+  };
+
+  const pickOption = (text: string) => {
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find(
+      (el) => el.textContent === text
+    );
+    expect(option).toBeDefined();
+    fireEvent.click(option as Element);
+  };
+
+  const fillNameAndSave = (name = 'my_collection') => {
+    fireEvent.change(document.getElementById('new-resource-name') as HTMLInputElement, {
+      target: { value: name },
+    });
+    fireEvent.click(screen.getByText('Save'));
+  };
+
+  it('shows an index type dropdown for a new Milvus collection preselected with the metadata default', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex();
+
+    const options = await openDropdownOptions('index-type-select');
+    expect(options).toContain('HNSW');
+    expect(options).toContain('GPU_CAGRA');
+    expect(options.some((o) => /SPARSE_/.test(o))).toBe(false);
+    expect(options.some((o) => /^BIN_/.test(o))).toBe(false);
+  });
+
+  it('saves the preselected default index type for a new collection', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex();
+
+    await waitFor(() => expect(document.getElementById('index-type-select')).toBeInTheDocument());
+    fillNameAndSave();
+
+    expect(baseProps.onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resourceName: 'my_collection', indexType: 'HNSW' })
+    );
+  });
+
+  it('offers FLAT only and preselects it for Milvus Lite', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({ auth_type: 'lite' });
+
+    const options = await openDropdownOptions('index-type-select');
+    expect(options).toEqual(['FLAT']);
+  });
+
+  it('resets a user-chosen index type to the first offered option when the context changes', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    const props = {
+      ...baseProps,
+      open: true,
+      provider: 'milvus',
+      providerCfg: getProviderConfig('milvus'),
+      engineOptions: [],
+      savedEngine: '',
+      vectorSimilarityOptions: ['L2', 'IP', 'COSINE', 'BM25', 'HAMMING', 'JACCARD'],
+      savedVectorSimilarity: 'L2',
+      indexTypeValidValues: milvusIndexValues,
+      indexTypeDefault: 'HNSW',
+      applicability: milvusApplicability,
+    };
+    const { rerender } = renderWithProviders(
+      <VectorDBFeatureMappingTearsheet {...props} parsedProviderConfig={{}} />
+    );
+
+    await openDropdownOptions('index-type-select');
+    pickOption('IVF_FLAT');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /Index type/i }).textContent).toContain('IVF_FLAT')
+    );
+
+    // The user switches the connection to Milvus Lite, which only supports FLAT.
+    rerender(
+      <VectorDBFeatureMappingTearsheet {...props} parsedProviderConfig={{ auth_type: 'lite' }} />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /Index type/i }).textContent).toContain('FLAT')
+    );
+    expect(screen.getByRole('combobox', { name: /Index type/i }).textContent).not.toContain('IVF_FLAT');
+    fillNameAndSave();
+    expect(baseProps.onSave).toHaveBeenLastCalledWith(expect.objectContaining({ indexType: 'FLAT' }));
+  });
+
+  it('offers only BIN_ index types for binary-only features', async () => {
+    mockEnrich.mockResolvedValue(enrichmentWith({ binary_emb: feature('binary_emb', 'vector_binary') }));
+    renderMilvusIndex();
+
+    const options = await openDropdownOptions('index-type-select');
+    expect(options).toEqual(['BIN_FLAT', 'BIN_IVF_FLAT']);
+  });
+
+  it('updates the metric options immediately when a GPU index type is selected', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex();
+
+    await openDropdownOptions('index-type-select');
+    pickOption('GPU_CAGRA');
+
+    const metrics = await openMetricOptions();
+    expect(metrics).toHaveLength(2);
+    expect(metrics.some((o) => /Cosine/i.test(o))).toBe(false);
+  });
+
+  it('resets the metric to the first valid option when the index family changes before saving', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({}, { savedVectorSimilarity: 'COSINE' });
+
+    // COSINE is valid for the default CPU dense index.
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /Metric type/i }).textContent).toMatch(/Cosine/i)
+    );
+
+    await openDropdownOptions('index-type-select');
+    pickOption('GPU_CAGRA');
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /Metric type/i }).textContent).toMatch(/Euclidean/i)
+    );
+    fillNameAndSave();
+    expect(baseProps.onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ indexType: 'GPU_CAGRA', similarityMetric: 'L2' })
+    );
+  });
+
+  it('never offers BM25 for a dense feature even with sparse vectors enabled', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({}, { addSparseVector: true });
+
+    const metrics = await openMetricOptions();
+    expect(metrics.some((o) => /BM25/i.test(o))).toBe(false);
+  });
+
+  it('offers BM25 for binary-only features when sparse vectors are enabled', async () => {
+    mockEnrich.mockResolvedValue(enrichmentWith({ binary_emb: feature('binary_emb', 'vector_binary') }));
+    renderMilvusIndex({}, { addSparseVector: true });
+
+    const metrics = await openMetricOptions();
+    expect(metrics.some((o) => /BM25/i.test(o))).toBe(true);
+    expect(metrics.some((o) => /Hamming/i.test(o))).toBe(true);
+  });
+
+  it('shows the saved index type and keeps it when saving unchanged', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({ index_type: 'IVF_FLAT' });
+
+    await waitFor(() => expect(document.getElementById('index-type-select')).toBeInTheDocument());
+    expect(screen.getByText('IVF_FLAT')).toBeInTheDocument();
+    fillNameAndSave();
+
+    expect(baseProps.onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ indexType: 'IVF_FLAT' })
+    );
+    const payload = vi.mocked(baseProps.onSave).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload.clearIndexParameters).toBeUndefined();
+  });
+
+  it('marks a saved index type that is not offered as invalid and blocks save', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({ index_type: 'BIN_FLAT' });
+
+    await waitFor(() => expect(document.getElementById('index-type-select')).toBeInTheDocument());
+    const invalidText = await screen.findByText(/"BIN_FLAT" is not available/i);
+    expect(invalidText).toBeInTheDocument();
+
+    fireEvent.change(document.getElementById('new-resource-name') as HTMLInputElement, {
+      target: { value: 'my_collection' },
+    });
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('associates the label and invalid message with the index type control', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({ index_type: 'BIN_FLAT' });
+
+    await waitFor(() => expect(document.getElementById('index-type-select')).toBeInTheDocument());
+    // Label is programmatically associated (accessible name) ...
+    const control = screen.getByRole('combobox', { name: /Index type/i });
+    expect(control).toBeInTheDocument();
+    // ... and the invalid message is referenced through aria-describedby.
+    const describedBy = control.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)?.textContent).toMatch(
+      /"BIN_FLAT" is not available/
+    );
+  });
+
+  it('allows keyboard selection of an index type', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex();
+
+    await waitFor(() => expect(document.getElementById('index-type-select')).toBeInTheDocument());
+    const trigger = screen.getByRole('combobox', { name: /Index type/i });
+    expect(trigger.getAttribute('tabindex')).toBe('0');
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    // Open with the keyboard, move to the first option, choose it with Enter.
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('true'));
+    fireEvent.keyDown(trigger, { key: 'Home' });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+
+    await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+    // FLAT is the first option of the CPU dense family, so the selection changed from HNSW.
+    expect(trigger.textContent).toContain('FLAT');
+    expect(trigger.textContent).not.toContain('HNSW');
+  });
+
+  it('clears index_parameters and shows a notice when the index type is changed', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({ index_parameters: { M: 16, efConstruction: 200 } });
+
+    await openDropdownOptions('index-type-select');
+    expect(screen.queryByText(/Index parameters will be reset/i)).toBeNull();
+    pickOption('IVF_FLAT');
+
+    expect(await screen.findByText(/Index parameters will be reset/i)).toBeInTheDocument();
+    fillNameAndSave();
+    expect(baseProps.onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ indexType: 'IVF_FLAT', clearIndexParameters: true })
+    );
+  });
+
+  it('shows no notice when the index type changes and no index_parameters are set', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex();
+
+    await openDropdownOptions('index-type-select');
+    pickOption('IVF_FLAT');
+
+    expect(screen.queryByText(/Index parameters will be reset/i)).toBeNull();
+    fillNameAndSave();
+    const payload = vi.mocked(baseProps.onSave).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload.clearIndexParameters).toBeUndefined();
+  });
+
+  it('shows the mixed dense and binary note only when both kinds are mapped', async () => {
+    mockEnrich.mockResolvedValue(
+      enrichmentWith(
+        { dense_emb: feature('dense_emb', 'vector'), binary_emb: feature('binary_emb', 'vector_binary') },
+        {
+          feature_mappings: [
+            { feature_name: 'dense_emb', mapped_column_name: 'dense_emb' },
+            { feature_name: 'binary_emb', mapped_column_name: 'binary_emb' },
+          ],
+        }
+      )
+    );
+    renderMilvusIndex();
+
+    expect(await screen.findByText(/The other vector field uses a default index/i)).toBeInTheDocument();
+  });
+
+  it('does not show the mixed note for dense-only features', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex();
+
+    await waitFor(() => expect(document.getElementById('index-type-select')).toBeInTheDocument());
+    expect(screen.queryByText(/The other vector field uses a default index/i)).toBeNull();
+  });
+
+  it('shows the stored index type read-only for an existing resource', async () => {
+    mockEnrich.mockResolvedValue(
+      enrichmentWith(
+        { dense_emb: feature('dense_emb', 'vector') },
+        {
+          available_resources: ['existing_col'],
+          stored_resource_metadata: { vector_similarity: 'L2', dimension_size: 4, index_type: 'IVF_FLAT' },
+        }
+      )
+    );
+    renderMilvusIndex({ index_type: 'HNSW' }, { savedResourceName: 'existing_col' });
+
+    await waitFor(() => expect(document.getElementById('index-type-readonly')).toBeInTheDocument());
+    expect((document.getElementById('index-type-readonly') as HTMLInputElement).value).toBe('IVF_FLAT');
+    expect(document.getElementById('index-type-select')).toBeNull();
+
+    fireEvent.click(screen.getByText('Save'));
+    const payload = vi.mocked(baseProps.onSave).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload.indexType).toBeUndefined();
+  });
+
+  it('hides the index type control for an existing resource with an unknown index type', async () => {
+    mockEnrich.mockResolvedValue(
+      enrichmentWith(
+        { dense_emb: feature('dense_emb', 'vector') },
+        {
+          available_resources: ['existing_col'],
+          stored_resource_metadata: { vector_similarity: 'L2', dimension_size: 4, index_type: null },
+        }
+      )
+    );
+    renderMilvusIndex({ index_type: 'HNSW' }, { savedResourceName: 'existing_col' });
+
+    await waitFor(() => expect(document.getElementById('similarity-metric-readonly')).toBeInTheDocument());
+    expect(document.getElementById('index-type-select')).toBeNull();
+    expect(document.getElementById('index-type-readonly')).toBeNull();
+
+    fireEvent.click(screen.getByText('Save'));
+    const payload = vi.mocked(baseProps.onSave).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload.indexType).toBeUndefined();
+  });
+
+  it('uses the provider fallback values when metadata is unavailable', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderMilvusIndex({}, { indexTypeValidValues: undefined, indexTypeDefault: undefined, applicability: undefined });
+
+    const options = await openDropdownOptions('index-type-select');
+    expect(options).toContain('HNSW');
+    expect(options).toContain('FLAT');
+    expect(options.some((o) => /SPARSE_/.test(o))).toBe(false);
+  });
+
+  // ── OpenSearch algorithm ──
+
+  const opensearchApplicability = {
+    engine_algorithms: {
+      faiss: ['hnsw', 'ivf'],
+      lucene: ['hnsw'],
+      nmslib: ['hnsw'],
+      jvector: ['hnsw'],
+    },
+  };
+
+  const renderOpenSearchAlgorithm = (
+    parsedProviderConfig: Record<string, unknown> = {},
+    savedEngine = 'faiss'
+  ) =>
+    renderWithProviders(
+      <VectorDBFeatureMappingTearsheet
+        {...baseProps}
+        open
+        parsedProviderConfig={parsedProviderConfig}
+        engineOptions={['faiss', 'lucene', 'nmslib', 'jvector']}
+        savedEngine={savedEngine}
+        indexTypeValidValues={['hnsw', 'ivf']}
+        indexTypeDefault="hnsw"
+        applicability={opensearchApplicability}
+      />
+    );
+
+  it('shows an Algorithm dropdown for a new OpenSearch index filtered by engine', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderOpenSearchAlgorithm();
+
+    const faissOptions = await openDropdownOptions('index-type-select');
+    expect(faissOptions).toEqual(['hnsw', 'ivf']);
+    expect(screen.getByRole('combobox', { name: /Algorithm/i })).toBeInTheDocument();
+  });
+
+  it('offers only hnsw for the lucene engine', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderOpenSearchAlgorithm({}, 'lucene');
+
+    const options = await openDropdownOptions('index-type-select');
+    expect(options).toEqual(['hnsw']);
+  });
+
+  it('resets the algorithm when the engine changes to one that does not allow it', async () => {
+    mockEnrich.mockResolvedValue(denseEnrichment);
+    renderOpenSearchAlgorithm({ algorithm: 'ivf' }, 'faiss');
+
+    await openDropdownOptions('index-type-select');
+    pickOption('ivf');
+
+    await openDropdownOptions('engine-select');
+    const lucene = Array.from(document.querySelectorAll('[role="option"]')).find(
+      (el) => el.textContent === 'Lucene'
+    );
+    expect(lucene).toBeDefined();
+    fireEvent.click(lucene as Element);
+
+    fillNameAndSave('my_index');
+    expect(baseProps.onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ engine: 'lucene', indexType: 'hnsw' })
+    );
+  });
 });

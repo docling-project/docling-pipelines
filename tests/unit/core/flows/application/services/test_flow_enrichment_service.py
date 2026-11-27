@@ -843,7 +843,11 @@ class TestBuildNodeFeatureMetadataVectorDB:
                 {"feature_name": "doc_id", "mapped_column_name": "doc_id"}
             ],
             OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE: {"index_name": "my-docs", "supported": True},
-            OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: {"vector_similarity": "l2", "dimension_size": 384},
+            OperatorConstants.VectorDB.STORED_RESOURCE_METADATA: {
+                "vector_similarity": "l2",
+                "dimension_size": 384,
+                "index_type": "hnsw",
+            },
         }
         nfr = _make_node_feature_result(
             operator_config={
@@ -859,6 +863,7 @@ class TestBuildNodeFeatureMetadataVectorDB:
         assert block[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA] == {
             "vector_similarity": "l2",
             "dimension_size": 384,
+            "index_type": "hnsw",
         }
         assert block[OperatorConstants.VectorDB.FEATURE_MAPPINGS_RESPONSE] == [
             {"feature_name": "doc_id", "mapped_column_name": "doc_id"}
@@ -878,6 +883,7 @@ class TestBuildNodeFeatureMetadataVectorDB:
         assert block[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA] == {
             "vector_similarity": None,
             "dimension_size": None,
+            "index_type": None,
         }
 
     def test_vectordb_projects_and_normalizes_available_features(self):
@@ -1418,6 +1424,7 @@ class TestEnrichFlowSecretHandling:
         assert by_id["vdb"][OperatorConstants.VectorDB.STORED_RESOURCE_METADATA] == {
             "vector_similarity": None,
             "dimension_size": None,
+            "index_type": None,
         }
         assert "content" in by_id["ing"][OperatorConstants.Config.OUTPUT_FEATURES]
         text = json.dumps(response, default=str).lower()

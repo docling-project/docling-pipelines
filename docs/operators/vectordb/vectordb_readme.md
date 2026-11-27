@@ -82,7 +82,7 @@ Supported providers: OpenSearch, Milvus, Weaviate.
 | `use_ssl` | boolean | No | `false` | Enable SSL/TLS |
 | `verify_certs` | boolean | No | `false` | Verify SSL certificates |
 | `engine` | string | No | `"nmslib"` | KNN engine: `nmslib`, `faiss`, `lucene` |
-| `algorithm` | string | No | `"hnsw"` | Index algorithm |
+| `algorithm` | string | No | `"hnsw"` | Index algorithm. Which algorithms each `engine` supports is listed under `providers.opensearch.applicability` in the operator metadata (`faiss`: `hnsw`, `ivf`; `lucene`, `nmslib`, `jvector`: `hnsw`) |
 | `space_type` | string | No | `"l2"` | Distance metric: `l2`, `cosinesimil`, `innerproduct` |
 | `batch_size` | integer | No | `100` | Documents indexed per batch |
 | `engine_parameters.ef_construction` | integer | No | `512` | Accuracy/speed tradeoff during indexing |
@@ -105,7 +105,7 @@ Supported providers: OpenSearch, Milvus, Weaviate.
 | `password` | string | No | — | Authentication password |
 | `database` | string | No | `"default"` | Database name (not used for `lite`) |
 | `secure` | boolean | No | `false` | Enable SSL/TLS (not used for `lite`) |
-| `index_type` | string | No | `"HNSW"` | Index type (only `FLAT` is supported for `lite`) |
+| `index_type` | string | No | `"HNSW"` (`"FLAT"` for `lite`) | Index type (only `FLAT` is supported for `lite`, and it is used when this is not set). Sparse index types are not accepted |
 | `metric_type` | string | No | `"L2"` | Distance metric: `L2`, `IP`, `COSINE` |
 | `batch_size` | integer | No | `100` | Documents indexed per batch |
 | `add_sparse_vector` | boolean | No | `false` | Enable BM25 sparse vector hybrid search (not supported for `lite`) |

@@ -18,6 +18,7 @@ from docpipe.core.operators.vectordb.adapters.outbound.milvus.client import Milv
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.config import MilvusConfig
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import (
     MilvusIndexManager,
+    MilvusIndexTypes,
     MilvusVectorModes,
 )
 from docpipe.core.operators.vectordb.ports.outbound.vector_store import VectorStorePort
@@ -121,8 +122,12 @@ class MilvusAdapter(VectorStorePort):
         batch_size = adapter_config.get(OperatorConstants.Config.BATCH_SIZE, 100)
         is_lite: bool = auth_type == "lite"
 
-        # Extract Milvus-specific parameters from provider_config in adapter_config
-        index_type = adapter_config.get(OperatorConstants.VectorDB.INDEX_TYPE, DEFAULT_INDEX_TYPE)
+        # Extract Milvus-specific parameters from provider_config in adapter_config.
+        # Milvus Lite only supports FLAT, so an unset index_type resolves to FLAT there instead of the HNSW
+        # default. An explicitly configured index_type is honored and validated as before.
+        index_type = adapter_config.get(
+            OperatorConstants.VectorDB.INDEX_TYPE, MilvusIndexTypes.FLAT if is_lite else DEFAULT_INDEX_TYPE
+        )
         metric_type = adapter_config.get(OperatorConstants.VectorDB.METRIC_TYPE, DEFAULT_METRIC_TYPE)
         index_parameters = adapter_config.get(OperatorConstants.VectorDB.INDEX_PARAMETERS, {})
 

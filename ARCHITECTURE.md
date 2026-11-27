@@ -2096,8 +2096,8 @@ graph TB
 4. **Flexibility**: Switch vector databases via configuration
 
 **Supported Index Types:**
-- **Dense Vectors**: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX
-- **Sparse Vectors**: SPARSE_INVERTED_INDEX, SPARSE_WAND
+- **Dense Vectors**: HNSW, IVF_FLAT, IVF_SQ8, IVF_PQ, FLAT, DISKANN, AUTOINDEX (plus GPU and binary index types)
+- **Sparse Vectors**: always indexed with a fixed `SPARSE_INVERTED_INDEX`; not user-selectable
 
 **Supported Metric Types:**
 - **Dense Vectors**: L2 (Euclidean), IP (Inner Product), COSINE (Cosine similarity)
@@ -2159,8 +2159,7 @@ graph TB
       "host": "localhost",
       "port": 19530,
       "username": "root",
-      "password": "<your-milvus-password>"
-      "index_type": "SPARSE_INVERTED_INDEX",
+      "password": "<your-milvus-password>",
       "metric_type": "BM25",
       "primary_key_field": "pk"
     }

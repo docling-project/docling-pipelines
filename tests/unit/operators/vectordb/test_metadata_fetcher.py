@@ -362,6 +362,12 @@ class TestEmptyResult:
         stored = result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]
         assert stored["vector_similarity"] is None
         assert stored["dimension_size"] is None
+        assert stored["index_type"] is None
+
+    def test_unreachable_store_fallback_carries_all_three_stored_keys(self):
+        """An unreachable vector store falls back to the empty result, which includes index_type as None."""
+        stored = VectorDBMetadataFetcher._empty_result()[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]
+        assert stored == {"vector_similarity": None, "dimension_size": None, "index_type": None}
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +605,7 @@ class TestOpenSearchResourceMetadataFetch:
         assert result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA] == {
             "vector_similarity": None,
             "dimension_size": None,
+            "index_type": None,
         }
         mock_client.indices.get_mapping.assert_not_called()
 
@@ -626,6 +633,25 @@ class TestOpenSearchResourceMetadataFetch:
         assert result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]["dimension_size"] == 768
         assert result[OperatorConstants.VectorDB.IS_DOCPIPE_SUPPORTED_RESOURCE]["supported"] is True
         mock_client.indices.get_mapping.assert_called_once_with(index="docs-index")
+
+    def test_stored_index_type_reported_for_existing_index(self):
+        """An existing index created with ivf reports it as the stored index_type."""
+        mock_client = MagicMock()
+        mock_client.cat.indices.return_value = [{"index": "docs-index"}]
+        mock_client.indices.get_mapping.return_value = {
+            "docs-index": {
+                "mappings": {
+                    "_meta": {"vector_similarity": "l2", "dimension_size": 8, "algorithm": "ivf"},
+                    "properties": {"embedding": {"type": "knn_vector", "dimension": 8}},
+                }
+            }
+        }
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.opensearch.client.OpenSearchClient") as mock_cls:
+            mock_cls.return_value.get_client.return_value = mock_client
+            result = self._call(provider_config={"host": "localhost", "index_name": "docs-index"})
+
+        stored = result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]
+        assert stored == {"vector_similarity": "l2", "dimension_size": 8, "index_type": "ivf"}
 
     def test_index_not_in_resources_skips_mapping_call(self):
         """index_name not present in cluster → no get_mapping call, empty schema."""
@@ -775,6 +801,67 @@ class TestStoredMetadata:
         result = OpenSearchResourceMetadata._stored_metadata(index_name="idx", mapping=mapping)
         assert result["vector_similarity"] is None
         assert result["dimension_size"] is None
+        assert result["index_type"] is None
+
+    def test_index_type_read_from_meta_algorithm(self):
+        mapping = {
+            "idx": {
+                "mappings": {
+                    "_meta": {"vector_similarity": "cosine", "dimension_size": 768, "algorithm": "ivf"},
+                    "properties": {},
+                }
+            }
+        }
+        result = OpenSearchResourceMetadata._stored_metadata(index_name="idx", mapping=mapping)
+        assert result["index_type"] == "ivf"
+
+    def test_index_type_falls_back_to_knn_method_name(self):
+        mapping = {
+            "idx": {
+                "mappings": {
+                    "_meta": {"vector_similarity": "cosine", "dimension_size": 768},
+                    "properties": {
+                        "vec": {
+                            "type": OperatorConstants.VectorDB.SCHEMA_KEY_KNN_VECTOR,
+                            "dimension": 768,
+                            "method": {"name": "hnsw", "space_type": "cosine"},
+                        }
+                    },
+                }
+            }
+        }
+        result = OpenSearchResourceMetadata._stored_metadata(index_name="idx", mapping=mapping)
+        assert result["index_type"] == "hnsw"
+
+    def test_meta_algorithm_wins_over_knn_method_name(self):
+        mapping = {
+            "idx": {
+                "mappings": {
+                    "_meta": {"algorithm": "ivf"},
+                    "properties": {
+                        "vec": {
+                            "type": OperatorConstants.VectorDB.SCHEMA_KEY_KNN_VECTOR,
+                            "dimension": 8,
+                            "method": {"name": "hnsw", "space_type": "l2"},
+                        }
+                    },
+                }
+            }
+        }
+        result = OpenSearchResourceMetadata._stored_metadata(index_name="idx", mapping=mapping)
+        assert result["index_type"] == "ivf"
+
+    def test_existing_values_unchanged_by_index_type_lookup(self):
+        mapping = {
+            "idx": {
+                "mappings": {
+                    "_meta": {"vector_similarity": "cosine", "dimension_size": 768, "algorithm": "ivf"},
+                    "properties": {},
+                }
+            }
+        }
+        result = OpenSearchResourceMetadata._stored_metadata(index_name="idx", mapping=mapping)
+        assert result == {"vector_similarity": "cosine", "dimension_size": 768, "index_type": "ivf"}
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +1039,62 @@ class TestMilvusResourceMetadata:
         assert schema["vector"]["index_info"]["metric_type"] == "L2"
         assert "text" in schema
 
+    def test_stored_index_type_reported_for_existing_collection(self):
+        mock_client = MagicMock()
+        mock_client.list_collections.return_value = ["col_a"]
+        mock_client.describe_collection.return_value = {
+            "fields": [
+                {"name": "pk", "dtype": "Int64", "is_primary": True, "description": ""},
+                {
+                    "name": "vector",
+                    "dtype": "FLOAT_VECTOR",
+                    "is_primary": False,
+                    "description": "",
+                    "params": {"dim": 384},
+                    "indexes": [{"index_name": "idx", "index_type": "IVF_FLAT", "metric_type": "L2"}],
+                },
+            ]
+        }
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient") as mock_cls:
+            mock_cls.return_value.get_client.return_value = mock_client
+            result = self._call(
+                provider_config={"host": "localhost", "auth_type": "standalone", "collection_name": "col_a"}
+            )
+        stored = result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]
+        assert stored == {"vector_similarity": "L2", "dimension_size": 384, "index_type": "IVF_FLAT"}
+
+    def test_stored_index_type_none_when_collection_has_no_index(self):
+        mock_client = MagicMock()
+        mock_client.list_collections.return_value = ["col_a"]
+        mock_client.list_indexes.return_value = []
+        mock_client.describe_collection.return_value = {
+            "fields": [
+                {
+                    "name": "vector",
+                    "dtype": "FLOAT_VECTOR",
+                    "is_primary": False,
+                    "description": "",
+                    "params": {"dim": 384},
+                },
+            ]
+        }
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient") as mock_cls:
+            mock_cls.return_value.get_client.return_value = mock_client
+            result = self._call(
+                provider_config={"host": "localhost", "auth_type": "standalone", "collection_name": "col_a"}
+            )
+        stored = result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]
+        assert stored == {"vector_similarity": None, "dimension_size": 384, "index_type": None}
+
+    def test_stored_index_type_none_when_no_collection_selected(self):
+        mock_client = MagicMock()
+        mock_client.list_collections.return_value = ["col_a"]
+        with patch("docpipe.core.operators.vectordb.adapters.outbound.milvus.client.MilvusClient") as mock_cls:
+            mock_cls.return_value.get_client.return_value = mock_client
+            result = self._call(provider_config={"host": "localhost", "auth_type": "standalone"})
+        stored = result[OperatorConstants.VectorDB.STORED_RESOURCE_METADATA]
+        assert stored == {"vector_similarity": None, "dimension_size": None, "index_type": None}
+
     def test_selected_resource_schema_populated_for_binary_vector_collection(self):
         mock_client = MagicMock()
         mock_client.list_collections.return_value = ["binary_col"]
@@ -997,7 +1140,7 @@ class TestMilvusResourceMetadata:
             },
         }
         meta = MilvusResourceMetadata._stored_metadata(schema)
-        assert meta == {"vector_similarity": "L2", "dimension_size": 384}
+        assert meta == {"vector_similarity": "L2", "dimension_size": 384, "index_type": "IVF_FLAT"}
 
     def test_stored_metadata_from_binary_vector_field_with_index(self):
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
@@ -1012,14 +1155,14 @@ class TestMilvusResourceMetadata:
             },
         }
         meta = MilvusResourceMetadata._stored_metadata(schema)
-        assert meta == {"vector_similarity": "JACCARD", "dimension_size": 1536}
+        assert meta == {"vector_similarity": "JACCARD", "dimension_size": 1536, "index_type": "BIN_IVF_FLAT"}
 
     def test_stored_metadata_returns_none_when_no_vector_field(self):
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
 
         schema = {"pk": {"type": "Int64", "is_primary": True}}
         meta = MilvusResourceMetadata._stored_metadata(schema)
-        assert meta == {"vector_similarity": None, "dimension_size": None}
+        assert meta == {"vector_similarity": None, "dimension_size": None, "index_type": None}
 
     def test_stored_metadata_vector_similarity_none_when_no_index(self):
         from docpipe.core.operators.vectordb.adapters.outbound.milvus.resource_metadata import MilvusResourceMetadata
@@ -1028,6 +1171,7 @@ class TestMilvusResourceMetadata:
         meta = MilvusResourceMetadata._stored_metadata(schema)
         assert meta["dimension_size"] == 512
         assert meta["vector_similarity"] is None
+        assert meta["index_type"] is None
 
     # ------------------------------------------------------------------
     # _is_supported

@@ -32,6 +32,9 @@ export const DEFAULT_SPACE_TYPE_VALUES = ['l2', 'cosine', 'inner_product'];
 /** Fallback engine options when metadata valid_values are unavailable. */
 export const DEFAULT_ENGINE_VALUES = ['faiss', 'lucene', 'nmslib', 'jvector'];
 
+/** Fallback algorithm options when metadata valid_values are unavailable. */
+export const DEFAULT_ALGORITHM_VALUES = ['hnsw', 'ivf'];
+
 // ── Milvus constants ──────────────────────────────────────────────────────────
 
 /** Fallback metric_type options when metadata valid_values are unavailable. */
@@ -42,6 +45,13 @@ export const MILVUS_BINARY_METRIC_VALUES = ['HAMMING', 'JACCARD'] as const;
 
 /** Milvus dense similarity metrics */
 export const MILVUS_DENSE_METRIC_VALUES = ['L2', 'IP', 'COSINE'] as const;
+
+/** Fallback index_type options when metadata valid_values are unavailable. */
+export const DEFAULT_INDEX_TYPE_VALUES = [
+  'FLAT', 'IVF_FLAT', 'IVF_SQ8', 'IVF_PQ', 'HNSW', 'DISKANN', 'AUTOINDEX',
+  'GPU_CAGRA', 'GPU_IVF_FLAT', 'GPU_IVF_PQ', 'GPU_BRUTE_FORCE',
+  'BIN_FLAT', 'BIN_IVF_FLAT',
+];
 
 /** Milvus GPU index (GPU_*) metrics — GPU mode accepts only L2 and IP. */
 export const MILVUS_GPU_METRIC_VALUES = ['L2', 'IP'] as const;
@@ -65,6 +75,14 @@ interface ProviderConfigBase {
   similarityLabel: string;
   /** Fallback similarity options when operator metadata returns none. */
   defaultSimilarityValues: string[];
+  /** Key in provider_config that holds the index algorithm (e.g. algorithm / index_type). */
+  indexTypeKey: string;
+  /** User-facing label for the index algorithm field (e.g. "Algorithm" / "Index type"). */
+  indexTypeLabel: string;
+  /** Fallback index algorithm options when operator metadata returns none. */
+  defaultIndexTypeValues: string[];
+  /** Fallback default index algorithm when operator metadata returns none. */
+  defaultIndexType: string;
   /**
    * Keys stripped from provider_config before enrichment API calls.
    *
@@ -101,10 +119,14 @@ const PROVIDER_CONFIG_MAP: Record<string, ProviderConfig> = {
     similarityKey:           'space_type',
     similarityLabel:         'Space type',
     defaultSimilarityValues: DEFAULT_SPACE_TYPE_VALUES,
+    indexTypeKey:            'algorithm',
+    indexTypeLabel:          'Algorithm',
+    defaultIndexTypeValues:  DEFAULT_ALGORITHM_VALUES,
+    defaultIndexType:        'hnsw',
     hasEngine:               true,
     engineKey:               'engine',
-    // algorithm: index-creation-time KNN parameter (default: "hnsw"). No dedicated UI
-    // control — set via the Advanced JSON textarea if a non-default value is needed.
+    // algorithm: index-creation-time KNN parameter (default: "hnsw"), edited in the
+    // feature-mapping tearsheet.
     resourceSpecificKeys:    ['index_name', 'space_type', 'engine', 'algorithm'],
     defaultConfig:           null,
   },
@@ -114,9 +136,13 @@ const PROVIDER_CONFIG_MAP: Record<string, ProviderConfig> = {
     similarityKey:           'metric_type',
     similarityLabel:         'Metric type',
     defaultSimilarityValues: DEFAULT_METRIC_TYPE_VALUES,
+    indexTypeKey:            'index_type',
+    indexTypeLabel:          'Index type',
+    defaultIndexTypeValues:  DEFAULT_INDEX_TYPE_VALUES,
+    defaultIndexType:        'HNSW',
     hasEngine:               false,
-    // index_type: index-creation-time ANN parameter (default: "HNSW"). No dedicated UI
-    // control — set via the Advanced JSON textarea if a non-default value is needed.
+    // index_type: index-creation-time ANN parameter (default: "HNSW"), edited in the
+    // feature-mapping tearsheet.
     resourceSpecificKeys:    ['collection_name', 'metric_type', 'index_type'],
     defaultConfig:           null,
   },

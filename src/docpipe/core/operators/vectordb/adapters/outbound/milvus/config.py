@@ -3,7 +3,7 @@
 
 """Pydantic config model for the Milvus vector store adapter."""
 
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -97,17 +97,17 @@ class MilvusConfig(BaseModel):
         "GPU_IVF_PQ",
         "GPU_CAGRA",
         "GPU_BRUTE_FORCE",
-        "SPARSE_INVERTED_INDEX",
-        "SPARSE_WAND",
         "BIN_FLAT",
         "BIN_IVF_FLAT",
     ] = Field(
         default="HNSW",
         description=(
-            "Vector index algorithm. Milvus Lite (auth_type='lite') only supports FLAT. "
+            "Vector index algorithm for the dense, GPU or binary vector field. "
+            "Milvus Lite (auth_type='lite') only supports FLAT and uses it when this is not set. "
             "Use HNSW for standalone/remote deployments, "
             "GPU_CAGRA, GPU_IVF_FLAT, GPU_IVF_PQ, GPU_BRUTE_FORCE for GPU-accelerated deployments, "
-            "or BIN_FLAT / BIN_IVF_FLAT for binary vectors."
+            "or BIN_FLAT / BIN_IVF_FLAT for binary vectors. "
+            "The sparse (BM25) field always uses a fixed SPARSE_INVERTED_INDEX and is not configurable."
         ),
     )
     metric_type: Literal[
@@ -129,3 +129,46 @@ class MilvusConfig(BaseModel):
         default=False,
         description="Enable sparse vector support using BM25. Kept for backward compatibility (maps to vector_mode='sparse').",
     )
+
+    @staticmethod
+    def applicability() -> dict[str, Any]:
+        """Describe which index types, metrics and feature types apply together.
+
+        Built from the same constants the index manager validates against, so the
+        operator metadata and the runtime rules cannot drift apart.
+        """
+        # Imported lazily: the index manager pulls in pymilvus, which config import should not require.
+        from docpipe.core.constants.operator_constants import OperatorConstants
+        from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import (
+            MilvusIndexTypes,
+            MilvusMetricTypes,
+        )
+
+        dense_feature = OperatorConstants.Types.TYPE_VECTOR
+        binary_feature = OperatorConstants.Types.TYPE_VECTOR_BINARY
+        return {
+            "index_families": [
+                {
+                    "id": "cpu_dense",
+                    "index_types": list(MilvusIndexTypes.ALL_DENSE_TYPES),
+                    "metric_types": list(MilvusMetricTypes.ALL_DENSE_METRIC_TYPES),
+                    "feature_types": [dense_feature],
+                },
+                {
+                    "id": "gpu",
+                    "index_types": list(MilvusIndexTypes.ALL_GPU_TYPES),
+                    "metric_types": list(MilvusMetricTypes.GPU_VALID_METRICS),
+                    "feature_types": [dense_feature],
+                },
+                {
+                    "id": "binary",
+                    "index_types": list(MilvusIndexTypes.ALL_BINARY_TYPES),
+                    "metric_types": list(MilvusMetricTypes.ALL_BINARY_METRIC_TYPES),
+                    "feature_types": [binary_feature],
+                },
+            ],
+            "lite": {
+                "index_types": list(MilvusIndexTypes.LITE_SUPPORTED_DENSE_TYPES),
+                "default": MilvusIndexTypes.FLAT,
+            },
+        }

@@ -98,7 +98,11 @@ class OpenSearchResourceMetadata:
 
             index_name: str = provider_config.get(OperatorConstants.VectorDB.INDEX_NAME, "")
             selected_resource_schema: dict[str, Any] = {}
-            stored_resource_metadata: dict[str, Any] = {"vector_similarity": None, "dimension_size": None}
+            stored_resource_metadata: dict[str, Any] = {
+                "vector_similarity": None,
+                "dimension_size": None,
+                "index_type": None,
+            }
             # Fetch mapping once and reuse across schema, stored_metadata,
             # is_supported, and feature_mappings — avoids 3 redundant network calls.
             mapping: dict[str, Any] = {}
@@ -180,18 +184,21 @@ class OpenSearchResourceMetadata:
         index_name: str,
         mapping: dict[str, Any],
     ) -> dict[str, Any]:
-        """Extract vector_similarity and dimension_size from index _meta.
+        """Extract vector_similarity, dimension_size and index_type from index _meta.
+
+        ``index_type`` is the stored KNN algorithm.
 
         Resolution priority:
-          1. mappings._meta.vector_similarity / dimension_size (written by docpipe)
-          2. First knn_vector field's method.space_type / dimension (fallback)
+          1. mappings._meta.vector_similarity / dimension_size / algorithm (written by docpipe)
+          2. First knn_vector field's method.space_type / dimension / name (fallback)
         """
         idx = mapping.get(index_name, {}).get(OperatorConstants.VectorDB.SCHEMA_KEY_MAPPINGS, {})
         meta = idx.get(OperatorConstants.VectorDB.SCHEMA_KEY_META, {})
         vector_similarity = meta.get(OperatorConstants.VectorDB.VECTOR_SIMILARITY_KEY)
         dimension_size = meta.get("dimension_size")
+        index_type = meta.get(OperatorConstants.VectorDB.ALGORITHM)
 
-        if vector_similarity is None or dimension_size is None:
+        if vector_similarity is None or dimension_size is None or index_type is None:
             props = idx.get(OperatorConstants.VectorDB.SCHEMA_KEY_PROPERTIES, {})
             for field_def in props.values():
                 if field_def.get("type") == OperatorConstants.VectorDB.SCHEMA_KEY_KNN_VECTOR:
@@ -199,9 +206,11 @@ class OpenSearchResourceMetadata:
                         vector_similarity = field_def.get("method", {}).get("space_type")
                     if dimension_size is None:
                         dimension_size = field_def.get("dimension")
+                    if index_type is None:
+                        index_type = field_def.get("method", {}).get("name")
                     break
 
-        return {"vector_similarity": vector_similarity, "dimension_size": dimension_size}
+        return {"vector_similarity": vector_similarity, "dimension_size": dimension_size, "index_type": index_type}
 
     @staticmethod
     def _resolve_feature_mappings(

@@ -168,6 +168,31 @@ export const messages = defineMessages({
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.metricTypeLabel',
     defaultMessage: 'Metric type',
   },
+  algorithmLabel: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.algorithmLabel',
+    defaultMessage: 'Algorithm',
+  },
+  indexTypeLabel: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.indexTypeLabel',
+    defaultMessage: 'Index type',
+  },
+  selectIndexType: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.selectIndexType',
+    defaultMessage: 'Select {indexTypeLabel}',
+  },
+  indexTypeInvalid: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.indexTypeInvalid',
+    defaultMessage: '"{value}" is not available for this configuration. Select a different {indexTypeLabel} to save.',
+  },
+  indexParametersResetNotice: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.indexParametersResetNotice',
+    defaultMessage: 'Index parameters will be reset because the {indexTypeLabel} changed.',
+  },
+  mixedVectorFeaturesNotice: {
+    id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.mixedVectorFeaturesNotice',
+    defaultMessage:
+      'The selected index applies to the vector field it fits. The other vector field uses a default index: HNSW with L2 for dense vectors, or BIN_FLAT with HAMMING for binary vectors.',
+  },
   resourceIndex: {
     id: 'src.components.PropertiesPanel.CustomPanels.VectorDB.VectorDBFeatureMappingTearsheet.resourceIndex',
     defaultMessage: 'index',

@@ -1130,8 +1130,14 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
         )
 
         return {
-            OPENSEARCH_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(schema=OpenSearchConfig.model_json_schema()),
-            MILVUS_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(schema=MilvusConfig.model_json_schema()),
+            OPENSEARCH_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(
+                schema=OpenSearchConfig.model_json_schema(),
+                overrides={"applicability": OpenSearchConfig.applicability()},
+            ),
+            MILVUS_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(
+                schema=MilvusConfig.model_json_schema(),
+                overrides={"applicability": MilvusConfig.applicability()},
+            ),
             WEAVIATE_ADAPTER_NAME: OperatorUtils.model_schema_to_docpipe(schema=WeaviateConfig.model_json_schema()),
         }
 

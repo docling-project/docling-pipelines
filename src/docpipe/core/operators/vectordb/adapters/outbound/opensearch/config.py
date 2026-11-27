@@ -3,7 +3,7 @@
 
 """Pydantic config model for the OpenSearch vector store adapter."""
 
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -95,3 +95,19 @@ class OpenSearchConfig(BaseModel):
         default=None,
         description="JWT bearer token for authentication.",
     )
+
+    @staticmethod
+    def applicability() -> dict[str, Any]:
+        """Describe which ``algorithm`` values each KNN ``engine`` supports.
+
+        Built from the map the index manager validates against, so the operator
+        metadata and the runtime rules cannot drift apart.
+        """
+        # Imported lazily: the index manager pulls in opensearchpy, which config import should not require.
+        from docpipe.core.operators.vectordb.adapters.outbound.opensearch.index_manager import (
+            ENGINE_ALGORITHM_SUPPORT,
+        )
+
+        return {
+            "engine_algorithms": {engine: list(algorithms) for engine, algorithms in ENGINE_ALGORITHM_SUPPORT.items()}
+        }

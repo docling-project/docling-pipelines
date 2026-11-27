@@ -39,6 +39,7 @@ import { NoDataEmptyState } from '@carbon/ibm-products';
 import type { FeatureMappingRow, NodeFeatureEntry, OperatorMetadata } from '@/types';
 import { NodeOperator } from '@/constants/operators';
 import { isValidJsonObject } from '@/utils/json';
+import type { VectorDBApplicability } from '@/utils/vectordb';
 import {
   DEFAULT_ENGINE_VALUES,
   VECTORDB_ATTRIBUTES as ATTR,
@@ -129,10 +130,15 @@ export function VectorDBPanelBody({
   // All provider-specific differences (keys, labels, defaults) live here.
   const cfg = getProviderConfig(provider);
 
-  // Extract similarity and engine options from operator metadata for the active provider.
+  // Extract similarity, engine and index type options from operator metadata for the active provider.
+  const activeProvider = providersMap[provider] as Record<string, unknown> | undefined;
   const activeProviderProps = (
-    ((providersMap[provider] as Record<string, unknown> | undefined)?.['properties'] ?? {})
+    (activeProvider?.['properties'] ?? {})
   ) as Record<string, { valid_values?: string[]; default?: string }>;
+  // Index applicability rules (families, Lite subset, engine to algorithm map); absent on older backends.
+  const applicability = activeProvider?.['applicability'] as VectorDBApplicability | undefined;
+  const indexTypeValidValues: string[] | undefined = activeProviderProps[cfg.indexTypeKey]?.valid_values;
+  const indexTypeDefault: string | undefined = activeProviderProps[cfg.indexTypeKey]?.default;
 
   const vectorSimilarityOptions: string[] =
     activeProviderProps[cfg.similarityKey]?.valid_values ?? cfg.defaultSimilarityValues;
@@ -239,14 +245,9 @@ export function VectorDBPanelBody({
   // Keys managed by the structured UI fields (connection, auth, settings accordions)
   // and by the feature mapping tearsheet (resource name, similarity, engine, algorithm, index type).
   // All of these are excluded from the advanced JSON textarea so the user never sees duplicates.
-  // resourceSpecificKeys (index_name/collection_name, space_type/metric_type, engine)
-  // are included — they are managed by the tearsheet.
-  // algorithm / index_type are intentionally NOT included here: they are no longer
-  // controlled by a dedicated UI input, so they should surface in the advanced textarea
-  // if the user set them previously, and remain editable via JSON.
-  const tearsheetManagedKeys = cfg.resourceSpecificKeys.filter(
-    (k) => k !== 'algorithm' && k !== 'index_type'
-  );
+  // resourceSpecificKeys (index_name/collection_name, space_type/metric_type, engine,
+  // algorithm/index_type) are all managed by the tearsheet.
+  const tearsheetManagedKeys = cfg.resourceSpecificKeys;
   const OPENSEARCH_MANAGED_KEYS = new Set([
     'host', 'port', 'use_ssl', 'verify_certs',
     'username', 'password', 'jwt_token', 'aws_auth', 'aws_region',
@@ -378,6 +379,8 @@ export function VectorDBPanelBody({
     resourceName: string;
     similarityMetric: string;
     engine: string;
+    indexType?: string;
+    clearIndexParameters?: boolean;
     featureMappings: FeatureMappingRow[];
     addSparseVector: boolean;
   }): void => {
@@ -388,7 +391,15 @@ export function VectorDBPanelBody({
     if (cfg.hasEngine) {
       configPatch[cfg.engineKey] = data.engine;
     }
-    const mergedConfig = mergeProviderConfig(providerConfig, configPatch);
+    // Only a new resource sends an index type; an existing resource keeps its saved value.
+    if (data.indexType) {
+      configPatch[cfg.indexTypeKey] = data.indexType;
+    }
+    let mergedConfig = mergeProviderConfig(providerConfig, configPatch);
+    if (data.clearIndexParameters) {
+      const { index_parameters: _cleared, ...rest } = mergedConfig;
+      mergedConfig = rest;
+    }
     controller?.updatePropertyValue?.({ name: ATTR.PROVIDER_CONFIG }, mergedConfig);
     controller?.updatePropertyValue?.({ name: ATTR.FEATURE_MAPPINGS }, data.featureMappings);
     // Persist add_sparse_vector as a top-level node parameter (Milvus-only).
@@ -866,6 +877,9 @@ export function VectorDBPanelBody({
         savedVectorSimilarity={savedVectorSimilarity}
         engineOptions={engineOptions}
         savedEngine={savedEngine}
+        indexTypeValidValues={indexTypeValidValues}
+        indexTypeDefault={indexTypeDefault}
+        applicability={applicability}
         addSparseVector={savedAddSparseVector}
       />
     </div>
