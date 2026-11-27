@@ -10,8 +10,9 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from docpipe.core.constants.constants import DocpipeConstants, Metrics
+from docpipe.core.constants.constants import DocpipeConstants, ExecutionStatus, Metrics
 from docpipe.core.constants.operator_constants import OperatorConstants
+from docpipe.core.operators.operator_utils import OperatorUtils
 from docpipe.core.operators.vectordb import VectorDBOperator
 from docpipe.core.operators.vectordb.adapters.outbound.factories.vector_store_factory import VectorStoreFactory
 from docpipe.core.operators.vectordb.adapters.outbound.opensearch.config import OpenSearchConfig
@@ -2166,6 +2167,183 @@ class TestDocumentIdentity:
         _, metadata = op.transform(self._chunked(ids=[None], doc_ids=["docA"]))
 
         assert [entry["id"] for entry in metadata[Metrics.External.FAILED_DOCS]] == ["docA"]
+
+
+# ---------------------------------------------------------------------------
+# Execution status and document counters after chunk indexing
+# ---------------------------------------------------------------------------
+
+
+class TestIndexingOutcomeStatusAndCounters:
+    """NODE_STATUS and document counters reflect the chunk indexing outcome."""
+
+    @staticmethod
+    def _operator() -> tuple[VectorDBOperator, Mock]:
+        op, adapter = _make_operator_with_mock_adapter()
+        adapter.generate_chunk_pk.side_effect = lambda *, file_id, chunk_index, chunk_content="": (
+            f"{file_id}#{chunk_index}"
+        )
+        adapter.get_chunk_ids_for_documents.return_value = {}
+        return op, adapter
+
+    @staticmethod
+    def _table(*, docs: dict[str, int], ids: list[str] | None = None) -> pa.Table:
+        """Build a chunked table: {doc_id_hash: number_of_chunks}; ids adds an id column."""
+        columns: dict = {
+            "doc_id_hash": list(docs),
+            "chunked_content": [[{"chunk": f"{d}-{i}"} for i in range(n)] for d, n in docs.items()],
+            "embeddings": [[[0.1, 0.2] for _ in range(n)] for n in docs.values()],
+        }
+        if ids is not None:
+            columns["id"] = pa.array(ids, type=pa.string())
+        return pa.table(columns)
+
+    @staticmethod
+    def _failed(*chunk_pks: str) -> list[dict]:
+        return [{"index": {"_id": pk, "error": {"reason": "rejected"}}} for pk in chunk_pks]
+
+    def test_all_chunks_indexed_is_completed(self):
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (4, [])
+
+        _, metadata = op.transform(self._table(docs={"docA": 2, "docB": 2}))
+
+        assert metadata[Metrics.External.NODE_STATUS] == "Completed"
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 2
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 0
+        assert metadata[Metrics.External.FAILED_DOCS] == []
+
+    def test_all_chunks_failed_is_failed(self):
+        """Reported scenario: 1 document, 3 chunks, all rejected."""
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (0, self._failed("docA#0", "docA#1", "docA#2"))
+
+        _, metadata = op.transform(self._table(docs={"docA": 3}))
+
+        assert metadata[Metrics.External.NODE_STATUS] == "Failed"
+        assert metadata[Metrics.External.TOTAL_DOCS] == 1
+        assert metadata[Metrics.External.TOTAL_CHUNKS_TO_INDEX] == 3
+        assert metadata[Metrics.External.CHUNKS_INDEXED_SUCCESSFULLY] == 0
+        assert metadata[Metrics.External.CHUNKS_FAILED_TO_INDEX] == 3
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 0
+
+    def test_partial_document_failure_is_completed_with_errors(self):
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (3, self._failed("docB#0"))
+
+        _, metadata = op.transform(self._table(docs={"docA": 2, "docB": 1}))
+
+        assert metadata[Metrics.External.NODE_STATUS] == "CompletedWithErrors"
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 1
+        assert [d["id"] for d in metadata[Metrics.External.FAILED_DOCS]] == ["docB"]
+
+    def test_partial_chunk_failure_of_a_single_document_fails_the_node(self):
+        """One document, one of two chunks rejected: the document is failed and nothing else succeeded."""
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (1, self._failed("docA#1"))
+
+        _, metadata = op.transform(self._table(docs={"docA": 2}))
+
+        assert metadata[Metrics.External.NODE_STATUS] == "Failed"
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 0
+
+    def test_multiple_failed_chunks_of_one_document_count_the_document_once(self):
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (2, self._failed("docA#0", "docA#1", "docA#2"))
+
+        _, metadata = op.transform(self._table(docs={"docA": 3, "docB": 2}))
+
+        assert metadata[Metrics.External.CHUNKS_FAILED_TO_INDEX] == 3
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        assert len(metadata[Metrics.External.FAILED_DOCS]) == 1
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 1
+        assert metadata[Metrics.External.NODE_STATUS] == "CompletedWithErrors"
+
+    def test_failed_document_is_recorded_by_id_when_id_differs_from_doc_id_hash(self):
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (0, self._failed("/f/a.pdf#0", "/f/a.pdf#1"))
+
+        _, metadata = op.transform(self._table(docs={"hashA": 2}, ids=["/f/a.pdf"]))
+
+        failed = metadata[Metrics.External.FAILED_DOCS]
+        assert [d["id"] for d in failed] == ["/f/a.pdf"]
+        assert metadata[Metrics.External.NODE_STATUS] == "Failed"
+
+    def test_unchunked_failed_document_is_recorded_by_id_when_id_differs_from_doc_id_hash(self):
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (0, self._failed("hashA"))
+        table = pa.table(
+            {
+                "doc_id_hash": ["hashA"],
+                "id": pa.array(["/f/a.pdf"], type=pa.string()),
+                "name": ["a.pdf"],
+                "embeddings": [[0.1, 0.2]],
+            }
+        )
+
+        _, metadata = op.transform(table)
+
+        failed = metadata[Metrics.External.FAILED_DOCS]
+        assert [(d["id"], d["name"]) for d in failed] == [("/f/a.pdf", "a.pdf")]
+
+    def test_counters_stay_consistent_with_documents_in_scope(self):
+        """completed + failed + skipped equals the documents in scope; a failed doc is never also completed."""
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (4, self._failed("c#0"))
+        table = self._table(docs={"docA": 1, "docB": 2, "docC": 1, "docD": 1}, ids=["a", "b", "c", "d"])
+        # Chunk PKs are keyed by the row id, so docC's chunk is "c#0".
+
+        _, metadata = op.transform(table)
+
+        failed_ids = {d["id"] for d in metadata[Metrics.External.FAILED_DOCS]}
+        assert failed_ids == {"c"}
+        in_scope = metadata[Metrics.External.TOTAL_DOCS]
+        assert in_scope == 4
+        assert (
+            metadata[Metrics.External.PROCESSED_DOCS]
+            + metadata[Metrics.External.FAILED_DOCS_COUNT]
+            + metadata[Metrics.External.SKIPPED_DOCS_COUNT]
+            == in_scope
+        )
+        # Completed documents as derived by the executor: ids in scope minus failed and skipped.
+        completed = [i for i in OperatorUtils.get_unique_ids(tables=table) if i not in failed_ids]
+        assert completed == ["a", "b", "d"]
+        assert len(completed) == metadata[Metrics.External.PROCESSED_DOCS]
+
+    def test_skipped_document_is_not_counted_as_processed(self):
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (2, [])
+        table = pa.table(
+            {
+                "doc_id_hash": ["docA", ""],
+                "chunked_content": [[{"chunk": "a0"}, {"chunk": "a1"}], [{"chunk": "x"}]],
+                "embeddings": [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6]]],
+            }
+        )
+
+        _, metadata = op.transform(table)
+
+        assert metadata[Metrics.External.SKIPPED_DOCS_COUNT] == 1
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 1
+        assert metadata[Metrics.External.NODE_STATUS] == "CompletedWithWarnings"
+
+    def test_node_statuses_aggregate_into_job_status(self):
+        """4 completed nodes plus a failed VectorDB node resolve to a Failed job; a partial failure does not."""
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (0, self._failed("docA#0", "docA#1", "docA#2"))
+        _, failed_metadata = op.transform(self._table(docs={"docA": 3}))
+
+        nodes = {f"n{i}": {"node_status": "Completed"} for i in range(4)}
+        nodes["vectordb"] = {"node_status": failed_metadata[Metrics.External.NODE_STATUS]}
+        assert OperatorUtils.determine_final_job_status(node_stats_list=nodes) == ExecutionStatus.FAILED
+
+        op, adapter = self._operator()
+        adapter.index_documents.return_value = (3, self._failed("docB#0"))
+        _, partial_metadata = op.transform(self._table(docs={"docA": 2, "docB": 1}))
+        nodes["vectordb"] = {"node_status": partial_metadata[Metrics.External.NODE_STATUS]}
+        assert OperatorUtils.determine_final_job_status(node_stats_list=nodes) == ExecutionStatus.COMPLETED_WITH_ERRORS
 
 
 # ---------------------------------------------------------------------------
