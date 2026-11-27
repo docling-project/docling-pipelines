@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 REST client for making HTTP requests with retry logic and error handling.
 
@@ -26,6 +29,12 @@ from tenacity import (
 from docpipe.exceptions.docpipe_exceptions import ExternalServiceError
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.url_sanitizer import (
+    REDACTED,
+    sanitize_url,
+    sanitize_urls_in_text,
+    split_text_and_urls,
+)
 
 logger = get_logger(__name__)
 
@@ -75,7 +84,7 @@ METHOD_CONFIG: dict[RestMethod, MethodConfig] = {
 }
 
 
-def sanitize_sensitive_data(data: Any, redact_value: str = "***REDACTED***") -> Any:
+def sanitize_sensitive_data(data: Any, redact_value: str = REDACTED) -> Any:
     """
     Redact sensitive information from data for logging purposes.
 
@@ -107,10 +116,17 @@ def sanitize_sensitive_data(data: Any, redact_value: str = "***REDACTED***") -> 
         return [sanitize_sensitive_data(item, redact_value) for item in data]
 
     if isinstance(data, str):
-        sanitized_str = data
-        for pattern, replacement in sensitive_patterns:
-            sanitized_str = re.sub(pattern, replacement, sanitized_str, flags=re.IGNORECASE)
-        return sanitized_str
+        # URLs get the parameter-aware redaction (keeps "&x=1" after a masked value, catches "tempauth" and "sig");
+        # the keyword patterns only run on the text between URLs so they cannot re-eat the rest of a query string.
+        sanitized_parts: list[str] = []
+        for text, is_url in split_text_and_urls(text=data):
+            if is_url:
+                sanitized_parts.append(sanitize_url(text, redact_value=redact_value))
+                continue
+            for pattern, replacement in sensitive_patterns:
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            sanitized_parts.append(text)
+        return "".join(sanitized_parts)
 
     return data
 
@@ -361,8 +377,10 @@ class RestClient:
 
             # Check status code
             if expected_status_codes and response.status_code not in expected_status_codes:
-                error_msg = f"Unexpected status code {response.status_code}. Expected one of {expected_status_codes}. Response: {response.text[:500]}"
-                logger.error(error_msg)
+                error_msg = sanitize_urls_in_text(
+                    f"Unexpected status code {response.status_code}. Expected one of {expected_status_codes}. Response: {response.text[:500]}"
+                )
+                logger.error("%s", error_msg)
                 raise ExternalServiceError(
                     message=error_msg,
                     error_code=ErrorCode.HTTP_ERROR,
@@ -371,19 +389,21 @@ class RestClient:
 
             return response
 
-        except requests.exceptions.HTTPError as e:
-            logger.error("Request failed: %s", e)
-            raise ExternalServiceError(
-                message=f"REST request failed: {e!s}",
-                error_code=ErrorCode.HTTP_ERROR,
-                status_code=e.response.status_code if e.response is not None else None,
-            ) from e
         except requests.exceptions.RequestException as e:
-            logger.error("Request failed: %s", e)
-            raise ExternalServiceError(
-                message=f"REST request failed: {e!s}",
-                error_code=ErrorCode.CONNECTION_ERROR,
-            ) from e
+            safe_error = sanitize_urls_in_text(str(e))
+            logger.error("Request failed: %s", safe_error)
+            if isinstance(e, requests.exceptions.HTTPError):
+                error_kwargs: dict[str, Any] = {
+                    "error_code": ErrorCode.HTTP_ERROR,
+                    "status_code": e.response.status_code if e.response is not None else None,
+                }
+            else:
+                error_kwargs = {"error_code": ErrorCode.CONNECTION_ERROR}
+
+        # Raised outside the except block on purpose: the requests exception, and the urllib3 error chained to it,
+        # echo the request URL including its credentials. Raising here leaves neither in __cause__ or __context__,
+        # so no traceback or exception-chain walker can reach them, and the caller's exception is not modified.
+        raise ExternalServiceError(message=f"REST request failed: {safe_error}", **error_kwargs)
 
     def _call_rest_method_impl(
         self,
@@ -428,16 +448,17 @@ class RestClient:
             raise ValueError("json_data and form_data are mutually exclusive")
 
         request_type = "multipart " if files is not None else ""
+        safe_url = sanitize_url(url)
         if params:
             logger.info(
                 "Making %s %srequest to %s with params: %s",
                 method.value,
                 request_type,
-                url,
+                safe_url,
                 sanitize_sensitive_data(params),
             )
         else:
-            logger.info("Making %s %srequest to %s", method.value, request_type, url)
+            logger.info("Making %s %srequest to %s", method.value, request_type, safe_url)
         logger.debug("Headers: %s", sanitize_sensitive_data(headers))
         if json_data is not None:
             logger.debug("Body: %s", sanitize_sensitive_data(json_data))

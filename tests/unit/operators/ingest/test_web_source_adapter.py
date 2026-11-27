@@ -1082,3 +1082,27 @@ def test_added_content_types_and_fallback(content_type, expected):
     response = Mock(status_code=200, headers={"Content-Type": content_type})
     with patch.object(adapter._rest_client, "call_rest", return_value=response):
         assert adapter._detect_extension(url="https://example.com/file", timeout=10) == expected
+
+
+class TestWebPageSourceAdapterUrlLogging:
+    """Credentials in source URLs must not reach the log."""
+
+    def test_download_logs_mask_credentials(self, caplog):
+        """The download start, success and failure lines do not contain the URL credential."""
+        adapter = WebPageSourceAdapter()
+        url = "https://example.com/file?tempauth=FAKE-TEMPAUTH-VALUE&id=1"
+        mock_response = Mock()
+        mock_response.content = b"data"
+
+        with caplog.at_level("DEBUG"):
+            with patch.object(adapter._download_client, "call_rest", return_value=mock_response):
+                adapter.fetch_binary_content(source_id=url, provider_config={})
+            with patch.object(
+                adapter._download_client,
+                "call_rest",
+                side_effect=ExternalServiceError(message=f"failed for url: {url}"),
+            ):
+                adapter.fetch_binary_content(source_id=url, provider_config={})
+
+        assert "FAKE-TEMPAUTH-VALUE" not in caplog.text
+        assert "tempauth=***REDACTED***" in caplog.text

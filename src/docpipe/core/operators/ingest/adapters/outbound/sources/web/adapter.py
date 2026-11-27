@@ -18,6 +18,7 @@ from docpipe.integrations.rest_client import RestClient, RestClientConfig, RestM
 from docpipe.integrations.secrets.secret_value import reveal_value
 from docpipe.utils.core.docpipe_utils import generate_hex_digest
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.url_sanitizer import sanitize_url, sanitize_urls_in_text
 
 logger = get_logger(__name__)
 
@@ -108,7 +109,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
         """
         # Iterate through all URLs
         for url in config.urls:
-            logger.info("Starting web crawl from %s with max_depth=%s", url, config.max_depth)
+            logger.info("Starting web crawl from %s with max_depth=%s", sanitize_url(url), config.max_depth)
 
             try:
                 # Imported lazily: langchain_community.document_loaders transitively loads
@@ -130,7 +131,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
 
                 # Load documents (synchronous operation from LangChain)
                 langchain_docs = loader.load()
-                logger.info("Successfully crawled %s pages from %s", len(langchain_docs), url)
+                logger.info("Successfully crawled %s pages from %s", len(langchain_docs), sanitize_url(url))
 
                 # Convert LangChain documents to domain documents
                 for lc_doc in langchain_docs:
@@ -170,7 +171,9 @@ class WebPageSourceAdapter(DocumentSourcePort):
                         yield document
                     except Exception as e:
                         # Log warning but continue processing other pages
-                        logger.warning("Failed to process page %s: %s", source_url, e)
+                        logger.warning(
+                            "Failed to process page %s: %s", sanitize_url(source_url), sanitize_urls_in_text(str(e))
+                        )
                         continue
             except ImportError as e:
                 raise DocpipeException(
@@ -178,7 +181,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
                 ) from e
             except Exception as e:
                 # Log error for this URL but continue with other URLs
-                logger.error("Failed to crawl %s: %s", url, e)
+                logger.error("Failed to crawl %s: %s", sanitize_url(url), sanitize_urls_in_text(str(e)))
                 continue
 
     async def test_connection(self, config: WebPageSourceConfig) -> tuple[bool, str]:
@@ -263,7 +266,7 @@ class WebPageSourceAdapter(DocumentSourcePort):
         timeout = provider_config.get("timeout", 30)
 
         try:
-            logger.info("Downloading binary content from URL: %s", source_id)
+            logger.info("Downloading binary content from URL: %s", sanitize_url(source_id))
 
             response = self._download_client.call_rest(
                 method=RestMethod.GET,
@@ -272,14 +275,16 @@ class WebPageSourceAdapter(DocumentSourcePort):
             )
 
             content = response.content
-            logger.info("Successfully downloaded %s bytes from %s", len(content), source_id)
+            logger.info("Successfully downloaded %s bytes from %s", len(content), sanitize_url(source_id))
             return content
 
         except ExternalServiceError as e:
-            logger.error("Failed to download from %s: %s", source_id, e)
+            logger.error("Failed to download from %s: %s", sanitize_url(source_id), sanitize_urls_in_text(str(e)))
             return None
         except Exception as e:
-            logger.exception("Unexpected error downloading from %s: %s", source_id, e)
+            logger.exception(
+                "Unexpected error downloading from %s: %s", sanitize_url(source_id), sanitize_urls_in_text(str(e))
+            )
             return None
 
     def build_config_from_operator_params(
