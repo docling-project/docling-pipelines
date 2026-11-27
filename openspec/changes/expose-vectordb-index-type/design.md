@@ -7,9 +7,9 @@ See `proposal.md` for motivation. Current state that constrains the approach:
 - **Metadata pipeline.** `VectorDBOperator._get_vectordb_provider_schemas` builds each provider's metadata with `OperatorUtils.model_schema_to_docpipe(schema=<Config>.model_json_schema())`. That translator forwards a fixed set of keys (`enum` becomes `valid_values`, plus `default`, `description`, ranges), so Pydantic cannot carry an `applicability` block. The frontend reads `valid_values` and `default` from `operatorMetadata.vectordb.providers[provider].properties[key]` (see `VectorDB.tsx` for `metric_type`, `space_type`, `engine`).
 - **Rules live in one place.** Index, metric, Lite and feature-type rules are enforced only in `MilvusIndexManager` (`_validate_index_type`, `_validate_metric_type`, `_validate_dense_config_for_hybrid`) and, for OpenSearch, in `ENGINE_ALGORITHM_SUPPORT` (`opensearch/index_manager.py`). `MilvusIndexTypes` and `MilvusMetricTypes` already group the types into dense, GPU, sparse and binary lists.
 - **Defaults.** `MilvusAdapter` reads `index_type` from `adapter_config` with a default of `HNSW` (`DEFAULT_INDEX_TYPE`), and `MilvusConfig.index_type` also defaults to `HNSW`. `vector_mode` is inferred from `index_type` when unset.
-- **Resource metadata.** `MilvusResourceMetadata._stored_metadata` and `OpenSearchResourceMetadata._stored_metadata` return only `vector_similarity` and `dimension_size`. The Milvus schema already carries `index_info.index_type` per field. OpenSearch stores `engine` and `algorithm` in the index `_meta` and the `knn_vector` field's `method.name`. `VectorDBMetadataFetcher._empty_result` is the shared fallback. Weaviate returns the same two keys.
+- **Resource metadata.** `MilvusResourceMetadata._stored_metadata` and `OpenSearchResourceMetadata._stored_metadata` return only `vector_similarity` and `dimension_size`. The Milvus schema already carries `index_info.index_type` per field. OpenSearch stores `engine` and `algorithm` in the index `_meta` and the `knn_vector` field's `method.name`. `VectorDBMetadataFetcher._empty_result` is the shared fallback.
 - **Tearsheet.** `effectiveSimilarityOptions` in `VectorDBFeatureMappingTearsheet.tsx` filters metrics from the saved `parsedProviderConfig` via `isMilvusGpuMode`. `VectorDB.tsx` excludes `algorithm` and `index_type` from `tearsheetManagedKeys` on purpose, so they appear in Advanced JSON.
-- **In-flight overlap.** `add-weaviate-vectordb-adapter` MODIFIES "Vector store resource metadata and flow enrichment" (backend) and "VectorDB feature mapping and backend configuration" (frontend). This change must not modify either.
+- **Scope.** Milvus and OpenSearch only. Weaviate is out of scope and is not changed. The existing requirements "Vector store resource metadata and flow enrichment" (backend) and "VectorDB feature mapping and backend configuration" (frontend) are left as they are; this change adds new requirements instead.
 
 ## Goals / Non-Goals
 
@@ -21,7 +21,7 @@ See `proposal.md` for motivation. Current state that constrains the approach:
 **Non-Goals:**
 - Changing the validators in `MilvusIndexManager` or OpenSearch beyond message clarity (B5). The metadata describes the rules; it does not replace enforcement.
 - A generic applicability engine for all operators. Only the VectorDB providers get the block.
-- Weaviate, index parameter editors, per-field index types, GPU capability detection (see proposal Non-goals).
+- Weaviate (no code, metadata, UI or spec changes), index parameter editors, per-field index types, GPU capability detection (see proposal Non-goals).
 
 ## Decisions
 
@@ -69,7 +69,7 @@ Why backend: fixes API and CLI users, not only the UI, and keeps one rule. Alter
 
 `_stored_metadata` in both providers returns `index_type` alongside the existing two. Milvus reads `index_info.index_type` of the same field it already uses for the metric. OpenSearch reads `_meta.algorithm`, falling back to the first `knn_vector` field's `method.name`. Fallbacks, including `VectorDBMetadataFetcher._empty_result`, return `None`.
 
-Why: the frontend type and enrichment normalization already expect a fixed shape, and existing resources already expose this in the schema. Weaviate keeps returning two keys; the frontend treats a missing `index_type` as `null`, and the backend requirement is scoped to Milvus and OpenSearch.
+Why: the frontend type and enrichment normalization already expect a fixed shape, and existing resources already expose this in the schema. The frontend treats a missing `index_type` as `null`, and the backend requirement is scoped to Milvus and OpenSearch.
 
 ### D5. Frontend: one data-driven control, filter logic in a pure helper
 
@@ -114,7 +114,7 @@ On a user-initiated index type change with non-empty `index_parameters`, the sav
 ## Risks / Trade-offs
 
 - **Metadata and validator drift** -> single source from constants plus the D6 parity tests.
-- **Archive conflict with `add-weaviate-vectordb-adapter`** -> only ADDED requirements with new names, and one MODIFIED requirement the other change does not touch. Rebase implementation on that change before editing `VectorDB.tsx` and the tearsheet. Re-run `openspec validate --strict` after it archives.
+- **Overlap with existing requirements** -> only ADDED requirements with new names, plus one MODIFIED requirement ("Milvus GPU mode similarity metric filtering"). The broader existing requirements are not modified, so this change stays independent of other changes to them. Re-run `openspec validate --strict` before archiving.
 - **Raw-vs-defaulted config for the Lite default (D3)** -> the "set vs unset" check is unit-tested at the adapter entry point, including an explicit `HNSW` on Lite (still rejected) and an unset key on Lite (resolves to `FLAT`). If a caller ever passes the model-dumped config (with the `HNSW` default filled in), Lite would still fail; the test covers the real `provider_config` path used by the operator.
 - **Existing flows with a sparse `index_type`** -> they already fail at runtime; they now fail at validation with the accepted values listed. Noted in the changelog entry by maintainers, not by this change.
 - **`BM25` in the metric list** -> the backend accepts `BM25` only when no dense feature is indexed with the configured metric (`_validate_dense_field_config` runs only when a `vector` feature exists). So `BM25` is dropped when a dense feature is mapped, and kept for binary-only collections with sparse on, which an existing test already pins. With no vector feature known, the list is unchanged.

@@ -44,12 +44,12 @@ None.
 
 ### Modified Capabilities
 
-- `backend/vectordb-operator`: adds requirements for the index selection applicability metadata, the stored index type in resource metadata, the sparse index types being non-selectable, and the Milvus Lite default index type. These are new requirements with new names. The existing requirement "Vector store resource metadata and flow enrichment" is **not** modified here, because the in-flight change `add-weaviate-vectordb-adapter` already modifies it and a second modification would conflict at archive time.
-- `frontend/properties-panel`: adds a requirement for index type / algorithm selection in the tearsheet, and modifies the existing "Milvus GPU mode similarity metric filtering" requirement so metric options follow the index family selected in the form, not saved config. The requirement "VectorDB feature mapping and backend configuration" is **not** modified here, for the same archive-conflict reason (the Weaviate change modifies it).
+- `backend/vectordb-operator`: adds requirements for the index selection applicability metadata, the stored index type in resource metadata, the sparse index types being non-selectable, and the Milvus Lite default index type. These are new requirements with new names. The existing requirement "Vector store resource metadata and flow enrichment" is **not** modified here.
+- `frontend/properties-panel`: adds a requirement for index type / algorithm selection in the tearsheet, and modifies the existing "Milvus GPU mode similarity metric filtering" requirement so metric options follow the index family selected in the form, not saved config. The requirement "VectorDB feature mapping and backend configuration" is **not** modified here.
 
 ## Non-goals
 
-- Weaviate UI. The panel does not support it yet, and its change deliberately keeps `index_type` / `index_parameters` in Advanced JSON.
+- Weaviate. This change covers Milvus and OpenSearch only and makes no Weaviate code, metadata, UI or spec changes.
 - Editors for index parameters (`M`, `efConstruction`, `nlist`, and so on).
 - Per-field index types and GPU capability detection.
 - Changing the existing `valid_values` lists or the `metric_type` / `space_type` enums.
@@ -60,4 +60,3 @@ None.
 - **Backend:** `src/docpipe/core/operators/vectordb/adapters/outbound/milvus/{config.py,index_manager.py,resource_metadata.py,adapter.py}`, `.../opensearch/{config.py,resource_metadata.py}`, `src/docpipe/core/operators/vectordb/vectordb_operator.py` (provider schema assembly), `tests/unit/operators/vectordb/`, and the three docs files above. REST route `GET /api/v1/operators/metadata` returns the additive `applicability` block; the flow enrichment endpoint returns the extended `stored_resource_metadata`.
 - **Frontend:** `frontend/src/components/PropertiesPanel/CustomPanels/VectorDB/{constants.ts,VectorDB.tsx,VectorDBFeatureMappingTearsheet.tsx,vectordb-enrichment.ts,*.messages.ts}`, `frontend/src/types/operator.ts`, `frontend/src/utils/vectordb.ts`, and the matching unit tests.
 - **Dependencies:** none.
-- **Coordination:** `add-weaviate-vectordb-adapter` edits the same VectorDB panel and `vectordb-operator` spec. Implementation must rebase on it; spec deltas are written to avoid archive conflicts.

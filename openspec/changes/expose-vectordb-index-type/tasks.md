@@ -1,6 +1,6 @@
 # Tasks
 
-Layer tags: [backend], [frontend], [both]. Rebase on `add-weaviate-vectordb-adapter` before starting group 4 (it edits the same panel files).
+Layer tags: [backend], [frontend], [both]. Scope is Milvus and OpenSearch only; Weaviate is not changed.
 
 ## 1. Backend enum, metadata and parity [backend]
 
@@ -20,7 +20,7 @@ Layer tags: [backend], [frontend], [both]. Rebase on `add-weaviate-vectordb-adap
 
 - [x] 3.1 Add `index_type` to `MilvusResourceMetadata._stored_metadata` (from the dense field's `index_info.index_type`) and to `OpenSearchResourceMetadata._stored_metadata` (`_meta.algorithm`, then `method.name` fallback). Verify with unit tests for existing resource, missing index info, and missing mapping
 - [x] 3.2 Add `index_type: None` to the empty and fallback `stored_resource_metadata` shapes in `metadata_fetcher.py` and both providers' initial values. Verify the unreachable-store test returns the three keys
-- [x] 3.3 Confirm the enrichment API DTO passes the extra key through unchanged and Weaviate output is untouched. Verify with an API-level test or schema inspection of the enrichment response
+- [x] 3.3 Confirm the enrichment API DTO passes the extra key through unchanged and that Weaviate is not changed. Verify with an API-level test or schema inspection of the enrichment response
 - [x] 3.4 Update `docs/reference/OPERATORS.md`, `docs/operators/vectordb/vectordb_readme.md` and `docs/operators/vectordb/milvus.md` for the new enum, the `applicability` metadata, the stored `index_type` and the Lite default. Verify links resolve and no section is added that the operator-readme rules forbid
 
 ## 4. Frontend data layer [frontend]
@@ -52,4 +52,4 @@ Layer tags: [backend], [frontend], [both]. Rebase on `add-weaviate-vectordb-adap
 ## Workflow follow-up
 
 - Run `pre-commit run --from-ref origin/main --to-ref HEAD` after committing with `git commit -s`.
-- Archive the change after review. If `add-weaviate-vectordb-adapter` archives first, re-run strict validation before archiving this one.
+- Archive the change after review, re-running `openspec validate expose-vectordb-index-type --strict` first.
