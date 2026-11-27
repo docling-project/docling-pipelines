@@ -1,0 +1,24 @@
+# Tasks: Flow Execution & Authoring MCP Server
+
+- [ ] 1. Package setup & transport architecture
+  - [ ] 1.1 Create directory `src/docpipe/mcp/`
+  - [ ] 1.2 Implement process-level stdout redirection in `src/docpipe/mcp/__main__.py` (duplicating fd 1 with `os.dup(1)`, redirecting `sys.stdout` and fd 1 to `sys.stderr` *before* importing docpipe modules, wrapping duplicated fd with `anyio.wrap_file`, and passing explicitly to `stdio_server(stdout=...)`)
+  - [ ] 1.3 Add entrypoint `docling-pipelines-mcp = "docpipe.mcp.__main__:main"` to `[project.scripts]` in `pyproject.toml` and ensure `mcp>=1.30.0,<2.0` (with `uv lock` run per AGENTS.md when dependencies are touched)
+- [ ] 2. Core tool implementations
+  - [ ] 2.1 Implement `list_operators` tool querying `get_docpipe_operators()` / `DOCPIPE_OPERATORS` and `OperatorFactory` for categories, descriptions, and required features
+  - [ ] 2.2 Implement `validate_flow` tool accepting `flow_definition` or `flow_file` (exactly one), validating workspace containment (file path and inline paths), normalizing constructor errors (`FlowInvalidDataException`, `DocpipeException`, `FileNotFoundError`, `json.JSONDecodeError`), and offloading via `anyio.to_thread.run_sync`
+  - [ ] 2.3 Implement `create_flow` tool registering flow in database asset repository via `FlowService` (with `SYSTEM_ACTOR`), optional file export, `.json` enforcement, overwrite guard, and partial failure rollback
+  - [ ] 2.4 Implement `run_flow` tool with synchronous initial run registration (preventing polling races), background worker thread execution preserving `ContextVar` context (`SessionInfo`), semaphore-bounded concurrency (`DOCPIPE_MCP_MAX_CONCURRENT_RUNS`), timeout handling returning non-terminal status, and `ExecutionStatus` vocabulary
+  - [ ] 2.5 Implement `get_job_status` tool querying run registry and configured `JobStatsStore` port, defaulting to latest run and returning structured node metrics with `ExecutionStatus` values
+- [ ] 3. Security & trust boundaries
+  - [ ] 3.1 Implement workspace root path containment guard (`DOCPIPE_WORKSPACE_ROOT`) refusing root `/` or `$HOME` and rejecting traversal/escapes in file arguments and inline flow definitions
+  - [ ] 3.2 Enforce `enable_custom_operators=False` by default in MCP server
+  - [ ] 3.3 Implement credential redaction using declared secret fields (`core/operators/secret_fields.py`) with key-name pattern fallback
+- [ ] 4. Server assembly & transport
+  - [ ] 4.1 Assemble `create_server()` in `src/docpipe/mcp/server.py` registering all 5 tools with stdio transport and offloading sync handlers to worker threads
+  - [ ] 4.2 Configure server-owned logging to `stderr` and graceful shutdown waiting for active workers
+- [ ] 5. Tests & Verification
+  - [ ] 5.1 Unit tests for `list_operators`, `validate_flow` (missing `flow_name`, authoring cycles, DAG cycles, missing root, valid flow), `create_flow` (DB registration, file export, duplicate flow, partial failure rollback), and `get_job_status`
+  - [ ] 5.2 Security tests verifying path traversal rejection (`..`), non-json extension rejection, root/home workspace rejection, and overwrite guard
+  - [ ] 5.3 Concurrency & side-effect tests verifying background thread execution, verifying row counts in `job_stats` and `flows` tables are unchanged before and after `validate_flow`, and unchanged after a failed `create_flow`
+  - [ ] 5.4 Transport purity test running a full pipeline with filesystem ingest asserting that `stdout` receives strictly valid JSON-RPC protocol frames and zero raw log lines
