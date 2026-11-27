@@ -998,24 +998,24 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
             metadata[Metrics.External.CHUNKS_INDEXED_SUCCESSFULLY] = chunks_indexed
             metadata[Metrics.External.CHUNKS_FAILED_TO_INDEX] = chunks_failed_to_index
 
-            # Track which original documents had chunk failures
-            failed_doc_ids: set[str] = set()
+            # Track which documents (by doc_id_hash) had chunk failures
+            failed_doc_hashes: set[str] = set()
 
             for failed_chunk in failed_chunks:
                 error_info: dict[str, Any] = failed_chunk.get("index", {})
                 failed_chunk_id: str = error_info.get("_id", "unknown")
                 failure_reason: str = error_info.get("error", {}).get("reason", "Unknown error")
 
-                # Determine original document ID
-                original_doc_id = chunk_id_to_doc_id.get(failed_chunk_id, failed_chunk_id)
+                # Determine the parent document hash (non-chunked documents are keyed by the hash itself)
+                original_doc_hash = chunk_id_to_doc_id.get(failed_chunk_id, failed_chunk_id)
 
                 # Only track document-level failure if we can determine the original document
-                if original_doc_id:
-                    failed_doc_ids.add(original_doc_id)
+                if original_doc_hash:
+                    failed_doc_hashes.add(original_doc_hash)
                     logger.warning(
                         "Chunk indexing failed: %s (document: %s) - %s",
                         failed_chunk_id,
-                        original_doc_id,
+                        original_doc_hash,
                         failure_reason[:100],
                         extra=self.common_log_arguments,
                     )
@@ -1027,19 +1027,30 @@ class VectorDBOperator(AbstractOperator):  # type: ignore[misc]
                         extra=self.common_log_arguments,
                     )
 
-            # Record document-level failures for documents with any chunk failures
-            for doc_id in failed_doc_ids:
+            # Record document-level failures for documents with any chunk failures, using the
+            # document identity (id column, else doc_id_hash) so they match the node's document ids
+            for doc_hash in failed_doc_hashes:
+                original_id = doc_hash_to_id.get(doc_hash, doc_hash)
                 self.record_failed_document(
                     metadata=metadata,
-                    doc_id=doc_id,
-                    doc_name=doc_hash_to_name.get(doc_id, doc_id),
+                    doc_id=original_id,
+                    doc_name=doc_hash_to_name.get(doc_hash, original_id),
                     reason="One or more chunks failed to index",
                 )
 
             # Calculate document-level metrics
-            # processed_docs = total documents - (preparation failures + indexing failures)
-            total_docs_processed = table.num_rows - metadata.get(Metrics.External.FAILED_DOCS_COUNT, 0)
+            # processed_docs = total documents - (preparation failures + indexing failures + skipped)
+            total_docs_processed = (
+                table.num_rows
+                - metadata[Metrics.External.FAILED_DOCS_COUNT]
+                - metadata[Metrics.External.SKIPPED_DOCS_COUNT]
+            )
             metadata[Metrics.External.PROCESSED_DOCS] = total_docs_processed
+            metadata[Metrics.External.NODE_STATUS] = OperatorUtils.determine_execution_status(
+                processed_count=total_docs_processed,
+                failed_count=metadata[Metrics.External.FAILED_DOCS_COUNT],
+                skipped_count=metadata[Metrics.External.SKIPPED_DOCS_COUNT],
+            )
 
             logger.info(
                 "VectorDB indexing complete: %s/%s documents processed, %s/%s chunks indexed successfully",
