@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pyarrow as pa
 import pytest
 
-from docpipe.core.constants.constants import Metrics
+from docpipe.core.constants.constants import ExecutionStatus, Metrics
 from docpipe.core.operators.vectordb.vectordb_operator import VectorDBOperator
 from docpipe.utils.operators.vectordb_utils import generate_composite_pk
 
@@ -206,6 +206,7 @@ class TestVectorDBMetrics:
         assert metadata[Metrics.External.CHUNKS_INDEXED_SUCCESSFULLY] == 3
         assert metadata[Metrics.External.CHUNKS_FAILED_TO_INDEX] == 1
         assert metadata[Metrics.External.TOTAL_CHUNKS_TO_INDEX] == 4
+        assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.COMPLETED_WITH_ERRORS.value
 
     def test_partial_chunk_failure_for_single_document(self, *, vectordb_config, mock_adapter):
         """
@@ -260,6 +261,7 @@ class TestVectorDBMetrics:
         # Document-level: entire document marked as failed due to partial chunk failure
         assert metadata[Metrics.External.PROCESSED_DOCS] == 0  # No documents fully succeeded
         assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1  # 1 doc had chunk failure
+        assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.FAILED.value
 
         # Item-level: 2 chunks indexed, 1 failed
         assert metadata[Metrics.External.CHUNKS_INDEXED_SUCCESSFULLY] == 2
@@ -270,3 +272,43 @@ class TestVectorDBMetrics:
         assert len(metadata[Metrics.External.FAILED_DOCS]) == 1
         assert metadata[Metrics.External.FAILED_DOCS][0]["id"] == "doc1"
         assert "One or more chunks failed to index" in metadata[Metrics.External.FAILED_DOCS][0]["reason"]
+
+    def test_chunk_rows_do_not_inflate_the_document_count(self, *, vectordb_config, mock_adapter):
+        """One document split into three chunk rows: processed comes from the documents in scope.
+
+        The table is chunk-level, so table.num_rows was counting chunks as documents: with one
+        document and three failed chunks it reported two processed documents (#770).
+        """
+        chunk_contents = [f"Chunk {index} of doc1" for index in (1, 2, 3)]
+        failed_items = [
+            {
+                "index": {
+                    "_id": generate_composite_pk(file_id="doc1", chunk_content=chunk),
+                    "error": {"reason": "Indexing error"},
+                }
+            }
+            for chunk in chunk_contents
+        ]
+        mock_adapter.index_documents.return_value = (0, failed_items)
+
+        table = pa.table(
+            {
+                "doc_id_hash": ["doc1", "doc1", "doc1"],
+                "content": ["Document 1"] * 3,
+                "embeddings": [[[0.1, 0.2]], [[0.3, 0.4]], [[0.5, 0.6]]],
+                "chunked_content": [[{"chunk": chunk}] for chunk in chunk_contents],
+            }
+        )
+
+        with patch(
+            "docpipe.core.operators.vectordb.vectordb_operator.VectorStoreFactory.create",
+            return_value=mock_adapter,
+        ):
+            operator = VectorDBOperator(config=vectordb_config)
+            _, metadata = operator.transform(table=table)
+
+        assert metadata[Metrics.External.TOTAL_DOCS] == 1
+        assert metadata[Metrics.External.PROCESSED_DOCS] == 0
+        assert metadata[Metrics.External.FAILED_DOCS_COUNT] == 1
+        assert metadata[Metrics.External.NODE_STATUS] == ExecutionStatus.FAILED.value
+        assert metadata[Metrics.External.FAILED_DOCS][0]["id"] == "doc1"
