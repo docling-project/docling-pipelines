@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Abstract base class for filesystem-based storage implementations."""
 
 import threading
@@ -202,7 +205,8 @@ class AbstractFileSystemStorage(ABC):
             file_path = self._get_file_path(collection=collection, file_name=file_name)
             temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
 
-            with Path(temp_path).open("w", encoding="utf-8") as f:
+            # newline="" keeps line endings as given (csv writes \r\n), without it they get translated twice
+            with Path(temp_path).open("w", encoding="utf-8", newline="") as f:
                 self.save_file_content(file=f, data=data)
 
             temp_path.replace(file_path)
@@ -240,7 +244,7 @@ class AbstractFileSystemStorage(ABC):
                 logger.debug("File not found: %s/%s", collection, file_name)
                 return self._missing_file_value()
 
-            with Path(file_path).open(encoding="utf-8") as f:
+            with Path(file_path).open(encoding="utf-8", newline="") as f:
                 data = self.load_file_content(file=f)
 
             logger.debug("Read file: %s/%s", collection, file_name)
