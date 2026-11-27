@@ -24,7 +24,7 @@ dependencies = [
     "datatrove==0.10.1",
     "datefinder==1.0.0",
     "dropbox==12.2.5",
-    "duckdb==1.5.6",
+    "duckdb==2.0.1",
     "fastapi==0.150.0",
     "fasttext-numpy2==0.10.4",
     "filelock==4.2.12",
