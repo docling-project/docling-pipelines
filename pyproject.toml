@@ -94,7 +94,7 @@ dependencies = [
     "tenacity==9.2.1",
     "toml==0.10.2",
     "torch==2.15.0",
-    "transformers>=5.17,<5.18",
+    "transformers>=5.17,<5.25",
     "unicategories==0.1.2",
     "unicodedataplus==16.0.0.post1",
     "urllib3==2.8.0",
