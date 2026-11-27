@@ -648,6 +648,23 @@ class TestUpdateFlowEndpoint:
         assert data["errors"][0]["code"] == "flow_not_found"
         assert nonexistent_id in data["errors"][0]["message"]
 
+    def test_update_flow_rename_to_existing_name_returns_409(self, client, override_service):
+        """Regression: a PUT that renames a flow to an existing name returns 409."""
+        # Arrange
+        flow_id = "12345678-1234-1234-1234-123456789abc"
+        override_service.update_flow.side_effect = FlowAlreadyExistsException(
+            "Flow with name 'test-pipeline-2' already exists", flow_name="test-pipeline-2"
+        )
+
+        # Act
+        response = client.put(f"/flows/{flow_id}?is_elyra=true", json={"name": "test-pipeline-2"})
+
+        # Assert
+        assert response.status_code == 409
+        data = response.json()
+        assert data["errors"][0]["code"] == "flow_already_exists"
+        assert "test-pipeline-2" in data["errors"][0]["message"]
+
     def test_update_flow_with_invalid_data_returns_400(self, client, override_service):
         """Test updating a flow with invalid data returns 400."""
         # Arrange
@@ -912,6 +929,23 @@ class TestPartialUpdateFlowEndpoint:
         data = response.json()
         assert data["errors"][0]["code"] == "flow_not_found"
         assert nonexistent_id in data["errors"][0]["message"]
+
+    def test_partial_update_flow_rename_to_existing_name_returns_409(self, client, override_service):
+        """Regression: renaming a flow to a name another flow uses returns 409."""
+        # Arrange
+        flow_id = "12345678-1234-1234-1234-123456789abc"
+        override_service.partial_update_flow.side_effect = FlowAlreadyExistsException(
+            "Flow with name 'test-pipeline-2' already exists", flow_name="test-pipeline-2"
+        )
+
+        # Act
+        response = client.patch(f"/flows/{flow_id}?is_elyra=true", json={"name": "test-pipeline-2"})
+
+        # Assert
+        assert response.status_code == 409
+        data = response.json()
+        assert data["errors"][0]["code"] == "flow_already_exists"
+        assert "test-pipeline-2" in data["errors"][0]["message"]
 
     def test_partial_update_flow_with_invalid_uuid_format_returns_422(self, client):
         """Test partially updating a flow with invalid UUID format returns 400."""

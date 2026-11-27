@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -889,5 +890,118 @@ describe('FlowDetail page', () => {
     // cancelJobRun posts a DELETE; finally always calls fetchRuns
     await waitFor(() => expect(cancelCalled).toBe(true), { timeout: 3000 });
     expect(document.body).toBeInTheDocument();
+  });
+});
+
+describe('FlowDetail edit flow details - duplicate name validation', () => {
+  const DUPLICATE_MSG = 'A flow with this name already exists. Please choose a unique name.';
+
+  const makeFlow = (id: string, name: string, projectId: string): FlowRow =>
+    ({ ...SAMPLE_FLOW, flow_id: id, name, project_id: projectId }) as FlowRow;
+
+  // flow-1 is being edited. flow-2 is in the same project. flow-3 has the same name in another project.
+  const STATE = {
+    flow: {
+      ...FLOW_STATE_WITH_FLOW.flow,
+      items: {
+        'flow-1': makeFlow('flow-1', 'test-pipeline-3', 'proj-1'),
+        'flow-2': makeFlow('flow-2', 'test-pipeline-2', 'proj-1'),
+        'flow-3': makeFlow('flow-3', 'other-project-flow', 'proj-2'),
+      },
+    },
+  };
+
+  async function openEditModal() {
+    renderFlowDetailWithBreadcrumb('flow-1', STATE);
+    fireEvent.click(await screen.findByRole('button', { name: /about flow/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /edit flow details/i }));
+    return screen.findByRole('textbox', { name: /^name$/i });
+  }
+
+  it('renaming to another flow in the same project shows the error and does not call PATCH', async () => {
+    let patched = false;
+    server.use(http.patch('/api/flows/:id', () => { patched = true; return HttpResponse.json({}); }));
+    const nameInput = await openEditModal();
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'test-pipeline-2');
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    expect(await screen.findByText(DUPLICATE_MSG)).toBeInTheDocument();
+    expect(patched).toBe(false);
+  });
+
+  it('renaming to a unique name calls PATCH', async () => {
+    let patchedBody: { name?: string } | undefined;
+    server.use(http.patch('/api/flows/:id', async ({ request }) => {
+      patchedBody = (await request.json()) as { name?: string };
+      return HttpResponse.json({ flow_id: 'flow-1', name: patchedBody.name });
+    }));
+    const nameInput = await openEditModal();
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'brand-new-name');
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(patchedBody?.name).toBe('brand-new-name'));
+    expect(screen.queryByText(DUPLICATE_MSG)).toBeNull();
+  });
+
+  it('saving without changing the name is allowed', async () => {
+    let patchedBody: { name?: string } | undefined;
+    server.use(http.patch('/api/flows/:id', async ({ request }) => {
+      patchedBody = (await request.json()) as { name?: string };
+      return HttpResponse.json({ flow_id: 'flow-1', name: patchedBody.name });
+    }));
+    await openEditModal();
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(patchedBody?.name).toBe('test-pipeline-3'));
+    expect(screen.queryByText(DUPLICATE_MSG)).toBeNull();
+  });
+
+  it('a name used only in a different project is not flagged client-side (backend still decides)', async () => {
+    let patchedBody: { name?: string } | undefined;
+    server.use(http.patch('/api/flows/:id', async ({ request }) => {
+      patchedBody = (await request.json()) as { name?: string };
+      return HttpResponse.json({ flow_id: 'flow-1', name: patchedBody.name });
+    }));
+    const nameInput = await openEditModal();
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'other-project-flow');
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(patchedBody?.name).toBe('other-project-flow'));
+  });
+
+  it('shows the duplicate error on blur using the fetched project flows when the store only has the current flow', async () => {
+    server.use(http.get('/api/projects/:id/flows', () =>
+      HttpResponse.json({
+        flows: [
+          { flow_id: 'flow-1', name: 'test-pipeline-3', container_id: 'proj-1' },
+          { flow_id: 'flow-9', name: 'Test-Pipeline-2', container_id: 'proj-1' },
+        ],
+        total_count: 2,
+      })
+    ));
+    let patched = false;
+    server.use(http.patch('/api/flows/:id', () => { patched = true; return HttpResponse.json({}); }));
+    renderFlowDetailWithBreadcrumb('flow-1', FLOW_STATE_WITH_FLOW); // store holds only flow-1
+    fireEvent.click(await screen.findByRole('button', { name: /about flow/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /edit flow details/i }));
+    const nameInput = await screen.findByRole('textbox', { name: /^name$/i });
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'test-pipeline-2');
+    // Retry the blur until the project flows have been fetched.
+    await waitFor(() => {
+      fireEvent.blur(nameInput);
+      expect(screen.getByText(DUPLICATE_MSG)).toBeInTheDocument();
+    });
+    expect(patched).toBe(false);
+  });
+
+  it('a 409 from the backend (stale list) is shown as the duplicate error', async () => {
+    server.use(http.patch('/api/flows/:id', () =>
+      HttpResponse.json({ errors: [{ code: 'flow_already_exists' }] }, { status: 409 })
+    ));
+    const nameInput = await openEditModal();
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'created-elsewhere');
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    expect(await screen.findByText(DUPLICATE_MSG)).toBeInTheDocument();
   });
 });

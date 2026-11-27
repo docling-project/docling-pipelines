@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate, useParams } from 'react-router-dom';
-import { go } from '@/utils';
+import { go, isConflictError } from '@/utils';
 import { Tag } from '@carbon/react';
 import { Add, ChevronUp, ChevronDown } from '@carbon/icons-react';
 import { NoDataEmptyState } from '@carbon/ibm-products';
@@ -228,7 +228,8 @@ export function ProjectDetail(): React.JSX.Element | null {
         notify.success(intl.formatMessage(messages.updateFlowSuccess, { name: updates.name }));
       })
       .catch((err: unknown) => {
-        notify.error(intl.formatMessage(messages.updateFlowError));
+        // A 409 is shown inline in the modal as a duplicate-name error.
+        if (!isConflictError(err)) { notify.error(intl.formatMessage(messages.updateFlowError)); }
         throw err;
       });
 

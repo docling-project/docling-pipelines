@@ -65,6 +65,7 @@ import {
   useNotify,
   useNodeSuggestion,
   useJobRunPoller,
+  useSiblingFlowNames,
   useTheme,
   useAuth,
 } from '@/hooks';
@@ -76,6 +77,8 @@ import { LinkConditionTearsheet } from '@/components/ElyraCanvas/LinkConditionTe
 import type { LinkConditionValues } from '@/components/ElyraCanvas/LinkConditionTearsheet';
 import type { CriteriaJson } from '@/components/PropertiesPanel/CustomPanels/AnnotationFilter/conditionTypes';
 import type { FeatureAttributes } from '@/types';
+import { isConflictError } from '@/utils/httpErrors';
+import { messages as createFlowMessages } from '@/components/ProjectDetail/CreateFlowTearsheet/CreateFlowTearsheet.messages';
 import { messages } from './Canvas.messages';
 import styles from './Canvas.module.scss';
 
@@ -171,6 +174,12 @@ export function Canvas(): React.JSX.Element {
   const [isFlowRunPropertiesOpen, setIsFlowRunPropertiesOpen] = useState(false);
   const [isAboutPanelOpen, setIsAboutPanelOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  // Other flows in this project, for duplicate detection (on blur) in the edit modal.
+  const siblingFlowNames = useSiblingFlowNames({
+    projectId: currentFlow?.container_id,
+    flowId: currentFlow?.flow_id,
+    enabled: isEditOpen,
+  });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedOperator, setSelectedOperator] = useState<string | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -1661,6 +1670,8 @@ export function Canvas(): React.JSX.Element {
                 description: currentFlow.description ?? '',
                 tags:        currentFlow.tags ?? [],
               }}
+              existingNames={siblingFlowNames}
+              duplicateNameMessage={intl.formatMessage(createFlowMessages.nameDuplicate)}
               onCancel={() => { setIsEditOpen(false); }}
               onEdit={(updates) => {
                 if (!currentFlow.flow_id) { return Promise.resolve(); }
@@ -1671,10 +1682,14 @@ export function Canvas(): React.JSX.Element {
                     dispatch(updateFlow({ flowId, updates: { name: updates.name, description: updates.description, tags: updates.tags } }));
                     setIsEditOpen(false);
                   })
-                  .catch(() => {
-                    notify.error(intl.formatMessage(messages.saveDetailsError), {
-                      subtitle: intl.formatMessage(messages.saveDetailsErrorSubtitle),
-                    });
+                  .catch((err: unknown) => {
+                    // A 409 is shown inline in the modal as a duplicate-name error.
+                    if (!isConflictError(err)) {
+                      notify.error(intl.formatMessage(messages.saveDetailsError), {
+                        subtitle: intl.formatMessage(messages.saveDetailsErrorSubtitle),
+                      });
+                    }
+                    throw err;
                   });
               }}
             />
