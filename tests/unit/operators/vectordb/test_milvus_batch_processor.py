@@ -9,12 +9,14 @@ Unit tests for MilvusBatchProcessor
 from unittest.mock import MagicMock
 
 import pytest
+from pymilvus.client.types import LoadState
 
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.batch_processor import (
     DEFAULT_BATCH_SIZE,
     MilvusBatchProcessor,
 )
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import VARCHAR_MAX_LENGTH
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
 
 @pytest.fixture
@@ -807,15 +809,19 @@ class TestProcessBatchesEdgeCases:
 class TestQueryAndDeleteEdgeCases:
     """Branches in query/delete not previously exercised."""
 
-    def test_query_by_doc_names_returns_empty_on_exception(self, mock_client):
-        """query_by_doc_names returns [] when client.query raises."""
-        mock_client.query.side_effect = Exception("query error")
+    def test_query_by_doc_names_raises_on_query_failure(self, mock_client):
+        """A failing query raises instead of looking like an empty result."""
+        query_error = Exception("query error")
+        mock_client.get_load_state.return_value = {"state": LoadState.Loaded}
+        mock_client.query.side_effect = query_error
         processor = MilvusBatchProcessor(
             client=mock_client,
             collection_name="test_collection",
         )
-        result = processor.query_by_doc_names(doc_names=["doc1"])
-        assert result == []
+        with pytest.raises(DocpipeException, match="query error") as exc_info:
+            processor.query_by_doc_names(doc_names=["doc1"])
+        assert exc_info.value.__cause__ is query_error
+        assert exc_info.value.status_code == 500
 
     def test_delete_documents_empty_list_returns_zeros(self, mock_client):
         """Deleting an empty id list immediately returns (0, 0) without calling client."""
@@ -976,13 +982,16 @@ class TestQueryPksByDocIds:
         result = processor.get_chunk_ids_for_documents(doc_ids=["doc_a"])
         assert result == {"doc_a": {"pk_valid"}}
 
-    def test_returns_empty_dict_on_exception(self, mock_client) -> None:
-        """A client exception must be swallowed and return {}."""
-        mock_client.query.side_effect = Exception("timeout")
+    def test_raises_on_query_failure(self, mock_client) -> None:
+        """A failed PK query raises so cleanup never mistakes it for 'no stale chunks'."""
+        query_error = Exception("timeout")
+        mock_client.get_load_state.return_value = {"state": LoadState.Loaded}
+        mock_client.query.side_effect = query_error
         processor = MilvusBatchProcessor(
             client=mock_client,
             collection_name="test_collection",
             feature_mappings=[{"feature_name": "doc_id_hash", "mapped_column_name": "doc_id_hash"}],
         )
-        result = processor.get_chunk_ids_for_documents(doc_ids=["doc_a"])
-        assert result == {}
+        with pytest.raises(DocpipeException, match="timeout") as exc_info:
+            processor.get_chunk_ids_for_documents(doc_ids=["doc_a"])
+        assert exc_info.value.__cause__ is query_error
