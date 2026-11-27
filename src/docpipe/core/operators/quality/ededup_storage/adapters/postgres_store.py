@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Atomic PostgreSQL deduplication admissions."""
 
 from typing import Any, cast
@@ -6,6 +9,7 @@ from sqlalchemy import MetaData, Table, text
 from sqlalchemy.dialects.postgresql import insert
 
 from docpipe.core.job_management.adapters.stores.postgres.database import (
+    _postgres_settings,
     create_postgres_engine,
     get_postgres_connection_string,
 )
@@ -19,14 +23,12 @@ class PostgresEdedupStore(EdedupStore):
 
     def __init__(self, *, config: dict[str, Any] | None = None):
         config = config or {}
-        postgres = config.get("postgres", config)
-        wrapped = {"postgres": postgres}
-        connection_string = get_postgres_connection_string(config=wrapped)
+        connection_string = get_postgres_connection_string(config=config)
         if not connection_string:
             raise DocpipeException("PostgreSQL connection not configured for ededup")
-        self._engine = create_postgres_engine(connection_string=connection_string, config=wrapped)
+        self._engine = create_postgres_engine(connection_string=connection_string, config=config)
         try:
-            schema = postgres.get("schema", "ededup_registry")
+            schema = _postgres_settings(config).get("schema") or "ededup_registry"
             metadata = MetaData(schema=schema)
             self._ededup_table = cast(Table, EdedupHashPostgresModel.__table__).to_metadata(metadata)
             with self._engine.begin() as connection:

@@ -28,6 +28,7 @@ from docpipe.core.incremental_metadata.domain import (
     IncrementalMetadataStore,
 )
 from docpipe.core.job_management.adapters.stores.postgres.database import (
+    _postgres_settings,
     create_postgres_engine,
     create_session_factory,
     get_postgres_connection_string,
@@ -64,7 +65,8 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         - DOCPIPE_INCREMENTAL_POSTGRES_SCHEMA (default: incremental_metadata)
     """
 
-    STORE_BACKEND = "postgresql"
+    STORE_BACKEND = "postgres"
+    STORE_BACKEND_ALIASES = ("postgresql",)
 
     def __init__(self, *, config: dict[str, Any] | None = None):
         """
@@ -79,19 +81,8 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
         """
         self.config = config or {}
 
-        # Extract flat postgres config: nested "postgres" key takes precedence
-        postgres_config = self.config.get("postgres")
-        flat_config = postgres_config if isinstance(postgres_config, dict) else self.config
-
-        # Log the config keys being used (without password value)
-        logger.debug("PostgresIncrementalMetadataStore config keys: %s", list(flat_config.keys()))
-
-        # Wrap flat config in expected structure for get_postgres_connection_string
-        # The function expects config["postgres"]["password"], etc.
-        wrapped_config = {"postgres": flat_config}
-
         # Get connection string from config or environment
-        connection_string = get_postgres_connection_string(config=wrapped_config)
+        connection_string = get_postgres_connection_string(config=self.config)
         if not connection_string:
             raise JobStatsStoreInitializationException(
                 message="PostgreSQL connection not configured for incremental metadata. "
@@ -101,13 +92,13 @@ class PostgresIncrementalMetadataStore(IncrementalMetadataStore):
 
         try:
             # Create engine and session factory
-            self._engine = create_postgres_engine(connection_string=connection_string, config=wrapped_config)
+            self._engine = create_postgres_engine(connection_string=connection_string, config=self.config)
             self._session_factory = create_session_factory(engine=self._engine)
 
             # Create schema and incremental metadata table if they don't exist.
             # We copy the SQLAlchemy Table into a per-instance MetaData with the
             # target schema so we never mutate the shared class-level __table__.
-            self.schema_name = flat_config.get("schema", "incremental_metadata")
+            self.schema_name = _postgres_settings(self.config).get("schema") or "incremental_metadata"
             source_table = cast(SATable, IncrementalMetadataPostgresModel.__table__)  # type: ignore[attr-defined]
             instance_metadata = MetaData(schema=self.schema_name)
             self._table = source_table.tometadata(instance_metadata)

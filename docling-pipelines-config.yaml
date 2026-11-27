@@ -63,11 +63,23 @@ job_management:
     type: default
     config: {}
   storage:
-    # Storage backend options: inmemory, json, duckdb, postgresql
-    # Current active: json (file-based storage)
+    # Storage backend options: inmemory, filesystem, duckdb, postgres
+    # ("postgresql" is accepted as an alias for "postgres")
+    # Current active: filesystem (file-based storage)
     type: filesystem
     config:
+      # Run directories are written to <base_dir>/job_stats/<job_run_id>/
+      # ("job_stats" is appended unless base_dir already ends with it)
       base_dir: ./data/job_stats_store_data
+    # PostgreSQL example (flat connection settings; a nested "postgres:" block is also supported
+    # and wins over root keys when both define the same key):
+    # type: postgres
+    # config:
+    #   host: localhost
+    #   port: 5432
+    #   database: docpipe
+    #   user: docpipe_user
+    #   password: "${POSTGRES_PASSWORD}"
 
 
 job_run_report:

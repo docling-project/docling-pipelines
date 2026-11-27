@@ -10,7 +10,8 @@ This guide covers advanced configuration topics for production deployments, dist
 4. [Asset Metadata Storage Configuration](#asset-metadata-storage-configuration)
 5. [Ededup Shared Storage Guidance](#ededup-shared-storage-guidance)
 6. [Execution Models](#execution-models)
-5. [Breaking Changes from the Central Config Loader](#breaking-changes-from-the-central-config-loader)
+7. [Breaking Changes from the Central Config Loader](#breaking-changes-from-the-central-config-loader)
+8. [Breaking Changes from Storage Normalization](#breaking-changes-from-storage-normalization)
 
 ---
 
@@ -505,6 +506,28 @@ Connection settings can still come from `DOCPIPE_POSTGRES_HOST`, `DOCPIPE_POSTGR
 | `list_backends()` on the job run report and flow definition snapshot factories                                                                                                                | `list_storage_types()` |
 | `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`)                                                                                                                     | `AssetRepositoryFactory` (`common/factories/asset_repository_factory.py`) |
 | Module constants `DEFAULT_CONFIG_PATH`, `ENV_CONFIG_PATH_KEY`, `ENV_INCREMENTAL_BASE_DIR_KEY` in the factory modules                                                                          | `docpipe.utils.infrastructure.config_utils` (`ENV_INCREMENTAL_BASE_DIR_KEY` is removed) |
+
+---
+
+## Breaking Changes from Storage Normalization
+
+`postgres` is now the canonical PostgreSQL backend name, and `postgresql` is accepted as an alias in every storage factory. PostgreSQL connection settings can be flat or nested under `postgres`; the nested value wins when both define a key. These two changes are backward compatible. The job stats directory layout is not.
+
+### Job stats directory layout
+
+`JsonJobStatsStore` now appends `job_stats` to an explicit `base_dir` unless the path already ends in `job_stats`. Run directories are always `<base_dir>/job_stats/<job_run_id>/`. Existing run directories located directly at `<base_dir>/<job_run_id>/` (for example under `./data/job_stats_store_data/` in previous versions) are no longer listed or read by the store. Setting `base_dir: <base_dir>/job_stats` does not keep existing runs readable without moving files.
+
+`DOCPIPE_JOB_STATS_BASE_DIR` is also a `base_dir`: the `job_stats` suffix is appended to it in the same way, and its value is not used verbatim. The migration below is required whether `base_dir` comes from YAML or from `DOCPIPE_JOB_STATS_BASE_DIR`.
+
+Move existing run directories into the `<base_dir>/job_stats/` subdirectory:
+
+```bash
+mkdir -p <base_dir>/job_stats
+for d in <base_dir>/*/; do
+  name=$(basename "$d")
+  [ "$name" = "job_stats" ] || mv "$d" <base_dir>/job_stats/
+done
+```
 
 ---
 

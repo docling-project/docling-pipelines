@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Ededup operator, shared admission, and storage configuration unit tests."""
 
 import ast
@@ -643,7 +646,7 @@ def test_config_precedence_and_nested_defaults(tmp_path):
         )
     )
     selected = EdedupStoreFactory.from_config_file(str(path))
-    assert selected.backend == "postgresql"
+    assert selected.backend == "postgres"
     assert selected.config == {"postgres": {"host": "shared", "schema": "ededup"}}
     path.write_text(
         yaml.safe_dump(
@@ -824,3 +827,37 @@ def test_postgres_schema_default_and_override(*, mocked_postgres_store, schema):
         assert store._ededup_table.schema == (schema or "ededup_registry")
     finally:
         store.close()
+
+
+def test_ededup_factory_accepts_postgres_and_postgresql_aliases():
+    """EdedupStoreFactory accepts both postgres and postgresql and normalizes to postgres."""
+    for backend_name in ("postgres", "postgresql", "POSTGRES", "PostgreSQL"):
+        factory = EdedupStoreFactory(backend=backend_name)
+        assert factory.backend == "postgres"
+
+
+def test_postgres_ededup_store_mixed_company_db_and_example_password(monkeypatch):
+    """PostgresEdedupStore with mixed config uses both root host and nested password."""
+    from docpipe.core.operators.quality.ededup_storage.adapters import postgres_store
+
+    mock_engine = Mock()
+    mock_conn = Mock()
+    mock_engine.begin.return_value.__enter__ = Mock(return_value=mock_conn)
+    mock_engine.begin.return_value.__exit__ = Mock(return_value=False)
+    mock_engine.dialect.identifier_preparer.quote_schema.return_value = '"ededup_registry"'
+
+    captured_url = []
+
+    def mock_create_engine(*, connection_string, config):
+        captured_url.append(connection_string)
+        return mock_engine
+
+    monkeypatch.setattr(postgres_store, "create_postgres_engine", mock_create_engine)
+    monkeypatch.setattr(postgres_store.Table, "create", Mock())
+
+    config = {"host": "company-db", "postgres": {"password": "example-password"}}  # pragma: allowlist secret
+    store = postgres_store.PostgresEdedupStore(config=config)
+    assert store is not None
+    assert len(captured_url) == 1
+    assert "company-db" in captured_url[0]
+    assert "example-password" in captured_url[0]

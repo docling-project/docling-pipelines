@@ -167,6 +167,29 @@ class TestInit:
             lock_call = str(calls[0][0][0])
             assert "pg_advisory_xact_lock" in lock_call
 
+    def test_init_with_mixed_company_db_and_example_password(self):
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_engine.begin.return_value.__enter__ = lambda *a: mock_conn
+        mock_engine.begin.return_value.__exit__ = Mock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}.get_postgres_connection_string", wraps=None) as mock_conn_str,
+            patch(f"{_MODULE}.create_postgres_engine", return_value=mock_engine),
+            patch(f"{_MODULE}.create_session_factory", return_value=MagicMock()),
+            patch(f"{_MODULE}.MetaData"),
+            patch(f"{_MODULE}.cast", return_value=MagicMock()),
+        ):
+            mock_conn_str.return_value = "postgresql+psycopg2://docpipe_user:example-password@company-db:5432/docpipe"  # pragma: allowlist secret
+            config = {"host": "company-db", "postgres": {"password": "example-password"}}  # pragma: allowlist secret
+            from docpipe.core.incremental_metadata.adapters.stores.postgres.postgres_incremental_store import (
+                PostgresIncrementalMetadataStore,
+            )
+
+            store = PostgresIncrementalMetadataStore(config=config)
+            assert store is not None
+            mock_conn_str.assert_called_once_with(config=config)
+
     def test_raises_wraps_init_exception_in_job_stats_exc(self):
         """Any unexpected exception during init is wrapped in JobStatsStoreInitializationException."""
         mock_engine = MagicMock()

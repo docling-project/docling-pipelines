@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 JsonJobStatsStore - Filesystem-based storage adapter
 
@@ -70,8 +73,10 @@ class JsonJobStatsStore(JobStatsStore):
         """
         Initialize JSON storage with deterministic base path and lock timeout.
 
-        If ``base_dir`` is provided, it is used directly. Otherwise falls back to
-        [`get_data_path()`](src/docpipe_app/backend/common/util/infrastructure/filesystem.py:13).
+        If ``base_dir`` is provided, the store appends ``job_stats`` unless the path already
+        ends with ``job_stats``. Otherwise falls back to
+        [`get_data_path()`](src/docpipe_app/backend/common/util/infrastructure/filesystem.py:13)
+        with the ``/job_stats`` sub-directory.
 
         Args:
             base_dir: Optional explicit storage root for job stats
@@ -80,7 +85,8 @@ class JsonJobStatsStore(JobStatsStore):
         if base_dir is None:
             resolved_base_dir = Path(get_data_path(sub_dir=JOB_STATS_SUBDIR))
         else:
-            resolved_base_dir = Path(base_dir)
+            resolved = Path(base_dir)
+            resolved_base_dir = resolved if resolved.name == "job_stats" else resolved / "job_stats"
 
         self._base_dir = resolved_base_dir
         self._lock_timeout = lock_timeout

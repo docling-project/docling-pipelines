@@ -18,12 +18,17 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from docpipe.exceptions.docpipe_exceptions import DatabaseMigrationException
-from docpipe.storage.postgres.connection import create_postgres_engine, get_postgres_connection_string
+from docpipe.storage.postgres.connection import (
+    _postgres_settings,
+    create_postgres_engine,
+    get_postgres_connection_string,
+)
 from docpipe.utils.infrastructure.logging import get_logger
 
 __all__ = [
     "ALEMBIC_INI_PATH",
     "MIGRATIONS_DIR",
+    "_postgres_settings",
     "create_postgres_engine",
     "create_session_factory",
     "get_postgres_connection_string",

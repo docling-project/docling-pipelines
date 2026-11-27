@@ -74,13 +74,25 @@ class IncrementalMetadataFactory:
         if not hasattr(store_class, "STORE_BACKEND"):
             raise TypeError(f"Store class {store_class.__name__} must define STORE_BACKEND")
 
-        backend_name: str = store_class.STORE_BACKEND  # type: ignore[attr-defined]
+        backends: list[str] = []
+        primary_backend = store_class.STORE_BACKEND
+        if isinstance(primary_backend, (list, tuple, set)):
+            backends.extend(primary_backend)
+        else:
+            backends.append(str(primary_backend))
 
-        if backend_name in cls._stores:
-            logger.warning("Store backend '%s' is already registered. Overwriting.", backend_name)
+        aliases = getattr(store_class, "STORE_BACKEND_ALIASES", ())
+        if isinstance(aliases, (list, tuple, set)):
+            backends.extend(aliases)
+        elif isinstance(aliases, str):
+            backends.append(aliases)
 
-        cls._stores[backend_name] = store_class
-        logger.debug("Registered incremental metadata store: %s", backend_name)
+        for backend_name in backends:
+            if backend_name in cls._stores:
+                logger.warning("Store backend '%s' is already registered. Overwriting.", backend_name)
+
+            cls._stores[backend_name] = store_class
+            logger.debug("Registered incremental metadata store: %s", backend_name)
         return store_class
 
     @classmethod
@@ -106,14 +118,15 @@ class IncrementalMetadataFactory:
     def get_store(self) -> IncrementalMetadataStore:
         """Return the singleton store, creating it on first call."""
         if self._store is None:
-            if self._storage_type not in IncrementalMetadataFactory._stores:
+            normalized_type = self._storage_type.lower() if isinstance(self._storage_type, str) else self._storage_type
+            if normalized_type not in IncrementalMetadataFactory._stores:
                 available = ", ".join(IncrementalMetadataFactory._stores.keys()) or "none"
                 raise DocpipeException(
                     f"Unknown incremental metadata store backend: '{self._storage_type}'. Available backends: {available}"
                 )
-            store_class = IncrementalMetadataFactory._stores[self._storage_type]
+            store_class = IncrementalMetadataFactory._stores[normalized_type]
             self._store = store_class(config=self._config)  # type: ignore[call-arg]
-            logger.info("Created IncrementalMetadataStore: backend=%s", self._storage_type)
+            logger.info("Created IncrementalMetadataStore: backend=%s", normalized_type)
         return self._store
 
     def get_service(self) -> IncrementalUpdateService:

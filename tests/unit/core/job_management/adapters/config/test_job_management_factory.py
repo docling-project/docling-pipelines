@@ -468,3 +468,49 @@ class TestJobManagementFactory:
         factory.initialize_storage()
         mock_migrate.assert_not_called()
         assert factory.config.get("storage_initialized") is True
+
+    def test_resolve_worker_env_mixed_company_db_and_example_password(self):
+        """Mixed example required by spec: host at root, password nested."""
+        config = {
+            "host": "company-db",
+            "postgres": {
+                "password": "example-password",  # pragma: allowlist secret
+            },
+        }
+        factory = JobManagementFactory(storage_backend=StorageBackend.POSTGRES, config=config)
+        with patch.dict(os.environ, {}, clear=True):
+            env = factory.resolve_worker_env()
+        assert env.get("DOCPIPE_POSTGRES_HOST") == "company-db"
+        assert env.get("DOCPIPE_POSTGRES_PASSWORD") == "example-password"
+
+    def test_create_default_factory_postgres_precedence_and_warning(self, tmp_path, monkeypatch):
+        """job_management.postgres takes precedence over storage.config.postgres and logs a warning."""
+        config_path = tmp_path / "config.yaml"
+        config_data = {
+            "job_management": {
+                "storage": {
+                    "type": "postgres",
+                    "config": {
+                        "postgres": {
+                            "host": "new-db",
+                        }
+                    },
+                },
+                "postgres": {
+                    "host": "old-db",
+                },
+            }
+        }
+        config_path.write_text(yaml.safe_dump(config_data))
+        monkeypatch.setenv("DOCPIPE_CONFIG_PATH", str(config_path))
+        DocpipeConfigLoader.reset()
+
+        with patch.object(_factory_mod.logger, "warning") as mock_warning:
+            factory = JobManagementFactory.create_default_factory()
+
+        assert factory.storage_backend in (StorageBackend.POSTGRES, StorageBackend.POSTGRESQL)
+        assert factory.config.get("postgres", {}).get("host") == "old-db"
+        assert any(
+            "job_management.postgres" in call.args[0] and "job_management.storage.config.postgres" in call.args[0]
+            for call in mock_warning.call_args_list
+        )

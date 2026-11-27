@@ -121,7 +121,13 @@ class PostgresStorageUtils:
             errors.append("Configuration 'postgres' must be a mapping of connection settings")
             return errors
 
-        schema = cls.get_postgres_section(config=config).get(SCHEMA_CONFIG_KEY, DEFAULT_ASSET_SCHEMA)
+        postgres_section = cls.get_postgres_section(config=config)
+        raw_schema = (
+            postgres_section.get(SCHEMA_CONFIG_KEY)
+            if SCHEMA_CONFIG_KEY in postgres_section
+            else config.get(SCHEMA_CONFIG_KEY)
+        )
+        schema = raw_schema if raw_schema is not None else DEFAULT_ASSET_SCHEMA
         if not isinstance(schema, str) or not _SCHEMA_NAME_PATTERN.match(schema):
             errors.append(
                 "Configuration 'postgres.schema' must be a lowercase PostgreSQL identifier "
@@ -139,7 +145,12 @@ class PostgresStorageUtils:
         Returns:
             Schema name (default ``docpipe_assets``).
         """
-        return str(cls.get_postgres_section(config=config).get(SCHEMA_CONFIG_KEY, DEFAULT_ASSET_SCHEMA))
+        postgres_section = cls.get_postgres_section(config=config)
+        if SCHEMA_CONFIG_KEY in postgres_section and postgres_section[SCHEMA_CONFIG_KEY] is not None:
+            return str(postgres_section[SCHEMA_CONFIG_KEY])
+        if SCHEMA_CONFIG_KEY in config and config[SCHEMA_CONFIG_KEY] is not None:
+            return str(config[SCHEMA_CONFIG_KEY])
+        return DEFAULT_ASSET_SCHEMA
 
     @classmethod
     def get_engine(cls, *, config: dict[str, Any], owner: str) -> Engine:
@@ -162,7 +173,7 @@ class PostgresStorageUtils:
         """
         from docpipe.storage.postgres.connection import get_shared_postgres_engine
 
-        engine = get_shared_postgres_engine(postgres=cls.get_postgres_section(config=config), owner=owner)
+        engine = get_shared_postgres_engine(postgres=config, owner=owner)
         if engine is None:
             raise RepositoryConfigurationException(
                 f"PostgreSQL connection is not configured for {owner}: set 'postgres.password' in the "

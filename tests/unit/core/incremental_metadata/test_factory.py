@@ -71,7 +71,23 @@ class TestIncrementalMetadataFactory:
         """Test that registered backends appear in list_backends()."""
         backends = IncrementalMetadataFactory.list_backends()
         assert "filesystem" in backends
+        assert "postgres" in backends
         assert "postgresql" in backends
+
+    def test_create_postgres_store_with_aliases(self, monkeypatch):
+        """Test creating postgres store using postgres and postgresql aliases (case-insensitive)."""
+        mock_store = object()
+        monkeypatch.setattr(
+            "docpipe.core.incremental_metadata.adapters.config.incremental_metadata_factory.IncrementalMetadataFactory._stores",
+            {
+                "filesystem": FilesystemIncrementalMetadataStore,
+                "postgres": lambda config: mock_store,
+                "postgresql": lambda config: mock_store,
+            },
+        )
+        for alias in ("postgres", "postgresql", "POSTGRES", "PostgreSQL"):
+            factory = IncrementalMetadataFactory(storage_type=alias)
+            assert factory.get_store() is mock_store
 
 
 class TestGetDefaultFactory:
