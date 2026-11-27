@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Job Report Generator Module
 
@@ -851,7 +854,6 @@ class JobReportGenerator:
                 "Ensure the flow completed successfully and generated parquet output files.",
                 ingest_node_id,
             )
-            return all_docs
 
         # Initialize documents from parquet data
         for doc_id, row_data in ingest_data.items():
@@ -870,8 +872,44 @@ class JobReportGenerator:
             )
 
         logger.info("Initialized %s documents from ingest operator parquet file", len(all_docs))
+        self._add_ingest_skipped_docs(all_docs=all_docs, ingest_node_id=ingest_node_id)
         logger.info("Sample document entry: %s", next(iter(all_docs.values())) if all_docs else "No docs")
         return all_docs
+
+    def _add_ingest_skipped_docs(self, *, all_docs: dict[str, dict[str, Any]], ingest_node_id: str) -> None:
+        """
+        Add entries for documents the ingest node skipped.
+
+        The ingest operator records extension-filtered and already-processed documents
+        as skipped and drops them, so they never reach its parquet output. The file name
+        comes from the skip entry in the node metadata when it is there.
+
+        Args:
+            all_docs: Dictionary of document information to update
+            ingest_node_id: ID of the ingest node
+        """
+        node_stats = self.job_stats.node_stats.get(ingest_node_id)
+        if not node_stats or not node_stats.skipped_docs:
+            return
+
+        skip_entries = ((node_stats.node_metadata or {}).get("node_metadata") or {}).get("skipped_docs") or []
+        names = {
+            entry.get("id"): entry.get("name")
+            for entry in skip_entries
+            if isinstance(entry, dict) and entry.get("name")
+        }
+
+        added = 0
+        for doc_id in node_stats.skipped_docs:
+            if doc_id in all_docs:
+                continue
+            all_docs[doc_id] = self._create_doc_entry(
+                doc_name=names.get(doc_id, doc_id), modified_time=None, timestamp_str=""
+            )
+            added += 1
+
+        if added:
+            logger.info("Added %s documents skipped by the ingest node", added)
 
     def _update_page_count_from_parquet(self, all_docs: dict[str, dict[str, Any]], doc_id: str, row_data: dict) -> bool:
         """Update page count for a single document from parquet data."""

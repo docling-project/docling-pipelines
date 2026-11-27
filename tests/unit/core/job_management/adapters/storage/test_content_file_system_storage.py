@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """Tests for ContentFileSystemStorage."""
 
 import pytest
@@ -114,6 +117,16 @@ class TestWriteAndReadText:
         storage.write_text(collection="deep/nested/job/run", file_name="r.csv", content="x")
 
         assert (tmp_path / "deep" / "nested" / "job" / "run" / "r.csv").exists()
+
+    def test_write_and_read_text_keep_line_endings(self, tmp_path):
+        """CSV content with \\r\\n line endings is stored and read back unchanged (#386)."""
+        storage = _storage(tmp_path)
+        content = "GUID,Status\r\nd1,Ingested\r\n"
+
+        storage.write_text(collection="job/run", file_name="r.csv", content=content)
+
+        assert (tmp_path / "job" / "run" / "r.csv").read_bytes() == content.encode("utf-8")
+        assert storage.read_text(collection="job/run", file_name="r.csv") == content
 
 
 class TestFileExists:

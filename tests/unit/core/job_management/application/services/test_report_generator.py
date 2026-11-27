@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: The Docling-pipeline Contributors
+# SPDX-License-Identifier: MIT
+
 """
 Unit tests for JobReportGenerator
 
@@ -721,6 +724,66 @@ class TestInitializeDocsFromIngest:
             report_data = generator.generate_report_data()
 
         assert report_data == []
+
+    @staticmethod
+    def _ingest_skip_generator(*, skipped_docs: list[str], skip_entries: list[dict]) -> JobReportGenerator:
+        ingest_stats = NodeStats(
+            id=INGEST_NODE_ID,
+            name="ingest_local",
+            total_docs=["d1", *skipped_docs],
+            skipped_docs=skipped_docs,
+            node_metadata={
+                "id": INGEST_NODE_ID,
+                "operator": "ingest_source",
+                "node_metadata": {"skipped_docs": skip_entries, "failed_docs": []},
+            },
+        )
+        dest_stats = NodeStats(id=DEST_NODE_ID, name="vectordb", docs_completed=["d1"])
+        job_stats = JobStats(
+            job_id=JOB_ID,
+            job_run_id=JOB_RUN_ID,
+            status=ExecutionStatus.COMPLETED,
+            node_stats={INGEST_NODE_ID: ingest_stats, DEST_NODE_ID: dest_stats},
+        )
+        dag_nodes = [
+            {"id": INGEST_NODE_ID, "name": "ingest_local", "input_edges": [], "output_edges": [DEST_NODE_ID]},
+            {"id": DEST_NODE_ID, "name": "vectordb", "input_edges": [INGEST_NODE_ID], "output_edges": []},
+        ]
+        return JobReportGenerator(
+            job_stats=job_stats,
+            dag_nodes=dag_nodes,
+            node_metadata_list=_build_node_metadata_list(node_stats=job_stats.node_stats),
+        )
+
+    def test_report_includes_docs_skipped_by_ingest(self):
+        """Docs the ingest node skipped are not in its parquet but still get a Skipped row (#386)."""
+        generator = self._ingest_skip_generator(
+            skipped_docs=["d2"],
+            skip_entries=[{"id": "d2", "name": "notes.txt", "reason": "Extension not included"}],
+        )
+        parquet_returns = {INGEST_NODE_ID: {"d1": {"id": "d1", "name": "a.pdf", "modified_time": 1704067200}}}
+
+        with patch.object(generator, "_read_parquet_file", side_effect=lambda n, **_: parquet_returns.get(n, {})):
+            rows = {row["GUID"]: row for row in generator.generate_report_data()}
+
+        assert set(rows) == {"d1", "d2"}
+        assert rows["d1"]["Status"] == "Ingested"
+        assert rows["d2"]["File name"] == "notes.txt"
+        assert rows["d2"]["Status"] == "Skipped"
+        assert rows["d2"]["Status reason"] == "Extension not included"
+        assert rows["d2"]["Time stamp"] == ""
+
+    def test_report_lists_skipped_docs_when_ingest_parquet_is_empty(self):
+        """If every document was skipped at ingest, the report still lists them, named by id without metadata."""
+        generator = self._ingest_skip_generator(skipped_docs=["d2", "d3"], skip_entries=[])
+
+        with patch.object(generator, "_read_parquet_file", return_value={}):
+            rows = generator.generate_report_data()
+
+        assert [(row["GUID"], row["File name"], row["Status"]) for row in rows] == [
+            ("d2", "d2", "Skipped"),
+            ("d3", "d3", "Skipped"),
+        ]
 
 
 class TestCreateDocEntry:

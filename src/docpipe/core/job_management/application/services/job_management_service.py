@@ -62,8 +62,8 @@ def _extract_flow_name_from_snapshot(flow_def: dict[str, Any]) -> str | None:
     Handles two formats:
     - Authoring format (CLI / Library): ``flow_def["flow_name"]``
     - Elyra format (API / UI):
-        ``flow_def["pipelines"][0]["app_data"]["ds_flow"]["name"]``
-        with a fallback to ``app_data["ui_data"]["name"]``
+        ``flow_def["pipelines"][0]["app_data"]["ui_data"]["name"]``
+        with a fallback to ``app_data["ds_flow"]["name"]``
     """
     from docpipe.utils.orchestration.elyra_converter import ElyraConstants
 
