@@ -58,7 +58,7 @@ import type { NodeFeatureMap } from '@/utils/fetchNodeFeatures';
 import type { FeatureAttributes } from '@/types';
 import styles from './CommonPropertiesPanel.module.scss';
 import { PROPERTIES_PANEL_CONSTANTS } from '@/constants/propertiesPanelConstants';
-import { hasAnyRequiredParamMissing } from '@/utils/requiredParamValidation';
+import { shouldDisableSave } from './saveValidation';
 import { messages } from './CommonPropertiesPanel.messages';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 
@@ -167,14 +167,15 @@ export function CommonPropertiesPanel({
     [operatorMetadata, operatorName]
   );
 
-  // Disable the Save button whenever readOnly or at least one required attribute is missing a value.
+  // Disable the Save button whenever readOnly, a required attribute is missing a value,
+  // or an operator-specific value (e.g. chunker chunk_size) is out of range.
   const updateSaveButton = useCallback((): void => {
     const propertyValues = (controller?.getPropertyValues?.() ?? {}) as Record<string, unknown>;
 
-    const shouldDisable = isReadOnly || hasAnyRequiredParamMissing(nodeAttributes, propertyValues);
+    const shouldDisable = isReadOnly || shouldDisableSave(operatorName, nodeAttributes, propertyValues);
 
     controller?.setSaveButtonDisable?.(shouldDisable);
-  }, [controller, nodeAttributes, isReadOnly]);
+  }, [controller, nodeAttributes, isReadOnly, operatorName]);
 
   useEffect(() => {
     updateSaveButton();

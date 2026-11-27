@@ -40,6 +40,8 @@ import {
   type ChunkType,
   type BreakpointThresholdType,
 } from './constants';
+import { getChunkSizeRange, isChunkSizeOutOfRange } from './chunkSizeValidation';
+import { buildRangeText } from '../shared/rangeValidation';
 import { messages } from './Chunker.messages';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { useProviderConfigDefaults } from '@/hooks/useProviderConfigDefaults';
@@ -177,6 +179,10 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
   const validate = getRequiredParamValidator(nodeAttributes);
   const chunkTypeValidation = validate(ATTR.CHUNK_TYPE, chunkType);
   const chunkSizeValidation = validate(ATTR.CHUNK_SIZE, chunkSize);
+  // Range is per chunk type (simple: characters, hybrid: tokens); revalidates on chunk type change
+  const chunkSizeRange = getChunkSizeRange(chunkType);
+  const chunkSizeOutOfRange = isChunkSizeOutOfRange(chunkType, chunkSize);
+  const chunkSizeRangeText = buildRangeText(intl, chunkSizeRange?.min, chunkSizeRange?.max);
   const chunkOverlapValidation = validate(ATTR.CHUNK_OVERLAP, chunkOverlap);
   const chunkOverlapPercentageValidation = validate(
     ATTR.CHUNK_OVERLAP_PERCENTAGE, chunkOverlapPercentage
@@ -342,14 +348,15 @@ export function ChunkerPanelBody({ controller }: ChunkerPanelBodyProps): React.J
               label={intl.formatMessage(messages.chunkSize)}
               hideLabel
               value={chunkSize}
-              min={isHybrid ? 100 : 500}
-              max={isHybrid ? 2048 : 5000}
-              step={isHybrid ? 64 : 100}
-              invalid={chunkSizeValidation.isInvalid}
-              invalidText={chunkSizeValidation.errorMessage}
+              min={chunkSizeRange?.min}
+              max={chunkSizeRange?.max}
+              step={chunkSizeRange?.step}
+              invalid={chunkSizeValidation.isInvalid || chunkSizeOutOfRange}
+              invalidText={chunkSizeOutOfRange ? chunkSizeRangeText : chunkSizeValidation.errorMessage}
               onChange={(_e: unknown, { value }: { value: number | string }) => {
                 const n = Number(value);
-                if (Number.isFinite(n) && n > 0) { update(ATTR.CHUNK_SIZE, n); }
+                // Out-of-range values are stored on purpose so they are flagged and block Save
+                if (value !== '' && Number.isFinite(n)) { update(ATTR.CHUNK_SIZE, n); }
               }}
             />
           </div>

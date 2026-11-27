@@ -148,6 +148,42 @@ describe('CommonPropertiesWrapper', () => {
     expect(mockElyraPropsController.setSaveButtonDisable).not.toHaveBeenCalled();
   });
 
+  it('propertyListener disables Save for an out-of-range chunker chunk_size and re-enables it when valid', () => {
+    renderWrapper();
+
+    const callbacks = getCallbacks();
+    const mockElyraPropsController = {
+      getPropertyValues: vi.fn<() => Record<string, unknown>>(() => ({ chunk_type: 'simple', chunk_size: 499 })),
+      setSaveButtonDisable: vi.fn(),
+    };
+
+    callbacks.controllerHandler(mockElyraPropsController);
+    callbacks.propertyListener({});
+    expect(mockElyraPropsController.setSaveButtonDisable).toHaveBeenLastCalledWith(true);
+
+    mockElyraPropsController.getPropertyValues.mockReturnValue({ chunk_type: 'simple', chunk_size: 500 });
+    callbacks.propertyListener({});
+    expect(mockElyraPropsController.setSaveButtonDisable).toHaveBeenLastCalledWith(false);
+  });
+
+  it('propertyListener revalidates chunk_size when chunk_type changes', () => {
+    renderWrapper();
+
+    const callbacks = getCallbacks();
+    const mockElyraPropsController = {
+      getPropertyValues: vi.fn<() => Record<string, unknown>>(() => ({ chunk_type: 'simple', chunk_size: 3000 })),
+      setSaveButtonDisable: vi.fn(),
+    };
+
+    callbacks.controllerHandler(mockElyraPropsController);
+    callbacks.propertyListener({});
+    expect(mockElyraPropsController.setSaveButtonDisable).toHaveBeenLastCalledWith(false);
+
+    mockElyraPropsController.getPropertyValues.mockReturnValue({ chunk_type: 'hybrid', chunk_size: 3000 });
+    callbacks.propertyListener({});
+    expect(mockElyraPropsController.setSaveButtonDisable).toHaveBeenLastCalledWith(true);
+  });
+
   it('handles propertyListener and calls setSaveButtonDisable based on required param validation', () => {
     renderWrapper();
 

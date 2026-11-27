@@ -48,6 +48,25 @@ export const BREAKPOINT_THRESHOLD_TYPES = [
 ] as const;
 export type BreakpointThresholdType = typeof BREAKPOINT_THRESHOLD_TYPES[number];
 
+// ── Chunk size ranges ─────────────────────────────────────────────────────────
+
+export interface ChunkSizeRange {
+  min: number;
+  max: number;
+  /** Suggested increment for the NumberInput stepper. */
+  step: number;
+}
+
+/**
+ * Supported chunk_size range per chunk type.
+ * simple = characters, hybrid = tokens. Semantic chunking does not use chunk_size.
+ * Mirrors the backend limits in ChunkerOperator (CHUNK_MIN/MAX_SIZE, DOCLING_CHUNK_SIZE_*).
+ */
+export const CHUNK_SIZE_RANGE: Partial<Record<ChunkType, ChunkSizeRange>> = {
+  simple: { min: 500, max: 5000, step: 100 },
+  hybrid: { min: 100, max: 2048, step: 64 },
+};
+
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
 export const CHUNKER_DEFAULTS = {
