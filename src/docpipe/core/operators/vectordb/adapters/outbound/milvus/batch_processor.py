@@ -12,12 +12,15 @@ import json
 from typing import Any
 
 from pymilvus import DataType, MilvusClient
+from pymilvus.client.types import LoadState
 
 from docpipe.core.constants import OperatorConstants
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import (
     FEATURE_TYPE_TO_MILVUS_DTYPE,
     VARCHAR_MAX_LENGTH,
 )
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     build_mapping_dict,
@@ -93,6 +96,8 @@ class MilvusBatchProcessor:
             content_field_name=self._content_field_name,
             primary_key_field=self.primary_key_field,
         )
+        # Set once the collection is confirmed loaded, so later queries skip the state check.
+        self._collection_loaded: bool = False
 
     def prepare_document(self, *, row_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -322,6 +327,95 @@ class MilvusBatchProcessor:
 
         return total_success, all_failed
 
+    def _ensure_collection_loaded(self) -> bool:
+        """Load the collection before a query when it is not already loaded.
+
+        A collection reopened in a new process reports ``NotLoad`` and rejects queries
+        until it is loaded.
+
+        Returns:
+            False when the collection does not exist yet, so the caller can skip the query
+            and return an empty result. True when the collection is loaded and queryable.
+
+        Raises:
+            DocpipeException: If the load state cannot be read or the collection cannot be loaded
+        """
+        if self._collection_loaded:
+            return True
+        try:
+            state = self.client.get_load_state(collection_name=self.collection_name)["state"]
+            if state == LoadState.NotExist:
+                return False
+            if state != LoadState.Loaded:
+                self.client.load_collection(collection_name=self.collection_name)
+            self._collection_loaded = True
+            return True
+        except Exception as e:
+            raise DocpipeException(
+                message=f"MilvusDB Error: Failed to load collection '{self.collection_name}': {e}",
+                status_code=500,
+                error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
+            ) from e
+
+    def _load_state_changed(self) -> bool:
+        """Report whether the collection is no longer in the ``Loaded`` state.
+
+        Used after a query failed on a cached loaded flag. A failure to read the state counts as
+        unchanged, so the original query error is the one reported.
+        """
+        try:
+            state = self.client.get_load_state(collection_name=self.collection_name)["state"]
+        except Exception:
+            return False
+        return bool(state != LoadState.Loaded)
+
+    def _query_loaded(
+        self, *, operation: str, filter_expr: str, output_fields: list[str]
+    ) -> list[dict[str, Any]] | None:
+        """Run a query against a loaded collection, recovering once from a stale loaded flag.
+
+        The cached ``_collection_loaded`` flag goes stale when another client releases or drops
+        the collection during the processor's lifetime. When a query fails on a cached flag and the
+        collection is no longer ``Loaded``, the flag is cleared and the load is redone once. Any
+        other failure is raised without a retry.
+
+        Args:
+            operation: Short description of the query, used in the error message
+            filter_expr: Milvus filter expression
+            output_fields: Fields to return
+
+        Returns:
+            The matching rows, or None when the collection does not exist
+
+        Raises:
+            DocpipeException: If the collection cannot be loaded or the query fails
+        """
+        for attempt in (1, 2):
+            was_cached: bool = self._collection_loaded
+            if not self._ensure_collection_loaded():
+                return None
+            try:
+                rows: list[dict[str, Any]] = self.client.query(
+                    collection_name=self.collection_name,
+                    filter=filter_expr,
+                    output_fields=output_fields,
+                )
+                return rows
+            except Exception as e:
+                if was_cached and attempt == 1 and self._load_state_changed():
+                    logger.warning(
+                        "Collection '%s' is no longer loaded, reloading before retrying the query",
+                        self.collection_name,
+                    )
+                    self._collection_loaded = False
+                    continue
+                raise DocpipeException(
+                    message=f"MilvusDB Error: {operation} failed for collection '{self.collection_name}': {e}",
+                    status_code=500,
+                    error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
+                ) from e
+        return None  # pragma: no cover - the loop always returns or raises
+
     def query_by_doc_names(self, *, doc_names: list[str], fields: list[str] | None = None) -> list[dict[str, Any]]:
         """
         Query documents by their names (IDs).
@@ -332,21 +426,16 @@ class MilvusBatchProcessor:
 
         Returns:
             List of matching documents
+
+        Raises:
+            DocpipeException: If the collection cannot be loaded or the query fails
         """
-        try:
-            # Build filter expression
-            filter_expr = f"{self.primary_key_field} in {doc_names}"
-
-            # Query documents
-            return self.client.query(
-                collection_name=self.collection_name,
-                filter=filter_expr,
-                output_fields=fields or ["*"],
-            )
-
-        except Exception as e:
-            logger.error("Query by doc names failed: %s", e)
-            return []
+        rows = self._query_loaded(
+            operation="Query by doc names",
+            filter_expr=f"{self.primary_key_field} in {doc_names}",
+            output_fields=fields or ["*"],
+        )
+        return rows if rows is not None else []
 
     def delete_documents_by_ids(self, *, doc_ids: list[str]) -> tuple[int, int]:
         """
@@ -425,29 +514,25 @@ class MilvusBatchProcessor:
         if not doc_ids:
             return {}
 
-        try:
-            result: dict[str, set[str]] = {}
+        result: dict[str, set[str]] = {}
 
-            # Chunk PKs are "{sha3_512(file_id)}_{sha3_512(chunk_content)}".
-            # Hash each file_id to reconstruct the stored prefix, then prefix-match.
-            for doc_id in doc_ids:
-                file_hash_prefix: str = hashlib.sha3_512(doc_id.encode()).hexdigest()
-                filter_expr = f'{self.primary_key_field} like "{file_hash_prefix}_%"'
-                rows: list[dict[str, Any]] = self.client.query(
-                    collection_name=self.collection_name,
-                    filter=filter_expr,
-                    output_fields=[self.primary_key_field],
-                )
-                for row in rows:
-                    chunk_pk: str = str(row.get(self.primary_key_field, ""))
-                    if chunk_pk:
-                        result.setdefault(doc_id, set()).add(chunk_pk)
+        # Chunk PKs are "{sha3_512(file_id)}_{sha3_512(chunk_content)}".
+        # Hash each file_id to reconstruct the stored prefix, then prefix-match.
+        for doc_id in doc_ids:
+            file_hash_prefix: str = hashlib.sha3_512(doc_id.encode()).hexdigest()
+            rows = self._query_loaded(
+                operation="Query of chunk PKs",
+                filter_expr=f'{self.primary_key_field} like "{file_hash_prefix}_%"',
+                output_fields=[self.primary_key_field],
+            )
+            if rows is None:
+                return {}
+            for row in rows:
+                chunk_pk: str = str(row.get(self.primary_key_field, ""))
+                if chunk_pk:
+                    result.setdefault(doc_id, set()).add(chunk_pk)
 
-            return result
-
-        except Exception as e:
-            logger.error("Error querying PKs by doc IDs: %s", e)
-            return {}
+        return result
 
     def _fill_unmapped_content_field(self, *, doc: dict[str, Any], row_data: dict[str, Any]) -> None:
         """Write the chunk text into the collection's content field when no mapping covers it.
