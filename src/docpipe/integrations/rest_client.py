@@ -15,8 +15,7 @@ This module provides a flexible REST client that supports:
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Final, TypedDict
-from urllib.parse import unquote_plus, urlsplit, urlunsplit
+from typing import Any, TypedDict
 
 import requests
 from requests import Response
@@ -30,6 +29,12 @@ from tenacity import (
 from docpipe.exceptions.docpipe_exceptions import ExternalServiceError
 from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.url_sanitizer import (
+    REDACTED,
+    sanitize_url,
+    sanitize_urls_in_text,
+    split_text_and_urls,
+)
 
 logger = get_logger(__name__)
 
@@ -79,7 +84,7 @@ METHOD_CONFIG: dict[RestMethod, MethodConfig] = {
 }
 
 
-def sanitize_sensitive_data(data: Any, redact_value: str = "***REDACTED***") -> Any:
+def sanitize_sensitive_data(data: Any, redact_value: str = REDACTED) -> Any:
     """
     Redact sensitive information from data for logging purposes.
 
@@ -111,109 +116,19 @@ def sanitize_sensitive_data(data: Any, redact_value: str = "***REDACTED***") -> 
         return [sanitize_sensitive_data(item, redact_value) for item in data]
 
     if isinstance(data, str):
-        sanitized_str = data
-        for pattern, replacement in sensitive_patterns:
-            sanitized_str = re.sub(pattern, replacement, sanitized_str, flags=re.IGNORECASE)
-        return sanitized_str
+        # URLs get the parameter-aware redaction (keeps "&x=1" after a masked value, catches "tempauth" and "sig");
+        # the keyword patterns only run on the text between URLs so they cannot re-eat the rest of a query string.
+        sanitized_parts: list[str] = []
+        for text, is_url in split_text_and_urls(text=data):
+            if is_url:
+                sanitized_parts.append(sanitize_url(text, redact_value=redact_value))
+                continue
+            for pattern, replacement in sensitive_patterns:
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            sanitized_parts.append(text)
+        return "".join(sanitized_parts)
 
     return data
-
-
-_REDACTED: Final[str] = "***REDACTED***"
-
-# Query/fragment parameter names (lower-cased, with "-" and "_" removed) whose value is a credential.
-# Pre-authenticated download URLs, for example the Microsoft Graph ``@microsoft.graph.downloadUrl``
-# (``tempauth``), AWS presigned URLs (``X-Amz-Signature``) and Azure SAS URLs (``sig``), carry the
-# credential in the query string.
-_SENSITIVE_URL_PARAM_KEYWORDS: Final[tuple[str, ...]] = (
-    "token",
-    "auth",
-    "secret",
-    "password",
-    "passwd",
-    "credential",
-    "signature",
-    "apikey",
-)
-_SENSITIVE_URL_PARAM_NAMES: Final[frozenset[str]] = frozenset({"sig", "key", "code"})
-
-_URL_IN_TEXT_PATTERN: Final[re.Pattern[str]] = re.compile(r"https?://[^\s'\"<>)]+")
-# urllib3 and requests report connection failures as "with url: /path?query" without a scheme or host
-_REQUEST_PATH_IN_TEXT_PATTERN: Final[re.Pattern[str]] = re.compile(r"(with url: )([^\s'\"<>)]+)")
-
-
-def _is_sensitive_url_param(*, name: str) -> bool:
-    """Return True when a URL parameter name indicates that its value is a credential."""
-    normalized = unquote_plus(name).lower().replace("-", "").replace("_", "")
-    return normalized in _SENSITIVE_URL_PARAM_NAMES or any(
-        keyword in normalized for keyword in _SENSITIVE_URL_PARAM_KEYWORDS
-    )
-
-
-def _redact_url_params(*, params: str, redact_value: str) -> str:
-    """Redact the value of every credential parameter in an ``a=b&c=d`` query or fragment string."""
-    redacted_parts: list[str] = []
-    for part in params.split("&"):
-        name, separator, _ = part.partition("=")
-        if separator and _is_sensitive_url_param(name=name):
-            redacted_parts.append(f"{name}={redact_value}")
-        else:
-            redacted_parts.append(part)
-    return "&".join(redacted_parts)
-
-
-def sanitize_url(url: str, *, redact_value: str = _REDACTED) -> str:
-    """
-    Redact credentials from a URL so that it can be logged or placed in an error message.
-
-    The scheme, host, path and non-sensitive query parameters are kept so that logs stay useful. Embedded
-    ``user:password@`` credentials are dropped, and the value of any query or fragment parameter that
-    looks like a credential (``tempauth``, ``token``, ``sig``, ``X-Amz-Signature`` and similar) is replaced.
-
-    Args:
-        url: A full URL or a path with a query string
-        redact_value: The string to substitute for redacted values (default: "***REDACTED***")
-
-    Returns:
-        The URL with credentials redacted, or ``redact_value`` when the URL cannot be parsed
-    """
-    try:
-        parts = urlsplit(url)
-        host = parts.netloc.rpartition("@")[2]
-        query = _redact_url_params(params=parts.query, redact_value=redact_value) if parts.query else ""
-        fragment = _redact_url_params(params=parts.fragment, redact_value=redact_value) if "=" in parts.fragment else ""
-        return urlunsplit((parts.scheme, host, parts.path, query, fragment or parts.fragment))
-    except ValueError:
-        return redact_value
-
-
-def sanitize_urls_in_text(text: str, *, redact_value: str = _REDACTED) -> str:
-    """
-    Redact credentials from every URL embedded in free text such as an exception message.
-
-    Args:
-        text: Text that may contain ``http(s)://`` URLs or ``with url: /path?query`` fragments
-        redact_value: The string to substitute for redacted values (default: "***REDACTED***")
-
-    Returns:
-        The text with credentials in URLs redacted
-    """
-    text = _URL_IN_TEXT_PATTERN.sub(lambda match: sanitize_url(match.group(0), redact_value=redact_value), text)
-    return _REQUEST_PATH_IN_TEXT_PATTERN.sub(
-        lambda match: match.group(1) + sanitize_url(match.group(2), redact_value=redact_value), text
-    )
-
-
-def _redact_request_exception(error: requests.exceptions.RequestException) -> str:
-    """
-    Remove URL credentials from a ``requests`` exception and return its safe text.
-
-    ``requests`` puts the full request URL in the exception message. The exception is chained to the
-    ``ExternalServiceError`` that callers log with a traceback, so its arguments are rewritten in place.
-    """
-    safe_text = sanitize_urls_in_text(str(error))
-    error.args = (safe_text,)
-    return safe_text
 
 
 @dataclass
@@ -474,21 +389,21 @@ class RestClient:
 
             return response
 
-        except requests.exceptions.HTTPError as e:
-            safe_error = _redact_request_exception(e)
-            logger.error("Request failed: %s", safe_error)
-            raise ExternalServiceError(
-                message=f"REST request failed: {safe_error}",
-                error_code=ErrorCode.HTTP_ERROR,
-                status_code=e.response.status_code if e.response is not None else None,
-            ) from e
         except requests.exceptions.RequestException as e:
-            safe_error = _redact_request_exception(e)
+            safe_error = sanitize_urls_in_text(str(e))
             logger.error("Request failed: %s", safe_error)
-            raise ExternalServiceError(
-                message=f"REST request failed: {safe_error}",
-                error_code=ErrorCode.CONNECTION_ERROR,
-            ) from e
+            if isinstance(e, requests.exceptions.HTTPError):
+                error_kwargs: dict[str, Any] = {
+                    "error_code": ErrorCode.HTTP_ERROR,
+                    "status_code": e.response.status_code if e.response is not None else None,
+                }
+            else:
+                error_kwargs = {"error_code": ErrorCode.CONNECTION_ERROR}
+
+        # Raised outside the except block on purpose: the requests exception, and the urllib3 error chained to it,
+        # echo the request URL including its credentials. Raising here leaves neither in __cause__ or __context__,
+        # so no traceback or exception-chain walker can reach them, and the caller's exception is not modified.
+        raise ExternalServiceError(message=f"REST request failed: {safe_error}", **error_kwargs)
 
     def _call_rest_method_impl(
         self,

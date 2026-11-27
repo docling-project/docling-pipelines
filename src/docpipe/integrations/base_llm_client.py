@@ -16,6 +16,7 @@ from typing import Any, Callable, ClassVar, TypeVar
 
 from docpipe.exceptions.docpipe_exceptions import ConfigurationError, DependencyError, ExternalServiceError
 from docpipe.utils.infrastructure.logging import get_logger
+from docpipe.utils.infrastructure.url_sanitizer import REDACTED
 
 logger = get_logger(__name__)
 
@@ -144,7 +145,7 @@ class BaseLLMClient(ABC):
         sanitized = {}
         for key, value in config.items():
             if any(sensitive in key.lower() for sensitive in BaseLLMClient.SENSITIVE_KEYS):
-                sanitized[key] = "***REDACTED***"
+                sanitized[key] = REDACTED
             else:
                 sanitized[key] = value
         return sanitized

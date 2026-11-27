@@ -201,3 +201,14 @@ class TestExtractMsgraphFileIdErrors:
         url = "https://contoso.sharepoint.com/?id=%2Fsites%2Fteam%2FShared%20Documents%2Fa.docx"
 
         assert extract_msgraph_file_id_from_url(url) == "/sites/team/Shared Documents/a.docx"
+
+
+def test_unparseable_url_log_masks_credentials(caplog):
+    """The warning for a URL without a file ID does not echo URL credentials."""
+    url = "https://contoso.sharepoint.com/sites/team/page?tempauth=FAKE-TEMPAUTH-VALUE"
+
+    with caplog.at_level("WARNING"):
+        assert extract_msgraph_file_id_from_url(url) is None
+
+    assert "FAKE-TEMPAUTH-VALUE" not in caplog.text
+    assert "tempauth=***REDACTED***" in caplog.text
