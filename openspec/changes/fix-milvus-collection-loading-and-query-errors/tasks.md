@@ -35,4 +35,4 @@
 - [x] 5.4 [backend] Run `interrogate` on the changed source file (100%)
 - [x] 5.5 [backend] Run `bandit==1.8.6` on the changed source file
 - [x] 5.6 [backend] Run `openspec validate fix-milvus-collection-loading-and-query-errors --strict` (pinned `@fission-ai/openspec@1.15.0` via npx; `validate --all --strict --no-interactive` also passes, 58 of 58)
-- [ ] 5.7 [backend] Confirm `employee_policy` collection is unchanged (no test writes to it). Server tests only create and drop `docpipe_it_*` collections and refuse to drop any other name; the collection is still present and `NotLoad`, but no row-count baseline was captured before the run, so this stays open for the owner to confirm
+- [x] 5.7 [backend] Confirm `employee_policy` collection is unchanged (no test writes to it). Server tests only create and drop `docpipe_it_*` collections and refuse to drop any other name. The Milvus server log shows no create, drop, insert, delete, load, release or flush event on `employee_policy` after the test session began; the collection is still present and `NotLoad`
