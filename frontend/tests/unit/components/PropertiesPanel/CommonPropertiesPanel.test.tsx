@@ -50,6 +50,20 @@ describe('CommonPropertiesPanel', () => {
     expect(screen.getByText('Output')).toBeDefined();
   });
 
+  it('disables Save on mount when the stored chunker chunk_size is out of range', () => {
+    const controller = makeController();
+    controller.getPropertyValues.mockReturnValue({ chunk_type: 'simple', chunk_size: 100 });
+    renderWithProviders(<CommonPropertiesPanel controller={controller} />);
+    expect(controller.setSaveButtonDisable).toHaveBeenLastCalledWith(true);
+  });
+
+  it('enables Save on mount when the stored chunker chunk_size is within range', () => {
+    const controller = makeController();
+    controller.getPropertyValues.mockReturnValue({ chunk_type: 'hybrid', chunk_size: 512 });
+    renderWithProviders(<CommonPropertiesPanel controller={controller} />);
+    expect(controller.setSaveButtonDisable).toHaveBeenLastCalledWith(false);
+  });
+
   it('renders without crashing when controller is undefined', () => {
     const { container } = renderWithProviders(
       <CommonPropertiesPanel controller={undefined} />

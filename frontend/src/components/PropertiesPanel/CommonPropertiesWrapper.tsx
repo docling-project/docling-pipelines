@@ -10,7 +10,7 @@ import {
   CommonProperties,
 } from '@elyra/canvas';
 import CommonPropertiesPanelWrapper from './CommonPropertiesPanelWrapper';
-import { hasAnyRequiredParamMissing } from '@/utils/requiredParamValidation';
+import { shouldDisableSave } from './saveValidation';
 import type { OperatorFeature, OperatorMetadata } from '@/types';
 
 // Correcting Elyra's typing for getPropertyValues as it does not internally type `options` as optional
@@ -97,9 +97,7 @@ export function CommonPropertiesWrapper({
       const attrs: Record<string, OperatorFeature> =
         selectedOperator ? (operatorMetadata[selectedOperator]?.attributes ?? {}) : {};
 
-      const shouldDisable = hasAnyRequiredParamMissing(attrs, propertyValues);
-
-      controller.setSaveButtonDisable?.(shouldDisable);
+      controller.setSaveButtonDisable?.(shouldDisableSave(selectedOperator, attrs, propertyValues));
     },
     [operatorMetadata, selectedOperator, readOnly]
   );

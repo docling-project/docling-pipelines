@@ -30,11 +30,12 @@ import {
   Toggle,
 } from '@carbon/react';
 import { DefinitionTooltip } from '@carbon/react';
-import { useIntl, type IntlShape } from 'react-intl';
+import { useIntl } from 'react-intl';
 import { JsonTextArea, ListInput, VaultInput } from '@/components/common';
 import type { OperatorFeature } from '@/types';
 import common from '../../CommonPropertiesPanel.module.scss';
 import { messages } from './ProviderFieldsForm.messages';
+import { buildRangeText, isOutOfRange } from './rangeValidation';
 
 // ── Hidden fields ─────────────────────────────────────────────────────────────
 // Fields that are intentionally suppressed from the provider form because they
@@ -81,24 +82,6 @@ function asStringArray(v: unknown): string[] {
     return v.split(',').map((s) => s.trim()).filter(Boolean);
   }
   return [];
-}
-
-function buildRangeText(intl: IntlShape, minValue?: number, maxValue?: number): string | undefined {
-  if (minValue !== undefined && maxValue !== undefined) {
-    return intl.formatMessage(messages.rangeAllowed, { min: minValue, max: maxValue });
-  }
-  if (minValue !== undefined) {return intl.formatMessage(messages.minimumAllowed, { min: minValue });}
-  if (maxValue !== undefined) {return intl.formatMessage(messages.maximumAllowed, { max: maxValue });}
-  return undefined;
-}
-
-function isOutOfRange(value: number | string, minValue?: number, maxValue?: number): boolean {
-  if (value === '') {return false;}
-  const n = Number(value);
-  if (!Number.isFinite(n)) {return false;}
-  if (minValue !== undefined && n < minValue) {return true;}
-  if (maxValue !== undefined && n > maxValue) {return true;}
-  return false;
 }
 
 // ── NullableNumberInput ───────────────────────────────────────────────────────
