@@ -905,4 +905,50 @@ describe('ProjectDetail page', () => {
       expect(document.body).toBeInTheDocument();
     }
   });
+
+  // ── handleEditFlow: 409 vs other failures ─────────────────────────────────
+  describe('editing a flow name that fails to save', () => {
+    async function submitEditWith(status: number) {
+      server.use(
+        http.get('/api/projects/:id/flows', () =>
+          HttpResponse.json({
+            flows: [{
+              flow_id: 'flow-1', name: 'My Flow', description: '', tags: [], container_id: 'proj-1',
+              container_kind: 'project', created_on: '2024-01-01T00:00:00Z', modified_on: '2024-06-01T00:00:00Z',
+              job_run_summary: null,
+            }],
+            total_count: 1,
+          })
+        ),
+        http.patch('/api/flows/:id', () => HttpResponse.json({ errors: [] }, { status }))
+      );
+      const { store } = renderProjectDetail('proj-1', {
+        projects: { loading: false, error: null, items: { 'proj-1': SAMPLE_PROJECT } },
+        flow: { ...EMPTY_FLOW_STATE, items: { 'flow-1': SAMPLE_FLOW } },
+      });
+      await waitFor(() => { expect(document.querySelector('.cds--overflow-menu')).not.toBeNull(); });
+      fireEvent.click(document.querySelector('.cds--overflow-menu') as HTMLElement);
+      fireEvent.click(await screen.findByText('Edit details'));
+      const nameInput = await screen.findByRole('textbox', { name: /^name$/i });
+      fireEvent.change(nameInput, { target: { value: 'Some New Name' } });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^save$/i })); });
+      return store;
+    }
+
+    const activeToasts = (store: Awaited<ReturnType<typeof submitEditWith>>) =>
+      (store.getState() as { notifications: { active: Array<{ title: string }> } }).notifications.active;
+
+    it('409 shows the inline duplicate error and no generic failure toast', async () => {
+      const store = await submitEditWith(409);
+      expect(await screen.findByText(/already exists/i)).toBeInTheDocument();
+      expect(activeToasts(store).some((n) => /failed to update flow/i.test(n.title))).toBe(false);
+    });
+
+    it('a non-409 failure still shows the generic failure toast', async () => {
+      const store = await submitEditWith(500);
+      await waitFor(() => {
+        expect(activeToasts(store).some((n) => /failed to update flow/i.test(n.title))).toBe(true);
+      });
+    });
+  });
 });

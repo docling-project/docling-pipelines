@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../utils/renderWithProviders';
 import { FlowsTable } from '@/components/ProjectDetail/FlowsTable/FlowsTable';
 import type { FlowRow } from '@/types';
@@ -361,6 +362,43 @@ describe('FlowsTable', () => {
     } else {
       expect(document.body).toBeInTheDocument();
     }
+  });
+
+  describe('edit flow duplicate-name validation', () => {
+    const DUPLICATE_MSG = 'A flow with this name already exists. Please choose a unique name.';
+
+    async function openEditModalForMyFlow() {
+      const utils = renderTable();
+      const firstMenu = document.querySelectorAll('.cds--overflow-menu')[0] as HTMLElement;
+      fireEvent.click(firstMenu);
+      fireEvent.click(await screen.findByText('Edit details'));
+      const nameInput = await screen.findByRole('textbox', { name: /^name$/i });
+      return { ...utils, nameInput };
+    }
+
+    it('renaming to another flow in the project is rejected', async () => {
+      const { onEditFlow, nameInput } = await openEditModalForMyFlow();
+      await userEvent.clear(nameInput);
+      await userEvent.type(nameInput, 'Error Flow');
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      expect(screen.getByText(DUPLICATE_MSG)).toBeInTheDocument();
+      expect(onEditFlow).not.toHaveBeenCalled();
+    });
+
+    it('renaming to a unique name is saved', async () => {
+      const { onEditFlow, nameInput } = await openEditModalForMyFlow();
+      await userEvent.clear(nameInput);
+      await userEvent.type(nameInput, 'Totally New Name');
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      expect(onEditFlow).toHaveBeenCalledWith('flow-1', expect.objectContaining({ name: 'Totally New Name' }));
+    });
+
+    it('saving without changing the name is not treated as a duplicate', async () => {
+      const { onEditFlow } = await openEditModalForMyFlow();
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      expect(screen.queryByText(DUPLICATE_MSG)).toBeNull();
+      expect(onEditFlow).toHaveBeenCalledWith('flow-1', expect.objectContaining({ name: 'My Flow' }));
+    });
   });
 
   it('Delete overflow item opens DeleteModal and confirming calls onDeleteFlow', async () => {

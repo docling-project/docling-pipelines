@@ -11,6 +11,7 @@ import {
   TextArea,
 } from '@carbon/react';
 import { useIntl } from 'react-intl';
+import { isConflictError } from '@/utils/httpErrors';
 import { TagInput } from '../TagInput';
 import { messages } from './EditDetailsModal.messages';
 import styles from './EditDetailsModal.module.scss';
@@ -37,6 +38,17 @@ interface EditDetailsModalProps {
   readonly onEdit: (updates: { name: string; description: string; tags: string[] }) => Promise<void>;
   /** Optional error message to show as an inline notification. */
   readonly error?: string | null;
+  /**
+   * Names already used by other entities of the same kind. Must NOT include the entity
+   * being edited, so saving without renaming is never reported as a duplicate.
+   * Compared trimmed and case-insensitively, like the create modals.
+   */
+  readonly existingNames?: string[];
+  /**
+   * Inline error shown under the name field for a duplicate name. Duplicate detection
+   * (client-side and on a 409 from `onEdit`) is only active when this is provided.
+   */
+  readonly duplicateNameMessage?: string;
 }
 
 /**
@@ -57,12 +69,15 @@ export function EditDetailsModal({
   onCancel,
   onEdit,
   error = null,
+  existingNames = [],
+  duplicateNameMessage,
 }: EditDetailsModalProps): React.JSX.Element {
   const intl = useIntl();
   const [name, setName] = useState(initialValues.name);
   const [description, setDescription] = useState(initialValues.description);
   const [tags, setTags] = useState<string[]>(initialValues.tags);
   const [nameInvalid, setNameInvalid] = useState(false);
+  const [nameDuplicate, setNameDuplicate] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -71,12 +86,24 @@ export function EditDetailsModal({
       setDescription(initialValues.description);
       setTags([...initialValues.tags]);
       setNameInvalid(false);
+      setNameDuplicate(false);
     }
   }, [open, initialValues.name, initialValues.description, initialValues.tags]);
 
   const handleCancel = (): void => {
     setNameInvalid(false);
+    setNameDuplicate(false);
     onCancel();
+  };
+
+  const isDuplicate = (value: string): boolean => {
+    const trimmed = value.trim().toLowerCase();
+    if (!duplicateNameMessage || !trimmed) { return false; }
+    return existingNames.some((n) => n.trim().toLowerCase() === trimmed);
+  };
+
+  const handleNameBlur = (): void => {
+    if (isDuplicate(name)) { setNameDuplicate(true); }
   };
 
   const handleSave = (): void => {
@@ -84,13 +111,19 @@ export function EditDetailsModal({
       setNameInvalid(true);
       return;
     }
+    if (isDuplicate(name)) {
+      setNameDuplicate(true);
+      return;
+    }
     setSaving(true);
     onEdit({ name: name.trim(), description, tags })
       .then(() => {
         setSaving(false);
       })
-      .catch(() => {
-        // parent surfaces the error; modal stays open on failure
+      .catch((err: unknown) => {
+        // parent surfaces the error; modal stays open on failure.
+        // A 409 means the name is taken (e.g. the local list was stale) - show it inline.
+        if (duplicateNameMessage && isConflictError(err)) { setNameDuplicate(true); }
         setSaving(false);
       });
   };
@@ -124,9 +157,11 @@ export function EditDetailsModal({
             onChange={(e) => {
               setName(e.target.value);
               if (e.target.value.trim()) { setNameInvalid(false); }
+              setNameDuplicate(false);
             }}
-            invalid={nameInvalid}
-            invalidText={intl.formatMessage(messages.nameRequired)}
+            onBlur={handleNameBlur}
+            invalid={nameInvalid || nameDuplicate}
+            invalidText={nameDuplicate ? duplicateNameMessage : intl.formatMessage(messages.nameRequired)}
             disabled={saving}
           />
 
@@ -153,7 +188,7 @@ export function EditDetailsModal({
         <Button kind="secondary" onClick={handleCancel} disabled={saving} className={styles.footerBtn}>
           {intl.formatMessage(messages.cancel)}
         </Button>
-        <Button kind="primary" onClick={handleSave} disabled={saving} className={styles.footerBtn}>
+        <Button kind="primary" onClick={handleSave} disabled={saving || nameDuplicate} className={styles.footerBtn}>
           {saving ? <InlineLoading description={intl.formatMessage(messages.saving)} /> : intl.formatMessage(messages.save)}
         </Button>
       </ModalFooter>

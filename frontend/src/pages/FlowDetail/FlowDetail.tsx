@@ -21,7 +21,7 @@ import { POLL_INTERVAL_MS } from '@/constants/jobRunStatus';
 import { setFlow, updateFlow, setLoading, setError, setCurrentFlow } from '@/slices/flowSlice';
 import { setProject } from '@/slices/projectsSlice';
 import { makeSelectFlow, makeSelectProject, selectCurrentFlow } from '@/selectors';
-import { useAppDispatch, useAppSelector, useNotify, useTheme } from '@/hooks';
+import { useAppDispatch, useAppSelector, useNotify, useSiblingFlowNames, useTheme } from '@/hooks';
 import { useRecentlyVisited } from '@/hooks/useRecentlyVisited';
 import { ROUTES, generateRoute } from '@/config';
 import { useBreadcrumbActions } from '@/contexts';
@@ -29,6 +29,7 @@ import { formatEpochToDisplay, formatElapsedTime } from '@/utils/dateTimeUtils';
 import { FlowInfoPanel } from '@/components/common/FlowInfoPanel';
 import { FlowMetrics, FlowRunsTable } from '@/components/FlowDetail';
 import type { RunMetrics, RunRow } from '@/components/FlowDetail';
+import { messages as createFlowMessages } from '@/components/ProjectDetail/CreateFlowTearsheet/CreateFlowTearsheet.messages';
 import { messages } from './FlowDetail.messages';
 import styles from './FlowDetail.module.scss';
 
@@ -119,6 +120,8 @@ export function FlowDetail(): React.JSX.Element | null {
   const [runsError, setRunsError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  // Other flows in this project, for duplicate detection (on blur) in the edit modal.
+  const siblingFlowNames = useSiblingFlowNames({ projectId: flowRow?.project_id, flowId, enabled: editOpen });
   const [deleteTarget, setDeleteTarget] = useState<RunRow | null>(null);
 
   // ── Bootstrap: fetch flow if not in store (deep link / page refresh) ───
@@ -409,6 +412,8 @@ export function FlowDetail(): React.JSX.Element | null {
         open={editOpen}
         title={intl.formatMessage(messages.editModalTitle)}
         initialValues={{ name: flowRow.name, description: flowRow.description, tags: flowRow.tags }}
+        existingNames={siblingFlowNames}
+        duplicateNameMessage={intl.formatMessage(createFlowMessages.nameDuplicate)}
         onCancel={() => { setEditOpen(false); }}
         onEdit={(updates) => handleEditSave(flowRow.flow_id, updates)}
       />

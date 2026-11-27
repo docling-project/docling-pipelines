@@ -1175,3 +1175,179 @@ class TestFlowServiceContainerIdFilter:
         service = FlowService(repository=mock_flow_repository)
 
         assert service.count_flows(container_id="project-xyz") == 2
+
+
+class TestFlowServiceRenameUniqueness:
+    """Regression tests: renaming a flow must not collide with another flow's name."""
+
+    def test_update_flow_rename_to_existing_name_raises_conflict(self, mock_flow_repository, sample_flow_with_id):
+        stored = Flow.from_dict(data=sample_flow_with_id.to_dict())
+        mock_flow_repository.find_by_id.return_value = stored
+        mock_flow_repository.exists_by_name.return_value = True
+        service = FlowService(repository=mock_flow_repository)
+        sample_flow_with_id.name = "test-pipeline-2"
+
+        with pytest.raises(FlowAlreadyExistsException, match="already exists"):
+            service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
+
+        mock_flow_repository.exists_by_name.assert_called_once_with(name="test-pipeline-2")
+        mock_flow_repository.update.assert_not_called()
+
+    def test_update_flow_rename_to_unique_name_succeeds(self, mock_flow_repository, sample_flow_with_id):
+        stored = Flow.from_dict(data=sample_flow_with_id.to_dict())
+        mock_flow_repository.find_by_id.return_value = stored
+        mock_flow_repository.exists_by_name.return_value = False
+        mock_flow_repository.update.return_value = sample_flow_with_id
+        service = FlowService(repository=mock_flow_repository)
+        sample_flow_with_id.name = "brand-new-name"
+
+        service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
+
+        mock_flow_repository.update.assert_called_once()
+
+    def test_update_flow_without_rename_skips_name_check(self, mock_flow_repository, sample_flow_with_id):
+        """Saving a flow under its own name must never be reported as a duplicate."""
+        mock_flow_repository.find_by_id.return_value = Flow.from_dict(data=sample_flow_with_id.to_dict())
+        mock_flow_repository.exists_by_name.return_value = True  # would be True for its own name
+        mock_flow_repository.update.return_value = sample_flow_with_id
+        service = FlowService(repository=mock_flow_repository)
+
+        service.update_flow(sample_flow_with_id, actor=SYSTEM_ACTOR)
+
+        mock_flow_repository.exists_by_name.assert_not_called()
+        mock_flow_repository.update.assert_called_once()
+
+    def test_partial_update_rename_to_existing_name_raises_conflict(self, mock_flow_repository, sample_flow_with_id):
+        mock_flow_repository.find_by_id.return_value = sample_flow_with_id
+        mock_flow_repository.exists_by_name.return_value = True
+        service = FlowService(repository=mock_flow_repository)
+
+        with pytest.raises(FlowAlreadyExistsException, match="already exists"):
+            service.partial_update_flow("test-flow-id-123", {"name": "test-pipeline-2"}, actor=SYSTEM_ACTOR)
+
+        mock_flow_repository.partial_update.assert_not_called()
+
+    def test_partial_update_rename_to_unique_name_succeeds(self, mock_flow_repository, sample_flow_with_id):
+        mock_flow_repository.find_by_id.return_value = sample_flow_with_id
+        mock_flow_repository.exists_by_name.return_value = False
+        mock_flow_repository.partial_update.return_value = sample_flow_with_id
+        service = FlowService(repository=mock_flow_repository)
+
+        service.partial_update_flow("test-flow-id-123", {"name": "brand-new-name"}, actor=SYSTEM_ACTOR)
+
+        mock_flow_repository.partial_update.assert_called_once()
+
+    def test_partial_update_same_name_skips_name_check(self, mock_flow_repository, sample_flow_with_id):
+        mock_flow_repository.find_by_id.return_value = sample_flow_with_id
+        mock_flow_repository.exists_by_name.return_value = True
+        mock_flow_repository.partial_update.return_value = sample_flow_with_id
+        service = FlowService(repository=mock_flow_repository)
+
+        service.partial_update_flow(
+            "test-flow-id-123", {"name": sample_flow_with_id.name, "description": "changed"}, actor=SYSTEM_ACTOR
+        )
+
+        mock_flow_repository.exists_by_name.assert_not_called()
+        mock_flow_repository.partial_update.assert_called_once()
+
+    def test_partial_update_without_name_skips_name_check(self, mock_flow_repository, sample_flow_with_id):
+        mock_flow_repository.find_by_id.return_value = sample_flow_with_id
+        mock_flow_repository.partial_update.return_value = sample_flow_with_id
+        service = FlowService(repository=mock_flow_repository)
+
+        service.partial_update_flow("test-flow-id-123", {"description": "only description"}, actor=SYSTEM_ACTOR)
+
+        mock_flow_repository.exists_by_name.assert_not_called()
+
+
+class TestFlowServiceRenameUniquenessWithLocalRepository:
+    """End-to-end rename checks against the real (default) filesystem repository."""
+
+    @staticmethod
+    def _make_flow(*, name: str, container_id: str, sample_flow_data: dict) -> Flow:
+        return Flow(
+            name=name,
+            description="",
+            definition=sample_flow_data["definition"],
+            tags=[],
+            container_kind="project",
+            container_id=container_id,
+        )
+
+    @pytest.fixture
+    def service(self, tmp_path) -> FlowService:
+        from docpipe.core.assets.common.adapters.repositories.local_asset_repository import LocalAssetRepository
+
+        return FlowService(repository=LocalAssetRepository(asset_type=Flow, storage_path=str(tmp_path)))
+
+    def test_patch_rename_to_existing_name_in_same_project_is_rejected(self, service, sample_flow_data):
+        service.create_flow(
+            flow=self._make_flow(name="test-pipeline-2", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+        other = service.create_flow(
+            flow=self._make_flow(name="test-pipeline-3", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+
+        with pytest.raises(FlowAlreadyExistsException):
+            service.partial_update_flow(other.flow_id, {"name": "test-pipeline-2"}, actor=SYSTEM_ACTOR)
+
+        assert service.get_flow(other.flow_id).name == "test-pipeline-3"
+
+    def test_patch_rename_to_unique_name_persists(self, service, sample_flow_data):
+        flow = service.create_flow(
+            flow=self._make_flow(name="test-pipeline-3", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+
+        service.partial_update_flow(flow.flow_id, {"name": "test-pipeline-4"}, actor=SYSTEM_ACTOR)
+
+        assert service.get_flow(flow.flow_id).name == "test-pipeline-4"
+
+    def test_patch_keeping_own_name_succeeds(self, service, sample_flow_data):
+        flow = service.create_flow(
+            flow=self._make_flow(name="test-pipeline-3", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+
+        result = service.partial_update_flow(
+            flow.flow_id, {"name": "test-pipeline-3", "description": "edited"}, actor=SYSTEM_ACTOR
+        )
+
+        assert result.name == "test-pipeline-3"
+        assert result.description == "edited"
+
+    def test_put_rename_to_existing_name_is_rejected(self, service, sample_flow_data):
+        service.create_flow(
+            flow=self._make_flow(name="test-pipeline-2", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+        other = service.create_flow(
+            flow=self._make_flow(name="test-pipeline-3", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+        replacement = self._make_flow(name="test-pipeline-2", container_id="proj-a", sample_flow_data=sample_flow_data)
+        replacement.flow_id = other.flow_id
+
+        with pytest.raises(FlowAlreadyExistsException):
+            service.update_flow(replacement, actor=SYSTEM_ACTOR)
+
+        assert service.get_flow(other.flow_id).name == "test-pipeline-3"
+
+    def test_same_name_in_different_project_follows_global_uniqueness_rule(self, service, sample_flow_data):
+        """Flow names are unique across the whole system (create_flow uses a global check).
+
+        Renaming must follow the same rule, so a name used in another project is also rejected.
+        """
+        service.create_flow(
+            flow=self._make_flow(name="shared-name", container_id="proj-a", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+        other = service.create_flow(
+            flow=self._make_flow(name="other-name", container_id="proj-b", sample_flow_data=sample_flow_data),
+            actor=SYSTEM_ACTOR,
+        )
+
+        with pytest.raises(FlowAlreadyExistsException):
+            service.partial_update_flow(other.flow_id, {"name": "shared-name"}, actor=SYSTEM_ACTOR)

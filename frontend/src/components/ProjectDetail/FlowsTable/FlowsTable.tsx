@@ -17,6 +17,7 @@ import { useIntl } from 'react-intl';
 import type { FlowRow, FlowRunStatus } from '@/types';
 import { SharedDataTable, EditDetailsModal, DeleteModal, PermissionTooltip } from '@/components/common';
 import { usePermissionReason } from '@/hooks';
+import { messages as createFlowMessages } from '../CreateFlowTearsheet/CreateFlowTearsheet.messages';
 import { messages } from './FlowsTable.messages';
 import styles from './FlowsTable.module.scss';
 
@@ -286,6 +287,8 @@ export function FlowsTable({
           description: editTarget?.description ?? '',
           tags: editTarget?.tags ?? [],
         }}
+        existingNames={rows.filter((r) => r.flow_id !== editTarget?.flow_id).map((r) => r.name)}
+        duplicateNameMessage={intl.formatMessage(createFlowMessages.nameDuplicate)}
         onCancel={() => { setEditTarget(null); }}
         onEdit={(updates) =>
           onEditFlow(editTarget?.flow_id ?? '', updates).then(() => {

@@ -147,6 +147,25 @@ class FlowService(AssetService[Flow]):
 
         return updates
 
+    def _ensure_name_available_on_rename(self, *, existing: Flow, new_name: str | None) -> None:
+        """Reject a rename that would collide with another flow's name.
+
+        Applies the same uniqueness rule as ``create_flow``. Nothing is checked
+        when the name is unchanged, so saving a flow without renaming it never fails.
+
+        Args:
+            existing: The stored flow, before the update.
+            new_name: The name the flow would have after the update.
+
+        Raises:
+            FlowAlreadyExistsException: If another flow already uses ``new_name``.
+        """
+        if new_name is None or new_name == existing.name:
+            return
+        if self._repository.exists_by_name(name=new_name):
+            logger.warning("Attempted to rename flow %s to existing name: %s", existing.flow_id, new_name)
+            raise FlowAlreadyExistsException(f"Flow with name '{new_name}' already exists", flow_name=new_name)
+
     def _validate_flow_id(self, flow_id: str) -> str:
         """Validate that flow_id is not None, empty, or whitespace.
 
@@ -373,6 +392,7 @@ class FlowService(AssetService[Flow]):
             FlowInvalidDataException: If flow_id is None, empty, or if flow validation fails
                        (invalid name, definition, etc.).
             FlowNotFoundException: If flow with given ID does not exist in repository.
+            FlowAlreadyExistsException: If the flow is renamed to a name another flow already uses.
             PermissionDeniedException: If ``actor`` may not modify the flow.
             FlowStorageException: If update operation fails (I/O errors, permission issues, etc.).
         """
@@ -391,6 +411,8 @@ class FlowService(AssetService[Flow]):
             raise FlowNotFoundException(f"Flow {flow.flow_id} not found", flow_id=flow.flow_id)
 
         ensure_can_modify(actor=actor, owner=existing.created_by, action="flow.update", target=flow.flow_id)
+
+        self._ensure_name_available_on_rename(existing=existing, new_name=flow.name)
 
         # Preserve protected fields from the stored flow so a full-replacement PUT
         # never overwrites created_on / created_by with the current timestamp.
@@ -751,6 +773,7 @@ class FlowService(AssetService[Flow]):
             ValueError: If flow_id is empty, updates is empty dictionary, or if
                        validation fails after applying updates.
             FileNotFoundError: If flow with given ID does not exist in repository.
+            FlowAlreadyExistsException: If the flow is renamed to a name another flow already uses.
             PermissionDeniedException: If ``actor`` may not modify the flow.
             Exception: If update operation fails (I/O errors, permission issues, etc.).
         """
@@ -784,6 +807,8 @@ class FlowService(AssetService[Flow]):
         if not validated_updates:
             logger.info("No valid fields to update for flow %s", flow_id)
             return existing_flow
+
+        self._ensure_name_available_on_rename(existing=existing_flow, new_name=validated_updates.get("name"))
 
         if not actor.is_system:
             validated_updates["modified_by"] = actor.username
