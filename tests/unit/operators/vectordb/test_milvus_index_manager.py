@@ -746,6 +746,8 @@ class TestCreateCollectionEdgeCases:
         manager.create_collection(dimension_mapping={"embeddings": 384})
         mock_client.create_collection.assert_called_once()
         mock_client.create_index.assert_called_once()
+        # A server-mode collection starts NotLoad; create_collection loads it once indexed.
+        mock_client.load_collection.assert_called_once_with(collection_name="test_col")
 
     def test_create_collection_inner_exception_wrapped(self, mock_client):
         """An exception inside create_collection is wrapped in DocpipeException."""

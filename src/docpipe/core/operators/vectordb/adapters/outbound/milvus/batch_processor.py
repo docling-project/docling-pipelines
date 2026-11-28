@@ -12,12 +12,15 @@ import json
 from typing import Any
 
 from pymilvus import DataType, MilvusClient
+from pymilvus.client.types import LoadState
 
 from docpipe.core.constants import OperatorConstants
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import (
     FEATURE_TYPE_TO_MILVUS_DTYPE,
     VARCHAR_MAX_LENGTH,
 )
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
+from docpipe.exceptions.error_codes import ErrorCode
 from docpipe.utils.infrastructure.logging import get_logger
 from docpipe.utils.operators.vectordb_utils import (
     build_mapping_dict,
@@ -322,6 +325,25 @@ class MilvusBatchProcessor:
 
         return total_success, all_failed
 
+    def _ensure_collection_loaded(self) -> None:
+        """Load the collection before a query when server-mode Milvus reports it as NotLoad.
+
+        A collection created by the adapter is not loaded until it is asked for, and a query
+        against it fails with 'collection not loaded'. Milvus Lite has no load state and may
+        not implement ``get_load_state``, so the check is best-effort.
+        """
+        try:
+            state = self.client.get_load_state(collection_name=self.collection_name)
+        except Exception as e:
+            logger.debug(
+                "Collection load state unavailable for '%s': %s", self.collection_name, e
+            )
+            return
+        current = state.get("state") if isinstance(state, dict) else state
+        if current == LoadState.NotLoad:
+            logger.info("[MILVUS] Loading collection '%s' before query", self.collection_name)
+            self.client.load_collection(collection_name=self.collection_name)
+
     def query_by_doc_names(self, *, doc_names: list[str], fields: list[str] | None = None) -> list[dict[str, Any]]:
         """
         Query documents by their names (IDs).
@@ -333,6 +355,7 @@ class MilvusBatchProcessor:
         Returns:
             List of matching documents
         """
+        self._ensure_collection_loaded()
         try:
             # Build filter expression
             filter_expr = f"{self.primary_key_field} in {doc_names}"
@@ -345,8 +368,12 @@ class MilvusBatchProcessor:
             )
 
         except Exception as e:
-            logger.error("Query by doc names failed: %s", e)
-            return []
+            logger.error("Query by doc names failed on '%s': %s", self.collection_name, e)
+            raise DocpipeException(
+                message=f"Milvus query failed for collection '{self.collection_name}': {e}",
+                status_code=500,
+                error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
+            ) from e
 
     def delete_documents_by_ids(self, *, doc_ids: list[str]) -> tuple[int, int]:
         """
@@ -425,6 +452,7 @@ class MilvusBatchProcessor:
         if not doc_ids:
             return {}
 
+        self._ensure_collection_loaded()
         try:
             result: dict[str, set[str]] = {}
 
@@ -446,8 +474,12 @@ class MilvusBatchProcessor:
             return result
 
         except Exception as e:
-            logger.error("Error querying PKs by doc IDs: %s", e)
-            return {}
+            logger.error("Error querying PKs by doc IDs on '%s': %s", self.collection_name, e)
+            raise DocpipeException(
+                message=f"Milvus query failed for collection '{self.collection_name}': {e}",
+                status_code=500,
+                error_code=ErrorCode.OPERATOR_EXECUTION_FAILED,
+            ) from e
 
     def _fill_unmapped_content_field(self, *, doc: dict[str, Any], row_data: dict[str, Any]) -> None:
         """Write the chunk text into the collection's content field when no mapping covers it.

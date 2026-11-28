@@ -9,12 +9,14 @@ Unit tests for MilvusBatchProcessor
 from unittest.mock import MagicMock
 
 import pytest
+from pymilvus.client.types import LoadState
 
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.batch_processor import (
     DEFAULT_BATCH_SIZE,
     MilvusBatchProcessor,
 )
 from docpipe.core.operators.vectordb.adapters.outbound.milvus.index_manager import VARCHAR_MAX_LENGTH
+from docpipe.exceptions.docpipe_exceptions import DocpipeException
 
 
 @pytest.fixture
@@ -807,15 +809,15 @@ class TestProcessBatchesEdgeCases:
 class TestQueryAndDeleteEdgeCases:
     """Branches in query/delete not previously exercised."""
 
-    def test_query_by_doc_names_returns_empty_on_exception(self, mock_client):
-        """query_by_doc_names returns [] when client.query raises."""
+    def test_query_by_doc_names_raises_on_exception(self, mock_client):
+        """query_by_doc_names surfaces a failed query instead of returning []. """
         mock_client.query.side_effect = Exception("query error")
         processor = MilvusBatchProcessor(
             client=mock_client,
             collection_name="test_collection",
         )
-        result = processor.query_by_doc_names(doc_names=["doc1"])
-        assert result == []
+        with pytest.raises(DocpipeException, match="Milvus query failed"):
+            processor.query_by_doc_names(doc_names=["doc1"])
 
     def test_delete_documents_empty_list_returns_zeros(self, mock_client):
         """Deleting an empty id list immediately returns (0, 0) without calling client."""
@@ -922,6 +924,28 @@ class TestQueryAndDeleteEdgeCases:
         assert sum(len(batch) for batch in batches) == 3
 
 
+class TestEnsureCollectionLoaded:
+    """Queries load a server-mode collection the adapter created, which starts NotLoad."""
+
+    def test_loads_a_collection_in_notload(self, mock_client) -> None:
+        mock_client.get_load_state.return_value = {"state": LoadState.NotLoad}
+        processor = MilvusBatchProcessor(client=mock_client, collection_name="test_collection")
+        processor._ensure_collection_loaded()
+        mock_client.load_collection.assert_called_once_with(collection_name="test_collection")
+
+    def test_does_not_load_a_loaded_collection(self, mock_client) -> None:
+        mock_client.get_load_state.return_value = {"state": LoadState.Loaded}
+        processor = MilvusBatchProcessor(client=mock_client, collection_name="test_collection")
+        processor._ensure_collection_loaded()
+        mock_client.load_collection.assert_not_called()
+
+    def test_tolerates_a_client_without_load_state(self, mock_client) -> None:
+        mock_client.get_load_state.side_effect = AttributeError("no load state")
+        processor = MilvusBatchProcessor(client=mock_client, collection_name="test_collection")
+        processor._ensure_collection_loaded()
+        mock_client.load_collection.assert_not_called()
+
+
 class TestQueryPksByDocIds:
     """Tests for MilvusBatchProcessor.get_chunk_ids_for_documents()."""
 
@@ -977,12 +1001,12 @@ class TestQueryPksByDocIds:
         assert result == {"doc_a": {"pk_valid"}}
 
     def test_returns_empty_dict_on_exception(self, mock_client) -> None:
-        """A client exception must be swallowed and return {}."""
+        """A client exception is surfaced instead of looking like 'no chunks'."""
         mock_client.query.side_effect = Exception("timeout")
         processor = MilvusBatchProcessor(
             client=mock_client,
             collection_name="test_collection",
             feature_mappings=[{"feature_name": "doc_id_hash", "mapped_column_name": "doc_id_hash"}],
         )
-        result = processor.get_chunk_ids_for_documents(doc_ids=["doc_a"])
-        assert result == {}
+        with pytest.raises(DocpipeException, match="Milvus query failed"):
+            processor.get_chunk_ids_for_documents(doc_ids=["doc_a"])

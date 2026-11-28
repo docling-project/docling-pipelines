@@ -1086,6 +1086,11 @@ class MilvusIndexManager:
                 self.metric_type,
             )
 
+            # Server-mode Milvus leaves a new collection in NotLoad, and queries against it
+            # fail with 'collection not loaded'. Load it once the indexes exist.
+            self.client.load_collection(collection_name=self.collection_name)
+            logger.info("[MILVUS COLLECTION] Collection '%s' loaded", self.collection_name)
+
         except Exception as e:
             if collection_created:
                 self._drop_partial_collection()
